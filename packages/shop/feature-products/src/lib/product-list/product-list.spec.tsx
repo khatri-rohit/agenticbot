@@ -55,7 +55,9 @@ describe('ProductList', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductList />
       </BrowserRouter>,
     );
@@ -78,7 +80,9 @@ describe('ProductList', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductList />
       </BrowserRouter>,
     );
@@ -101,7 +105,9 @@ describe('ProductList', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductList />
       </BrowserRouter>,
     );
@@ -129,7 +135,9 @@ describe('ProductList', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductList />
       </BrowserRouter>,
     );
@@ -163,7 +171,9 @@ describe('ProductList', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductList />
       </BrowserRouter>,
     );
@@ -197,7 +207,9 @@ describe('ProductList', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductList />
       </BrowserRouter>,
     );
@@ -231,7 +243,9 @@ describe('ProductList', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductList />
       </BrowserRouter>,
     );
@@ -259,7 +273,9 @@ describe('ProductList', () => {
     });
 
     const { container } = render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductList />
       </BrowserRouter>,
     );

@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import {render, RenderOptions, RenderResult} from '@testing-library/react';
+import { render, RenderOptions, RenderResult } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 
 interface AllTheProvidersProps {
@@ -7,12 +7,18 @@ interface AllTheProvidersProps {
 }
 
 function AllTheProviders({ children }: AllTheProvidersProps) {
-  return <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{children}</BrowserRouter>;
+  return (
+    <BrowserRouter
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      {children}
+    </BrowserRouter>
+  );
 }
 
 export function renderWithRouter(
   ui: ReactElement,
-  options?: Omit<RenderOptions, 'wrapper'>
+  options?: Omit<RenderOptions, 'wrapper'>,
 ): RenderResult {
   return render(ui, { wrapper: AllTheProviders, ...options });
 }

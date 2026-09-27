@@ -21,8 +21,14 @@ export const createMockProductList = (count = 3): Product[] => {
       price: (i + 1) * 50.99,
       rating: 3 + Math.random() * 2,
       reviewCount: Math.floor(Math.random() * 500),
-    })
+    }),
   );
 };
 
-export const mockCategories = ['Electronics', 'Clothing', 'Home & Kitchen', 'Sports', 'Accessories'];
+export const mockCategories = [
+  'Electronics',
+  'Clothing',
+  'Home & Kitchen',
+  'Sports',
+  'Accessories',
+];

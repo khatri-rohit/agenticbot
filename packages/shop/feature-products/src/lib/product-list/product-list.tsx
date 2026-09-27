@@ -2,11 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Product, ProductFilter } from '@org/models';
 import { useProducts, useCategories } from '@org/shop-data';
-import {
-  ProductGrid,
-  LoadingSpinner,
-  ErrorMessage,
-} from '@org/shop-shared-ui';
+import { ProductGrid, LoadingSpinner, ErrorMessage } from '@org/shop-shared-ui';
 import styles from './product-list.module.css';
 
 export function ProductList() {
@@ -23,7 +19,7 @@ export function ProductList() {
   const { products, totalProducts, totalPages, loading, error } = useProducts(
     filter,
     currentPage,
-    12
+    12,
   );
   const { categories } = useCategories();
 
@@ -131,7 +127,10 @@ export function ProductList() {
             Showing {products.length} of {totalProducts} products
           </div>
 
-          <ProductGrid products={products} onProductSelect={handleProductSelect} />
+          <ProductGrid
+            products={products}
+            onProductSelect={handleProductSelect}
+          />
 
           {totalPages > 1 && (
             <div className={styles['pagination']}>

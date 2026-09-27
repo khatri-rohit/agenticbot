@@ -12,7 +12,9 @@ describe('ProductGrid', () => {
   });
 
   it('should render all products', () => {
-    render(<ProductGrid products={mockProducts} onProductSelect={mockOnSelect} />);
+    render(
+      <ProductGrid products={mockProducts} onProductSelect={mockOnSelect} />,
+    );
 
     expect(screen.getByText('Test Product 1')).toBeInTheDocument();
     expect(screen.getByText('Test Product 2')).toBeInTheDocument();
@@ -22,13 +24,19 @@ describe('ProductGrid', () => {
   it('should display empty state when no products', () => {
     render(<ProductGrid products={[]} onProductSelect={mockOnSelect} />);
 
-    expect(screen.getByText('No products found matching your criteria.')).toBeInTheDocument();
+    expect(
+      screen.getByText('No products found matching your criteria.'),
+    ).toBeInTheDocument();
   });
 
   it('should call onProductSelect when a product card is clicked', () => {
-    render(<ProductGrid products={mockProducts} onProductSelect={mockOnSelect} />);
+    render(
+      <ProductGrid products={mockProducts} onProductSelect={mockOnSelect} />,
+    );
 
-    const firstCard = screen.getByRole('button', { name: /View details for Test Product 1/i });
+    const firstCard = screen.getByRole('button', {
+      name: /View details for Test Product 1/i,
+    });
     fireEvent.click(firstCard);
 
     expect(mockOnSelect).toHaveBeenCalledWith(mockProducts[0]);
@@ -37,7 +45,7 @@ describe('ProductGrid', () => {
 
   it('should have responsive grid layout', () => {
     const { container } = render(
-      <ProductGrid products={mockProducts} onProductSelect={mockOnSelect} />
+      <ProductGrid products={mockProducts} onProductSelect={mockOnSelect} />,
     );
 
     // CSS modules generate unique class names, check for element with class containing 'product-grid'

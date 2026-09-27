@@ -6,7 +6,9 @@ describe('ErrorMessage', () => {
   it('should display default message when no message prop provided', () => {
     render(<ErrorMessage />);
 
-    expect(screen.getByText('An error occurred. Please try again.')).toBeInTheDocument();
+    expect(
+      screen.getByText('An error occurred. Please try again.'),
+    ).toBeInTheDocument();
   });
 
   it('should display custom error message', () => {

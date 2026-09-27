@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Product, ApiResponse, PaginatedResponse, ProductFilter } from '@org/models';
+import {
+  Product,
+  ApiResponse,
+  PaginatedResponse,
+  ProductFilter,
+} from '@org/models';
 
 const API_URL = 'http://localhost:3333/api';
 
-export function useProducts(
-  filter?: ProductFilter,
-  page = 1,
-  pageSize = 12
-) {
+export function useProducts(filter?: ProductFilter, page = 1, pageSize = 12) {
   const [products, setProducts] = useState<Product[]>([]);
   const [totalProducts, setTotalProducts] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
@@ -27,14 +28,18 @@ export function useProducts(
 
         if (filter) {
           if (filter.category) params.append('category', filter.category);
-          if (filter.minPrice !== undefined) params.append('minPrice', filter.minPrice.toString());
-          if (filter.maxPrice !== undefined) params.append('maxPrice', filter.maxPrice.toString());
-          if (filter.inStock !== undefined) params.append('inStock', filter.inStock.toString());
+          if (filter.minPrice !== undefined)
+            params.append('minPrice', filter.minPrice.toString());
+          if (filter.maxPrice !== undefined)
+            params.append('maxPrice', filter.maxPrice.toString());
+          if (filter.inStock !== undefined)
+            params.append('inStock', filter.inStock.toString());
           if (filter.searchTerm) params.append('searchTerm', filter.searchTerm);
         }
 
         const response = await fetch(`${API_URL}/products?${params}`);
-        const data: ApiResponse<PaginatedResponse<Product>> = await response.json() as ApiResponse<PaginatedResponse<Product>>;
+        const data: ApiResponse<PaginatedResponse<Product>> =
+          (await response.json()) as ApiResponse<PaginatedResponse<Product>>;
 
         if (!data.success) {
           throw new Error(data.error || 'Failed to load products');
@@ -44,7 +49,10 @@ export function useProducts(
         setTotalProducts(data.data.total);
         setTotalPages(data.data.totalPages);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'An error occurred while loading products';
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'An error occurred while loading products';
         setError(message);
         console.error('Error loading products:', err);
         setProducts([]);
@@ -79,7 +87,8 @@ export function useCategories() {
 
       try {
         const response = await fetch(`${API_URL}/products/categories`);
-        const data: ApiResponse<string[]> = await response.json() as ApiResponse<string[]>;
+        const data: ApiResponse<string[]> =
+          (await response.json()) as ApiResponse<string[]>;
 
         if (!data.success) {
           throw new Error(data.error || 'Failed to load categories');
@@ -87,7 +96,10 @@ export function useCategories() {
 
         setCategories(data.data);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'An error occurred while loading categories';
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'An error occurred while loading categories';
         setError(message);
         console.error('Error loading categories:', err);
         setCategories([]);

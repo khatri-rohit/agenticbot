@@ -48,7 +48,9 @@ export function ProductCard({ product, onProductClick }: ProductCardProps) {
               </span>
             ))}
           </span>
-          <span className={styles['review-count']}>({product.reviewCount})</span>
+          <span className={styles['review-count']}>
+            ({product.reviewCount})
+          </span>
         </div>
         <div className={styles['product-price']}>
           ${product.price.toFixed(2)}

@@ -4,6 +4,7 @@
 
 ✨ A repository showcasing key [Nx](https://nx.dev) features for React monorepos ✨
 <!-- BEGIN: nx-cloud -->
+
 🚀 If you haven't connected to Nx Cloud yet, [complete your setup here](https://cloud.nx.app/get-started). Get faster builds with remote caching, distributed task execution, and self-healing CI. [See how your workspace can benefit](#nx-cloud).
 <!-- END: nx-cloud -->
 
@@ -260,4 +261,5 @@ Join the Nx community:
 - [LinkedIn](https://www.linkedin.com/company/nrwl)
 - [YouTube](https://www.youtube.com/@nxdevtools)
 - [Blog](https://nx.dev/blog)
+
 # agenticbot

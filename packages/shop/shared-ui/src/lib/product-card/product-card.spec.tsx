@@ -34,8 +34,8 @@ describe('ProductCard', () => {
     const stars = screen.getAllByText('★');
     expect(stars).toHaveLength(5);
     // 4.5 rating means 4 filled stars
-    const filledStars = stars.filter(star =>
-      star.className.includes('filled')
+    const filledStars = stars.filter((star) =>
+      star.className.includes('filled'),
     );
     expect(filledStars).toHaveLength(4);
   });
@@ -43,7 +43,9 @@ describe('ProductCard', () => {
   it('should call onProductClick when card is clicked', () => {
     render(<ProductCard product={mockProduct} onProductClick={mockOnClick} />);
 
-    const card = screen.getByRole('button', { name: /View details for Test Product/i });
+    const card = screen.getByRole('button', {
+      name: /View details for Test Product/i,
+    });
     fireEvent.click(card);
 
     expect(mockOnClick).toHaveBeenCalledWith(mockProduct);
@@ -53,7 +55,9 @@ describe('ProductCard', () => {
   it('should call onProductClick when Enter key is pressed', () => {
     render(<ProductCard product={mockProduct} onProductClick={mockOnClick} />);
 
-    const card = screen.getByRole('button', { name: /View details for Test Product/i });
+    const card = screen.getByRole('button', {
+      name: /View details for Test Product/i,
+    });
     fireEvent.keyDown(card, { key: 'Enter' });
 
     expect(mockOnClick).toHaveBeenCalledWith(mockProduct);
@@ -62,7 +66,9 @@ describe('ProductCard', () => {
   it('should call onProductClick when Space key is pressed', () => {
     render(<ProductCard product={mockProduct} onProductClick={mockOnClick} />);
 
-    const card = screen.getByRole('button', { name: /View details for Test Product/i });
+    const card = screen.getByRole('button', {
+      name: /View details for Test Product/i,
+    });
     fireEvent.keyDown(card, { key: ' ' });
 
     expect(mockOnClick).toHaveBeenCalledWith(mockProduct);
@@ -70,7 +76,9 @@ describe('ProductCard', () => {
 
   it('should show out of stock overlay when product is not in stock', () => {
     const outOfStockProduct = createMockProduct({ inStock: false });
-    render(<ProductCard product={outOfStockProduct} onProductClick={mockOnClick} />);
+    render(
+      <ProductCard product={outOfStockProduct} onProductClick={mockOnClick} />,
+    );
 
     expect(screen.getByText('Out of Stock')).toBeInTheDocument();
     const card = screen.getByRole('button');

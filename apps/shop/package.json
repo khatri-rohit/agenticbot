@@ -4,16 +4,25 @@
   "private": true,
   "nx": {
     "projectType": "application",
-    "tags": ["scope:shop"],
+    "tags": [
+      "scope:shop"
+    ],
     "targets": {
       "serve": {
-        "dependsOn": ["@org/api:serve"]
+        "dependsOn": [
+          "@org/api:serve"
+        ]
       },
       "dev": {
-        "dependsOn": ["@org/api:serve"]
+        "dependsOn": [
+          "@org/api:serve"
+        ]
       },
       "preview": {
-        "dependsOn": ["build", "@org/api:serve"]
+        "dependsOn": [
+          "build",
+          "@org/api:serve"
+        ]
       }
     }
   },

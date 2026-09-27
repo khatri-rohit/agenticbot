@@ -49,7 +49,9 @@ describe('ProductDetail', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
@@ -65,7 +67,9 @@ describe('ProductDetail', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
@@ -81,7 +85,9 @@ describe('ProductDetail', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
@@ -97,7 +103,9 @@ describe('ProductDetail', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
@@ -125,7 +133,9 @@ describe('ProductDetail', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
@@ -145,7 +155,9 @@ describe('ProductDetail', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
@@ -167,7 +179,9 @@ describe('ProductDetail', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
@@ -190,7 +204,9 @@ describe('ProductDetail', () => {
     vi.mocked(useParams).mockReturnValue({ id: '42' });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
@@ -206,7 +222,9 @@ describe('ProductDetail', () => {
     });
 
     render(
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ProductDetail />
       </BrowserRouter>,
     );
