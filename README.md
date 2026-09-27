@@ -3,10 +3,9 @@
 <a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
 
 ✨ A repository showcasing key [Nx](https://nx.dev) features for React monorepos ✨
-<!-- BEGIN: nx-cloud -->
+## Finish your Nx platform setup
 
-🚀 If you haven't connected to Nx Cloud yet, [complete your setup here](https://cloud.nx.app/get-started). Get faster builds with remote caching, distributed task execution, and self-healing CI. [See how your workspace can benefit](#nx-cloud).
-<!-- END: nx-cloud -->
+🚀 [Finish setting up your workspace](https://cloud.nx.app/connect/hT0mdhcey1) to get faster builds with remote caching, distributed task execution, and self-healing CI. [Learn more about Nx Cloud](https://nx.dev/ci/intro/why-nx-cloud).
 
 ## 📦 Project Overview
 

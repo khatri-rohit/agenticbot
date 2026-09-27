@@ -32,6 +32,15 @@
     },
     {
       "path": "./packages/shared/test-utils"
+    },
+    {
+      "path": "./apps/web-e2e"
+    },
+    {
+      "path": "./apps/web"
+    },
+    {
+      "path": "./apps/agent"
     }
   ]
 }

@@ -1,0 +1,10 @@
+
+error: gpg failed to sign the data:
+[GNUPG:] KEY_CONSIDERED A7D83CA56D42E9723F16177A24648D96D481BAE6 2
+[GNUPG:] BEGIN_SIGNING H10
+[GNUPG:] PINENTRY_LAUNCHED 48828 w32 1.3.1-unknown - xterm-256color needs-to-be-defined - 197609/197121 0
+gpg: signing failed: Operation cancelled
+[GNUPG:] FAILURE sign 83886179
+gpg: signing failed: Operation cancelled
+
+fatal: failed to write commit object
