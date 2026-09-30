@@ -1,0 +1,8 @@
+{
+  "node": "24",
+  "dockerfile": false,
+  "env": ".env",
+  "graphs": {
+    "chatpipline": "./src/graph/v1/chatpipline.ts:graph"
+  }
+}

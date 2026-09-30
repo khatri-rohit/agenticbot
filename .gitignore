@@ -56,3 +56,6 @@ test-output
 # Next.js
 .next
 out
+.env
+.env.*
+!.env.example
