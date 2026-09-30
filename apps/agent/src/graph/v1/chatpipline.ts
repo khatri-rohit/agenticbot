@@ -11,6 +11,11 @@ import {
   type CompiledStateGraph,
 } from '@langchain/langgraph';
 import { getAgentModel } from '../../lib/model';
+import { getWebInformationTool, searchTool } from '../../lib/tools/web';
+import { ToolNode } from '@langchain/langgraph/prebuilt';
+
+/** Node id used when filtering LangGraph message streams in the HTTP layer. */
+export const CHATBOT_NODE_ID = 'chatbot';
 
 const State = new StateSchema({
   messages: MessagesValue,
@@ -22,19 +27,26 @@ const State = new StateSchema({
 const model = getAgentModel();
 
 const chatbot: GraphNode<typeof State> = async (state) => {
-  const response = await model.invoke(state.messages, {
-    outputVersion: 'v1',
-    configurable: {
-      thread_id: '123',
-    },
-  });
+  const response = await model
+    .bindTools([searchTool, getWebInformationTool])
+    .invoke(state.messages, {
+      outputVersion: 'v1',
+      configurable: {
+        thread_id: '123',
+      },
+    });
+  console.log(response);
   return { messages: [response] };
 };
 
+const toolNode = new ToolNode([searchTool, getWebInformationTool]);
+
 export const graph = new StateGraph(State)
-  .addNode('chatbot', chatbot)
-  .addEdge(START, 'chatbot')
-  .addEdge('chatbot', END)
+  .addNode(CHATBOT_NODE_ID, chatbot)
+  .addNode('tool_call', toolNode)
+  .addEdge(START, CHATBOT_NODE_ID)
+  .addEdge(CHATBOT_NODE_ID, 'tool_call')
+  .addEdge('tool_call', END)
   .compile() as unknown as CompiledStateGraph<any, any>;
 // .compile({ checkpointer, store }) as unknown as CompiledStateGraph<any, any>;
 
