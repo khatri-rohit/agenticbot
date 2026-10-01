@@ -1,8 +1,9 @@
 {
-  "node": "24",
-  "dockerfile": false,
+  "node_version": "24",
+  "dependencies": ["."],
+  "dockerfile_lines": [],
   "env": ".env",
   "graphs": {
-    "chatpipline": "./src/graph/v1/chatpipline.ts:graph"
+    "agent": "./src/graph/v1/chatpipline.ts:graph"
   }
 }

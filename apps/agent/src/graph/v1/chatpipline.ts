@@ -6,13 +6,11 @@ import {
   GraphNode,
   StateSchema,
   MessagesValue,
-  // MemorySaver,
-  // InMemoryStore,
   type CompiledStateGraph,
 } from '@langchain/langgraph';
 import { getAgentModel } from '../../lib/model';
 import { getWebInformationTool, searchTool } from '../../lib/tools/web';
-import { ToolNode } from '@langchain/langgraph/prebuilt';
+import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
 
 /** Node id used when filtering LangGraph message streams in the HTTP layer. */
 export const CHATBOT_NODE_ID = 'chatbot';
@@ -21,33 +19,26 @@ const State = new StateSchema({
   messages: MessagesValue,
 });
 
-// const store = new InMemoryStore();
-// const checkpointer = new MemorySaver();
-
 const model = getAgentModel();
 
+const tools = [searchTool, getWebInformationTool];
+const modelWithTools = model.bindTools(tools);
+
 const chatbot: GraphNode<typeof State> = async (state) => {
-  const response = await model
-    .bindTools([searchTool, getWebInformationTool])
-    .invoke(state.messages, {
-      outputVersion: 'v1',
-      configurable: {
-        thread_id: '123',
-      },
-    });
-  console.log(response);
+  const response = await modelWithTools.invoke(state.messages, {
+    outputVersion: 'v1',
+  });
   return { messages: [response] };
 };
 
-const toolNode = new ToolNode([searchTool, getWebInformationTool]);
+const toolNode = new ToolNode(tools);
 
 export const graph = new StateGraph(State)
   .addNode(CHATBOT_NODE_ID, chatbot)
-  .addNode('tool_call', toolNode)
+  .addNode('tools', toolNode)
   .addEdge(START, CHATBOT_NODE_ID)
-  .addEdge(CHATBOT_NODE_ID, 'tool_call')
-  .addEdge('tool_call', END)
+  .addConditionalEdges(CHATBOT_NODE_ID, toolsCondition, ['tools', END])
+  .addEdge('tools', CHATBOT_NODE_ID)
   .compile() as unknown as CompiledStateGraph<any, any>;
-// .compile({ checkpointer, store }) as unknown as CompiledStateGraph<any, any>;
 
 export type ChatPipeline = typeof graph;

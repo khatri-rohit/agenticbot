@@ -2,6 +2,9 @@
   "name": "@org/agent",
   "version": "0.0.1",
   "private": true,
+  "scripts": {
+    "langgraph:dev": "langgraphjs dev --no-browser"
+  },
   "nx": {
     "projectType": "application",
     "targets": {
@@ -121,8 +124,8 @@
         "continuous": true,
         "executor": "nx:run-commands",
         "options": {
-          "command": "langgraph dev",
-          "cwd": "apps/agent"
+          "command": "npm run langgraph:dev --workspace=@org/agent",
+          "cwd": "{workspaceRoot}"
         }
       },
       "test": {
