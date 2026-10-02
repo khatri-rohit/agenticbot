@@ -19,10 +19,10 @@ export const firecrawlSearch = async (query: string) => {
   try {
     const firecrawl = await getFirecrawl();
     const results = await firecrawl.search(query, {
-      limit: 10,
+      limit: 5,
       sources: ['web', 'news'],
       scrapeOptions: {
-        formats: ['markdown', 'html', 'json', 'summary'],
+        formats: ['markdown'],
         storeInCache: true,
         onlyMainContent: true,
       },
@@ -40,8 +40,8 @@ export const firecrawlGetPageContent = async (urls: string[]) => {
   try {
     const firecrawl = await getFirecrawl();
     const results = await firecrawl.batchScrape(urls, {
-      options: { formats: ['markdown', 'html', 'json', 'summary'] },
-      maxConcurrency: 2,
+      options: { formats: ['markdown'] },
+      maxConcurrency: 1,
       timeout: 120,
     });
     console.log('Results from firecrawl batchScrape: ', results);

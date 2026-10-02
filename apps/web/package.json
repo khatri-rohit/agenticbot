@@ -11,6 +11,8 @@
     ]
   },
   "dependencies": {
+    "@langchain/langgraph-sdk": "^1.12.0",
+    "@langchain/react": "^1.2.0",
     "@radix-ui/react-slot": "^1.3.3",
     "@tailwindcss/postcss": "^4.3.3",
     "class-variance-authority": "^0.7.1",

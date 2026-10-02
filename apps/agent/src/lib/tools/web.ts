@@ -3,7 +3,8 @@ import { firecrawlGetPageContent, firecrawlSearch } from './firecrawl';
 import z from 'zod';
 
 export const searchTool = tool(
-  async ({ query }: { query: string }) => {
+  async ({ query }) => {
+    console.log('Searching the web for information for the query: ', query);
     const results = await firecrawlSearch(query);
     return results;
   },
@@ -18,7 +19,8 @@ export const searchTool = tool(
 );
 
 export const getWebInformationTool = tool(
-  async ({ urls }: { urls: string[] }) => {
+  async ({ urls }) => {
+    console.log('Getting information from the web for the urls: ', urls);
     const results = await firecrawlGetPageContent(urls);
     return results;
   },
