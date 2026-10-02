@@ -22,7 +22,7 @@ export const firecrawlSearch = async (query: string) => {
       limit: 5,
       sources: ['web', 'news'],
       scrapeOptions: {
-        formats: ['markdown'],
+        formats: ['summary'],
         storeInCache: true,
         onlyMainContent: true,
       },
@@ -40,7 +40,9 @@ export const firecrawlGetPageContent = async (urls: string[]) => {
   try {
     const firecrawl = await getFirecrawl();
     const results = await firecrawl.batchScrape(urls, {
-      options: { formats: ['markdown'] },
+      options: {
+        formats: ['summary'],
+      },
       maxConcurrency: 1,
       timeout: 120,
     });

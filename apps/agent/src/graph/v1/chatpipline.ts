@@ -11,6 +11,8 @@ import {
 import { getAgentModel } from '../../lib/model';
 import { getWebInformationTool, searchTool } from '../../lib/tools/web';
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
+import { BaseMessage, ToolMessage } from '@langchain/core/messages';
+import { MAX_TOOL_PAYLOAD_CHARS } from '../../lib/tools/compact-tool-payload';
 
 /** Node id used when filtering LangGraph message streams in the HTTP layer. */
 export const CHATBOT_NODE_ID = 'chatbot';
@@ -24,9 +26,16 @@ const model = getAgentModel();
 const tools = [searchTool, getWebInformationTool];
 const modelWithTools = model.bindTools(tools);
 
+const config = {
+  configurable: {
+    thread_id: '1',
+  },
+};
+
 const chatbot: GraphNode<typeof State> = async (state) => {
   const response = await modelWithTools.invoke(state.messages, {
     outputVersion: 'v1',
+    ...config,
   });
   return { messages: [response] };
 };
