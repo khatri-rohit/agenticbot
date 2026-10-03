@@ -1,23 +1,18 @@
-import express from 'express';
-import chatRouter from './routers/chat.router';
+import { runAgent } from './agents/agent';
 
-const host = process.env.HOST ?? 'localhost';
-const port = process.env.PORT ? Number(process.env.PORT) : 8080;
+const MODEL = 'llama3.2:3b';
 
-const app = express();
+async function main() {
+  try {
+    const result = await runAgent(MODEL, [
+      { role: 'user', content: 'Hello, how are you?' },
+    ]);
+    console.log('Result: ');
+    console.log(result);
+  } catch (error) {
+    console.error('Something went wrong: ');
+    console.error(error);
+  }
+}
 
-app.use(express.json());
-
-app.use('/api/v1', chatRouter);
-
-app.get('/health', (req, res) => {
-  res.send({ status: 'ok' });
-});
-
-app.get('/', (req, res) => {
-  res.send({ message: 'Hello Agent' });
-});
-
-app.listen(port, host, () => {
-  console.log(`[ ready ] http://${host}:${port}`);
-});
+main();

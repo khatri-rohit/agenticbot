@@ -1,17 +1,23 @@
-import { Agent, run } from '@openai/agents';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { client } from './model';
 
-const agent = new Agent({
-  name: 'My Agent',
-  instructions:
-    'You are a helpful assistant that can answer questions and help with tasks.',
-  model: 'llama3.2:3b',
-});
+export async function runAgent(
+  model: string,
+  messages: ChatCompletionMessageParam[],
+): Promise<any> {
+  // while (true) {
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      messages,
+    });
 
-run(agent, 'Hello, how are you?')
-  .then((result) => {
-    console.log('Result: ');
-    console.log(result);
-  })
-  .catch((error) => {
-    console.error('Something went wrong: ', error);
-  });
+    const choices = response.choices[0];
+    console.log(choices);
+  } catch (error) {
+    console.error(error);
+    // break;
+  }
+}
+// }
