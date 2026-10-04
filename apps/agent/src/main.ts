@@ -1,23 +1,38 @@
-import express from 'express';
-import chatRouter from './routers/chat.router';
+import { runAgent } from './agents/agent';
+import { getContext } from './agents/libs/context';
+import { createTools } from './agents/tools';
 
-const host = process.env.HOST ?? 'localhost';
-const port = process.env.PORT ? Number(process.env.PORT) : 8080;
+// const MODEL = 'llama3.2:3b';
+// const MODEL = 'glm-5.2:cloud';
+const MODEL = 'llama3.1:8b';
 
-const app = express();
+async function main() {
+  try {
+    // const query = 'Hi, how are you?';
+    // const query = 'What is the capital of France?';
+    // const query = 'What is the latest news about OpenAI?';
+    const query =
+      'Search the web and tell me what the latest React release is. And also tell me the latest news about OpenAI.';
 
-app.use(express.json());
+    const tools = createTools();
+    const messages = getContext(query);
 
-app.use('/api/v1', chatRouter);
+    const result = await runAgent(MODEL, messages, tools, {
+      limits: {
+        maxIterations: 8,
+        maxToolCalls: 12,
+        maxRepeatedToolCalls: 2,
+        toolTimeoutMs: 30_000,
+      },
+    });
 
-app.get('/health', (req, res) => {
-  res.send({ status: 'ok' });
-});
+    console.log('================================================');
+    console.log('Model:', MODEL);
+    console.log('Result:', result);
+    console.log('================================================');
+  } catch (error) {
+    console.error('Something went wrong:', error);
+  }
+}
 
-app.get('/', (req, res) => {
-  res.send({ message: 'Hello Agent' });
-});
-
-app.listen(port, host, () => {
-  console.log(`[ ready ] http://${host}:${port}`);
-});
+main();
