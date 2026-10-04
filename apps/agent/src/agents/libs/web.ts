@@ -19,25 +19,41 @@ export const getFirecrawl = async () => {
 export const firecrawlSearch = async (query: string) => {
   try {
     const firecrawl = await getFirecrawl();
+
     const results = await firecrawl.search(query, {
-      limit: 2,
+      limit: 5,
       sources: ['web', 'news'],
       scrapeOptions: {
         formats: ['summary'],
         storeInCache: true,
         onlyMainContent: true,
       },
-      categories: ['research'],
     });
-    if (results.web) {
-      const summaries = results.web.map((result: any) => result.summary ?? '');
-      console.log('Results from firecrawl search: ', results.web.length);
-      return summaries.join('\n');
-    }
-    return '';
+
+    const webResults = (results.web ?? []).map((result: any) => ({
+      type: 'web',
+      title: result.title ?? '',
+      url: result.url ?? '',
+      summary: result.summary ?? '',
+    }));
+
+    const newsResults = (results.news ?? []).map((result: any) => ({
+      type: 'news',
+      title: result.title ?? '',
+      url: result.url ?? '',
+      summary: result.summary ?? '',
+    }));
+
+    return JSON.stringify({
+      query,
+      results: [...webResults, ...newsResults],
+    });
   } catch (error) {
-    console.error('Error searching the web: ', error);
-    return `Error searching the web: ${error}`;
+    console.error('Error searching the web:', error);
+
+    return JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 };
 

@@ -20,7 +20,10 @@ export const createTools = (): ToolRegistry => {
         function: {
           name: 'web_search',
           description:
-            'Search the web when the answer requires up-to-date or web-based information.',
+            'Search the web for current, recent, time-sensitive, ' +
+            'or web-specific information. ' +
+            'Do not use this tool for greetings, casual conversation, ' +
+            'basic reasoning, or stable general knowledge.',
           parameters: {
             type: 'object',
             properties: {
