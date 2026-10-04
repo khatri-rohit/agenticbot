@@ -3,8 +3,8 @@ import { getContext } from './agents/libs/context';
 import { createTools } from './agents/tools';
 
 // const MODEL = 'llama3.2:3b';
-const MODEL = 'glm-5.2:cloud';
-// const MODEL = 'llama3.1:8b';
+// const MODEL = 'glm-5.2:cloud';
+const MODEL = 'llama3.1:8b';
 
 async function main() {
   try {
@@ -12,7 +12,7 @@ async function main() {
     // const query = 'What is the capital of France?';
     // const query = 'What is the latest news about OpenAI?';
     const query =
-      'Search the web and tell me what the latest React release is.';
+      'Search the web and tell me what the latest React release is. And also tell me the latest news about OpenAI.';
 
     const tools = createTools();
     const messages = getContext(query);
