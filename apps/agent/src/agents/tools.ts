@@ -20,7 +20,7 @@ export const createTools = (): ToolRegistry => {
         function: {
           name: 'web_search',
           description:
-            "Web search is the tool that you can use to search the web for information of something that you need to know about. Somethings that is relevant to the question that you are asking. Everything that you need to know about the question that you are asking, is can't be found on the web. So use this tool for only when you need to know something that is can only be found on the web. For example, if you are asking about the latest news on the stock market, you can use this tool to search the web for the latest news on the stock market. Not for like when questions is 'How are you'.",
+            'Search the web when the answer requires up-to-date or web-based information.',
           parameters: {
             type: 'object',
             properties: {

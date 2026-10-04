@@ -17,14 +17,22 @@ export async function runAgent(
       });
 
       const choices = response.choices[0];
-
+      console.log('Choices: ', choices);
       if (choices.finish_reason === 'stop') {
         console.log('Stop reason: ', choices.finish_reason);
         return choices.message.content;
+      } else {
+        console.log('Finish reason: ', choices.finish_reason);
+        console.log('Message: ', choices.message);
+        console.log('Logprobs: ', choices.logprobs);
+        console.log('Index: ', choices.index);
       }
 
-      console.log('Tool calls: ', choices.message.tool_calls);
-      if (choices.message.tool_calls) {
+      if (
+        choices.message.tool_calls &&
+        choices.finish_reason === 'tool_calls'
+      ) {
+        console.log('Tool calls: ', choices.message.tool_calls);
         const toolCalls = choices.message.tool_calls;
         for (const toolCall of toolCalls ?? []) {
           if (toolCall.type === 'function') {
@@ -42,10 +50,18 @@ export async function runAgent(
             }
           }
         }
+      } else {
+        console.log('Finish reason: ', choices.finish_reason);
+        console.log('Message: ', choices.message);
+        console.log('Logprobs: ', choices.logprobs);
+        console.log('Index: ', choices.index);
+        console.log('--------------------------------');
+        console.log('Breaking the loop');
+        console.log('--------------------------------');
+        break;
       }
     }
   } catch (error) {
-    console.error('Error', error);
-    // break;
+    return `Error running agent: ${error}`;
   }
 }

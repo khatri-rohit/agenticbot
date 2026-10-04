@@ -31,6 +31,7 @@ export const firecrawlSearch = async (query: string) => {
     });
     if (results.web) {
       const summaries = results.web.map((result: any) => result.summary ?? '');
+      console.log('Results from firecrawl search: ', results.web.length);
       return summaries.join('\n');
     }
     return '';
