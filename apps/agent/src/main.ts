@@ -8,7 +8,7 @@ const MODEL = 'llama3.1:8b';
 
 async function main() {
   try {
-    const query = 'Can u help me in finding somthing on the web?';
+    const query = 'What is value of PI in 3 decimal places?';
     // const query = 'What is the capital of France?';
     // const query = 'What is the latest news about OpenAI?';
     // const query =
