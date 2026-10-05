@@ -51,9 +51,7 @@ describe('streamModelTurn — tool-call accumulation', () => {
         choices: [
           {
             delta: {
-              tool_calls: [
-                { index: 0, function: { arguments: '{"query":' } },
-              ],
+              tool_calls: [{ index: 0, function: { arguments: '{"query":' } }],
             },
             finish_reason: null,
           },
@@ -108,7 +106,12 @@ describe('streamModelTurn — tool-call accumulation', () => {
 
     try {
       const deltas: string[] = [];
-      const turn = await streamModelTurn('test-model', emptyMessages, emptyTools, (delta: string) => deltas.push(delta));
+      const turn = await streamModelTurn(
+        'test-model',
+        emptyMessages,
+        emptyTools,
+        (delta: string) => deltas.push(delta),
+      );
 
       expect(turn.content).toBe('Hello world!');
       expect(turn.finishReason).toBe('stop');
@@ -142,7 +145,11 @@ describe('streamModelTurn — tool-call accumulation', () => {
     ]);
 
     try {
-      const turn = await streamModelTurn('test-model', emptyMessages, emptyTools);
+      const turn = await streamModelTurn(
+        'test-model',
+        emptyMessages,
+        emptyTools,
+      );
 
       expect(turn.toolCalls).toHaveLength(1);
       expect(turn.toolCalls[0].id).toBeTruthy();
@@ -204,7 +211,11 @@ describe('streamModelTurn — tool-call accumulation', () => {
     ]);
 
     try {
-      const turn = await streamModelTurn('test-model', emptyMessages, emptyTools);
+      const turn = await streamModelTurn(
+        'test-model',
+        emptyMessages,
+        emptyTools,
+      );
 
       expect(turn.toolCalls).toHaveLength(2);
       expect(turn.toolCalls[0].id).toBe('call_1');

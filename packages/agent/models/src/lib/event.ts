@@ -127,3 +127,14 @@ export interface LimitHit {
 
 /** Union of event types for filtering. */
 export type AgentEventType = AgentEvent['type'];
+
+/**
+ * An AgentEvent without the seq field — for emitters that assign seq.
+ * Uses a distributive conditional so Omit applies to each union member,
+ * preserving discriminated union narrowing on `type`.
+ */
+export type AgentEventWithoutSeq = AgentEvent extends infer E
+  ? E extends { seq: number }
+    ? Omit<E, 'seq'>
+    : E
+  : never;

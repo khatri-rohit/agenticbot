@@ -18,6 +18,7 @@ export async function invokeModelTurn(
   model: string,
   messages: ChatCompletionMessageParam[],
   tools: ToolRegistry,
+  _onTextDelta?: (delta: string) => void,
 ): Promise<ModelTurn> {
   const response = await client.chat.completions.create({
     model,

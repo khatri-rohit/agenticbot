@@ -6,17 +6,11 @@ import type {
 
 import type { ToolRegistry } from '../tools/registry';
 import { consoleTrace, type TraceEvent } from '../events/trace';
+import type { AgentEventWithoutSeq } from '@org/agent-models';
 import { DEFAULT_LIMITS, type AgentLimits } from './limits';
 
 /* ---------- public types ---------- */
 
-/**
- * Result of one model call. Both streaming and non-streaming model functions
- * return this shape so the loop doesn't branch on transport.
- *
- * (Imported from @org/agent-models in Phase 4; kept local for Phase 2 to
- * avoid a circular type dependency while the model layer is still in flux.)
- */
 export type ModelTurn = {
   content: string;
   toolCalls: ChatCompletionMessageToolCall[];
@@ -24,21 +18,27 @@ export type ModelTurn = {
 };
 
 /**
- * Function signature for a model call. The loop is transport-agnostic —
- * it calls this and consumes the ModelTurn. Phase 2 wires this to the
- * non-streaming invoke; Phase 3 adds a streaming implementation.
+ * Function signature for a model call. The loop is transport-agnostic.
+ * onTextDelta is provided at call time so the loop controls messageId
+ * and can wire it to assistant.delta events.
  */
 export type ModelCallFn = (
   model: string,
   messages: ChatCompletionMessageParam[],
   tools: ToolRegistry,
+  onTextDelta?: (delta: string) => void,
 ) => Promise<ModelTurn>;
 
 export type RunLoopConfig = {
   runId?: string;
+  threadId?: string;
   model: string;
+  streaming: boolean;
   limits?: Partial<AgentLimits>;
+  /** Legacy trace callback (eval harness). Kept for backward compat. */
   trace?: (event: TraceEvent) => void;
+  /** Event emitter callback (Phase 4+). If provided, emits AgentEvents. */
+  emit?: (event: AgentEventWithoutSeq) => void;
 };
 
 export type RunLoopResult = {
@@ -49,7 +49,7 @@ export type RunLoopResult = {
   status: 'completed' | 'error';
 };
 
-/* ---------- internal helpers (preserved from agent.ts) ---------- */
+/* ---------- internal helpers ---------- */
 
 function preview(value: unknown, max = 300): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
@@ -85,11 +85,9 @@ function skipToolCalls(
 
 /**
  * The agent state machine. Iterates: model call → tool execution → next model call.
- * Enforces iteration, tool-call, and repeated-call limits with the same
- * semantics as the original runAgent.
  *
- * Host-agnostic: no HTTP, no DOM, no database. The model call is injected
- * so streaming vs non-streaming is a configuration concern, not a loop concern.
+ * Emits AgentEvents via config.emit (for SSE/UI) AND traces via config.trace
+ * (for eval/console). Both are optional — the loop works with either or both.
  */
 export async function runLoop(
   modelCall: ModelCallFn,
@@ -99,21 +97,53 @@ export async function runLoop(
 ): Promise<RunLoopResult> {
   const limits = { ...DEFAULT_LIMITS, ...config.limits };
   const trace = config.trace ?? ((event: TraceEvent) => consoleTrace(event));
+  const emit = config.emit;
   const runId = config.runId ?? randomUUID();
+  const threadId = config.threadId ?? 'unknown';
 
   let iterations = 0;
   let totalToolCalls = 0;
   const repeatedCalls = new Map<string, number>();
 
   trace({ type: 'run_start', runId, model: config.model });
+  emit?.({
+    type: 'run.started',
+    runId,
+    threadId,
+    mode: 'research',
+    streaming: config.streaming,
+    model: config.model,
+  });
 
   try {
     while (iterations < limits.maxIterations) {
       iterations++;
 
       trace({ type: 'llm_request', runId, iteration: iterations });
+      emit?.({ type: 'turn.started', runId, iteration: iterations });
 
-      const turn = await modelCall(config.model, messages, tools);
+      const messageId = randomUUID();
+      const onTextDelta = config.streaming
+        ? (delta: string) => {
+            emit?.({
+              type: 'assistant.delta',
+              runId,
+              messageId,
+              delta,
+            });
+          }
+        : undefined;
+
+      if (config.streaming) {
+        emit?.({ type: 'assistant.started', runId, messageId });
+      }
+
+      const turn = await modelCall(
+        config.model,
+        messages,
+        tools,
+        onTextDelta,
+      );
 
       trace({
         type: 'llm_response',
@@ -125,7 +155,6 @@ export async function runLoop(
       });
 
       if (turn.toolCalls.length > 0) {
-        // Preserve the assistant tool-call message in context.
         messages.push({
           role: 'assistant',
           content: turn.content || null,
@@ -146,6 +175,11 @@ export async function runLoop(
               iteration: iterations,
               reason: `max tool calls exceeded (${limits.maxToolCalls})`,
             });
+            emit?.({
+              type: 'limit.hit',
+              runId,
+              reason: `max tool calls exceeded (${limits.maxToolCalls})`,
+            });
 
             skipToolCalls(
               messages,
@@ -159,8 +193,26 @@ export async function runLoop(
               messages,
             );
 
+            emit?.({
+              type: 'assistant.completed',
+              runId,
+              messageId,
+              content: turn.content,
+            });
+
             trace({
               type: 'run_finish',
+              runId,
+              iterations,
+              toolCalls: totalToolCalls,
+            });
+            emit?.({
+              type: 'turn.completed',
+              runId,
+              iteration: iterations,
+            });
+            emit?.({
+              type: 'run.completed',
               runId,
               iterations,
               toolCalls: totalToolCalls,
@@ -210,6 +262,11 @@ export async function runLoop(
               iteration: iterations,
               reason: `repeated tool call blocked: ${toolName}`,
             });
+            emit?.({
+              type: 'limit.hit',
+              runId,
+              reason: `repeated tool call blocked: ${toolName}`,
+            });
 
             messages.push({
               role: 'tool',
@@ -236,6 +293,17 @@ export async function runLoop(
               iterations,
               toolCalls: totalToolCalls,
             });
+            emit?.({
+              type: 'turn.completed',
+              runId,
+              iteration: iterations,
+            });
+            emit?.({
+              type: 'run.completed',
+              runId,
+              iterations,
+              toolCalls: totalToolCalls,
+            });
 
             return {
               runId,
@@ -252,6 +320,13 @@ export async function runLoop(
             iteration: iterations,
             toolName,
             args,
+          });
+          emit?.({
+            type: 'tool.started',
+            runId,
+            toolCallId: toolCall.id,
+            toolName,
+            argsPreview: preview(args, 200),
           });
 
           const startedAt = Date.now();
@@ -270,6 +345,14 @@ export async function runLoop(
               durationMs: Date.now() - startedAt,
               resultPreview: preview(result),
             });
+            emit?.({
+              type: 'tool.completed',
+              runId,
+              toolCallId: toolCall.id,
+              toolName,
+              durationMs: Date.now() - startedAt,
+              resultPreview: preview(result, 200),
+            });
 
             messages.push({
               role: 'tool',
@@ -287,6 +370,12 @@ export async function runLoop(
               toolName,
               error: errorMessage,
             });
+            emit?.({
+              type: 'tool.failed',
+              runId,
+              toolCallId: toolCall.id,
+              error: errorMessage,
+            });
 
             messages.push({
               role: 'tool',
@@ -296,15 +385,30 @@ export async function runLoop(
           }
         }
 
+        emit?.({ type: 'turn.completed', runId, iteration: iterations });
         continue;
       }
 
       // No tool calls — this is the final assistant response.
+      emit?.({
+        type: 'assistant.completed',
+        runId,
+        messageId,
+        content: turn.content,
+      });
+
       if (turn.finishReason === 'stop') {
         const result = turn.content ?? '';
 
         trace({
           type: 'run_finish',
+          runId,
+          iterations,
+          toolCalls: totalToolCalls,
+        });
+        emit?.({ type: 'turn.completed', runId, iteration: iterations });
+        emit?.({
+          type: 'run.completed',
           runId,
           iterations,
           toolCalls: totalToolCalls,
@@ -325,6 +429,18 @@ export async function runLoop(
         iteration: iterations,
         reason: `unexpected finish reason: ${turn.finishReason}`,
       });
+      emit?.({
+        type: 'limit.hit',
+        runId,
+        reason: `unexpected finish reason: ${turn.finishReason}`,
+      });
+      emit?.({ type: 'turn.completed', runId, iteration: iterations });
+      emit?.({
+        type: 'run.completed',
+        runId,
+        iterations,
+        toolCalls: totalToolCalls,
+      });
 
       return {
         runId,
@@ -342,6 +458,11 @@ export async function runLoop(
       iteration: iterations,
       reason: `max iterations exceeded (${limits.maxIterations})`,
     });
+    emit?.({
+      type: 'limit.hit',
+      runId,
+      reason: `max iterations exceeded (${limits.maxIterations})`,
+    });
 
     const finalContent = await finalizeWithoutTools(
       modelCall,
@@ -351,6 +472,13 @@ export async function runLoop(
 
     trace({
       type: 'run_finish',
+      runId,
+      iterations,
+      toolCalls: totalToolCalls,
+    });
+    emit?.({ type: 'turn.completed', runId, iteration: iterations });
+    emit?.({
+      type: 'run.completed',
       runId,
       iterations,
       toolCalls: totalToolCalls,
@@ -373,6 +501,7 @@ export async function runLoop(
       toolName: 'agent',
       error: message,
     });
+    emit?.({ type: 'run.error', runId, error: message });
 
     return {
       runId,
@@ -384,11 +513,6 @@ export async function runLoop(
   }
 }
 
-/**
- * When the tool budget is exhausted, ask the model to answer directly
- * from the information gathered so far. Uses the injected model call
- * so this works in both streaming and non-streaming modes.
- */
 async function finalizeWithoutTools(
   modelCall: ModelCallFn,
   model: string,

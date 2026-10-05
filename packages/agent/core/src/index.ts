@@ -5,6 +5,7 @@
 export type {
   AgentEvent,
   AgentEventType,
+  AgentEventWithoutSeq,
   Thread,
   Message,
   MessageRole,
@@ -55,6 +56,10 @@ export {
 
 // Events / trace
 export { consoleTrace, type TraceEvent } from './lib/events/trace';
+export { EventEmitter, type EventSubscriber } from './lib/events/emitter';
+
+// Run manager
+export { RunManager, type RunHandle, type StartRunOptions } from './lib/run/run-manager';
 
 // Prompts
 export { buildSystemPrompt } from './lib/prompts/system-prompt';

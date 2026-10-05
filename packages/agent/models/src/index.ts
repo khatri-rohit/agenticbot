@@ -5,6 +5,7 @@
 export type {
   AgentEvent,
   AgentEventType,
+  AgentEventWithoutSeq,
   RunStarted,
   TurnStarted,
   AssistantStarted,
