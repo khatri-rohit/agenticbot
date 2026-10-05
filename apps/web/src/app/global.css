@@ -1,3 +1,7 @@
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 html {
   -webkit-text-size-adjust: 100%;
   font-family:
@@ -499,3 +503,10 @@ summary svg {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
