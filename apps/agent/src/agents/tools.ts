@@ -2,8 +2,15 @@
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import { firecrawlSearch } from './libs/web';
 
+export type ToolGuidance = {
+  whenToUse: string[];
+  whenNotToUse: string[];
+  usage: string[];
+};
+
 export type Tool = {
   definition: ChatCompletionTool;
+  guidance: ToolGuidance;
   execute: (args: Record<string, unknown>) => Promise<string>;
 };
 
@@ -20,10 +27,7 @@ export const createTools = (): ToolRegistry => {
         function: {
           name: 'web_search',
           description:
-            'Search the web for current, recent, time-sensitive, ' +
-            'or web-specific information. ' +
-            'Do not use this tool for greetings, casual conversation, ' +
-            'basic reasoning, or stable general knowledge.',
+            'Search the web for current, recent, time-sensitive, or web-specific information.',
           parameters: {
             type: 'object',
             properties: {
@@ -36,6 +40,23 @@ export const createTools = (): ToolRegistry => {
             additionalProperties: false,
           },
         },
+      },
+      guidance: {
+        whenToUse: [
+          'The user asks about current events, recent releases, prices, or anything time-sensitive.',
+          'The user explicitly asks you to search the web or look something up online.',
+          'You need external facts that may have changed after your knowledge cutoff.',
+        ],
+        whenNotToUse: [
+          'Greetings, small talk, or casual conversation.',
+          'Stable general knowledge (capitals, definitions, well-known history).',
+          'Pure reasoning, math, or coding help that does not require live data.',
+        ],
+        usage: [
+          'Write a specific query; include the current year when freshness matters.',
+          'Prefer one focused search per sub-question before broadening.',
+          'After results return, stop searching once you can answer; do not run near-duplicate queries.',
+        ],
       },
       execute: async (args) => {
         const query = String(args.query ?? '');

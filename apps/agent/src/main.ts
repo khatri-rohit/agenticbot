@@ -8,14 +8,14 @@ const MODEL = 'llama3.1:8b';
 
 async function main() {
   try {
-    // const query = 'Hi, how are you?';
+    const query = 'Can u help me in finding somthing on the web?';
     // const query = 'What is the capital of France?';
     // const query = 'What is the latest news about OpenAI?';
-    const query =
-      'Search the web and tell me what the latest React release is. And also tell me the latest news about OpenAI.';
+    // const query =
+    //   'Search the web and tell me what the latest React release is. And also tell me the latest news about OpenAI.';
 
     const tools = createTools();
-    const messages = getContext(query);
+    const messages = getContext(query, tools);
 
     const result = await runAgent(MODEL, messages, tools, {
       limits: {
