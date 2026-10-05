@@ -21,6 +21,7 @@ export { RESEARCH_MODE } from '@org/agent-models';
 // Model layer
 export { client } from './lib/model/client';
 export { invokeModelTurn } from './lib/model/invoke';
+export { streamModelTurn, type OnTextDelta } from './lib/model/stream';
 
 // Loop
 export { runLoop } from './lib/loop/loop';
@@ -32,6 +33,10 @@ export type {
 } from './lib/loop/loop';
 export { DEFAULT_LIMITS, type AgentLimits } from './lib/loop/limits';
 export { getContext } from './lib/loop/context';
+export {
+  createInvokeModelCall,
+  createStreamModelCall,
+} from './lib/loop/model-call';
 
 // Tools
 export {
