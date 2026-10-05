@@ -7,7 +7,6 @@ import {
   createInvokeModelCall,
   createStreamModelCall,
   RESEARCH_MODE,
-  type ChatMessage,
 } from '@org/agent-core';
 
 const router = Router();
@@ -119,6 +118,8 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
   req.on('close', () => {
     unsubscribe();
   });
+
+  return;
 });
 
 export { router as agentRouter };
