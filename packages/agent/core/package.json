@@ -1,0 +1,28 @@
+{
+  "name": "@org/agent-core",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@org/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "nx": {
+    "tags": ["scope:agent", "type:logic"]
+  },
+  "dependencies": {
+    "tslib": "^2.3.0",
+    "openai": "^7.27.0",
+    "firecrawl": "^4.42.1"
+  },
+  "devDependencies": {
+    "@org/agent-models": "*"
+  }
+}
