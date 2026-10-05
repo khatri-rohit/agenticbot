@@ -1,10 +1,16 @@
-import { runAgent } from './agents/agent';
-import { getContext } from './agents/libs/context';
-import { createTools } from './agents/tools';
+import 'dotenv/config';
 
-// const MODEL = 'llama3.2:3b';
-// const MODEL = 'glm-5.2:cloud';
-const MODEL = 'llama3.1:8b';
+import {
+  runLoop,
+  invokeModelTurn,
+  getContext,
+  createToolRegistry,
+  allTools,
+  consoleTrace,
+  RESEARCH_MODE,
+} from '@org/agent-core';
+
+const MODEL = RESEARCH_MODE.model;
 
 async function main() {
   try {
@@ -14,21 +20,20 @@ async function main() {
     // const query =
     //   'Search the web and tell me what the latest React release is. And also tell me the latest news about OpenAI.';
 
-    const tools = createTools();
+    const tools = createToolRegistry(allTools, RESEARCH_MODE.allowedTools);
     const messages = getContext(query, tools);
 
-    const result = await runAgent(MODEL, messages, tools, {
-      limits: {
-        maxIterations: 8,
-        maxToolCalls: 12,
-        maxRepeatedToolCalls: 2,
-        toolTimeoutMs: 30_000,
-      },
+    const result = await runLoop(invokeModelTurn, messages, tools, {
+      model: MODEL,
+      limits: RESEARCH_MODE.limits,
+      trace: consoleTrace,
     });
 
     console.log('================================================');
     console.log('Model:', MODEL);
-    console.log('Result:', result);
+    console.log('Result:', result.content);
+    console.log('Iterations:', result.iterations);
+    console.log('Tool calls:', result.toolCalls);
     console.log('================================================');
   } catch (error) {
     console.error('Something went wrong:', error);

@@ -1,7 +1,11 @@
-import { runAgent } from '../agents/agent';
-import { getContext } from '../agents/libs/context';
-import { createTools } from '../agents/tools';
-import type { TraceEvent } from '../agents/trace';
+import {
+  runLoop,
+  invokeModelTurn,
+  getContext,
+  createToolRegistry,
+  allTools,
+  type TraceEvent,
+} from '@org/agent-core';
 import { formatReport, scoreScenario, type ScenarioRunInput } from './metrics';
 import { EVAL_SCENARIOS } from './scenarios';
 
@@ -29,11 +33,12 @@ async function runScenario(
   scenarioId: string,
   query: string,
 ): Promise<ScenarioRunInput & { answer: string }> {
-  const tools = createTools();
+  const tools = createToolRegistry(allTools);
   const messages = getContext(query, tools);
   const stats: RunStats = { toolCalls: 0, iterations: 0, toolNames: [] };
 
-  const answer = await runAgent(model, messages, tools, {
+  const result = await runLoop(invokeModelTurn, messages, tools, {
+    model,
     trace: createTraceCollector(stats),
     limits: {
       maxIterations: 8,
@@ -46,7 +51,7 @@ async function runScenario(
   return {
     scenarioId,
     model,
-    answer,
+    answer: result.content,
     toolCalls: stats.toolCalls,
     iterations: stats.iterations || 1,
     toolNames: stats.toolNames,

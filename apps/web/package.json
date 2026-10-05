@@ -13,10 +13,13 @@
   "dependencies": {
     "@langchain/langgraph-sdk": "^1.12.0",
     "@langchain/react": "^1.2.0",
+    "@org/agent-models": "*",
     "@radix-ui/react-slot": "^1.3.3",
     "@tailwindcss/postcss": "^4.3.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dexie": "^4.0.10",
+    "dexie-react-hooks": "^1.1.7",
     "lucide-react": "^1.48.0",
     "next": "~16.1.6",
     "postcss": "^8.5.28",

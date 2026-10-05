@@ -137,6 +137,8 @@
   "dependencies": {
     "express": "^4.21.2",
     "@org/api-products": "*",
-    "@org/models": "*"
+    "@org/models": "*",
+    "@org/agent-core": "*",
+    "@org/agent-models": "*"
   }
 }

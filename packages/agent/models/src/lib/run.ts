@@ -1,4 +1,4 @@
-import type { MessageRole } from './message';
+import type { PendingToolCall } from './message.js';
 
 /**
  * The execution instance of one user request and everything the agent
@@ -31,9 +31,6 @@ export interface ModelTurn {
   toolCalls: PendingToolCall[];
   finishReason: string | null;
 }
-
-// Re-export to avoid a circular import at the barrel level.
-export type { PendingToolCall } from './message';
 
 /**
  * Context message in the OpenAI Chat Completions shape.
