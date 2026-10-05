@@ -1,0 +1,111 @@
+import { useState, useCallback, useRef } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import type { AgentEvent, ChatMessage } from '@org/agent-models';
+import { db, getMessages, addMessage } from '../store/db';
+import {
+  initialChatState,
+  reduceChatState,
+  type ChatState,
+} from '../store/chat-store';
+import { startRun, subscribeRun } from '../api/agent-client';
+
+/**
+ * Hook for managing an active agent run.
+ * Starts a run, subscribes to SSE events, reduces them into ChatState,
+ * and persists durable state to IndexedDB.
+ */
+export function useAgentRun(threadId: string | null) {
+  const [chatState, setChatState] = useState<ChatState>(initialChatState());
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
+  const sendMessage = useCallback(
+    async (content: string, options: { streaming?: boolean } = {}) => {
+      if (!threadId) return;
+      if (chatState.activeRun?.status === 'running') return;
+
+      // 1. Persist the user message
+      const userMessage = {
+        id: crypto.randomUUID(),
+        threadId,
+        runId: null,
+        role: 'user' as const,
+        content,
+        status: 'complete' as const,
+        createdAt: new Date().toISOString(),
+      };
+      await addMessage(userMessage);
+
+      // 2. Build the message context from history
+      const history = await getMessages(threadId);
+      const contextMessages: ChatMessage[] = history.map((m) => {
+        if (m.role === 'user') return { role: 'user', content: m.content };
+        if (m.role === 'tool')
+          return { role: 'tool', tool_call_id: m.toolCallId!, content: m.content };
+        return { role: 'assistant', content: m.content };
+      });
+
+      // 3. Start the run
+      const runId = await startRun(threadId, contextMessages, {
+        streaming: options.streaming ?? true,
+      });
+
+      // 4. Reset chat state for the new run
+      setChatState(initialChatState());
+
+      // 5. Subscribe to SSE events
+      // Process events sequentially — the reducer is async (IndexedDB writes)
+      // so we can't use it directly in setChatState. Instead, we maintain
+      // a ref to the current state and update both ref + state on each event.
+      let currentState = initialChatState();
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = subscribeRun(
+        runId,
+        0,
+        (event: AgentEvent) => {
+          reduceChatState(currentState, event, threadId).then((next) => {
+            currentState = next;
+            setChatState(next);
+          });
+        },
+        (error) => {
+          console.error('SSE error:', error);
+        },
+      );
+    },
+    [threadId, chatState.activeRun?.status],
+  );
+
+  const disconnect = useCallback(() => {
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
+  }, []);
+
+  return {
+    chatState,
+    sendMessage,
+    disconnect,
+  };
+}
+
+/**
+ * Live query for threads (sidebar).
+ */
+export function useThreads() {
+  return useLiveQuery(() => db.threads.orderBy('updatedAt').reverse().toArray(), []);
+}
+
+/**
+ * Live query for messages in a thread (conversation view).
+ */
+export function useMessages(threadId: string | null) {
+  return useLiveQuery(
+    async () => {
+      if (!threadId) return [];
+      return db.messages.where('[threadId+createdAt]').between(
+        [threadId, ''],
+        [threadId, '\uffff'],
+      ).toArray();
+    },
+    [threadId],
+  );
+}
