@@ -14,7 +14,10 @@
     }
   },
   "nx": {
-    "tags": ["scope:shared", "type:data"]
+    "tags": [
+      "scope:shared",
+      "type:data"
+    ]
   },
   "dependencies": {}
 }

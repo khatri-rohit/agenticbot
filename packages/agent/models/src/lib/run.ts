@@ -40,5 +40,9 @@ export interface ModelTurn {
 export type ChatMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string | null; tool_calls?: PendingToolCall[] }
+  | {
+      role: 'assistant';
+      content: string | null;
+      tool_calls?: PendingToolCall[];
+    }
   | { role: 'tool'; tool_call_id: string; content: string };

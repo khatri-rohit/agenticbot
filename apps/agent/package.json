@@ -135,7 +135,9 @@
       },
       "eval": {
         "executor": "nx:run-commands",
-        "dependsOn": ["^build"],
+        "dependsOn": [
+          "^build"
+        ],
         "options": {
           "commands": [
             "node ./node_modules/esbuild/bin/esbuild apps/agent/src/eval/run-eval.ts --bundle --platform=node --format=cjs --outfile=apps/agent/dist/run-eval.cjs --packages=external",
