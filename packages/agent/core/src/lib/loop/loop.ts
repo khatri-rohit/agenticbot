@@ -138,12 +138,7 @@ export async function runLoop(
         emit?.({ type: 'assistant.started', runId, messageId });
       }
 
-      const turn = await modelCall(
-        config.model,
-        messages,
-        tools,
-        onTextDelta,
-      );
+      const turn = await modelCall(config.model, messages, tools, onTextDelta);
 
       trace({
         type: 'llm_response',

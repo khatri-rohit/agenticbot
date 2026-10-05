@@ -91,9 +91,7 @@ describe('streamModelTurn — tool-call accumulation', () => {
       if (tc0.type === 'function') {
         expect(tc0.id).toBe('call_abc');
         expect(tc0.function.name).toBe('web_search');
-        expect(tc0.function.arguments).toBe(
-          '{"query":"latest React"}',
-        );
+        expect(tc0.function.arguments).toBe('{"query":"latest React"}');
       }
     } finally {
       restore();
