@@ -86,12 +86,15 @@ describe('streamModelTurn — tool-call accumulation', () => {
       expect(turn.finishReason).toBe('tool_calls');
       expect(turn.content).toBe('');
       expect(turn.toolCalls).toHaveLength(1);
-      expect(turn.toolCalls[0].id).toBe('call_abc');
-      expect(turn.toolCalls[0].type).toBe('function');
-      expect(turn.toolCalls[0].function.name).toBe('web_search');
-      expect(turn.toolCalls[0].function.arguments).toBe(
-        '{"query":"latest React"}',
-      );
+      const tc0 = turn.toolCalls[0];
+      expect(tc0.type).toBe('function');
+      if (tc0.type === 'function') {
+        expect(tc0.id).toBe('call_abc');
+        expect(tc0.function.name).toBe('web_search');
+        expect(tc0.function.arguments).toBe(
+          '{"query":"latest React"}',
+        );
+      }
     } finally {
       restore();
     }
@@ -218,10 +221,16 @@ describe('streamModelTurn — tool-call accumulation', () => {
       );
 
       expect(turn.toolCalls).toHaveLength(2);
-      expect(turn.toolCalls[0].id).toBe('call_1');
-      expect(turn.toolCalls[0].function.arguments).toBe('{"query":"a"}');
-      expect(turn.toolCalls[1].id).toBe('call_2');
-      expect(turn.toolCalls[1].function.arguments).toBe('{"query":"b"}');
+      const tc0 = turn.toolCalls[0];
+      const tc1 = turn.toolCalls[1];
+      expect(tc0.type).toBe('function');
+      expect(tc1.type).toBe('function');
+      if (tc0.type === 'function' && tc1.type === 'function') {
+        expect(tc0.id).toBe('call_1');
+        expect(tc0.function.arguments).toBe('{"query":"a"}');
+        expect(tc1.id).toBe('call_2');
+        expect(tc1.function.arguments).toBe('{"query":"b"}');
+      }
     } finally {
       restore();
     }

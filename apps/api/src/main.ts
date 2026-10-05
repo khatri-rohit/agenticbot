@@ -6,6 +6,7 @@ import {
   ProductFilter,
   PaginatedResponse,
 } from '@org/models';
+import { agentRouter } from './routes/agent/agent.routes';
 
 const host = process.env.HOST ?? 'localhost';
 const port = process.env.PORT ? Number(process.env.PORT) : 3333;
@@ -122,6 +123,9 @@ app.get('/api/products/:id', (req, res) => {
     return res.status(500).json(response);
   }
 });
+
+// Agent endpoints
+app.use('/api/agent', agentRouter);
 
 app.listen(port, host, () => {
   console.log(`[ ready ] http://${host}:${port}`);
