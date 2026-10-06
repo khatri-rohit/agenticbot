@@ -1,9 +1,5 @@
 import type { AgentEvent, Message } from '@org/agent-models';
-import {
-  addMessage,
-  updateRun,
-  addRun,
-} from './db';
+import { addMessage, updateRun, addRun } from './db';
 
 /**
  * Ephemeral UI state derived from the event stream.
@@ -168,9 +164,7 @@ export async function reduceChatState(
         activeRun: {
           ...state.activeRun,
           toolActivity: state.activeRun.toolActivity.map((t) =>
-            t.toolCallId === event.toolCallId
-              ? { ...t, status: 'failed' }
-              : t,
+            t.toolCallId === event.toolCallId ? { ...t, status: 'failed' } : t,
           ),
           lastSeq,
         },
@@ -187,13 +181,7 @@ export async function reduceChatState(
         completedAt: new Date().toISOString(),
       });
 
-      return {
-        activeRun: {
-          ...state.activeRun,
-          status: 'completed',
-          lastSeq,
-        },
-      };
+      return { activeRun: null };
     }
 
     case 'run.error': {
@@ -205,13 +193,7 @@ export async function reduceChatState(
         error: event.error,
       });
 
-      return {
-        activeRun: {
-          ...state.activeRun,
-          status: 'error',
-          lastSeq,
-        },
-      };
+      return { activeRun: null };
     }
 
     case 'turn.started':

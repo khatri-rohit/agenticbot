@@ -64,7 +64,10 @@ export class RunManager {
     return runId;
   }
 
-  private async executeRun(runId: string, opts: StartRunOptions): Promise<void> {
+  private async executeRun(
+    runId: string,
+    opts: StartRunOptions,
+  ): Promise<void> {
     const handle = this.runs.get(runId);
     if (!handle) return;
 
@@ -87,7 +90,11 @@ export class RunManager {
   }
 
   /** Subscribe to a run's events. Optionally replay from a seq cursor. */
-  subscribe(runId: string, fromSeq: number, subscriber: EventSubscriber): () => void {
+  subscribe(
+    runId: string,
+    fromSeq: number,
+    subscriber: EventSubscriber,
+  ): () => void {
     const handle = this.runs.get(runId);
     if (!handle) {
       throw new Error(`Run not found: ${runId}`);
@@ -105,11 +112,12 @@ export class RunManager {
     }
 
     // Run is done — no live events to subscribe to.
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
     return () => {};
   }
 
   /** Get the current event buffer for a run (for SSE replay). */
-  getEvents(runId: string, fromSeq: number = 0): AgentEvent[] {
+  getEvents(runId: string, fromSeq = 0): AgentEvent[] {
     const handle = this.runs.get(runId);
     if (!handle) return [];
     return handle.emitter.getEventsFromSeq(fromSeq);

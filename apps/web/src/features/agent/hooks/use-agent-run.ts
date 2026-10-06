@@ -40,7 +40,11 @@ export function useAgentRun(threadId: string | null) {
       const contextMessages: ChatMessage[] = history.map((m) => {
         if (m.role === 'user') return { role: 'user', content: m.content };
         if (m.role === 'tool')
-          return { role: 'tool', tool_call_id: m.toolCallId!, content: m.content };
+          return {
+            role: 'tool',
+            tool_call_id: m.toolCallId!,
+            content: m.content,
+          };
         return { role: 'assistant', content: m.content };
       });
 
@@ -52,17 +56,17 @@ export function useAgentRun(threadId: string | null) {
       // 4. Reset chat state for the new run
       setChatState(initialChatState());
 
-      // 5. Subscribe to SSE events
-      // Process events sequentially — the reducer is async (IndexedDB writes)
-      // so we can't use it directly in setChatState. Instead, we maintain
-      // a ref to the current state and update both ref + state on each event.
+      // 5. Subscribe to SSE events — must process in order (async reducer + races
+      // otherwise drop run.completed and leave status stuck on "running").
       let currentState = initialChatState();
+      let eventChain = Promise.resolve();
       unsubscribeRef.current?.();
       unsubscribeRef.current = subscribeRun(
         runId,
         0,
         (event: AgentEvent) => {
-          reduceChatState(currentState, event, threadId).then((next) => {
+          eventChain = eventChain.then(async () => {
+            const next = await reduceChatState(currentState, event, threadId);
             currentState = next;
             setChatState(next);
           });
@@ -91,21 +95,21 @@ export function useAgentRun(threadId: string | null) {
  * Live query for threads (sidebar).
  */
 export function useThreads() {
-  return useLiveQuery(() => db.threads.orderBy('updatedAt').reverse().toArray(), []);
+  return useLiveQuery(
+    () => db.threads.orderBy('updatedAt').reverse().toArray(),
+    [],
+  );
 }
 
 /**
  * Live query for messages in a thread (conversation view).
  */
 export function useMessages(threadId: string | null) {
-  return useLiveQuery(
-    async () => {
-      if (!threadId) return [];
-      return db.messages.where('[threadId+createdAt]').between(
-        [threadId, ''],
-        [threadId, '\uffff'],
-      ).toArray();
-    },
-    [threadId],
-  );
+  return useLiveQuery(async () => {
+    if (!threadId) return [];
+    return db.messages
+      .where('[threadId+createdAt]')
+      .between([threadId, ''], [threadId, '\uffff'])
+      .toArray();
+  }, [threadId]);
 }

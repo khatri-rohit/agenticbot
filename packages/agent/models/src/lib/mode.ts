@@ -21,9 +21,10 @@ export interface ModeConfig {
 
 export const RESEARCH_MODE: ModeConfig = {
   name: 'research',
-  model: 'llama3.1:8b',
+  model: 'glm-5.2:cloud',
+  // model: 'llama3.1:8b',
   temperature: 0.7,
-  allowedTools: ['web_search'],
+  allowedTools: [''],
   limits: {
     maxIterations: 8,
     maxToolCalls: 12,

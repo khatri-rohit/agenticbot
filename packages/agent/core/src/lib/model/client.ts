@@ -7,6 +7,6 @@ import { OpenAI } from 'openai';
  * Override base URL / API key via env for cloud Ollama or other OpenAI-compatible providers.
  */
 export const client = new OpenAI({
-  baseURL: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1',
+  baseURL: process.env.OLLAMA_BASE_URL ?? 'https://ollama.com/v1',
   apiKey: process.env.OLLAMA_API_KEY ?? 'ollama',
 });
