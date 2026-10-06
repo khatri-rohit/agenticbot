@@ -1,9 +1,45 @@
 @import 'tailwindcss';
 @import 'streamdown/styles.css';
+@import 'tw-animate-css';
 
-/* Streamdown: scan dist files for Tailwind utility classes (monorepo path) */
 @source "../../../node_modules/streamdown/dist/*.js";
 @source "../../../node_modules/@streamdown/code/dist/*.js";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.13 0.01 260);
+  --foreground: oklch(0.93 0.01 260);
+  --muted: oklch(0.2 0.01 260);
+  --muted-foreground: oklch(0.62 0.02 260);
+  --border: oklch(0.26 0.01 260);
+  --input: oklch(0.26 0.01 260);
+  --ring: oklch(0.55 0.08 260);
+  --primary: oklch(0.93 0.01 260);
+  --primary-foreground: oklch(0.15 0.01 260);
+  --secondary: oklch(0.22 0.01 260);
+  --secondary-foreground: oklch(0.9 0.01 260);
+  --accent: oklch(0.24 0.02 260);
+  --accent-foreground: oklch(0.93 0.01 260);
+}
 
 html {
   scroll-behavior: smooth;
@@ -11,100 +47,8 @@ html {
 
 body {
   margin: 0;
-}
-
-/* Custom scrollbar — subtle, dark */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(63, 63, 70, 0.5);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(82, 82, 91, 0.7);
-}
-
-/* Streamdown body tweaks — match our dark theme */
-.streamdown-body p {
-  margin-bottom: 0.75rem;
-}
-
-.streamdown-body p:last-child {
-  margin-bottom: 0;
-}
-
-.streamdown-body pre {
-  margin-bottom: 0.75rem;
-}
-
-.streamdown-body ul,
-.streamdown-body ol {
-  margin-bottom: 0.75rem;
-  padding-left: 1.5rem;
-}
-
-.streamdown-body li {
-  margin-bottom: 0.25rem;
-}
-
-.streamdown-body h1,
-.streamdown-body h2,
-.streamdown-body h3 {
-  font-weight: 600;
-  margin-top: 1rem;
-  margin-bottom: 0.5rem;
-}
-
-.streamdown-body h1 {
-  font-size: 1.25rem;
-}
-
-.streamdown-body h2 {
-  font-size: 1.125rem;
-}
-
-.streamdown-body h3 {
-  font-size: 1rem;
-}
-
-.streamdown-body a {
-  color: rgb(96, 165, 250);
-  text-decoration: underline;
-}
-
-.streamdown-body a:hover {
-  color: rgb(147, 197, 253);
-}
-
-.streamdown-body blockquote {
-  border-left: 3px solid rgb(63, 63, 70);
-  padding-left: 1rem;
-  color: rgb(161, 161, 170);
-  margin-bottom: 0.75rem;
-}
-
-.streamdown-body table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 0.75rem;
-}
-
-.streamdown-body th,
-.streamdown-body td {
-  border: 1px solid rgb(63, 63, 70);
-  padding: 0.5rem 0.75rem;
-  text-align: left;
-}
-
-.streamdown-body th {
-  background: rgb(24, 24, 27);
-  font-weight: 600;
+  background: var(--background);
+  color: var(--foreground);
+  font-feature-settings: 'rlig' 1, 'calt' 1;
+  -webkit-font-smoothing: antialiased;
 }

@@ -1,10 +1,10 @@
 'use client';
 
 import { use, useEffect, useRef } from 'react';
-import { Sidebar } from '../../../components/sidebar';
 import { ChatHeader } from '../../../components/chat-header';
 import { MessageList } from '../../../components/message-list';
 import { ChatInput } from '../../../components/chat-input';
+import { ChatShell } from '../../../components/chat-shell';
 import {
   useMessages,
   useAgentRun,
@@ -32,13 +32,11 @@ export default function ChatThreadPage({
   }, [sendMessage]);
 
   return (
-    <div className="flex h-screen w-full bg-zinc-950 text-zinc-200">
-      <Sidebar />
-      <main className="flex flex-1 flex-col">
-        <ChatHeader threadId={threadId} />
-        <MessageList messages={messages} chatState={chatState} />
-        <ChatInput onSend={sendMessage} disabled={isRunning} />
-      </main>
-    </div>
+    <ChatShell
+      header={<ChatHeader threadId={threadId} />}
+      footer={<ChatInput onSend={sendMessage} disabled={isRunning} />}
+    >
+      <MessageList messages={messages} chatState={chatState} />
+    </ChatShell>
   );
 }

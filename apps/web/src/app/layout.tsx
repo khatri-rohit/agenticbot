@@ -2,7 +2,7 @@ import './global.css';
 
 export const metadata = {
   title: 'AgenticBot',
-  description: 'Local-first AI agent with streaming chat',
+  description: 'Research agent',
 };
 
 export default function RootLayout({
@@ -12,7 +12,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-zinc-950 text-zinc-200">{children}</body>
+      <body className="min-h-screen bg-background text-foreground antialiased">
+        {children}
+      </body>
     </html>
   );
 }
