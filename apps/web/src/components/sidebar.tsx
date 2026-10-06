@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Plus, MessageSquare, Trash2, Bot } from 'lucide-react';
 import type { Thread } from '@org/agent-models';
 import { useThreads } from '../features/agent/hooks/use-agent-run';
 import { deleteThread } from '../features/agent/store/db';
@@ -11,18 +12,38 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex w-64 min-w-64 flex-col border-r border-zinc-800 bg-zinc-950 p-3">
-      <Link
-        href="/"
-        className={`mb-3 rounded-lg px-4 py-2.5 text-center text-sm font-medium transition ${
-          pathname === '/'
-            ? 'bg-blue-700 text-white'
-            : 'bg-blue-600 text-white hover:bg-blue-700'
-        }`}
-      >
-        + New Chat
-      </Link>
-      <div className="flex-1 overflow-y-auto">
+    <aside className="flex w-72 min-w-72 flex-col border-r border-zinc-800/60 bg-zinc-900/50">
+      {/* Brand */}
+      <div className="flex items-center gap-2.5 px-4 py-4">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600">
+          <Bot className="h-5 w-5 text-white" />
+        </div>
+        <span className="text-sm font-semibold text-zinc-200">AgenticBot</span>
+      </div>
+
+      {/* New Chat */}
+      <div className="px-3 pb-2">
+        <Link
+          href="/"
+          className={`flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+            pathname === '/'
+              ? 'bg-zinc-800 text-white'
+              : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+          }`}
+        >
+          <Plus className="h-4 w-4" />
+          New Chat
+        </Link>
+      </div>
+
+      {/* Thread list */}
+      <div className="flex-1 overflow-y-auto px-2 pb-2">
+        <div className="px-2 py-2 text-xs font-medium uppercase tracking-wider text-zinc-600">
+          Conversations
+        </div>
+        {threads?.length === 0 && (
+          <div className="px-3 py-4 text-sm text-zinc-600">No conversations yet</div>
+        )}
         {threads?.map((thread) => (
           <ThreadItem
             key={thread.id}
@@ -30,6 +51,14 @@ export function Sidebar() {
             active={pathname === `/chat/${thread.id}`}
           />
         ))}
+      </div>
+
+      {/* Footer */}
+      <div className="border-t border-zinc-800/60 px-4 py-3">
+        <div className="flex items-center gap-2 text-xs text-zinc-600">
+          <span className="h-2 w-2 rounded-full bg-green-500" />
+          <span>Local · Ollama</span>
+        </div>
       </div>
     </aside>
   );
@@ -47,25 +76,26 @@ function ThreadItem({ thread, active }: { thread: Thread; active: boolean }) {
   return (
     <Link
       href={`/chat/${thread.id}`}
-      className={`mb-0.5 flex items-center justify-between rounded-md px-3 py-2 text-sm transition ${
+      className={`group mb-0.5 flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition ${
         active
-          ? 'bg-zinc-800 text-white'
-          : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+          ? 'bg-zinc-800 text-zinc-100'
+          : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
       }`}
     >
+      <MessageSquare className="h-4 w-4 shrink-0 opacity-50" />
+
       {isPending ? (
-        <span className="flex flex-1 items-center gap-2">
-          <span className="h-3.5 w-3/4 animate-pulse rounded bg-zinc-800" />
-        </span>
+        <span className="h-3.5 flex-1 animate-pulse rounded bg-zinc-800" />
       ) : (
         <span className="flex-1 truncate">{thread.title}</span>
       )}
+
       <button
         onClick={handleDelete}
-        className="ml-2 text-zinc-600 hover:text-red-400"
+        className="ml-auto text-zinc-600 opacity-0 transition group-hover:opacity-100 hover:text-red-400"
         aria-label="Delete thread"
       >
-        ×
+        <Trash2 className="h-3.5 w-3.5" />
       </button>
     </Link>
   );

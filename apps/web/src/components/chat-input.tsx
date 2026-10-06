@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { ArrowUp, Zap, ZapOff } from 'lucide-react';
 
 export function ChatInput({
   onSend,
@@ -11,13 +12,22 @@ export function ChatInput({
 }) {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(true);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+  }, [input]);
 
   const handleSend = useCallback(() => {
-    if (!input.trim()) return;
+    if (!input.trim() || disabled) return;
     const content = input.trim();
     setInput('');
     onSend(content, { streaming });
-  }, [input, onSend, streaming]);
+  }, [input, onSend, streaming, disabled]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -30,40 +40,53 @@ export function ChatInput({
   );
 
   return (
-    <div className="mx-auto w-full max-w-3xl border-t border-zinc-800 p-4">
-      <div className="flex items-end gap-2">
+    <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+      <div className="relative flex items-end gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-2.5 shadow-lg transition focus-within:border-zinc-700">
+        {/* Streaming toggle */}
         <button
           onClick={() => setStreaming(!streaming)}
-          title="Toggle streaming mode"
-          className={`whitespace-nowrap rounded-lg border px-3 py-2 text-xs transition ${
+          title={streaming ? 'Streaming mode — tokens appear as they arrive' : 'Non-streaming mode — full response at once'}
+          className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
             streaming
-              ? 'border-blue-600 bg-blue-600/10 text-blue-400'
-              : 'border-zinc-800 bg-zinc-900 text-zinc-500'
+              ? 'bg-blue-600/15 text-blue-400'
+              : 'text-zinc-600 hover:text-zinc-400'
           }`}
         >
-          {streaming ? '⚡ Streaming' : '⏸ Non-streaming'}
+          {streaming ? <Zap className="h-3.5 w-3.5" /> : <ZapOff className="h-3.5 w-3.5" />}
+          <span className="hidden sm:inline">{streaming ? 'Stream' : 'Batch'}</span>
         </button>
+
+        {/* Textarea */}
         <textarea
+          ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type a message…"
+          placeholder="Send a message…"
           rows={1}
           disabled={disabled}
-          className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-lg border border-zinc-800 bg-zinc-950 px-3.5 py-2.5 text-[15px] text-zinc-200 outline-none focus:border-blue-600"
+          className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[15px] text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
         />
+
+        {/* Send button */}
         <button
           onClick={handleSend}
           disabled={!input.trim() || disabled}
-          className={`whitespace-nowrap rounded-lg px-5 py-2.5 text-sm font-medium transition ${
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
             !input.trim() || disabled
               ? 'cursor-not-allowed bg-zinc-800 text-zinc-600'
-              : 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-zinc-100 text-zinc-900 hover:bg-white'
           }`}
+          aria-label="Send message"
         >
-          Send
+          <ArrowUp className="h-4 w-4" />
         </button>
       </div>
+
+      {/* Hint */}
+      <p className="mt-2 text-center text-xs text-zinc-600">
+        Press <kbd className="rounded border border-zinc-800 px-1 py-0.5 text-[10px]">Enter</kbd> to send · <kbd className="rounded border border-zinc-800 px-1 py-0.5 text-[10px]">Shift+Enter</kbd> for new line
+      </p>
     </div>
   );
 }
