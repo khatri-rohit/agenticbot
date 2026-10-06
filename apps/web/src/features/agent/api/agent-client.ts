@@ -35,6 +35,41 @@ export async function startRun(
 }
 
 /**
+ * Enqueue a title generation job for a thread's first message.
+ * Returns the jobId for polling.
+ */
+export async function enqueueTitle(
+  threadId: string,
+  firstMessage: string,
+): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/agent/title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ threadId, firstMessage }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to enqueue title: ${res.status}`);
+  }
+
+  const { jobId } = await res.json();
+  return jobId;
+}
+
+/**
+ * Poll a title generation job.
+ * Returns the title string when completed, or null if still pending.
+ */
+export async function pollTitle(
+  jobId: string,
+): Promise<{ status: 'completed'; title: string } | { status: 'pending' } | { status: 'failed' }> {
+  const res = await fetch(`${API_BASE}/api/agent/title/${jobId}`);
+  if (!res.ok) return { status: 'failed' };
+  return res.json();
+}
+
+/**
  * Subscribe to a run's SSE event stream.
  * Replays events from fromSeq, then streams live events.
  *

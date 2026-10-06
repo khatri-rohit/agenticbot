@@ -8,6 +8,7 @@ import {
   createStreamModelCall,
   RESEARCH_MODE,
 } from '@org/agent-core';
+import { titleQueue, type TitleJobData } from '../../queue/title-queue';
 
 const router = Router();
 const runManager = new RunManager();
@@ -120,6 +121,65 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
   });
 
   return;
+});
+
+/**
+ * POST /api/agent/title
+ * Enqueue a title generation job for a thread's first message.
+ *
+ * Body: { threadId: string; firstMessage: string }
+ * Returns: { jobId: string }
+ */
+router.post('/title', async (req: Request, res: Response) => {
+  const { threadId, firstMessage } = req.body;
+
+  if (!threadId) {
+    return res.status(400).json({ error: 'threadId is required' });
+  }
+  if (!firstMessage || typeof firstMessage !== 'string') {
+    return res.status(400).json({ error: 'firstMessage is required' });
+  }
+
+  try {
+    const job = await titleQueue.add('generate-title', {
+      threadId,
+      firstMessage,
+    } satisfies TitleJobData);
+    return res.json({ jobId: job.id ?? '' });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: `Failed to enqueue: ${msg}` });
+  }
+});
+
+/**
+ * GET /api/agent/title/:jobId
+ * Poll a title generation job's result.
+ *
+ * Returns:
+ *   200 { status: 'completed', title: string }
+ *   200 { status: 'pending' }
+ *   200 { status: 'failed', error: string }
+ *   404 { error: 'Job not found' }
+ */
+router.get('/title/:jobId', async (req: Request, res: Response) => {
+  const { jobId } = req.params;
+
+  const job = await titleQueue.getJob(jobId);
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+
+  if (await job.isFailed()) {
+    return res.json({ status: 'failed', error: 'Title generation failed' });
+  }
+
+  if (!job.returnvalue) {
+    return res.json({ status: 'pending' });
+  }
+
+  const result = job.returnvalue as { title: string };
+  return res.json({ status: 'completed', title: result.title });
 });
 
 export { router as agentRouter };

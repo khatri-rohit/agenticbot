@@ -1,18 +1,21 @@
 import { useState, useCallback, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import type { AgentEvent, ChatMessage } from '@org/agent-models';
-import { db, getMessages, addMessage } from '../store/db';
+import { db, getMessages, addMessage, updateThread } from '../store/db';
 import {
   initialChatState,
   reduceChatState,
   type ChatState,
 } from '../store/chat-store';
-import { startRun, subscribeRun } from '../api/agent-client';
+import { startRun, subscribeRun, enqueueTitle, pollTitle } from '../api/agent-client';
 
 /**
  * Hook for managing an active agent run.
  * Starts a run, subscribes to SSE events, reduces them into ChatState,
  * and persists durable state to IndexedDB.
+ *
+ * On the first message in a thread, also enqueues a title generation job
+ * and polls until the title is ready, then updates the thread in IndexedDB.
  */
 export function useAgentRun(threadId: string | null) {
   const [chatState, setChatState] = useState<ChatState>(initialChatState());
@@ -56,8 +59,16 @@ export function useAgentRun(threadId: string | null) {
       // 4. Reset chat state for the new run
       setChatState(initialChatState());
 
-      // 5. Subscribe to SSE events — must process in order (async reducer + races
-      // otherwise drop run.completed and leave status stuck on "running").
+      // 5. If this is the first message, generate a title asynchronously
+      const isFirstMessage = history.length <= 1;
+      if (isFirstMessage) {
+        enqueueTitle(threadId, content)
+          .then((jobId) => pollForTitle(jobId, threadId))
+          .catch((err) => console.error('Title generation failed:', err));
+      }
+
+      // 6. Subscribe to SSE events — must process in order (async reducer + races
+      //    otherwise drop run.completed and leave status stuck on "running").
       let currentState = initialChatState();
       let eventChain = Promise.resolve();
       unsubscribeRef.current?.();
@@ -89,6 +100,30 @@ export function useAgentRun(threadId: string | null) {
     sendMessage,
     disconnect,
   };
+}
+
+/**
+ * Poll the title job until completed, then update the thread in IndexedDB.
+ */
+async function pollForTitle(jobId: string, threadId: string): Promise<void> {
+  const MAX_POLLS = 30;
+  const INTERVAL_MS = 2000;
+
+  for (let i = 0; i < MAX_POLLS; i++) {
+    await new Promise((r) => setTimeout(r, INTERVAL_MS));
+    const result = await pollTitle(jobId);
+
+    if (result.status === 'completed') {
+      await updateThread(threadId, { title: result.title });
+      return;
+    }
+    if (result.status === 'failed') {
+      console.error('Title generation failed for thread', threadId);
+      return;
+    }
+    // pending — keep polling
+  }
+  console.warn('Title generation timed out for thread', threadId);
 }
 
 /**
