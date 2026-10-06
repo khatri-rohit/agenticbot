@@ -14,7 +14,11 @@ export function Sidebar() {
     <aside className="flex w-64 min-w-64 flex-col border-r border-zinc-800 bg-zinc-950 p-3">
       <Link
         href="/"
-        className="mb-3 rounded-lg bg-blue-600 px-4 py-2.5 text-center text-sm font-medium text-white transition hover:bg-blue-700"
+        className={`mb-3 rounded-lg px-4 py-2.5 text-center text-sm font-medium transition ${
+          pathname === '/'
+            ? 'bg-blue-700 text-white'
+            : 'bg-blue-600 text-white hover:bg-blue-700'
+        }`}
       >
         + New Chat
       </Link>
@@ -38,6 +42,8 @@ function ThreadItem({ thread, active }: { thread: Thread; active: boolean }) {
     await deleteThread(thread.id);
   };
 
+  const isPending = thread.title === 'New Chat';
+
   return (
     <Link
       href={`/chat/${thread.id}`}
@@ -47,7 +53,13 @@ function ThreadItem({ thread, active }: { thread: Thread; active: boolean }) {
           : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
       }`}
     >
-      <span className="flex-1 truncate">{thread.title}</span>
+      {isPending ? (
+        <span className="flex flex-1 items-center gap-2">
+          <span className="h-3.5 w-3/4 animate-pulse rounded bg-zinc-800" />
+        </span>
+      ) : (
+        <span className="flex-1 truncate">{thread.title}</span>
+      )}
       <button
         onClick={handleDelete}
         className="ml-2 text-zinc-600 hover:text-red-400"
