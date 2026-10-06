@@ -6,8 +6,7 @@ import { ChatHeader } from '../../../components/chat-header';
 import { MessageList } from '../../../components/message-list';
 import { ChatInput } from '../../../components/chat-input';
 import { useMessages, useAgentRun } from '../../../features/agent/hooks/use-agent-run';
-
-const PENDING_MSG_KEY = 'agenticbot:pendingMessage';
+import { takePendingMessage } from '../../../features/agent/api/agent-client';
 
 export default function ChatThreadPage({
   params,
@@ -21,23 +20,12 @@ export default function ChatThreadPage({
 
   const isRunning = chatState.activeRun?.status === 'running';
 
-  /**
-   * On mount: if we were redirected from the home page with a pending
-   * message (stored in sessionStorage), send it immediately.
-   */
   useEffect(() => {
     if (sentPendingRef.current) return;
-    const raw = sessionStorage.getItem(PENDING_MSG_KEY);
-    if (!raw) return;
-
-    sessionStorage.removeItem(PENDING_MSG_KEY);
+    const pending = takePendingMessage();
+    if (!pending) return;
     sentPendingRef.current = true;
-
-    const { content, streaming } = JSON.parse(raw) as {
-      content: string;
-      streaming: boolean;
-    };
-    void sendMessage(content, { streaming });
+    void sendMessage(pending.content, { streaming: pending.streaming });
   }, [sendMessage]);
 
   return (

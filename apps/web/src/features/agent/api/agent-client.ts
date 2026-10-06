@@ -2,6 +2,25 @@ import type { AgentEvent, ChatMessage } from '@org/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
+/* ---------- Pending message (cross-route handoff) ---------- */
+
+const PENDING_MSG_KEY = 'agenticbot:pendingMessage';
+
+export type PendingMessage = { content: string; streaming: boolean };
+
+/** Stash a message for the chat page to send on mount. */
+export function stashPendingMessage(msg: PendingMessage): void {
+  sessionStorage.setItem(PENDING_MSG_KEY, JSON.stringify(msg));
+}
+
+/** Read and clear the stashed message. Returns null if none. */
+export function takePendingMessage(): PendingMessage | null {
+  const raw = sessionStorage.getItem(PENDING_MSG_KEY);
+  if (!raw) return null;
+  sessionStorage.removeItem(PENDING_MSG_KEY);
+  return JSON.parse(raw) as PendingMessage;
+}
+
 /**
  * Start an agent run. Returns the runId.
  * The server is stateless — we send the full message context.

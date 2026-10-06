@@ -5,27 +5,19 @@ import { useRouter } from 'next/navigation';
 import { Sidebar } from '../components/sidebar';
 import { ChatInput } from '../components/chat-input';
 import { createThread } from '../features/agent/store/db';
+import { stashPendingMessage } from '../features/agent/api/agent-client';
 
 const MODEL = 'llama3.1:8b';
-const PENDING_MSG_KEY = 'agenticbot:pendingMessage';
 
 export default function HomePage() {
   const router = useRouter();
   const [pendingContent, setPendingContent] = useState(false);
 
-  /**
-   * On first send: create the thread, stash the message in sessionStorage,
-   * redirect to /chat/[threadId]. The chat page picks up the pending message
-   * on mount and sends it.
-   */
   const handleSend = useCallback(
     async (content: string, options: { streaming: boolean }) => {
       setPendingContent(true);
       const thread = await createThread('New Chat', MODEL);
-      sessionStorage.setItem(
-        PENDING_MSG_KEY,
-        JSON.stringify({ content, streaming: options.streaming }),
-      );
+      stashPendingMessage({ content, streaming: options.streaming });
       router.push(`/chat/${thread.id}`);
     },
     [router],
