@@ -5,7 +5,10 @@ import { Sidebar } from '../../../components/sidebar';
 import { ChatHeader } from '../../../components/chat-header';
 import { MessageList } from '../../../components/message-list';
 import { ChatInput } from '../../../components/chat-input';
-import { useMessages, useAgentRun } from '../../../features/agent/hooks/use-agent-run';
+import {
+  useMessages,
+  useAgentRun,
+} from '../../../features/agent/hooks/use-agent-run';
 import { takePendingMessage } from '../../../features/agent/api/agent-client';
 
 export default function ChatThreadPage({

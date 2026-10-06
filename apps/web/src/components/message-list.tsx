@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
 import type { Message } from '@org/agent-models';
 import type { ChatState } from '../features/agent/store/chat-store';
+
+const streamdownPlugins = { code };
 
 export function MessageList({
   messages,
@@ -13,13 +17,14 @@ export function MessageList({
 }) {
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, chatState.activeRun?.streamingMessage]);
-
   const streaming = chatState.activeRun?.streamingMessage;
   const toolActivity = chatState.activeRun?.toolActivity ?? [];
   const isRunning = chatState.activeRun?.status === 'running';
+
+  // Auto-scroll when messages or streaming content change
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streaming?.content]);
 
   return (
     <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto p-6">
@@ -27,20 +32,7 @@ export function MessageList({
         <MessageBubble key={msg.id} message={msg} />
       ))}
 
-      {streaming && (
-        <div className="mb-4">
-          <div className="mb-1 text-xs font-semibold uppercase text-zinc-500">
-            Assistant
-          </div>
-          <div className="text-[15px] leading-relaxed whitespace-pre-wrap">
-            {streaming.content}
-            <span className="ml-0.5 inline-block animate-pulse text-zinc-500">
-              ▊
-            </span>
-          </div>
-        </div>
-      )}
-
+      {/* Tool activity chips */}
       {toolActivity.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-2">
           {toolActivity.map((tool) => (
@@ -49,9 +41,26 @@ export function MessageList({
         </div>
       )}
 
-      {isRunning && !streaming && (
-        <div className="mb-4 text-sm italic text-zinc-500">Thinking…</div>
+      {/* Streaming assistant response */}
+      {streaming && streaming.content && (
+        <div className="mb-4">
+          <div className="mb-1 text-xs font-semibold uppercase text-zinc-500">
+            Assistant
+          </div>
+          <div className="rounded-xl bg-zinc-900 px-4 py-2.5 text-[15px] leading-relaxed text-zinc-200">
+            <Streamdown
+              animated
+              isAnimating
+              plugins={streamdownPlugins}
+            >
+              {streaming.content}
+            </Streamdown>
+          </div>
+        </div>
       )}
+
+      {/* Loading state: run started but no content yet */}
+      {isRunning && !streaming?.content && <ThinkingIndicator />}
 
       <div ref={endRef} />
     </div>
@@ -61,18 +70,40 @@ export function MessageList({
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
   return (
-    <div className={`mb-4 ${isUser ? '' : ''}`}>
+    <div className="mb-4">
       <div className="mb-1 text-xs font-semibold uppercase text-zinc-500">
         {isUser ? 'You' : 'Assistant'}
       </div>
-      <div
-        className={`rounded-xl px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap ${
-          isUser
-            ? 'bg-blue-600/10 text-zinc-200'
-            : 'bg-zinc-900 text-zinc-200'
-        }`}
-      >
-        {message.content}
+      {isUser ? (
+        <div className="rounded-xl bg-blue-600/10 px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-zinc-200">
+          {message.content}
+        </div>
+      ) : (
+        <div className="rounded-xl bg-zinc-900 px-4 py-2.5 text-[15px] leading-relaxed text-zinc-200">
+          <Streamdown plugins={streamdownPlugins}>{message.content}</Streamdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Animated "Thinking…" indicator shown when the run is active
+ * but the first content chunk hasn't arrived yet.
+ */
+function ThinkingIndicator() {
+  return (
+    <div className="mb-4">
+      <div className="mb-1 text-xs font-semibold uppercase text-zinc-500">
+        Assistant
+      </div>
+      <div className="flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-3">
+        <span className="flex gap-1">
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.3s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.15s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-500" />
+        </span>
+        <span className="text-sm text-zinc-500">Thinking…</span>
       </div>
     </div>
   );

@@ -82,7 +82,11 @@ export async function enqueueTitle(
  */
 export async function pollTitle(
   jobId: string,
-): Promise<{ status: 'completed'; title: string } | { status: 'pending' } | { status: 'failed' }> {
+): Promise<
+  | { status: 'completed'; title: string }
+  | { status: 'pending' }
+  | { status: 'failed' }
+> {
   const res = await fetch(`${API_BASE}/api/agent/title/${jobId}`);
   if (!res.ok) return { status: 'failed' };
   return res.json();
