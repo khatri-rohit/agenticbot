@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChatInput } from '../components/chat-input';
-import { ChatShell, HomeHeader } from '../components/chat-shell';
+import { ChatShell } from '../components/chat-shell';
 import { createThread } from '../features/agent/store/db';
 import { stashPendingMessage } from '../features/agent/api/agent-client';
 
@@ -24,15 +24,21 @@ export default function HomePage() {
   );
 
   return (
-    <ChatShell
-      header={<HomeHeader />}
-      footer={<ChatInput onSend={handleSend} disabled={pendingContent} />}
-    >
-      <div className="flex flex-1 flex-col items-center justify-center px-6">
-        <p className="max-w-md text-center text-base text-muted-foreground">
-          Ask a research question. Your thread is created when you send the
-          first message.
-        </p>
+    <ChatShell layout="home">
+      <div className="flex w-full max-w-3xl flex-col items-center gap-10">
+        <div className="space-y-2 text-center">
+          <p className="text-lg font-medium tracking-tight text-foreground">
+            Research with your agent
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Ask a question to start a new thread.
+          </p>
+        </div>
+        <ChatInput
+          variant="hero"
+          onSend={handleSend}
+          disabled={pendingContent}
+        />
       </div>
     </ChatShell>
   );

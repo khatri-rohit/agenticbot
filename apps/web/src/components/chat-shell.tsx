@@ -1,23 +1,34 @@
 'use client';
 
 import { Sidebar } from './sidebar';
-import { Separator } from './ui/separator';
+import { cn } from '../lib/utils';
 
 export function ChatShell({
   header,
   children,
   footer,
+  layout = 'thread',
 }: {
-  header: React.ReactNode;
+  header?: React.ReactNode;
   children: React.ReactNode;
-  footer: React.ReactNode;
+  footer?: React.ReactNode;
+  layout?: 'thread' | 'home';
 }) {
+  const isHome = layout === 'home';
+
   return (
-    <div className="flex h-screen w-full">
+    <div className="flex h-screen w-full bg-background">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         {header}
-        <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+        <main
+          className={cn(
+            'flex min-h-0 flex-1 flex-col',
+            isHome && 'items-center justify-center px-6',
+          )}
+        >
+          {children}
+        </main>
         {footer}
       </div>
     </div>
@@ -25,12 +36,5 @@ export function ChatShell({
 }
 
 export function HomeHeader() {
-  return (
-    <header className="shrink-0">
-      <div className="px-6 py-4">
-        <h1 className="text-sm font-medium text-muted-foreground">New chat</h1>
-      </div>
-      <Separator />
-    </header>
-  );
+  return null;
 }
