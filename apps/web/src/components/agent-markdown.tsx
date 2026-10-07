@@ -28,6 +28,13 @@ const controls = {
 const mermaidConfig = { config: { theme: 'dark' as const } };
 
 /**
+ * Streamdown enables link-safety by default (full-screen confirm modal).
+ * Research citations should open normally in a new tab.
+ * @see https://streamdown.ai/docs — `linkSafety`
+ */
+const linkSafety = { enabled: false };
+
+/**
  * Renders assistant markdown via Streamdown.
  * Use `streaming` while tokens are arriving so incomplete fences parse correctly.
  */
@@ -51,6 +58,7 @@ export function AgentMarkdown({
     codeBlockMaxHeight: 0,
     controls,
     className: 'agent-markdown',
+    linkSafety,
   };
 
   if (streaming) {
