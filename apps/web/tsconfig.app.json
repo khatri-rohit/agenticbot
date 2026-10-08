@@ -11,6 +11,11 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "incremental": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "plugins": [
       {
         "name": "next"
@@ -21,9 +26,6 @@
       "@nx/react/typings/cssmodule.d.ts",
       "@nx/react/typings/image.d.ts"
     ],
-    "paths": {
-      "@/*": ["./src/*"]
-    },
     "outDir": "dist",
     "rootDir": "src",
     "tsBuildInfoFile": "dist/tsconfig.app.tsbuildinfo"
@@ -52,6 +54,9 @@
     "eslint.config.mjs"
   ],
   "references": [
+    {
+      "path": "../../packages/agent/models/tsconfig.lib.json"
+    },
     {
       "path": "../../packages/shop/shared-ui/tsconfig.lib.json"
     }

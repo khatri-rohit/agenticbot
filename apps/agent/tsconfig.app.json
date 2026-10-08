@@ -26,5 +26,13 @@
     "eslint.config.js",
     "eslint.config.cjs",
     "eslint.config.mjs"
+  ],
+  "references": [
+    {
+      "path": "../../packages/agent/models/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/agent/core/tsconfig.lib.json"
+    }
   ]
 }

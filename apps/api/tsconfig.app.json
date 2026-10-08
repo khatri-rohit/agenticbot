@@ -21,6 +21,12 @@
   ],
   "references": [
     {
+      "path": "../../packages/agent/models/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/agent/core/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/shared/models/tsconfig.lib.json"
     },
     {

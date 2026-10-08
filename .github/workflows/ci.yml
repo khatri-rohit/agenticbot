@@ -10,32 +10,55 @@ permissions:
   actions: read
   contents: read
 
+# Cancel stale runs on the same branch — saves CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  main:
+  quality:
+    name: Lint · Test · Typecheck · Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          filter: tree:0
           fetch-depth: 0
 
-      # This enables task distribution via Nx Cloud
-      # Run this command as early as possible, before dependencies are installed
-      # Learn more at https://nx.dev/docs/reference/nx-cloud-cli#npx-nxcloud-startcirun
-      - run: npx nx start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="e2e"
-
-      # Cache node_modules
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: 'npm'
 
       - run: npm ci
+
+      # Compare formatting against the PR base branch (or last commit on main).
+      - name: Format check
+        run: npx nx format:check --base="${{ github.base_ref && format('remotes/origin/{0}', github.base_ref) || 'HEAD~1' }}"
+
+      # Run all quality gates across every project in one command.
+      # Nx resolves the dependency graph and runs targets in the correct order.
+      - name: Lint · Test · Typecheck · Build
+        run: npx nx run-many -t lint test typecheck build
+
+  e2e:
+    name: E2E Tests
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - run: npm ci
+
       - run: npx playwright install --with-deps
 
-      # Prepend any command with "nx record --" to record its logs to Nx Cloud
-      - run: npx nx record -- npx nx format:check --base="remotes/origin/main"
-      - run: npx nx run-many -t lint test build typecheck e2e
-      # Nx Cloud recommends fixes for failures to help you get CI green faster. Learn more: https://nx.dev/docs/features/ci-features/self-healing-ci
-      - run: npx nx fix-ci
-        if: always()
+      # Nx starts each app's dev server automatically (declared in the
+      # e2e target dependsOn), then runs Playwright specs against it.
+      - name: E2E
+        run: npx nx run-many -t e2e

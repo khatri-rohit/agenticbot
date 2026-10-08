@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
+} from 'openai/resources/chat/completions';
 
 import { client } from './model';
 import { ToolRegistry } from './tools';
@@ -40,14 +43,29 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   ]);
 }
 
+function skipToolCalls(
+  messages: ChatCompletionMessageParam[],
+  toolCalls: ChatCompletionMessageToolCall[],
+  reason: string,
+) {
+  for (const toolCall of toolCalls) {
+    messages.push({ role: 'tool', tool_call_id: toolCall.id, content: reason });
+  }
+}
+
 async function finalizeWithoutTools(
   model: string,
   messages: ChatCompletionMessageParam[],
 ): Promise<string> {
+  messages.push({
+    role: 'user',
+    content:
+      'Tool budget reached. Answer my original question now using only the information above, and say what is uncertain.',
+  });
+
   const response = await client.chat.completions.create({
     model,
     messages,
-    tools: [],
   });
 
   return response.choices[0]?.message.content ?? '';
@@ -112,14 +130,10 @@ export async function runAgent(
         contentPreview: message.content ? preview(message.content) : undefined,
       });
 
-      /*
-       * Native tool call path.
-       */
       if (message.tool_calls?.length) {
-        // Preserve assistant's decision in state.
         messages.push(message);
 
-        for (const toolCall of message.tool_calls) {
+        for (const [index, toolCall] of message.tool_calls.entries()) {
           if (toolCall.type !== 'function') {
             continue;
           }
@@ -133,6 +147,12 @@ export async function runAgent(
               iteration: iterations,
               reason: `max tool calls exceeded (${limits.maxToolCalls})`,
             });
+
+            skipToolCalls(
+              messages,
+              message.tool_calls.slice(index),
+              'Skipped: tool call limit reached.',
+            );
 
             return finalizeWithoutTools(model, messages);
           }
@@ -185,6 +205,12 @@ export async function runAgent(
               content:
                 'This exact tool call has already been attempted multiple times. Do not repeat it.',
             });
+
+            skipToolCalls(
+              messages,
+              message.tool_calls.slice(index + 1),
+              'Skipped: tool call limit reached.',
+            );
 
             return finalizeWithoutTools(model, messages);
           }
@@ -242,9 +268,6 @@ export async function runAgent(
         continue;
       }
 
-      /*
-       * Normal final response.
-       */
       if (choice.finish_reason === 'stop') {
         const result = message.content ?? '';
 
@@ -258,9 +281,6 @@ export async function runAgent(
         return result;
       }
 
-      /*
-       * Unexpected provider/model behavior.
-       */
       trace({
         type: 'limit',
         runId,
@@ -271,9 +291,6 @@ export async function runAgent(
       return message.content ?? '';
     }
 
-    /*
-     * Iteration limit.
-     */
     trace({
       type: 'limit',
       runId,
