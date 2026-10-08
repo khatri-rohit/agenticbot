@@ -46,7 +46,10 @@ export function ModelPicker({
           <ChevronDown className="size-3.5 shrink-0 opacity-70" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80 max-h-[min(24rem,70vh)] overflow-y-auto">
+      <DropdownMenuContent
+        align="start"
+        className="w-80 max-h-[min(24rem,70vh)] overflow-y-auto"
+      >
         <DropdownMenuLabel className="text-xs text-muted-foreground">
           Ollama Cloud
         </DropdownMenuLabel>

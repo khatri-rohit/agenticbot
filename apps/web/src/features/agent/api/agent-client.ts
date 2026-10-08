@@ -45,8 +45,7 @@ export async function startRun(
     webSearch?: boolean;
   } = {},
 ): Promise<string> {
-  const allowedTools =
-    options.webSearch === false ? [] : ['web_search'];
+  const allowedTools = options.webSearch === false ? [] : ['web_search'];
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
     method: 'POST',
