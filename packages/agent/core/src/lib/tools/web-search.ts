@@ -1,17 +1,18 @@
-import { webSearchResultContext } from '../prompts/tools_result_context';
-import { Tool, WebSearchResults } from './type';
-import { webSearch } from './web_search_api';
+import type { Tool } from './type';
+import { webSearch, webFetch } from './web_search_api';
 
 /**
- * web_search tool — searches the web via Firecrawl for current information.
+ * web_search tool — searches the web via Ollama for current information.
+ * Returns tiered results: top results with full page content, remaining
+ * results as snippets with links.
  */
 export const webSearchTool: Tool = {
   definition: {
     type: 'function',
     function: {
       name: 'web_search',
-      description: `Search the web for current, recent, time-sensitive, or web-specific information. Just for context the current date and time is ${new Date().toISOString()}. You can utilize the date and time to your advantage to search the web for current information if it is relevant to the user's question.
-        `,
+      description:
+        'Search the web for current, recent, time-sensitive, or web-specific information.',
       parameters: {
         type: 'object',
         properties: {
@@ -44,11 +45,55 @@ export const webSearchTool: Tool = {
   },
   execute: async (args) => {
     const query = String(args.query ?? '');
-    const results: WebSearchResults = await webSearch(query, 5);
-    return webSearchResultContext(
-      query,
-      JSON.stringify(results, null, 2).trimEnd(),
-    );
+    return webSearch(query, 5);
+  },
+};
+
+/**
+ * web_fetch tool — fetches the full content of a single web page by URL.
+ * Always available as a native global tool, not user-toggleable.
+ */
+export const webFetchTool: Tool = {
+  definition: {
+    type: 'function',
+    function: {
+      name: 'web_fetch',
+      description:
+        'Fetch the full content of a web page by URL. Use when the user provides a URL and asks to read or summarize it, or when you need deeper content from a specific page found in search results.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description:
+              'The full URL of the web page to fetch (including protocol)',
+          },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+    },
+  },
+  guidance: {
+    whenToUse: [
+      'The user provides a URL and asks to read, summarize, or extract information from it.',
+      'You found a promising URL in web_search results and need the full page content.',
+      'You need to verify a specific claim by reading the original source page.',
+    ],
+    whenNotToUse: [
+      'General conversation or questions without a specific URL.',
+      'You need to search for information (use web_search instead).',
+      'You already have enough content from search snippets to answer.',
+    ],
+    usage: [
+      'Pass the full URL including the protocol (https:// or http://).',
+      'If the fetch fails, inform the user and try alternative sources if available.',
+      'Do not fetch the same URL multiple times if it already returned content.',
+    ],
+  },
+  execute: async (args) => {
+    const url = String(args.url ?? '');
+    return webFetch(url);
   },
 };
 
@@ -56,4 +101,4 @@ export const webSearchTool: Tool = {
  * All available tools in the core package.
  * Apps and modes select from this list.
  */
-export const allTools: Tool[] = [webSearchTool];
+export const allTools: Tool[] = [webSearchTool, webFetchTool];

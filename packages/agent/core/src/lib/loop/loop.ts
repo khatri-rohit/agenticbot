@@ -7,7 +7,7 @@ import type {
 import { consoleTrace, type TraceEvent } from '../events/trace';
 import type { AgentEventWithoutSeq } from '@org/agent-models';
 import { DEFAULT_LIMITS, type AgentLimits } from './limits';
-import { ToolRegistry } from '../tools/type';
+import type { ToolRegistry } from '../tools/type';
 
 /* ---------- public types ---------- */
 

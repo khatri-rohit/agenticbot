@@ -31,7 +31,7 @@ export type ToolRegistry = {
 export type WebSearchResult = {
   title: string;
   url: string;
-  summary: string;
+  content: string;
 };
 
 export type WebSearchResponse = {

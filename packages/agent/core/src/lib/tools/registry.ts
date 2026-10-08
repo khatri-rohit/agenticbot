@@ -1,4 +1,4 @@
-import { Tool, ToolRegistry } from './type';
+import type { Tool, ToolRegistry } from './type';
 
 /**
  * Build a ToolRegistry from a list of tools.

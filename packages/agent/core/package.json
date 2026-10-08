@@ -15,12 +15,14 @@
     }
   },
   "nx": {
-    "tags": ["scope:agent", "type:logic"]
+    "tags": [
+      "scope:agent",
+      "type:logic"
+    ]
   },
   "dependencies": {
     "tslib": "^2.3.0",
-    "openai": "^7.27.0",
-    "firecrawl": "^4.42.1"
+    "openai": "^7.27.0"
   },
   "devDependencies": {
     "@org/agent-models": "*"

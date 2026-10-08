@@ -6,7 +6,7 @@ import type {
 
 import { client } from './client';
 import type { ModelTurn } from '../loop/loop';
-import { ToolRegistry } from '../tools/type';
+import type { ToolRegistry } from '../tools/type';
 
 /**
  * Callback type for receiving streamed text deltas.

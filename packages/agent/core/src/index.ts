@@ -42,14 +42,7 @@ export {
 // Tools
 export { createToolRegistry } from './lib/tools/registry';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
-
-export { webSearchTool, allTools } from './lib/tools/web-search';
-export {
-  firecrawlSearch,
-  firecrawlGetPageContent,
-  compactToolPayload,
-  MAX_TOOL_PAYLOAD_CHARS,
-} from './lib/tools/firecrawl';
+export { webSearchTool, webFetchTool, allTools } from './lib/tools/web-search';
 
 // Events / trace
 export { consoleTrace, type TraceEvent } from './lib/events/trace';

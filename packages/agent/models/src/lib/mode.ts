@@ -9,8 +9,10 @@ export interface ModeConfig {
   name: ModeName;
   model: string;
   temperature: number;
-  /** Tool names allowed in this mode. Empty = no tools. */
+  /** Tool names allowed in this mode. User-toggleable via client. */
   allowedTools: string[];
+  /** Always-on native tools. Server includes these regardless of client selection. */
+  globalTools: string[];
   limits: {
     maxIterations: number;
     maxToolCalls: number;
@@ -25,6 +27,7 @@ export const RESEARCH_MODE: ModeConfig = {
   // model: 'llama3.1:8b',
   temperature: 0.7,
   allowedTools: ['web_search'],
+  globalTools: ['web_fetch'],
   limits: {
     maxIterations: 8,
     maxToolCalls: 12,

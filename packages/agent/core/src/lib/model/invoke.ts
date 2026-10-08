@@ -5,7 +5,7 @@ import type {
 
 import { client } from './client';
 import type { ModelTurn } from '../loop/loop';
-import { ToolRegistry } from '../tools/type';
+import type { ToolRegistry } from '../tools/type';
 
 /**
  * Non-streaming model call. Calls chat.completions.create with stream:false

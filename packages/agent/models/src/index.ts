@@ -21,6 +21,11 @@ export type {
 } from './lib/event.js';
 
 export type { Thread } from './lib/thread.js';
+export {
+  CHAT_TITLE_MIN_WORDS,
+  CHAT_TITLE_MAX_WORDS,
+  clampChatTitle,
+} from './lib/thread.js';
 
 export type {
   Message,
@@ -29,12 +34,7 @@ export type {
   PendingToolCall,
 } from './lib/message.js';
 
-export type {
-  Run,
-  RunStatus,
-  ModelTurn,
-  ChatMessage,
-} from './lib/run.js';
+export type { Run, RunStatus, ModelTurn, ChatMessage } from './lib/run.js';
 
 export type { ModeName, ModeConfig } from './lib/mode.js';
 export { RESEARCH_MODE } from './lib/mode.js';

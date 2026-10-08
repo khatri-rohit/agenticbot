@@ -46,9 +46,12 @@ router.post('/run', (req: Request, res: Response) => {
 
   const useStreaming = streaming ?? true;
   const useModel = model ?? RESEARCH_MODE.model;
-  const toolAllowList = Array.isArray(allowedTools)
+  const clientTools = Array.isArray(allowedTools)
     ? allowedTools
     : RESEARCH_MODE.allowedTools;
+  const toolAllowList = [
+    ...new Set([...clientTools, ...RESEARCH_MODE.globalTools]),
+  ];
   const tools = createToolRegistry(allTools, toolAllowList);
 
   // Build the OpenAI-format messages from the client's ChatMessage[]
