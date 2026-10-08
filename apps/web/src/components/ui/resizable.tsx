@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { GripVertical } from 'lucide-react';
 import * as ResizablePrimitive from 'react-resizable-panels';
 import { cn } from '@/lib/utils';
 
@@ -34,29 +33,28 @@ function ResizablePanel({
   );
 }
 
+/**
+ * IDE-style edge resize: no grip, ~16px invisible hit strip on the seam,
+ * 1px hairline brightens on hover and while dragging.
+ */
 function ResizableHandle({
-  withHandle,
   className,
   ...props
-}: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
-  withHandle?: boolean;
-}) {
+}: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle>) {
   return (
     <ResizablePrimitive.PanelResizeHandle
       data-slot="resizable-handle"
+      aria-label="Resize sidebar"
       className={cn(
-        'relative z-10 flex w-px shrink-0 items-stretch bg-border/50 transition-colors after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 hover:bg-border focus-visible:bg-border focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full data-[panel-group-direction=vertical]:after:left-0 data-[panel-group-direction=vertical]:after:h-1 data-[panel-group-direction=vertical]:after:w-full data-[panel-group-direction=vertical]:after:translate-x-0 data-[panel-group-direction=vertical]:after:-translate-y-1/2',
-        withHandle && 'w-3 bg-transparent after:w-3 hover:bg-accent/40',
+        'relative z-20 w-0 shrink-0 cursor-col-resize touch-none select-none focus-visible:outline-none',
+        'before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-border/30 before:transition-[background-color] before:duration-150 before:content-[""]',
+        'hover:before:bg-border/80 data-[resize-handle-active]:before:bg-primary/50',
+        'after:absolute after:inset-y-0 after:-left-2 after:w-4 after:content-[""]',
+        'focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-0',
         className,
       )}
       {...props}
-    >
-      {withHandle ? (
-        <div className="z-10 mx-auto flex h-8 w-3 items-center justify-center rounded-sm border border-border/60 bg-background/80">
-          <GripVertical className="size-2.5 text-muted-foreground" />
-        </div>
-      ) : null}
-    </ResizablePrimitive.PanelResizeHandle>
+    />
   );
 }
 

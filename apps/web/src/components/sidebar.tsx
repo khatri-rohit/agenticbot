@@ -45,12 +45,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   const pathname = usePathname();
 
   return (
-    <aside
-      className={cn(
-        'flex h-full min-h-0 w-full flex-col bg-sidebar text-sidebar-foreground',
-        !collapsed && 'min-w-0 border-r border-border/35',
-      )}
-    >
+    <aside className="flex h-full min-h-0 w-full min-w-0 flex-col bg-sidebar text-sidebar-foreground">
       <div className="shrink-0 px-2 pt-2">
         {collapsed ? (
           <div className="flex flex-col items-stretch gap-1">

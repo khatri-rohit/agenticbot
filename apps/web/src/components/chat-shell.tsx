@@ -51,7 +51,7 @@ export function ChatShell({
             onExpand={() => sidebarRef.current?.expand()}
           />
         </ResizablePanel>
-        <ResizableHandle withHandle className="cursor-col-resize" />
+        <ResizableHandle />
         <ResizablePanel id="main" order={2} minSize={40} defaultSize={80}>
           <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
             {header}
