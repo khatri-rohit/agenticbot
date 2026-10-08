@@ -15,24 +15,29 @@ import type {
   ToolActivity,
 } from '../features/agent/store/chat-store';
 import { groupMessageTurns } from '../lib/group-message-turns';
-import { cn } from '../lib/utils';
 import { AgentMarkdown } from './agent-markdown';
 import {
   ConversationRail,
   shouldShowConversationRail,
 } from './conversation-rail';
 import { MessageActions } from './message-actions';
+import { UserMessage } from './user-message';
 
 export function MessageList({
   messages,
   chatState,
   isRunning,
   onRetryLastResponse,
+  onEditLastUserMessage,
 }: {
   messages: Message[] | undefined;
   chatState: ChatState;
   isRunning: boolean;
   onRetryLastResponse: () => void | Promise<void>;
+  onEditLastUserMessage: (
+    messageId: string,
+    content: string,
+  ) => void | Promise<void>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -95,6 +100,14 @@ export function MessageList({
     return null;
   }, [messages]);
 
+  const latestUserMessageId = useMemo(() => {
+    if (!messages?.length) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
   return (
     <div className="relative flex min-h-0 flex-1">
       {showJumpToBottom && (
@@ -129,7 +142,7 @@ export function MessageList({
       >
         <div className="mx-auto w-full max-w-3xl px-5 py-7 sm:pl-14 sm:pr-6">
           {!hasMessages && !isRunning && !streaming?.content && (
-            <p className="text-center text-sm text-muted-foreground/80">
+            <p className="type-ui text-center text-muted-foreground/80">
               Your research thread will appear here.
             </p>
           )}
@@ -146,6 +159,16 @@ export function MessageList({
                   <UserMessage
                     message={turn.userMessage}
                     registerAnchor={registerAnchor}
+                    canEdit={
+                      isLastTurn && turn.userMessage.id === latestUserMessageId
+                    }
+                    hasResponseBelow={
+                      isLastTurn &&
+                      (turn.replies.length > 0 ||
+                        isRunning ||
+                        Boolean(streaming?.content))
+                    }
+                    onEditSubmit={onEditLastUserMessage}
                   />
 
                   {isLastTurn && isRunning && (
@@ -156,7 +179,7 @@ export function MessageList({
                   )}
 
                   {turn.replies.length > 0 && (
-                    <div className="flex flex-col gap-5 pt-0.5">
+                    <div className="flex flex-col gap-4 pt-1">
                       {turn.replies.map((msg) => (
                         <AssistantMessage
                           key={msg.id}
@@ -183,7 +206,7 @@ export function MessageList({
 
                   {isLastTurn && streaming?.content && (
                     <div className="group/msg">
-                      <article className="text-[14px] leading-relaxed">
+                      <article className="chat-prose type-body">
                         <AgentMarkdown content={streaming.content} streaming />
                       </article>
                       <MessageActions
@@ -199,39 +222,6 @@ export function MessageList({
           </div>
 
           <div ref={endRef} className="h-10" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function UserMessage({
-  message,
-  registerAnchor,
-}: {
-  message: Message;
-  registerAnchor: (id: string, el: HTMLDivElement | null) => void;
-}) {
-  return (
-    <div
-      ref={(el) => registerAnchor(message.id, el)}
-      id={`conversation-anchor-${message.id}`}
-      className="group/msg scroll-mt-8"
-    >
-      <div className="flex justify-end">
-        <div className="max-w-[min(100%,32rem)]">
-          <div
-            className={cn(
-              'rounded-lg border border-border/25 bg-secondary/90 px-3.5 py-2 text-[14px] leading-relaxed text-foreground/95',
-            )}
-          >
-            <p className="whitespace-pre-wrap">{message.content}</p>
-          </div>
-          <MessageActions
-            content={message.content}
-            align="end"
-            className="opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100"
-          />
         </div>
       </div>
     </div>
@@ -260,7 +250,7 @@ function TurnStatusLine({
 
   return (
     <p
-      className="text-right text-[11px] text-muted-foreground/70 tabular-nums"
+      className="type-caption text-right text-muted-foreground/70 tabular-nums"
       aria-live="polite"
     >
       {label}
@@ -282,7 +272,7 @@ function AssistantMessage({
   if (message.role === 'tool') {
     return (
       <div>
-        <p className="text-xs text-muted-foreground/80">
+        <p className="type-caption text-muted-foreground/80">
           Tool result
           {message.toolCallId ? ` (${message.toolCallId.slice(0, 8)}…)` : ''}
         </p>
@@ -293,7 +283,7 @@ function AssistantMessage({
 
   return (
     <div className="group/msg">
-      <article className="text-[14px] leading-relaxed">
+      <article className="chat-prose type-body">
         <AgentMarkdown content={message.content} />
       </article>
       <MessageActions
@@ -320,5 +310,5 @@ function ToolStatus({
         ? `${tool.toolName} failed`
         : `${tool.toolName} done${tool.durationMs ? ` (${tool.durationMs}ms)` : ''}`;
 
-  return <p className="text-xs text-muted-foreground/85">{label}</p>;
+  return <p className="type-caption text-muted-foreground/85">{label}</p>;
 }

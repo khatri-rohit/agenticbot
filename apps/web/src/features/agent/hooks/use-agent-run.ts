@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import type { AgentEvent, ChatMessage } from '@org/agent-models';
+import type { AgentEvent, ChatMessage, Thread } from '@org/agent-models';
+import { clampChatTitle } from '@/lib/thread-title';
 import {
   db,
   getMessages,
@@ -8,6 +9,7 @@ import {
   updateThread,
   updateRun,
   deleteMessagesAfter,
+  updateMessageContent,
 } from '../store/db';
 import {
   initialChatState,
@@ -22,6 +24,11 @@ import {
   cancelRun,
   type ComposerOptions,
 } from '../api/agent-client';
+import {
+  readStoredComposerModel,
+  resolveOllamaCloudModel,
+  writeStoredComposerModel,
+} from '@/lib/ollama-cloud-models';
 
 export type QueuedMessage = {
   content: string;
@@ -31,9 +38,12 @@ export type QueuedMessage = {
 const defaultComposerOptions = (): ComposerOptions => ({
   streaming: true,
   webSearch: true,
+  model: readStoredComposerModel(),
 });
 
-function toChatContext(messages: Awaited<ReturnType<typeof getMessages>>): ChatMessage[] {
+function toChatContext(
+  messages: Awaited<ReturnType<typeof getMessages>>,
+): ChatMessage[] {
   return messages.map((m) => {
     if (m.role === 'user') return { role: 'user', content: m.content };
     if (m.role === 'tool')
@@ -64,6 +74,35 @@ export function useAgentRun(threadId: string | null) {
   const chatStateRef = useRef(chatState);
   chatStateRef.current = chatState;
   const wasRunningRef = useRef(false);
+  const syncedThreadModelRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!threadId) return;
+    let cancelled = false;
+    void db.threads.get(threadId).then((thread) => {
+      if (cancelled || !thread) return;
+      if (syncedThreadModelRef.current === thread.id) return;
+      syncedThreadModelRef.current = thread.id;
+      const model = resolveOllamaCloudModel(thread.model);
+      setComposerOptions((prev) => ({ ...prev, model }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+
+  const setComposerOptionsPersisted = useCallback(
+    (options: ComposerOptions) => {
+      const model = resolveOllamaCloudModel(options.model);
+      const next = { ...options, model };
+      setComposerOptions(next);
+      writeStoredComposerModel(model);
+      if (threadId) {
+        void updateThread(threadId, { model });
+      }
+    },
+    [threadId],
+  );
 
   const disconnect = useCallback(() => {
     unsubscribeRef.current?.();
@@ -148,6 +187,7 @@ export function useAgentRun(threadId: string | null) {
       const runId = await startRun(threadId, contextMessages, {
         streaming: options.streaming,
         webSearch: options.webSearch,
+        model: resolveOllamaCloudModel(options.model),
       });
 
       setChatState(initialChatState());
@@ -192,6 +232,7 @@ export function useAgentRun(threadId: string | null) {
       const merged: ComposerOptions = {
         streaming: options.streaming ?? composerOptions.streaming,
         webSearch: options.webSearch ?? composerOptions.webSearch,
+        model: resolveOllamaCloudModel(options.model ?? composerOptions.model),
       };
 
       if (chatStateRef.current.activeRun?.status === 'running') {
@@ -247,11 +288,50 @@ export function useAgentRun(threadId: string | null) {
     const runId = await startRun(threadId, contextMessages, {
       streaming: composerOptions.streaming,
       webSearch: composerOptions.webSearch,
+      model: resolveOllamaCloudModel(composerOptions.model),
     });
 
     setChatState(initialChatState());
     subscribeToRun(runId);
   }, [threadId, composerOptions, subscribeToRun]);
+
+  const editLastUserMessage = useCallback(
+    async (messageId: string, newContent: string) => {
+      if (!threadId) return;
+      const trimmed = newContent.trim();
+      if (!trimmed) return;
+
+      if (chatStateRef.current.activeRun?.status === 'running') {
+        await interruptActiveRun();
+      }
+
+      const history = await getMessages(threadId);
+      let lastUserId: string | null = null;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].role === 'user') {
+          lastUserId = history[i].id;
+          break;
+        }
+      }
+      if (lastUserId !== messageId) return;
+
+      await updateMessageContent(messageId, trimmed);
+      await deleteMessagesAfter(threadId, messageId);
+
+      const remaining = await getMessages(threadId);
+      const contextMessages = toChatContext(remaining);
+
+      const runId = await startRun(threadId, contextMessages, {
+        streaming: composerOptions.streaming,
+        webSearch: composerOptions.webSearch,
+        model: resolveOllamaCloudModel(composerOptions.model),
+      });
+
+      setChatState(initialChatState());
+      subscribeToRun(runId);
+    },
+    [threadId, composerOptions, subscribeToRun, interruptActiveRun],
+  );
 
   useEffect(() => {
     const running = chatState.activeRun?.status === 'running';
@@ -266,14 +346,16 @@ export function useAgentRun(threadId: string | null) {
   return {
     chatState,
     composerOptions,
-    setComposerOptions,
+    setComposerOptions: setComposerOptionsPersisted,
     queuedMessage,
     sendMessage,
     sendQueuedNow,
     editQueuedMessage,
     clearQueuedMessage,
     retryLastResponse,
+    editLastUserMessage,
     disconnect,
+    stopGeneration: interruptActiveRun,
     isRunning: chatState.activeRun?.status === 'running',
   };
 }
@@ -287,7 +369,7 @@ async function pollForTitle(jobId: string, threadId: string): Promise<void> {
     const result = await pollTitle(jobId);
 
     if (result.status === 'completed') {
-      await updateThread(threadId, { title: result.title });
+      await updateThread(threadId, { title: clampChatTitle(result.title) });
       return;
     }
     if (result.status === 'failed') {
@@ -298,11 +380,19 @@ async function pollForTitle(jobId: string, threadId: string): Promise<void> {
   console.warn('Title generation timed out for thread', threadId);
 }
 
+function sortThreadsForSidebar(threads: Thread[]) {
+  return [...threads].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+}
+
 export function useThreads() {
-  return useLiveQuery(
-    () => db.threads.orderBy('updatedAt').reverse().toArray(),
-    [],
-  );
+  return useLiveQuery(async () => {
+    const threads = await db.threads.toArray();
+    return sortThreadsForSidebar(threads);
+  }, []);
 }
 
 export function useMessages(threadId: string | null) {

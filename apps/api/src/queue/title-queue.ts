@@ -1,5 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { client } from '@org/agent-core';
+import { clampChatTitle } from '@org/agent-models';
 import { redis } from './redis';
 
 /**
@@ -24,7 +25,7 @@ export const titleQueue = new Queue<TitleJobData>(TITLE_QUEUE_NAME, {
 
 const TITLE_MODEL = process.env.TITLE_MODEL ?? 'gemma4:31b';
 
-const TITLE_PROMPT = `You are a title generator. Summarize the user's message into a concise, meaningful title of 3-6 words. Reply with ONLY the title, no quotes, no punctuation at the end.
+const TITLE_PROMPT = `You are a title generator. Summarize the user's message into a concise, meaningful title of exactly 5 to 7 words. Reply with ONLY the title, no quotes, no punctuation at the end.
 
 User message: """{MESSAGE}"""`;
 
@@ -43,16 +44,16 @@ async function generateTitle(firstMessage: string): Promise<string> {
     messages: [
       {
         role: 'system',
-        content: 'You generate concise chat titles. Output only the title.',
+        content:
+          'You generate concise chat titles of 5 to 7 words. Output only the title.',
       },
       { role: 'user', content: prompt },
     ],
   });
 
-  const title = response.choices[0]?.message?.content?.trim() ?? 'New Chat';
-
-  // Clean: strip quotes, limit length
-  return title.replace(/^["']|["']$/g, '').slice(0, 80);
+  const raw = response.choices[0]?.message?.content?.trim() ?? 'New Chat';
+  const cleaned = raw.replace(/^["']|["']$/g, '');
+  return clampChatTitle(cleaned);
 }
 
 /**

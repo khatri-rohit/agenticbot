@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Check, Copy, RotateCcw } from 'lucide-react';
+import { Check, Copy, Pencil, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -15,6 +15,8 @@ export function MessageActions({
   align = 'start',
   showRetry = false,
   onRetry,
+  showEdit = false,
+  onEdit,
   disabled = false,
   className,
 }: {
@@ -22,6 +24,8 @@ export function MessageActions({
   align?: 'start' | 'end';
   showRetry?: boolean;
   onRetry?: () => void | Promise<void>;
+  showEdit?: boolean;
+  onEdit?: () => void;
   disabled?: boolean;
   className?: string;
 }) {
@@ -65,7 +69,7 @@ export function MessageActions({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+            className="type-caption h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
             onClick={() => void handleCopy()}
             disabled={!content.trim()}
           >
@@ -80,6 +84,25 @@ export function MessageActions({
         <TooltipContent>Copy message</TooltipContent>
       </Tooltip>
 
+      {showEdit && onEdit && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="type-caption h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+              onClick={onEdit}
+              disabled={disabled}
+            >
+              <Pencil className="size-3.5" aria-hidden />
+              Edit
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Edit and resend this prompt</TooltipContent>
+        </Tooltip>
+      )}
+
       {showRetry && !confirmRetry && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -87,7 +110,7 @@ export function MessageActions({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              className="type-caption h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
               onClick={() => setConfirmRetry(true)}
               disabled={disabled || retrying}
             >

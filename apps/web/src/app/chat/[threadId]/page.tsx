@@ -10,6 +10,7 @@ import {
   useAgentRun,
 } from '../../../features/agent/hooks/use-agent-run';
 import { takePendingMessage } from '../../../features/agent/api/agent-client';
+import { resolveOllamaCloudModel } from '@/lib/ollama-cloud-models';
 
 export default function ChatThreadPage({
   params,
@@ -27,7 +28,9 @@ export default function ChatThreadPage({
     composerOptions,
     setComposerOptions,
     isRunning,
+    stopGeneration,
     retryLastResponse,
+    editLastUserMessage,
   } = useAgentRun(threadId);
   const sentPendingRef = useRef(false);
 
@@ -36,13 +39,16 @@ export default function ChatThreadPage({
     const pending = takePendingMessage();
     if (!pending) return;
     sentPendingRef.current = true;
+    const model = resolveOllamaCloudModel(pending.model ?? '');
     setComposerOptions({
       streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,
+      model,
     });
     void sendMessage(pending.content, {
       streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,
+      model,
     });
   }, [sendMessage, setComposerOptions]);
 
@@ -58,6 +64,7 @@ export default function ChatThreadPage({
           onEditQueued={editQueuedMessage}
           composerOptions={composerOptions}
           onComposerOptionsChange={setComposerOptions}
+          onStop={() => void stopGeneration()}
         />
       }
     >
@@ -66,6 +73,9 @@ export default function ChatThreadPage({
         chatState={chatState}
         isRunning={isRunning}
         onRetryLastResponse={() => retryLastResponse()}
+        onEditLastUserMessage={(id, content) =>
+          editLastUserMessage(id, content)
+        }
       />
     </ChatShell>
   );

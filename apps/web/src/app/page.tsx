@@ -9,12 +9,15 @@ import {
   stashPendingMessage,
   type ComposerOptions,
 } from '../features/agent/api/agent-client';
-
-const MODEL = 'llama3.1:8b';
+import {
+  readStoredComposerModel,
+  writeStoredComposerModel,
+} from '@/lib/ollama-cloud-models';
 
 const defaultOptions: ComposerOptions = {
   streaming: true,
   webSearch: true,
+  model: readStoredComposerModel(),
 };
 
 export default function HomePage() {
@@ -23,17 +26,23 @@ export default function HomePage() {
   const [composerOptions, setComposerOptions] =
     useState<ComposerOptions>(defaultOptions);
 
+  const handleComposerOptionsChange = useCallback(
+    (options: ComposerOptions) => {
+      setComposerOptions(options);
+      writeStoredComposerModel(options.model);
+    },
+    [],
+  );
+
   const handleSend = useCallback(
-    async (
-      content: string,
-      options: { streaming: boolean; webSearch: boolean },
-    ) => {
+    async (content: string, options: ComposerOptions) => {
       setPendingContent(true);
-      const thread = await createThread('New Chat', MODEL);
+      const thread = await createThread('New Chat', options.model);
       stashPendingMessage({
         content,
         streaming: options.streaming,
         webSearch: options.webSearch,
+        model: options.model,
       });
       router.push(`/chat/${thread.id}`);
     },
@@ -42,12 +51,12 @@ export default function HomePage() {
 
   return (
     <ChatShell layout="home">
-      <div className="flex w-full max-w-3xl flex-col items-center gap-10">
-        <div className="space-y-1.5 text-center">
-          <p className="text-base font-medium tracking-tight text-foreground/95">
+      <div className="flex w-full max-w-2xl flex-col gap-9">
+        <div className="w-full space-y-2 text-center">
+          <h1 className="type-hero-title text-foreground/95">
             Research with your agent
-          </p>
-          <p className="text-[13px] text-muted-foreground">
+          </h1>
+          <p className="type-hero-sub mx-auto max-w-sm text-pretty">
             Ask a question to start a new thread.
           </p>
         </div>
@@ -59,7 +68,7 @@ export default function HomePage() {
           onSendQueuedNow={() => {}}
           onEditQueued={() => null}
           composerOptions={composerOptions}
-          onComposerOptionsChange={setComposerOptions}
+          onComposerOptionsChange={handleComposerOptionsChange}
         />
       </div>
     </ChatShell>

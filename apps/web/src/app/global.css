@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './themes.css';
 @import 'streamdown/styles.css';
 @import 'tw-animate-css';
 
@@ -39,40 +40,40 @@
   --radius-lg: var(--radius);
 }
 
-/* Streamdown expects shadcn-style tokens (see streamdown README). */
+/* Scrollbar geometry (thumb colors come from each theme in themes.css). */
 :root {
-  /* Cursor-like: tight radius, cool neutral stack, one restrained link accent */
-  --radius: 0.5rem;
-  --background: oklch(0.097 0.006 264);
-  --foreground: oklch(0.91 0.008 264);
-  --card: oklch(0.128 0.008 264);
-  --card-foreground: oklch(0.9 0.008 264);
-  --popover: oklch(0.135 0.009 264);
-  --popover-foreground: oklch(0.9 0.008 264);
-  --muted: oklch(0.175 0.009 264);
-  --muted-foreground: oklch(0.58 0.014 264);
-  --border: oklch(0.255 0.01 264);
-  --input: oklch(0.155 0.009 264);
-  --ring: oklch(0.48 0.04 264);
-  --primary: oklch(0.9 0.01 264);
-  --primary-foreground: oklch(0.12 0.008 264);
-  --secondary: oklch(0.19 0.01 264);
-  --secondary-foreground: oklch(0.88 0.01 264);
-  --accent: oklch(0.2 0.012 264);
-  --accent-foreground: oklch(0.92 0.008 264);
-  --sidebar: oklch(0.104 0.007 264);
-  --sidebar-foreground: oklch(0.88 0.01 264);
-  --destructive: oklch(0.58 0.18 25);
-  --destructive-foreground: oklch(0.98 0.01 25);
-  --link: oklch(0.7 0.09 238);
-  --link-hover: oklch(0.78 0.1 238);
+  --scrollbar-size: 8px;
+  /* Fallback until themes.css loads; each theme overrides track + thumb */
+  --scrollbar-track: oklch(0.16 0.01 264 / 0.4);
+  --scrollbar-thumb: oklch(0.48 0.02 264 / 0.95);
+  --scrollbar-thumb-hover: oklch(0.56 0.024 264);
+  --scrollbar-thumb-active: oklch(0.64 0.028 264);
 
-  /* Scrollbars — native overflow (chat, code blocks, etc.) */
-  --scrollbar-size: 7px;
-  --scrollbar-track: transparent;
-  --scrollbar-thumb: oklch(0.3 0.01 264 / 0.75);
-  --scrollbar-thumb-hover: oklch(0.4 0.015 264 / 0.9);
-  --scrollbar-thumb-active: oklch(0.48 0.02 264);
+  /* Typography scale (agent chat: assistant = primary reading surface) */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+
+  --text-hero-title: 1.125rem;
+  --text-hero-title-leading: 1.35;
+  --text-hero-sub: 0.8125rem;
+  --text-hero-sub-leading: 1.55;
+
+  --text-body: 0.9375rem;
+  --text-body-leading: 1.65;
+  --text-user: 0.875rem;
+  --text-user-leading: 1.55;
+  --text-composer: 0.9375rem;
+  --text-composer-leading: 1.5;
+  --text-ui: 0.8125rem;
+  --text-ui-leading: 1.45;
+  --text-caption: 0.6875rem;
+  --text-caption-leading: 1.4;
+
+  --measure-chat: 65ch;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -89,21 +90,58 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    'Helvetica Neue',
-    Arial,
-    sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--text-body-leading);
   font-feature-settings:
     'rlig' 1,
     'calt' 1;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Shared type roles */
+.type-hero-title {
+  font-size: var(--text-hero-title);
+  line-height: var(--text-hero-title-leading);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.type-hero-sub {
+  font-size: var(--text-hero-sub);
+  line-height: var(--text-hero-sub-leading);
+  color: var(--muted-foreground);
+}
+
+.type-body {
+  font-size: var(--text-body);
+  line-height: var(--text-body-leading);
+}
+
+.type-user {
+  font-size: var(--text-user);
+  line-height: var(--text-user-leading);
+}
+
+.type-composer {
+  font-size: var(--text-composer);
+  line-height: var(--text-composer-leading);
+}
+
+.type-ui {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-leading);
+}
+
+.type-caption {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-leading);
+}
+
+.chat-prose {
+  max-width: var(--measure-chat);
+  width: 100%;
 }
 
 /* --- Global scrollbars --- */
@@ -152,31 +190,83 @@ body {
   display: none;
 }
 
+/* Radix ScrollArea thumb (sidebar) — match native scrollbar tokens per theme */
+[data-slot='scroll-area-thumb'] {
+  background-color: var(--scrollbar-thumb);
+}
+
+[data-slot='scroll-area-scrollbar']:hover [data-slot='scroll-area-thumb'],
+[data-slot='scroll-area-thumb']:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+[data-slot='scroll-area-scrollbar']:active [data-slot='scroll-area-thumb'],
+[data-slot='scroll-area-thumb']:active {
+  background-color: var(--scrollbar-thumb-active);
+}
+
 /* --- Assistant markdown (Streamdown) --- */
 
 .agent-markdown {
-  font-size: 14px;
-  line-height: 1.62;
-  color: color-mix(in oklch, var(--foreground) 94%, transparent);
+  font-size: var(--text-body);
+  line-height: var(--text-body-leading);
+  color: color-mix(in oklch, var(--foreground) 96%, transparent);
+  font-weight: 400;
+}
+
+.agent-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.agent-markdown > *:last-child {
+  margin-bottom: 0;
 }
 
 .agent-markdown [data-streamdown='heading-1'],
 .agent-markdown [data-streamdown='heading-2'],
 .agent-markdown [data-streamdown='heading-3'] {
   font-weight: 600;
-  margin: 1.25rem 0 0.5rem;
+  letter-spacing: -0.015em;
+  color: var(--foreground);
+  margin: 1.35rem 0 0.45rem;
 }
 
 .agent-markdown [data-streamdown='heading-1'] {
-  font-size: 1.25rem;
+  font-size: 1.2rem;
+  line-height: 1.35;
 }
 
 .agent-markdown [data-streamdown='heading-2'] {
-  font-size: 1.125rem;
+  font-size: 1.0625rem;
+  line-height: 1.4;
+}
+
+.agent-markdown [data-streamdown='heading-3'] {
+  font-size: 0.9875rem;
+  line-height: 1.45;
 }
 
 .agent-markdown [data-streamdown='paragraph'] {
+  margin: 0.65rem 0;
+}
+
+.agent-markdown [data-streamdown='list'],
+.agent-markdown ul,
+.agent-markdown ol {
+  margin: 0.5rem 0 0.75rem;
+  padding-left: 1.35rem;
+}
+
+.agent-markdown [data-streamdown='list-item'],
+.agent-markdown li {
+  margin: 0.25rem 0;
+}
+
+.agent-markdown [data-streamdown='blockquote'] {
   margin: 0.75rem 0;
+  padding-left: 0.85rem;
+  border-left: 2px solid var(--border);
+  color: color-mix(in oklch, var(--foreground) 82%, var(--muted-foreground));
 }
 
 .agent-markdown [data-streamdown='link'] {
@@ -241,7 +331,7 @@ body {
   border-radius: 0;
   background: transparent;
   padding: 0.75rem 1rem 1rem;
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.55;
 }
 
@@ -251,9 +341,7 @@ body {
 }
 
 .agent-markdown [data-streamdown='code-block-body'] code {
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
+  font-family: var(--font-mono);
   white-space: pre;
 }
 

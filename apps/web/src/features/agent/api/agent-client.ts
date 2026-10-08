@@ -9,12 +9,14 @@ const PENDING_MSG_KEY = 'agenticbot:pendingMessage';
 export type ComposerOptions = {
   streaming: boolean;
   webSearch: boolean;
+  model: string;
 };
 
 export type PendingMessage = {
   content: string;
   streaming: boolean;
   webSearch?: boolean;
+  model?: string;
 };
 
 /** Stash a message for the chat page to send on mount. */
