@@ -14,7 +14,7 @@ const MARKER_WIDTH_PX = 12;
 const MARKER_HEIGHT_PX = 2;
 /** Shared vertical rhythm between ticks and expanded rows */
 const TURN_GAP_CLASS = 'gap-2';
-const TURN_ROW_MIN_H = 'min-h-2';
+const TURN_ROW_MIN_H = 'min-h-7';
 
 export function shouldShowConversationRail(userTurnCount: number): boolean {
   return userTurnCount >= MIN_TURNS;
@@ -67,7 +67,7 @@ export function ConversationRail({
           className={cn(
             'relative rounded-md border border-transparent transition-colors',
             hovered &&
-              'border-border/60 bg-popover/95 px-2 py-2 shadow-md backdrop-blur-md',
+              'border-border/50 bg-popover/98 px-2 py-2 shadow-sm backdrop-blur-md',
           )}
         >
           {hovered ? (
@@ -106,7 +106,7 @@ export function ConversationRail({
                   <button
                     type="button"
                     onClick={() => scrollToAnchor(anchor.id)}
-                    className="shrink-0 rounded-[1px] bg-muted-foreground/50 transition-colors hover:bg-foreground/85"
+                    className="shrink-0 rounded-[1px] bg-muted-foreground/40 transition-colors hover:bg-foreground/70"
                     style={{
                       width: MARKER_WIDTH_PX,
                       height: MARKER_HEIGHT_PX,

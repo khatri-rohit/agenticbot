@@ -7,20 +7,21 @@ import type { Thread } from '@org/agent-models';
 import { useThreads } from '../features/agent/hooks/use-agent-run';
 import { deleteThread } from '../features/agent/store/db';
 import { formatRelativeTime } from '../lib/format-relative-time';
-import { Button } from './ui/button';
-import { ScrollArea } from './ui/scroll-area';
-import { cn } from '../lib/utils';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 
 export function Sidebar() {
   const threads = useThreads();
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-full min-h-0 w-[268px] shrink-0 flex-col border-r border-border/50 bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-full min-h-0 w-[260px] shrink-0 flex-col border-r border-border/35 bg-sidebar text-sidebar-foreground">
       <div className="p-3 pt-4">
         <Button
           variant="outline"
-          className="h-9 w-full justify-start gap-2 rounded-lg border-border/60 bg-transparent font-normal text-foreground shadow-none hover:bg-accent/50"
+          className="h-8 w-full justify-start gap-2 rounded-md border-border/45 bg-transparent text-[13px] font-normal text-foreground shadow-none hover:bg-accent/70"
           asChild
         >
           <Link href="/">
@@ -46,7 +47,8 @@ export function Sidebar() {
           </ul>
         )}
       </ScrollArea>
-      <div className="border-t border-border/40 px-4 py-3">
+      <Separator className="bg-border/40" />
+      <div className="px-4 py-3">
         <p className="text-[11px] font-medium tracking-wide text-muted-foreground">
           AgenticBot
         </p>
@@ -69,10 +71,10 @@ function ThreadItem({ thread, active }: { thread: Thread; active: boolean }) {
       <Link
         href={`/chat/${thread.id}`}
         className={cn(
-          'group flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] transition-colors',
+          'group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
           active
-            ? 'bg-accent/80 text-foreground'
-            : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+            ? 'bg-accent text-foreground'
+            : 'text-muted-foreground hover:bg-accent/55 hover:text-foreground',
         )}
       >
         {isPending ? (

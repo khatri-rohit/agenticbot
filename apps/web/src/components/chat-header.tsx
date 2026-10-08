@@ -10,8 +10,8 @@ export function ChatHeader({ threadId }: { threadId: string }) {
   const isPending = title === 'New Chat';
 
   return (
-    <header className="shrink-0 px-6 py-3">
-      <h1 className="truncate text-sm font-medium text-muted-foreground">
+    <header className="shrink-0 border-b border-border/30 px-6 py-2.5">
+      <h1 className="truncate text-[13px] font-medium text-muted-foreground">
         {isPending ? (
           <span className="inline-flex items-center gap-2">
             <span>Untitled</span>

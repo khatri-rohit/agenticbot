@@ -17,7 +17,7 @@ export function ChatShell({
   const isHome = layout === 'home';
 
   return (
-    <div className="flex h-screen w-full bg-background">
+    <div className="flex min-h-[100dvh] h-[100dvh] w-full bg-background">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         {header}

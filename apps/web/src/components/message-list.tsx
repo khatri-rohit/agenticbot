@@ -1,6 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { ArrowDown } from 'lucide-react';
+import { useStickToBottom } from '../hooks/use-stick-to-bottom';
+import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import type { Message } from '@org/agent-models';
 import type {
   ChatState,
@@ -13,13 +21,18 @@ import {
   ConversationRail,
   shouldShowConversationRail,
 } from './conversation-rail';
+import { MessageActions } from './message-actions';
 
 export function MessageList({
   messages,
   chatState,
+  isRunning,
+  onRetryLastResponse,
 }: {
   messages: Message[] | undefined;
   chatState: ChatState;
+  isRunning: boolean;
+  onRetryLastResponse: () => void | Promise<void>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -27,7 +40,6 @@ export function MessageList({
 
   const streaming = chatState.activeRun?.streamingMessage;
   const toolActivity = chatState.activeRun?.toolActivity ?? [];
-  const isRunning = chatState.activeRun?.status === 'running';
 
   const turns = useMemo(() => groupMessageTurns(messages ?? []), [messages]);
 
@@ -52,15 +64,58 @@ export function MessageList({
     return anchorRefs.current.get(id) ?? null;
   }, []);
 
+  const {
+    showJumpToBottom,
+    followContent,
+    jumpToBottomAndFollow,
+    enableStickToBottom,
+  } = useStickToBottom(scrollRef);
+
+  const prevMessageCount = useRef(0);
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streaming?.content, toolActivity.length]);
+    const count = messages?.length ?? 0;
+    if (count > prevMessageCount.current) {
+      enableStickToBottom();
+    }
+    prevMessageCount.current = count;
+  }, [messages?.length, enableStickToBottom]);
+
+  useEffect(() => {
+    followContent(streaming?.content ? 'auto' : 'smooth');
+  }, [messages, streaming?.content, toolActivity.length, followContent]);
 
   const hasMessages = (messages?.length ?? 0) > 0;
   const lastTurnIndex = turns.length - 1;
 
+  const latestAssistantMessageId = useMemo(() => {
+    if (!messages?.length) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
   return (
     <div className="relative flex min-h-0 flex-1">
+      {showJumpToBottom && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className="pointer-events-auto size-8 rounded-full border border-border/50 bg-card/95 shadow-sm backdrop-blur-sm"
+                onClick={jumpToBottomAndFollow}
+                aria-label="Scroll to latest messages"
+              >
+                <ArrowDown className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Jump to latest</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
       {showRail && (
         <ConversationRail
           anchors={userAnchors}
@@ -72,14 +127,14 @@ export function MessageList({
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto scroll-smooth scrollbar-gutter-stable"
       >
-        <div className="mx-auto w-full max-w-3xl px-6 py-8 sm:pl-14">
+        <div className="mx-auto w-full max-w-3xl px-5 py-7 sm:pl-14 sm:pr-6">
           {!hasMessages && !isRunning && !streaming?.content && (
             <p className="text-center text-sm text-muted-foreground/80">
               Your research thread will appear here.
             </p>
           )}
 
-          <div className="flex flex-col gap-14">
+          <div className="flex flex-col gap-12">
             {turns.map((turn, index) => {
               const isLastTurn = index === lastTurnIndex;
               return (
@@ -103,7 +158,17 @@ export function MessageList({
                   {turn.replies.length > 0 && (
                     <div className="flex flex-col gap-5 pt-0.5">
                       {turn.replies.map((msg) => (
-                        <AssistantMessage key={msg.id} message={msg} />
+                        <AssistantMessage
+                          key={msg.id}
+                          message={msg}
+                          showRetry={
+                            !isRunning &&
+                            msg.role === 'assistant' &&
+                            msg.id === latestAssistantMessageId
+                          }
+                          onRetry={onRetryLastResponse}
+                          retryDisabled={isRunning}
+                        />
                       ))}
                     </div>
                   )}
@@ -117,9 +182,16 @@ export function MessageList({
                   )}
 
                   {isLastTurn && streaming?.content && (
-                    <article className="text-[15px] leading-relaxed text-foreground/95">
-                      <AgentMarkdown content={streaming.content} streaming />
-                    </article>
+                    <div className="group/msg">
+                      <article className="text-[14px] leading-relaxed">
+                        <AgentMarkdown content={streaming.content} streaming />
+                      </article>
+                      <MessageActions
+                        content={streaming.content}
+                        align="start"
+                        className="opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/msg:opacity-100 sm:group-focus-within/msg:opacity-100"
+                      />
+                    </div>
                   )}
                 </section>
               );
@@ -144,15 +216,22 @@ function UserMessage({
     <div
       ref={(el) => registerAnchor(message.id, el)}
       id={`conversation-anchor-${message.id}`}
-      className="scroll-mt-8"
+      className="group/msg scroll-mt-8"
     >
       <div className="flex justify-end">
-        <div
-          className={cn(
-            'max-w-[min(100%,36rem)] rounded-xl bg-muted/70 px-4 py-2.5 text-[15px] leading-relaxed text-foreground',
-          )}
-        >
-          <p className="whitespace-pre-wrap">{message.content}</p>
+        <div className="max-w-[min(100%,32rem)]">
+          <div
+            className={cn(
+              'rounded-lg border border-border/25 bg-secondary/90 px-3.5 py-2 text-[14px] leading-relaxed text-foreground/95',
+            )}
+          >
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          </div>
+          <MessageActions
+            content={message.content}
+            align="end"
+            className="opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100"
+          />
         </div>
       </div>
     </div>
@@ -181,7 +260,7 @@ function TurnStatusLine({
 
   return (
     <p
-      className="text-right text-xs text-muted-foreground/75 tabular-nums"
+      className="text-right text-[11px] text-muted-foreground/70 tabular-nums"
       aria-live="polite"
     >
       {label}
@@ -189,20 +268,43 @@ function TurnStatusLine({
   );
 }
 
-function AssistantMessage({ message }: { message: Message }) {
+function AssistantMessage({
+  message,
+  showRetry,
+  onRetry,
+  retryDisabled,
+}: {
+  message: Message;
+  showRetry?: boolean;
+  onRetry: () => void | Promise<void>;
+  retryDisabled?: boolean;
+}) {
   if (message.role === 'tool') {
     return (
-      <p className="text-xs text-muted-foreground/80">
-        Tool result
-        {message.toolCallId ? ` (${message.toolCallId.slice(0, 8)}…)` : ''}
-      </p>
+      <div>
+        <p className="text-xs text-muted-foreground/80">
+          Tool result
+          {message.toolCallId ? ` (${message.toolCallId.slice(0, 8)}…)` : ''}
+        </p>
+        <MessageActions content={message.content} align="start" />
+      </div>
     );
   }
 
   return (
-    <article className="text-[15px] leading-relaxed text-foreground/95">
-      <AgentMarkdown content={message.content} />
-    </article>
+    <div className="group/msg">
+      <article className="text-[14px] leading-relaxed">
+        <AgentMarkdown content={message.content} />
+      </article>
+      <MessageActions
+        content={message.content}
+        align="start"
+        showRetry={showRetry}
+        onRetry={onRetry}
+        disabled={retryDisabled}
+        className="opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100"
+      />
+    </div>
   );
 }
 
@@ -213,10 +315,10 @@ function ToolStatus({
 }) {
   const label =
     tool.status === 'running'
-      ? `${tool.toolName} — running`
+      ? `${tool.toolName} running`
       : tool.status === 'failed'
-        ? `${tool.toolName} — failed`
-        : `${tool.toolName} — done${tool.durationMs ? ` (${tool.durationMs}ms)` : ''}`;
+        ? `${tool.toolName} failed`
+        : `${tool.toolName} done${tool.durationMs ? ` (${tool.durationMs}ms)` : ''}`;
 
   return <p className="text-xs text-muted-foreground/85">{label}</p>;
 }

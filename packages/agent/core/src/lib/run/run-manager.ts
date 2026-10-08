@@ -10,6 +10,7 @@ export type RunHandle = {
   runId: string;
   threadId: string;
   status: 'running' | 'completed' | 'error';
+  cancelled: boolean;
   emitter: EventEmitter;
   result: RunLoopResult | null;
 };
@@ -43,6 +44,7 @@ export class RunManager {
       runId,
       threadId: opts.threadId,
       status: 'running',
+      cancelled: false,
       emitter,
       result: null,
     };
@@ -77,11 +79,31 @@ export class RunManager {
       model: opts.model,
       streaming: opts.streaming,
       limits: opts.limits,
-      emit: (event) => handle.emitter.emit(event),
+      emit: (event) => {
+        if (handle.cancelled) return;
+        handle.emitter.emit(event);
+      },
     });
+
+    if (handle.cancelled) return;
 
     handle.status = result.status === 'error' ? 'error' : 'completed';
     handle.result = result;
+  }
+
+  /** Stop a run so a new one can start on the same thread. */
+  cancel(runId: string): boolean {
+    const handle = this.runs.get(runId);
+    if (!handle || handle.status !== 'running') return false;
+
+    handle.cancelled = true;
+    handle.status = 'error';
+    handle.emitter.emit({
+      type: 'run.error',
+      runId,
+      error: 'Run cancelled',
+    });
+    return true;
   }
 
   /** Get a run handle. Returns undefined if not found. */

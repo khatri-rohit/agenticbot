@@ -75,6 +75,24 @@ export async function addMessage(message: Message): Promise<void> {
   });
 }
 
+/** Remove assistant/tool messages after a user message (for retry). */
+export async function deleteMessagesAfter(
+  threadId: string,
+  afterMessageId: string,
+): Promise<void> {
+  const messages = await getMessages(threadId);
+  const index = messages.findIndex((m) => m.id === afterMessageId);
+  if (index === -1) return;
+
+  const idsToDelete = messages.slice(index + 1).map((m) => m.id);
+  if (idsToDelete.length === 0) return;
+
+  await db.messages.bulkDelete(idsToDelete);
+  await db.threads.update(threadId, {
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 /* ---------- Run operations ---------- */
 
 export async function getRuns(threadId: string): Promise<Run[]> {

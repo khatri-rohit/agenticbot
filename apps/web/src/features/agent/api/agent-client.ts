@@ -6,7 +6,16 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
 const PENDING_MSG_KEY = 'agenticbot:pendingMessage';
 
-export type PendingMessage = { content: string; streaming: boolean };
+export type ComposerOptions = {
+  streaming: boolean;
+  webSearch: boolean;
+};
+
+export type PendingMessage = {
+  content: string;
+  streaming: boolean;
+  webSearch?: boolean;
+};
 
 /** Stash a message for the chat page to send on mount. */
 export function stashPendingMessage(msg: PendingMessage): void {
@@ -31,8 +40,12 @@ export async function startRun(
   options: {
     streaming?: boolean;
     model?: string;
+    webSearch?: boolean;
   } = {},
 ): Promise<string> {
+  const allowedTools =
+    options.webSearch === false ? [] : ['web_search'];
+
   const res = await fetch(`${API_BASE}/api/agent/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -41,6 +54,7 @@ export async function startRun(
       messages,
       streaming: options.streaming ?? true,
       model: options.model,
+      allowedTools,
     }),
   });
 
@@ -128,4 +142,14 @@ export function subscribeRun(
   return () => {
     es.close();
   };
+}
+
+export async function cancelRun(runId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/agent/run/${runId}/cancel`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to cancel run: ${res.status}`);
+  }
 }

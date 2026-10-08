@@ -27,7 +27,7 @@ const runManager = new RunManager();
  * Returns: { runId: string }
  */
 router.post('/run', (req: Request, res: Response) => {
-  const { threadId, messages, streaming, model } = req.body;
+  const { threadId, messages, streaming, model, allowedTools } = req.body;
 
   if (!threadId) {
     return res.status(400).json({ error: 'threadId is required' });
@@ -46,7 +46,10 @@ router.post('/run', (req: Request, res: Response) => {
 
   const useStreaming = streaming ?? true;
   const useModel = model ?? RESEARCH_MODE.model;
-  const tools = createToolRegistry(allTools, RESEARCH_MODE.allowedTools);
+  const toolAllowList = Array.isArray(allowedTools)
+    ? allowedTools
+    : RESEARCH_MODE.allowedTools;
+  const tools = createToolRegistry(allTools, toolAllowList);
 
   // Build the OpenAI-format messages from the client's ChatMessage[]
   const openaiMessages = messages as any[];
@@ -75,6 +78,19 @@ router.post('/run', (req: Request, res: Response) => {
   });
 
   return res.json({ runId });
+});
+
+/**
+ * POST /api/agent/run/:runId/cancel
+ * Cancel an in-flight run so the thread can accept a new run.
+ */
+router.post('/run/:runId/cancel', (req: Request, res: Response) => {
+  const { runId } = req.params;
+  const ok = runManager.cancel(runId);
+  if (!ok) {
+    return res.status(404).json({ error: 'Run not found or not active' });
+  }
+  return res.json({ ok: true });
 });
 
 /**

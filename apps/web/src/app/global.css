@@ -32,6 +32,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -39,33 +41,38 @@
 
 /* Streamdown expects shadcn-style tokens (see streamdown README). */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.105 0.008 260);
-  --foreground: oklch(0.94 0.008 260);
-  --card: oklch(0.145 0.012 260);
-  --card-foreground: oklch(0.93 0.01 260);
-  --popover: oklch(0.16 0.01 260);
-  --popover-foreground: oklch(0.93 0.01 260);
-  --muted: oklch(0.2 0.01 260);
-  --muted-foreground: oklch(0.62 0.02 260);
-  --border: oklch(0.28 0.01 260);
-  --input: oklch(0.26 0.01 260);
-  --ring: oklch(0.55 0.08 260);
-  --primary: oklch(0.93 0.01 260);
-  --primary-foreground: oklch(0.15 0.01 260);
-  --secondary: oklch(0.22 0.01 260);
-  --secondary-foreground: oklch(0.9 0.01 260);
-  --accent: oklch(0.24 0.02 260);
-  --accent-foreground: oklch(0.93 0.01 260);
-  --sidebar: oklch(0.125 0.01 260);
-  --sidebar-foreground: oklch(0.9 0.01 260);
+  /* Cursor-like: tight radius, cool neutral stack, one restrained link accent */
+  --radius: 0.5rem;
+  --background: oklch(0.097 0.006 264);
+  --foreground: oklch(0.91 0.008 264);
+  --card: oklch(0.128 0.008 264);
+  --card-foreground: oklch(0.9 0.008 264);
+  --popover: oklch(0.135 0.009 264);
+  --popover-foreground: oklch(0.9 0.008 264);
+  --muted: oklch(0.175 0.009 264);
+  --muted-foreground: oklch(0.58 0.014 264);
+  --border: oklch(0.255 0.01 264);
+  --input: oklch(0.155 0.009 264);
+  --ring: oklch(0.48 0.04 264);
+  --primary: oklch(0.9 0.01 264);
+  --primary-foreground: oklch(0.12 0.008 264);
+  --secondary: oklch(0.19 0.01 264);
+  --secondary-foreground: oklch(0.88 0.01 264);
+  --accent: oklch(0.2 0.012 264);
+  --accent-foreground: oklch(0.92 0.008 264);
+  --sidebar: oklch(0.104 0.007 264);
+  --sidebar-foreground: oklch(0.88 0.01 264);
+  --destructive: oklch(0.58 0.18 25);
+  --destructive-foreground: oklch(0.98 0.01 25);
+  --link: oklch(0.7 0.09 238);
+  --link-hover: oklch(0.78 0.1 238);
 
   /* Scrollbars — native overflow (chat, code blocks, etc.) */
-  --scrollbar-size: 8px;
+  --scrollbar-size: 7px;
   --scrollbar-track: transparent;
-  --scrollbar-thumb: oklch(0.32 0.012 260 / 0.85);
-  --scrollbar-thumb-hover: oklch(0.44 0.02 260 / 0.95);
-  --scrollbar-thumb-active: oklch(0.52 0.03 260);
+  --scrollbar-thumb: oklch(0.3 0.01 264 / 0.75);
+  --scrollbar-thumb-hover: oklch(0.4 0.015 264 / 0.9);
+  --scrollbar-thumb-active: oklch(0.48 0.02 264);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -82,10 +89,21 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
   font-feature-settings:
     'rlig' 1,
     'calt' 1;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* --- Global scrollbars --- */
@@ -137,8 +155,9 @@ body {
 /* --- Assistant markdown (Streamdown) --- */
 
 .agent-markdown {
-  font-size: 15px;
-  line-height: 1.65;
+  font-size: 14px;
+  line-height: 1.62;
+  color: color-mix(in oklch, var(--foreground) 94%, transparent);
 }
 
 .agent-markdown [data-streamdown='heading-1'],
@@ -162,10 +181,10 @@ body {
 
 .agent-markdown [data-streamdown='link'] {
   cursor: pointer;
-  color: oklch(0.78 0.11 250);
+  color: var(--link);
   font-weight: 500;
   text-decoration: underline;
-  text-decoration-color: oklch(0.78 0.11 250 / 0.4);
+  text-decoration-color: color-mix(in oklch, var(--link) 35%, transparent);
   text-underline-offset: 3px;
   transition:
     color 0.15s ease,
@@ -173,8 +192,12 @@ body {
 }
 
 .agent-markdown [data-streamdown='link']:hover {
-  color: oklch(0.9 0.08 250);
-  text-decoration-color: oklch(0.9 0.08 250 / 0.65);
+  color: var(--link-hover);
+  text-decoration-color: color-mix(
+    in oklch,
+    var(--link-hover) 55%,
+    transparent
+  );
 }
 
 .agent-markdown [data-streamdown='link']:focus-visible {

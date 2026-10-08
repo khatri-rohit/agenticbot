@@ -18,25 +18,55 @@ export default function ChatThreadPage({
 }) {
   const { threadId } = use(params);
   const messages = useMessages(threadId);
-  const { chatState, sendMessage } = useAgentRun(threadId);
+  const {
+    chatState,
+    sendMessage,
+    sendQueuedNow,
+    editQueuedMessage,
+    queuedMessage,
+    composerOptions,
+    setComposerOptions,
+    isRunning,
+    retryLastResponse,
+  } = useAgentRun(threadId);
   const sentPendingRef = useRef(false);
-
-  const isRunning = chatState.activeRun?.status === 'running';
 
   useEffect(() => {
     if (sentPendingRef.current) return;
     const pending = takePendingMessage();
     if (!pending) return;
     sentPendingRef.current = true;
-    void sendMessage(pending.content, { streaming: pending.streaming });
-  }, [sendMessage]);
+    setComposerOptions({
+      streaming: pending.streaming,
+      webSearch: pending.webSearch ?? true,
+    });
+    void sendMessage(pending.content, {
+      streaming: pending.streaming,
+      webSearch: pending.webSearch ?? true,
+    });
+  }, [sendMessage, setComposerOptions]);
 
   return (
     <ChatShell
       header={<ChatHeader threadId={threadId} />}
-      footer={<ChatInput onSend={sendMessage} disabled={isRunning} />}
+      footer={
+        <ChatInput
+          onSend={sendMessage}
+          isRunning={isRunning}
+          queuedMessage={queuedMessage}
+          onSendQueuedNow={() => void sendQueuedNow()}
+          onEditQueued={editQueuedMessage}
+          composerOptions={composerOptions}
+          onComposerOptionsChange={setComposerOptions}
+        />
+      }
     >
-      <MessageList messages={messages} chatState={chatState} />
+      <MessageList
+        messages={messages}
+        chatState={chatState}
+        isRunning={isRunning}
+        onRetryLastResponse={() => retryLastResponse()}
+      />
     </ChatShell>
   );
 }
