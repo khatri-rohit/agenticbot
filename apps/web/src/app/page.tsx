@@ -65,7 +65,7 @@ export default function HomePage() {
           onSend={handleSend}
           isRunning={pendingContent}
           queuedMessage={null}
-          onSendQueuedNow={() => {}}
+          onSendQueuedNow={() => undefined}
           onEditQueued={() => null}
           composerOptions={composerOptions}
           onComposerOptionsChange={handleComposerOptionsChange}

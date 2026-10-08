@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { streamModelTurn } from './stream.js';
 import { client } from './client.js';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import type { ToolRegistry } from '../tools/registry.js';
+import type { ToolRegistry } from '../tools/type.js';
 
 // We test the tool-call accumulation logic by mocking the OpenAI client.
 // The streamModelTurn function consumes an async iterable of chunks.
