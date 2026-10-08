@@ -1,4 +1,4 @@
-import type { ToolRegistry } from '../tools/registry';
+import { ToolRegistry } from '../tools/type';
 
 const today = () => new Date().toISOString().slice(0, 10);
 

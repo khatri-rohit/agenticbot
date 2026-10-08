@@ -5,8 +5,8 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import { client } from './client';
-import type { ToolRegistry } from '../tools/registry';
 import type { ModelTurn } from '../loop/loop';
+import { ToolRegistry } from '../tools/type';
 
 /**
  * Callback type for receiving streamed text deltas.

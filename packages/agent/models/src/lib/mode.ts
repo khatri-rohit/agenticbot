@@ -24,7 +24,7 @@ export const RESEARCH_MODE: ModeConfig = {
   model: 'glm-5.2:cloud',
   // model: 'llama3.1:8b',
   temperature: 0.7,
-  allowedTools: [''],
+  allowedTools: ['web_search'],
   limits: {
     maxIterations: 8,
     maxToolCalls: 12,

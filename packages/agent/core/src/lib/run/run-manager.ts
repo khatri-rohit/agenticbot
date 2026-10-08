@@ -3,8 +3,8 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import type { AgentEvent } from '@org/agent-models';
 import { runLoop, type ModelCallFn, type RunLoopResult } from '../loop/loop';
-import type { ToolRegistry } from '../tools/registry';
 import { EventEmitter, type EventSubscriber } from '../events/emitter';
+import { ToolRegistry } from '../tools/type';
 
 export type RunHandle = {
   runId: string;

@@ -1,9 +1,9 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import type { ToolRegistry } from '../tools/registry';
 import type { ModelCallFn } from './loop';
 import { invokeModelTurn } from '../model/invoke';
 import { streamModelTurn } from '../model/stream';
+import { ToolRegistry } from '../tools/type';
 
 /**
  * Create a ModelCallFn for non-streaming mode.

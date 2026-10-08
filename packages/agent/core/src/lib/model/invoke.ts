@@ -4,8 +4,8 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import { client } from './client';
-import type { ToolRegistry } from '../tools/registry';
 import type { ModelTurn } from '../loop/loop';
+import { ToolRegistry } from '../tools/type';
 
 /**
  * Non-streaming model call. Calls chat.completions.create with stream:false

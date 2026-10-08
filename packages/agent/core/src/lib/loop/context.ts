@@ -1,7 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
-import type { ToolRegistry } from '../tools/registry';
+import { ToolRegistry } from '../..';
 
 /**
  * Build the initial message context: system prompt + user task.

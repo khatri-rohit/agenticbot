@@ -40,12 +40,9 @@ export {
 } from './lib/loop/model-call';
 
 // Tools
-export {
-  createToolRegistry,
-  type Tool,
-  type ToolGuidance,
-  type ToolRegistry,
-} from './lib/tools/registry';
+export { createToolRegistry } from './lib/tools/registry';
+export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
+
 export { webSearchTool, allTools } from './lib/tools/web-search';
 export {
   firecrawlSearch,

@@ -1,5 +1,6 @@
-import type { Tool } from './registry';
-import { firecrawlSearch } from './firecrawl';
+import { webSearchResultContext } from '../prompts/tools_result_context';
+import { Tool, WebSearchResults } from './type';
+import { webSearch } from './web_search_api';
 
 /**
  * web_search tool — searches the web via Firecrawl for current information.
@@ -9,8 +10,8 @@ export const webSearchTool: Tool = {
     type: 'function',
     function: {
       name: 'web_search',
-      description:
-        'Search the web for current, recent, time-sensitive, or web-specific information.',
+      description: `Search the web for current, recent, time-sensitive, or web-specific information. Just for context the current date and time is ${new Date().toISOString()}. You can utilize the date and time to your advantage to search the web for current information if it is relevant to the user's question.
+        `,
       parameters: {
         type: 'object',
         properties: {
@@ -43,7 +44,11 @@ export const webSearchTool: Tool = {
   },
   execute: async (args) => {
     const query = String(args.query ?? '');
-    return firecrawlSearch(query);
+    const results: WebSearchResults = await webSearch(query, 5);
+    return webSearchResultContext(
+      query,
+      JSON.stringify(results, null, 2).trimEnd(),
+    );
   },
 };
 
