@@ -27,7 +27,7 @@ export const RESEARCH_MODE: ModeConfig = {
   // model: 'llama3.1:8b',
   temperature: 0.7,
   allowedTools: ['web_search'],
-  globalTools: ['web_fetch'],
+  globalTools: ['web_fetch', 'load_skill'],
   limits: {
     maxIterations: 8,
     maxToolCalls: 12,

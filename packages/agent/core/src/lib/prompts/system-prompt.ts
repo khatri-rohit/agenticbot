@@ -1,3 +1,4 @@
+import { listSkills } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -39,6 +40,9 @@ function buildToolGuardrails(registry: ToolRegistry): string {
  */
 export function buildSystemPrompt(registry: ToolRegistry): string {
   const toolNames = Array.from(registry.byName.keys());
+  const catalog = listSkills()
+    .map((skill) => `- **${skill.name}** — ${skill.description}`)
+    .join('\n');
 
   const availableTools =
     toolNames.length > 0
@@ -67,6 +71,20 @@ Rules:
 
 Available tools:
 ${availableTools}
+
+# Skills
+
+Available skills:
+${catalog}
+
+These are instruction sets you can load on demand.
+When a skill covers the kind of work you are about to do, call load_skill
+with its name BEFORE starting that work, then follow its instructions.
+Loading instructions does not approve any action they recommend.
+Example: "load_skill: web_search_skill"
+Then follow the instructions of the skill.
+Example: "web_search: latest advancements in solar panel technology"
+
 
 # Per-tool guardrails
 

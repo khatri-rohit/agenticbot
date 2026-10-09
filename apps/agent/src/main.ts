@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import 'dotenv/config';
 
 import {
@@ -6,7 +7,7 @@ import {
   streamModelTurn,
   getContext,
   createToolRegistry,
-  allTools,
+  ALL_TOOLS,
   consoleTrace,
   type AgentEvent,
   RESEARCH_MODE,
@@ -19,7 +20,7 @@ async function main() {
   try {
     const query = 'What is value of PI in 3 decimal places?';
 
-    const tools = createToolRegistry(allTools, RESEARCH_MODE.allowedTools);
+    const tools = createToolRegistry(ALL_TOOLS, RESEARCH_MODE.allowedTools);
     const messages = getContext(query, tools);
 
     // Collect events for display

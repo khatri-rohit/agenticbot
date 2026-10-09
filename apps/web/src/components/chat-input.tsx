@@ -4,7 +4,11 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { ArrowUp, Pencil, Plus, Square } from 'lucide-react';
 import type { ComposerOptions } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
+import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
+import { estimateTokens } from '@/lib/estimate-tokens';
 import { ModelPicker } from '@/components/model-picker';
+import { ThinkingPicker } from '@/components/thinking-picker';
+import { ContextUsage } from '@/components/context-usage';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +38,8 @@ export function ChatInput({
   onComposerOptionsChange,
   onStop,
   variant = 'dock',
+  contextMessages = [],
+  streamingContent,
 }: {
   onSend: (content: string, options: ComposerOptions) => void;
   isRunning: boolean;
@@ -45,9 +51,15 @@ export function ChatInput({
   /** Stops the active agent run; queue is preserved and runs after stop completes. */
   onStop?: () => void;
   variant?: 'dock' | 'hero';
+  contextMessages?: Array<{ content?: string | null; toolCalls?: unknown }>;
+  streamingContent?: string | null;
 }) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerOptionsRef = useRef(composerOptions);
+  const onComposerOptionsChangeRef = useRef(onComposerOptionsChange);
+  composerOptionsRef.current = composerOptions;
+  onComposerOptionsChangeRef.current = onComposerOptionsChange;
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -78,6 +90,40 @@ export function ChatInput({
     if (text) setInput(text);
     textareaRef.current?.focus();
   }, [onEditQueued]);
+
+  const modelConfig = useOllamaModelConfig(composerOptions.model);
+
+  // When model config loads, pick a valid thinking value for that model.
+  useEffect(() => {
+    if (!modelConfig) return;
+    const options = composerOptionsRef.current;
+    const onChange = onComposerOptionsChangeRef.current;
+
+    if (!modelConfig.thinking.supported) {
+      if (options.thinking !== undefined) {
+        onChange({ ...options, thinking: undefined });
+      }
+      return;
+    }
+
+    const allowed = modelConfig.thinking.values;
+    if (
+      options.thinking !== undefined &&
+      allowed.some((v) => Object.is(v, options.thinking))
+    ) {
+      return;
+    }
+    onChange({
+      ...options,
+      thinking: modelConfig.thinking.default ?? allowed[0],
+    });
+  }, [modelConfig]);
+
+  const usedTokens = estimateTokens(contextMessages, [
+    input,
+    streamingContent,
+    queuedMessage?.content,
+  ]);
 
   const isHero = variant === 'hero';
   const hasText = Boolean(input.trim());
@@ -220,25 +266,43 @@ export function ChatInput({
                   }
                   disabled={isRunning}
                 />
+                {modelConfig?.thinking.supported ? (
+                  <ThinkingPicker
+                    thinking={modelConfig.thinking}
+                    value={composerOptions.thinking}
+                    onChange={(thinking) =>
+                      onComposerOptionsChange({ ...composerOptions, thinking })
+                    }
+                    disabled={isRunning}
+                  />
+                ) : null}
               </div>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant={showStopButton ? 'secondary' : 'default'}
-                onClick={handlePrimaryAction}
-                disabled={!showStopButton && !hasText}
-                className={cn(
-                  'shrink-0',
-                  showStopButton ? 'rounded-md' : 'rounded-full',
-                )}
-                aria-label={showStopButton ? 'Stop generating' : 'Send message'}
-              >
-                {showStopButton ? (
-                  <Square className="size-3.5 fill-current" strokeWidth={0} />
-                ) : (
-                  <ArrowUp className="size-4" strokeWidth={2.25} />
-                )}
-              </Button>
+              <div className="flex shrink-0 items-center gap-0.5">
+                <ContextUsage
+                  used={usedTokens}
+                  limit={modelConfig?.contextLength ?? null}
+                />
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant={showStopButton ? 'secondary' : 'default'}
+                  onClick={handlePrimaryAction}
+                  disabled={!showStopButton && !hasText}
+                  className={cn(
+                    'shrink-0',
+                    showStopButton ? 'rounded-md' : 'rounded-full',
+                  )}
+                  aria-label={
+                    showStopButton ? 'Stop generating' : 'Send message'
+                  }
+                >
+                  {showStopButton ? (
+                    <Square className="size-3.5 fill-current" strokeWidth={0} />
+                  ) : (
+                    <ArrowUp className="size-4" strokeWidth={2.25} />
+                  )}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

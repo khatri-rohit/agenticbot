@@ -38,3 +38,10 @@ export type { Run, RunStatus, ModelTurn, ChatMessage } from './lib/run.js';
 
 export type { ModeName, ModeConfig } from './lib/mode.js';
 export { RESEARCH_MODE } from './lib/mode.js';
+
+export type {
+  ThinkingValue,
+  ThinkingMode,
+  OllamaThinkingConfig,
+  OllamaModelConfig,
+} from './lib/ollama-model.js';

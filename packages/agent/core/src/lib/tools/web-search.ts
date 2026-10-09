@@ -101,4 +101,4 @@ export const webFetchTool: Tool = {
  * All available tools in the core package.
  * Apps and modes select from this list.
  */
-export const allTools: Tool[] = [webSearchTool, webFetchTool];
+export const WEB_SEARCH_TOOLS: Tool[] = [webSearchTool, webFetchTool];

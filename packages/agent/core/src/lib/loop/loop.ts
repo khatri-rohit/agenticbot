@@ -5,49 +5,16 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import { consoleTrace, type TraceEvent } from '../events/trace';
-import type { AgentEventWithoutSeq } from '@org/agent-models';
-import { DEFAULT_LIMITS, type AgentLimits } from './limits';
+import { DEFAULT_LIMITS } from './limits';
 import type { ToolRegistry } from '../tools/type';
+import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
-/* ---------- public types ---------- */
-
-export type ModelTurn = {
-  content: string;
-  toolCalls: ChatCompletionMessageToolCall[];
-  finishReason: string | null;
-};
-
-/**
- * Function signature for a model call. The loop is transport-agnostic.
- * onTextDelta is provided at call time so the loop controls messageId
- * and can wire it to assistant.delta events.
- */
-export type ModelCallFn = (
-  model: string,
-  messages: ChatCompletionMessageParam[],
-  tools: ToolRegistry,
-  onTextDelta?: (delta: string) => void,
-) => Promise<ModelTurn>;
-
-export type RunLoopConfig = {
-  runId?: string;
-  threadId?: string;
-  model: string;
-  streaming: boolean;
-  limits?: Partial<AgentLimits>;
-  /** Legacy trace callback (eval harness). Kept for backward compat. */
-  trace?: (event: TraceEvent) => void;
-  /** Event emitter callback (Phase 4+). If provided, emits AgentEvents. */
-  emit?: (event: AgentEventWithoutSeq) => void;
-};
-
-export type RunLoopResult = {
-  runId: string;
-  content: string;
-  iterations: number;
-  toolCalls: number;
-  status: 'completed' | 'error';
-};
+export type {
+  ModelCallFn,
+  RunLoopConfig,
+  RunLoopResult,
+  RunLoopStatus,
+} from './types';
 
 /* ---------- internal helpers ---------- */
 
@@ -192,7 +159,7 @@ export async function runLoop(
               type: 'assistant.completed',
               runId,
               messageId,
-              content: turn.content,
+              content: finalContent,
             });
 
             trace({
@@ -281,6 +248,13 @@ export async function runLoop(
               config.model,
               messages,
             );
+
+            emit?.({
+              type: 'assistant.completed',
+              runId,
+              messageId,
+              content: finalContent,
+            });
 
             trace({
               type: 'run_finish',
@@ -465,6 +439,14 @@ export async function runLoop(
       messages,
     );
 
+    const finalMessageId = randomUUID();
+    emit?.({
+      type: 'assistant.completed',
+      runId,
+      messageId: finalMessageId,
+      content: finalContent,
+    });
+
     trace({
       type: 'run_finish',
       runId,
@@ -523,6 +505,10 @@ async function finalizeWithoutTools(
     definitions: [],
     byName: new Map(),
   });
-
+  console.log(
+    'Final content: ',
+    turn.content.length,
+    turn.content?.slice(0, 100),
+  );
   return turn.content ?? '';
 }

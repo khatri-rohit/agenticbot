@@ -12,7 +12,7 @@ import {
 import {
   readStoredComposerModel,
   writeStoredComposerModel,
-} from '@/lib/ollama-cloud-models';
+} from '@/lib/ollama-models';
 
 const defaultOptions: ComposerOptions = {
   streaming: true,
@@ -43,6 +43,7 @@ export default function HomePage() {
         streaming: options.streaming,
         webSearch: options.webSearch,
         model: options.model,
+        thinking: options.thinking,
       });
       router.push(`/chat/${thread.id}`);
     },

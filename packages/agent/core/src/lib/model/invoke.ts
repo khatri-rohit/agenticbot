@@ -1,10 +1,9 @@
-import type {
-  ChatCompletionMessageParam,
-  ChatCompletionMessageToolCall,
-} from 'openai/resources/chat/completions';
+import type { PendingToolCall } from '@org/agent-models';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import { client } from './client';
-import type { ModelTurn } from '../loop/loop';
+import type { ModelCallOptions } from './call-options';
+import type { ModelTurn } from './types';
 import type { ToolRegistry } from '../tools/type';
 
 /**
@@ -19,12 +18,18 @@ export async function invokeModelTurn(
   messages: ChatCompletionMessageParam[],
   tools: ToolRegistry,
   _onTextDelta?: (delta: string) => void,
+  options?: ModelCallOptions,
 ): Promise<ModelTurn> {
+  // Ollama accepts reasoning_effort values beyond OpenAI's ReasoningEffort enum.
   const response = await client.chat.completions.create({
     model,
     messages,
     tools: tools.definitions,
-  });
+    ...(options?.reasoningEffort !== undefined
+      ? { reasoning_effort: options.reasoningEffort }
+      : {}),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
 
   const choice = response.choices[0];
 
@@ -36,7 +41,7 @@ export async function invokeModelTurn(
 
   return {
     content: message.content ?? '',
-    toolCalls: (message.tool_calls ?? []) as ChatCompletionMessageToolCall[],
+    toolCalls: (message.tool_calls ?? []) as PendingToolCall[],
     finishReason: choice.finish_reason,
   };
 }

@@ -49,3 +49,16 @@ export type WebSearchResults = {
   query: string;
   results: WebFetchResponse[];
 };
+
+/**
+ * Skill metadata for the agent.
+ * This is the metadata for a skill that the agent can use.
+ */
+export interface SkillMetadata {
+  name: string;
+  description: string;
+}
+
+export interface Skill extends SkillMetadata {
+  instructions: string;
+}
