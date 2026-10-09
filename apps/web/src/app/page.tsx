@@ -12,7 +12,7 @@ import {
 import {
   readStoredComposerModel,
   writeStoredComposerModel,
-} from '@/lib/ollama-cloud-models';
+} from '@/lib/ollama-models';
 
 const defaultOptions: ComposerOptions = {
   streaming: true,

@@ -10,7 +10,7 @@ import {
   useAgentRun,
 } from '../../../features/agent/hooks/use-agent-run';
 import { takePendingMessage } from '../../../features/agent/api/agent-client';
-import { resolveOllamaCloudModel } from '@/lib/ollama-cloud-models';
+import { resolveOllamaModel } from '@/lib/ollama-models';
 
 export default function ChatThreadPage({
   params,
@@ -39,7 +39,7 @@ export default function ChatThreadPage({
     const pending = takePendingMessage();
     if (!pending) return;
     sentPendingRef.current = true;
-    const model = resolveOllamaCloudModel(pending.model ?? '');
+    const model = resolveOllamaModel(pending.model ?? '');
     setComposerOptions({
       streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,

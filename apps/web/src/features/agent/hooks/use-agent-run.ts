@@ -26,9 +26,9 @@ import {
 } from '../api/agent-client';
 import {
   readStoredComposerModel,
-  resolveOllamaCloudModel,
+  resolveOllamaModel,
   writeStoredComposerModel,
-} from '@/lib/ollama-cloud-models';
+} from '@/lib/ollama-models';
 
 export type QueuedMessage = {
   content: string;
@@ -83,7 +83,7 @@ export function useAgentRun(threadId: string | null) {
       if (cancelled || !thread) return;
       if (syncedThreadModelRef.current === thread.id) return;
       syncedThreadModelRef.current = thread.id;
-      const model = resolveOllamaCloudModel(thread.model);
+      const model = resolveOllamaModel(thread.model);
       setComposerOptions((prev) => ({ ...prev, model }));
     });
     return () => {
@@ -93,7 +93,7 @@ export function useAgentRun(threadId: string | null) {
 
   const setComposerOptionsPersisted = useCallback(
     (options: ComposerOptions) => {
-      const model = resolveOllamaCloudModel(options.model);
+      const model = resolveOllamaModel(options.model);
       const next = { ...options, model };
       setComposerOptions(next);
       writeStoredComposerModel(model);
@@ -187,7 +187,7 @@ export function useAgentRun(threadId: string | null) {
       const runId = await startRun(threadId, contextMessages, {
         streaming: options.streaming,
         webSearch: options.webSearch,
-        model: resolveOllamaCloudModel(options.model),
+        model: resolveOllamaModel(options.model),
         thinking: options.thinking,
       });
 
@@ -233,7 +233,7 @@ export function useAgentRun(threadId: string | null) {
       const merged: ComposerOptions = {
         streaming: options.streaming ?? composerOptions.streaming,
         webSearch: options.webSearch ?? composerOptions.webSearch,
-        model: resolveOllamaCloudModel(options.model ?? composerOptions.model),
+        model: resolveOllamaModel(options.model ?? composerOptions.model),
         thinking: options.thinking ?? composerOptions.thinking,
       };
 
@@ -290,7 +290,7 @@ export function useAgentRun(threadId: string | null) {
     const runId = await startRun(threadId, contextMessages, {
       streaming: composerOptions.streaming,
       webSearch: composerOptions.webSearch,
-      model: resolveOllamaCloudModel(composerOptions.model),
+      model: resolveOllamaModel(composerOptions.model),
       thinking: composerOptions.thinking,
     });
 
@@ -327,7 +327,7 @@ export function useAgentRun(threadId: string | null) {
       const runId = await startRun(threadId, contextMessages, {
         streaming: composerOptions.streaming,
         webSearch: composerOptions.webSearch,
-        model: resolveOllamaCloudModel(composerOptions.model),
+        model: resolveOllamaModel(composerOptions.model),
         thinking: composerOptions.thinking,
       });
 
