@@ -4,14 +4,13 @@ import type {
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 
+import type { PendingToolCall } from '@org/agent-models';
+
 import { client } from './client';
-import type { ModelTurn } from '../loop/loop';
+import type { ModelTurn, OnTextDelta } from './types';
 import type { ToolRegistry } from '../tools/type';
 
-/**
- * Callback type for receiving streamed text deltas.
- */
-export type OnTextDelta = (delta: string) => void;
+export type { OnTextDelta } from './types';
 
 /**
  * Internal accumulator for a tool call being reconstructed from stream chunks.
@@ -119,7 +118,7 @@ export async function streamModelTurn(
 
   return {
     content,
-    toolCalls: reconstructedToolCalls,
+    toolCalls: reconstructedToolCalls as PendingToolCall[],
     finishReason,
   };
 }

@@ -1,10 +1,8 @@
-import type {
-  ChatCompletionMessageParam,
-  ChatCompletionMessageToolCall,
-} from 'openai/resources/chat/completions';
+import type { PendingToolCall } from '@org/agent-models';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import { client } from './client';
-import type { ModelTurn } from '../loop/loop';
+import type { ModelTurn } from './types';
 import type { ToolRegistry } from '../tools/type';
 
 /**
@@ -36,7 +34,7 @@ export async function invokeModelTurn(
 
   return {
     content: message.content ?? '',
-    toolCalls: (message.tool_calls ?? []) as ChatCompletionMessageToolCall[],
+    toolCalls: (message.tool_calls ?? []) as PendingToolCall[],
     finishReason: choice.finish_reason,
   };
 }

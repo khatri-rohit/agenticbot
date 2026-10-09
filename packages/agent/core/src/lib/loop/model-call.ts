@@ -1,6 +1,6 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import type { ModelCallFn } from './loop';
+import type { ModelCallFn } from './types';
 import { invokeModelTurn } from '../model/invoke';
 import { streamModelTurn } from '../model/stream';
 import type { ToolRegistry } from '../tools/type';
