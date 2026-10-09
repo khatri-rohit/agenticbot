@@ -44,11 +44,13 @@ export default function ChatThreadPage({
       streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,
       model,
+      thinking: pending.thinking,
     });
     void sendMessage(pending.content, {
       streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,
       model,
+      thinking: pending.thinking,
     });
   }, [sendMessage, setComposerOptions]);
 
@@ -65,6 +67,8 @@ export default function ChatThreadPage({
           composerOptions={composerOptions}
           onComposerOptionsChange={setComposerOptions}
           onStop={() => void stopGeneration()}
+          contextMessages={messages ?? []}
+          streamingContent={chatState.activeRun?.streamingMessage?.content}
         />
       }
     >

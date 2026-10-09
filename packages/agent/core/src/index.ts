@@ -16,6 +16,10 @@ export type {
   ChatMessage,
   ModeName,
   ModeConfig,
+  ThinkingValue,
+  ThinkingMode,
+  OllamaThinkingConfig,
+  OllamaModelConfig,
 } from '@org/agent-models';
 export { RESEARCH_MODE } from '@org/agent-models';
 
@@ -23,7 +27,15 @@ export { RESEARCH_MODE } from '@org/agent-models';
 export { client } from './lib/model/client';
 export { invokeModelTurn } from './lib/model/invoke';
 export { streamModelTurn } from './lib/model/stream';
-export type { ModelTurn, OnTextDelta } from './lib/model/types';
+export type {
+  ModelTurn,
+  OnTextDelta,
+  ModelCallOptions,
+} from './lib/model/types';
+export {
+  getOllamaModelConfig,
+  resolveReasoningEffort,
+} from './lib/model/ollama-model-config';
 
 // Loop
 export { runLoop } from './lib/loop/loop';

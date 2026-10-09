@@ -188,6 +188,7 @@ export function useAgentRun(threadId: string | null) {
         streaming: options.streaming,
         webSearch: options.webSearch,
         model: resolveOllamaCloudModel(options.model),
+        thinking: options.thinking,
       });
 
       setChatState(initialChatState());
@@ -233,6 +234,7 @@ export function useAgentRun(threadId: string | null) {
         streaming: options.streaming ?? composerOptions.streaming,
         webSearch: options.webSearch ?? composerOptions.webSearch,
         model: resolveOllamaCloudModel(options.model ?? composerOptions.model),
+        thinking: options.thinking ?? composerOptions.thinking,
       };
 
       if (chatStateRef.current.activeRun?.status === 'running') {
@@ -289,6 +291,7 @@ export function useAgentRun(threadId: string | null) {
       streaming: composerOptions.streaming,
       webSearch: composerOptions.webSearch,
       model: resolveOllamaCloudModel(composerOptions.model),
+      thinking: composerOptions.thinking,
     });
 
     setChatState(initialChatState());
@@ -325,6 +328,7 @@ export function useAgentRun(threadId: string | null) {
         streaming: composerOptions.streaming,
         webSearch: composerOptions.webSearch,
         model: resolveOllamaCloudModel(composerOptions.model),
+        thinking: composerOptions.thinking,
       });
 
       setChatState(initialChatState());

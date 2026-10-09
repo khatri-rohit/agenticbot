@@ -1,4 +1,9 @@
-import type { AgentEvent, ChatMessage } from '@org/agent-models';
+import type {
+  AgentEvent,
+  ChatMessage,
+  OllamaModelConfig,
+  ThinkingValue,
+} from '@org/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
@@ -10,6 +15,8 @@ export type ComposerOptions = {
   streaming: boolean;
   webSearch: boolean;
   model: string;
+  /** Model-specific thinking: false / true / effort name from `/api/show`. */
+  thinking?: ThinkingValue;
 };
 
 export type PendingMessage = {
@@ -17,6 +24,7 @@ export type PendingMessage = {
   streaming: boolean;
   webSearch?: boolean;
   model?: string;
+  thinking?: ThinkingValue;
 };
 
 /** Stash a message for the chat page to send on mount. */
@@ -43,6 +51,7 @@ export async function startRun(
     streaming?: boolean;
     model?: string;
     webSearch?: boolean;
+    thinking?: ThinkingValue;
   } = {},
 ): Promise<string> {
   const allowedTools = options.webSearch === false ? [] : ['web_search'];
@@ -56,6 +65,7 @@ export async function startRun(
       streaming: options.streaming ?? true,
       model: options.model,
       allowedTools,
+      thinking: options.thinking,
     }),
   });
 
@@ -143,6 +153,19 @@ export function subscribeRun(
   return () => {
     es.close();
   };
+}
+
+export async function fetchOllamaModelConfig(
+  model: string,
+): Promise<OllamaModelConfig> {
+  const res = await fetch(
+    `${API_BASE}/api/agent/models/config?model=${encodeURIComponent(model)}`,
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load model config: ${res.status}`);
+  }
+  return res.json() as Promise<OllamaModelConfig>;
 }
 
 export async function cancelRun(runId: string): Promise<void> {

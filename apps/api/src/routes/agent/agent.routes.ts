@@ -7,6 +7,9 @@ import {
   createInvokeModelCall,
   createStreamModelCall,
   RESEARCH_MODE,
+  getOllamaModelConfig,
+  resolveReasoningEffort,
+  type ThinkingValue,
 } from '@org/agent-core';
 import { titleQueue, type TitleJobData } from '../../queue/title-queue';
 
@@ -22,12 +25,14 @@ const runManager = new RunManager();
  *   messages: ChatMessage[];     // full context (server is stateless)
  *   streaming?: boolean;          // default: true
  *   model?: string;               // default: RESEARCH_MODE.model
+ *   thinking?: boolean | string;  // from model /api/show values
  * }
  *
  * Returns: { runId: string }
  */
-router.post('/run', (req: Request, res: Response) => {
-  const { threadId, messages, streaming, model, allowedTools } = req.body;
+router.post('/run', async (req: Request, res: Response) => {
+  const { threadId, messages, streaming, model, allowedTools, thinking } =
+    req.body;
 
   if (!threadId) {
     return res.status(400).json({ error: 'threadId is required' });
@@ -66,9 +71,10 @@ router.post('/run', (req: Request, res: Response) => {
     });
   }
 
+  const callOptions = await resolveCallOptions(useModel, thinking);
   const modelCall = useStreaming
-    ? createStreamModelCall()
-    : createInvokeModelCall();
+    ? createStreamModelCall(callOptions)
+    : createInvokeModelCall(callOptions);
 
   const runId = runManager.start({
     threadId,
@@ -81,6 +87,26 @@ router.post('/run', (req: Request, res: Response) => {
   });
 
   return res.json({ runId });
+});
+
+/**
+ * GET /api/agent/models/config?model=
+ * Proxy for Ollama /api/show (context length, thinking values).
+ */
+router.get('/models/config', async (req: Request, res: Response) => {
+  const model =
+    typeof req.query.model === 'string' ? req.query.model.trim() : '';
+  if (!model) {
+    return res.status(400).json({ error: 'model is required' });
+  }
+
+  try {
+    const config = await getOllamaModelConfig(model);
+    return res.json(config);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(502).json({ error: msg });
+  }
 });
 
 /**
@@ -200,5 +226,25 @@ router.get('/title/:jobId', async (req: Request, res: Response) => {
   const result = job.returnvalue as { title: string };
   return res.json({ status: 'completed', title: result.title });
 });
+
+async function resolveCallOptions(
+  model: string,
+  thinking: unknown,
+): Promise<{ reasoningEffort: string } | undefined> {
+  const requested: ThinkingValue | undefined =
+    typeof thinking === 'boolean' ||
+    (typeof thinking === 'string' && thinking.length > 0)
+      ? thinking
+      : undefined;
+
+  try {
+    const config = await getOllamaModelConfig(model);
+    const reasoningEffort = resolveReasoningEffort(config, requested);
+    return reasoningEffort !== undefined ? { reasoningEffort } : undefined;
+  } catch {
+    // /api/show unavailable — omit; provider keeps its default
+    return undefined;
+  }
+}
 
 export { router as agentRouter };

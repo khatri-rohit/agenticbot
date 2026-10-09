@@ -8,3 +8,5 @@ export type { ModelTurn } from '@org/agent-models';
 
 /** Called for each streamed text fragment from chat.completions (stream: true). */
 export type OnTextDelta = (delta: string) => void;
+
+export type { ModelCallOptions } from './call-options';

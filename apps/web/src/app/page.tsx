@@ -43,6 +43,7 @@ export default function HomePage() {
         streaming: options.streaming,
         webSearch: options.webSearch,
         model: options.model,
+        thinking: options.thinking,
       });
       router.push(`/chat/${thread.id}`);
     },

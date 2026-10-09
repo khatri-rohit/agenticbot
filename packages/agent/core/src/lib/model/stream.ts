@@ -7,6 +7,7 @@ import type {
 import type { PendingToolCall } from '@org/agent-models';
 
 import { client } from './client';
+import type { ModelCallOptions } from './call-options';
 import type { ModelTurn, OnTextDelta } from './types';
 import type { ToolRegistry } from '../tools/type';
 
@@ -39,13 +40,19 @@ export async function streamModelTurn(
   messages: ChatCompletionMessageParam[],
   tools: ToolRegistry,
   onTextDelta?: OnTextDelta,
+  options?: ModelCallOptions,
 ): Promise<ModelTurn> {
-  const stream = await client.chat.completions.create({
+  // Ollama accepts reasoning_effort values beyond OpenAI's ReasoningEffort enum.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream: any = await client.chat.completions.create({
     model,
     messages,
     tools: tools.definitions,
     stream: true,
-  });
+    ...(options?.reasoningEffort !== undefined
+      ? { reasoning_effort: options.reasoningEffort }
+      : {}),
+  } as any);
 
   let content = '';
   let finishReason: string | null = null;
