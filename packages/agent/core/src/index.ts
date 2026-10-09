@@ -41,9 +41,9 @@ export {
 } from './lib/loop/model-call';
 
 // Tools
-export { createToolRegistry } from './lib/tools/registry';
+export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
-export { webSearchTool, webFetchTool, allTools } from './lib/tools/web-search';
+export { webSearchTool, webFetchTool } from './lib/tools/web-search';
 
 // Events / trace
 export { consoleTrace } from './lib/events/trace';

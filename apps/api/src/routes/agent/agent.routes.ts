@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import {
   RunManager,
   createToolRegistry,
-  allTools,
+  ALL_TOOLS,
   getContext,
   createInvokeModelCall,
   createStreamModelCall,
@@ -52,7 +52,7 @@ router.post('/run', (req: Request, res: Response) => {
   const toolAllowList = [
     ...new Set([...clientTools, ...RESEARCH_MODE.globalTools]),
   ];
-  const tools = createToolRegistry(allTools, toolAllowList);
+  const tools = createToolRegistry(ALL_TOOLS, toolAllowList);
 
   // Build the OpenAI-format messages from the client's ChatMessage[]
   const openaiMessages = messages as any[];

@@ -1,4 +1,6 @@
+import { load_skill } from './skills';
 import type { Tool, ToolRegistry } from './type';
+import { WEB_SEARCH_TOOLS } from './web-search';
 
 /**
  * Build a ToolRegistry from a list of tools.
@@ -17,3 +19,5 @@ export function createToolRegistry(
     byName: new Map(filtered.map((t) => [t.definition.function.name, t])),
   };
 }
+
+export const ALL_TOOLS: Tool[] = [load_skill, ...WEB_SEARCH_TOOLS];

@@ -159,7 +159,7 @@ export async function runLoop(
               type: 'assistant.completed',
               runId,
               messageId,
-              content: turn.content,
+              content: finalContent,
             });
 
             trace({
@@ -248,6 +248,13 @@ export async function runLoop(
               config.model,
               messages,
             );
+
+            emit?.({
+              type: 'assistant.completed',
+              runId,
+              messageId,
+              content: finalContent,
+            });
 
             trace({
               type: 'run_finish',
@@ -432,6 +439,14 @@ export async function runLoop(
       messages,
     );
 
+    const finalMessageId = randomUUID();
+    emit?.({
+      type: 'assistant.completed',
+      runId,
+      messageId: finalMessageId,
+      content: finalContent,
+    });
+
     trace({
       type: 'run_finish',
       runId,
@@ -490,6 +505,10 @@ async function finalizeWithoutTools(
     definitions: [],
     byName: new Map(),
   });
-
+  console.log(
+    'Final content: ',
+    turn.content.length,
+    turn.content?.slice(0, 100),
+  );
   return turn.content ?? '';
 }
