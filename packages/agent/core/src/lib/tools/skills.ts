@@ -15,7 +15,7 @@ export function listSkills(): SkillMetadata[] {
   return skills.map(({ name, description }) => ({ name, description }));
 }
 
-export function getSkill(name: string): Skill | undefined {
+function getSkill(name: string): Skill | undefined {
   return skills.find((skill) => skill.name === name);
 }
 

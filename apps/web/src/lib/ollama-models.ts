@@ -24,7 +24,7 @@ export type OllamaModel = {
   hint?: string;
 };
 
-export const DEFAULT_OLLAMA_MODEL = 'glm-5.2:cloud';
+const DEFAULT_OLLAMA_MODEL = 'glm-5.2:cloud';
 
 export const OLLAMA_MODELS: OllamaModel[] = [
   // ── Cloud: GLM ──
@@ -342,7 +342,7 @@ export const OLLAMA_MODELS: OllamaModel[] = [
 
 const MODEL_BY_ID = new Map(OLLAMA_MODELS.map((m) => [m.id, m]));
 
-export function getOllamaModel(id: string): OllamaModel | undefined {
+function getOllamaModel(id: string): OllamaModel | undefined {
   return MODEL_BY_ID.get(id);
 }
 

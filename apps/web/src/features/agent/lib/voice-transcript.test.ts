@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendComposerText, isUsableTranscript } from './voice-transcript';
+import { isUsableTranscript } from './voice-transcript';
 
 describe('isUsableTranscript', () => {
   it('accepts normal speech', () => {
@@ -15,12 +15,5 @@ describe('isUsableTranscript', () => {
     expect(isUsableTranscript('Thanks for watching!')).toBe(false);
     expect(isUsableTranscript('Thank you for watching')).toBe(false);
     expect(isUsableTranscript('80,000 Thanks for watching!')).toBe(false);
-  });
-});
-
-describe('appendComposerText', () => {
-  it('starts fresh or appends with a space', () => {
-    expect(appendComposerText('', 'hello')).toBe('hello');
-    expect(appendComposerText('hello ', 'world')).toBe('hello world');
   });
 });

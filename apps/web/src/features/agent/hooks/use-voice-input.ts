@@ -2,12 +2,27 @@
 
 import { useBrowserSpeechDictation } from '@/features/agent/hooks/use-browser-speech-dictation';
 import { useVoiceDictation } from '@/features/agent/hooks/use-voice-dictation';
-import {
-  getVoiceSttProvider,
-  type VoiceSttProvider,
-} from '@/features/agent/lib/voice-provider';
 
-export type VoiceInputController = {
+type VoiceSttProvider = 'browser' | 'speaches' | 'off';
+
+const VOICE_PROVIDERS = new Set<VoiceSttProvider>([
+  'browser',
+  'speaches',
+  'off',
+]);
+
+/** Default `browser` so forks work without Docker / Speaches / GPU. */
+function resolveVoiceSttProvider(): VoiceSttProvider {
+  const raw = (process.env.NEXT_PUBLIC_VOICE_STT_PROVIDER ?? 'browser')
+    .trim()
+    .toLowerCase();
+  if (VOICE_PROVIDERS.has(raw as VoiceSttProvider)) {
+    return raw as VoiceSttProvider;
+  }
+  return 'browser';
+}
+
+type VoiceInputController = {
   enabled: boolean;
   provider: VoiceSttProvider;
   active: boolean;
@@ -32,7 +47,7 @@ type Options = {
  * - off      — hide voice UI
  */
 export function useVoiceInput({ onTranscript }: Options): VoiceInputController {
-  const provider = getVoiceSttProvider();
+  const provider = resolveVoiceSttProvider();
 
   const speaches = useVoiceDictation({
     onTranscript,

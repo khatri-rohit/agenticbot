@@ -16,7 +16,6 @@ import type { ComposerOptions } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
 import { useVoiceInput } from '@/features/agent/hooks/use-voice-input';
-import { appendComposerText } from '@/features/agent/lib/voice-transcript';
 import {
   MAX_IMAGE_ATTACHMENTS,
   fileToAttachment,
@@ -125,7 +124,12 @@ export function ChatInput({
 
   const voice = useVoiceInput({
     onTranscript: (text) => {
-      setInput((prev) => appendComposerText(prev, text));
+      const piece = text.trim();
+      if (!piece) return;
+      setInput((prev) => {
+        const base = prev.trimEnd();
+        return base ? `${base} ${piece}` : piece;
+      });
     },
   });
   const voiceLocked = voice.enabled && (voice.active || voice.transcribing);

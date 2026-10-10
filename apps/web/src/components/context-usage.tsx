@@ -1,6 +1,5 @@
 'use client';
 
-import { formatTokenCount } from '@/lib/estimate-tokens';
 import { cn } from '@/lib/utils';
 import {
   Popover,
@@ -19,6 +18,8 @@ export function ContextUsage({
 
   const ratio = Math.min(1, Math.max(0, used / limit));
   const percent = Math.round(ratio * 100);
+  const usedLabel = used.toLocaleString();
+  const limitLabel = limit.toLocaleString();
   const size = 20;
   const stroke = 2.25;
   const radius = (size - stroke) / 2;
@@ -31,7 +32,7 @@ export function ContextUsage({
         <button
           type="button"
           className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-          aria-label={`${percent}% context used, ${formatTokenCount(used)} of ${formatTokenCount(limit)} tokens`}
+          aria-label={`${percent}% context used, ${usedLabel} of ${limitLabel} tokens`}
         >
           <svg
             width={size}
@@ -75,13 +76,9 @@ export function ContextUsage({
         </p>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
           <dt className="text-muted-foreground">Used</dt>
-          <dd className="text-right font-medium tabular-nums">
-            {formatTokenCount(used)}
-          </dd>
+          <dd className="text-right font-medium tabular-nums">{usedLabel}</dd>
           <dt className="text-muted-foreground">Limit</dt>
-          <dd className="text-right font-medium tabular-nums">
-            {formatTokenCount(limit)}
-          </dd>
+          <dd className="text-right font-medium tabular-nums">{limitLabel}</dd>
         </dl>
         <p className="mt-2 text-[11px] text-muted-foreground tabular-nums">
           {percent}% of window

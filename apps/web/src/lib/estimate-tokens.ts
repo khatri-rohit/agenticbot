@@ -32,7 +32,3 @@ export function estimateTokens(
   tokenEstimate += pendingAttachments * ESTIMATED_TOKENS_PER_IMAGE;
   return tokenEstimate;
 }
-
-export function formatTokenCount(n: number): string {
-  return n.toLocaleString();
-}

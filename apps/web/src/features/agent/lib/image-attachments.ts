@@ -16,10 +16,10 @@ const ALLOWED_IMAGE_MIME = new Set([
   'image/gif',
 ]);
 
-export type ImageAttachError =
+type ImageAttachError =
   'unsupported_type' | 'too_large' | 'too_many' | 'read_failed';
 
-export type ImageAttachResult =
+type ImageAttachResult =
   | { ok: true; attachment: MessageAttachment }
   | { ok: false; error: ImageAttachError };
 
