@@ -1,14 +1,16 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ArrowUp, Pencil, Plus, Square } from 'lucide-react';
+import { ArrowUp, Mic, Pencil, Plus, Square } from 'lucide-react';
 import type { ComposerOptions } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
+import { useVoiceDictation } from '@/features/agent/hooks/use-voice-dictation';
 import { estimateTokens } from '@/lib/estimate-tokens';
 import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
+import { VoiceModePill } from '@/components/voice-mode-pill';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -60,6 +62,14 @@ export function ChatInput({
   const onComposerOptionsChangeRef = useRef(onComposerOptionsChange);
   composerOptionsRef.current = composerOptions;
   onComposerOptionsChangeRef.current = onComposerOptionsChange;
+
+  const appendTranscript = useCallback((text: string) => {
+    const piece = text.trim();
+    if (!piece) return;
+    setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${piece}` : piece));
+  }, []);
+
+  const voice = useVoiceDictation({ onTranscript: appendTranscript });
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -220,6 +230,9 @@ export function ChatInput({
             />
             <div className="flex items-center justify-between gap-2 border-t border-border/30 px-0.5 pt-1">
               <div className="flex min-w-0 flex-1 items-center gap-0.5">
+                {voice.active ? (
+                  <VoiceModePill level={voice.level} className="mr-0.5" />
+                ) : null}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -285,6 +298,27 @@ export function ChatInput({
                 <Button
                   type="button"
                   size="icon-sm"
+                  variant={voice.active ? 'secondary' : 'ghost'}
+                  onClick={() => voice.toggle()}
+                  className={cn(
+                    'shrink-0 rounded-md',
+                    voice.active && 'text-foreground',
+                  )}
+                  aria-label={
+                    voice.active ? 'Stop voice mode' : 'Start voice mode'
+                  }
+                  aria-pressed={voice.active}
+                  title={
+                    voice.active
+                      ? 'Stop voice mode (Alt+A)'
+                      : 'Start voice mode (Alt+A)'
+                  }
+                >
+                  <Mic className="size-4" strokeWidth={2.25} />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
                   variant={showStopButton ? 'secondary' : 'default'}
                   onClick={handlePrimaryAction}
                   disabled={!showStopButton && !hasText}
@@ -307,9 +341,16 @@ export function ChatInput({
           </CardContent>
         </Card>
 
+        {voice.error ? (
+          <p className="type-caption text-destructive" role="alert">
+            {voice.error}
+          </p>
+        ) : null}
+
         {isHero && (
           <p className="type-caption text-center text-muted-foreground/75">
-            Threads are saved locally when you send your first message.
+            Threads are saved locally when you send your first message. Voice:
+            Alt+A.
           </p>
         )}
       </div>

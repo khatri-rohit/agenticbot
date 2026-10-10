@@ -7,6 +7,7 @@ import {
   PaginatedResponse,
 } from '@org/models';
 import { agentRouter } from './routes/agent/agent.routes';
+import { voiceRouter } from './routes/voice/voice.routes';
 
 const host = process.env.HOST ?? 'localhost';
 const port = process.env.PORT ? Number(process.env.PORT) : 3333;
@@ -126,6 +127,9 @@ app.get('/api/products/:id', (req, res) => {
 
 // Agent endpoints
 app.use('/api/agent', agentRouter);
+
+// Voice STT proxy (Speaches) — does not use Ollama
+app.use('/api/voice', voiceRouter);
 
 app.listen(port, host, () => {
   console.log(`[ ready ] http://${host}:${port}`);
