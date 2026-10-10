@@ -1,6 +1,8 @@
 # Docker infrastructure (agenticbot)
 
-Compose stack for **Redis** (BullMQ) and **Speaches** (STT: **faster-distil-whisper-large-v3**).
+Compose stack for **Redis** (BullMQ) and optional **Speaches** (STT: **faster-distil-whisper-large-v3**).
+
+Voice defaults to the **browser** Web Speech API (`VOICE_STT_PROVIDER=browser`) — no Speaches required. Start this Speaches service only when you set `VOICE_STT_PROVIDER=speaches` (and matching `NEXT_PUBLIC_VOICE_STT_PROVIDER`) in the host `.env`.
 
 **Ollama is not part of this compose file.** Chat stays on cloud via host `.env` (`OLLAMA_BASE_URL=https://ollama.com/v1`). Your existing Ollama container and model directory (e.g. `D:\ollama\models`) are never mounted, created, replaced, or deleted by `docker compose up` / `down` / `down -v`.
 
@@ -36,15 +38,33 @@ SPEACHES_HF_CACHE_DIR=D:/agenticbot/docker-data/speaches/hf-hub
 
 Compose rule: a **bare name** → named volume; an **absolute path** → host bind mount.
 
-## Your machine (snapshot from Docker CLI)
+## STT model choice
 
-| Check                    | Result                                                                                   |
-| ------------------------ | ---------------------------------------------------------------------------------------- |
-| Docker Desktop           | 4.83.0, Engine 29.6.2, Compose v5.3.1                                                    |
-| Memory limit (Docker VM) | **~7.75 GiB** — raise if Speaches preload OOMs                                           |
-| NVIDIA in Docker         | Not working yet — use **`COMPOSE_PROFILES=cpu`**                                         |
-| Existing Ollama          | Separate container; **`D:\ollama\models` untouched by this stack**                       |
-| Existing Redis           | `colorcaratiers-dev-redis-1` on **127.0.0.1:6379** — stop it or change `REDIS_HOST_PORT` |
+| Model                                                  | When                                             |
+| ------------------------------------------------------ | ------------------------------------------------ |
+| **`Systran/faster-distil-whisper-large-v3`** (default) | GPU dictation: best accuracy vs latency          |
+| `Systran/faster-whisper-medium`                        | CPU-only fallback if distil is too heavy         |
+| `Systran/faster-whisper-large-v3`                      | Avoid as default — often 2–4× slower than distil |
+
+**Preload only one STT model** (`SPEACHES_PRELOAD_MODELS`). Keep the same id in host `.env` as `SPEACHES_STT_MODEL`.
+
+### Switch model / free old HF weights
+
+Volume **path stays the same**; only remove old model dirs inside the cache:
+
+```bash
+docker compose --env-file .env.docker down
+
+# Host bind example (Windows D:):
+# rm -rf "D:/agenticbot/docker-data/speaches/hf-hub/models--Systran--faster-whisper-medium"
+# rm -rf "D:/agenticbot/docker-data/speaches/hf-hub/models--Systran--faster-whisper-small"
+
+docker compose --env-file .env.docker up -d
+curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:8000/v1/models
+# if distil missing:
+curl -X POST "http://127.0.0.1:8000/v1/models/Systran%2Ffaster-distil-whisper-large-v3"
+```
 
 ## Optional: Windows D: binds (Redis + Speaches only)
 
@@ -72,21 +92,76 @@ docker compose down
 
 ## Profiles: CPU vs GPU (Speaches)
 
-| Profile | Service        | Image         | When                         |
-| ------- | -------------- | ------------- | ---------------------------- |
-| `cpu`   | `speaches`     | `latest-cpu`  | Default                      |
-| `gpu`   | `speaches-gpu` | `latest-cuda` | After NVIDIA works in Docker |
+| Profile | Service        | Image         | When                        |
+| ------- | -------------- | ------------- | --------------------------- |
+| `cpu`   | `speaches`     | `latest-cpu`  | Works today (slower)        |
+| `gpu`   | `speaches-gpu` | `latest-cuda` | After Docker can use NVIDIA |
+
+### Enable GPU (Windows + RTX, e.g. 3060 Ti)
+
+Host GPU can work while Docker still cannot. Gate test:
+
+```bash
+nvidia-smi
+# must show your GPU on Windows
+
+docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
+# must show the same GPU inside Docker — if this fails, stay on COMPOSE_PROFILES=cpu
+```
+
+If the Docker test fails (`libnvidia-ml.so.1` / empty reply):
+
+1. Docker Desktop → **Settings → General** → use **WSL 2** engine.
+2. **Settings → Resources → WSL integration** → enable your distro.
+3. **Settings → Resources** → enable **GPU** / NVIDIA support if shown (wording varies by Desktop version).
+4. Install/update [NVIDIA driver](https://www.nvidia.com/drivers) (you already have a working host driver).
+5. **Apply & restart** Docker Desktop.
+6. Re-run the `docker run --gpus all … nvidia-smi` gate test.
+
+When the gate test passes, switch Speaches to GPU in `.env.docker`:
+
+```env
+COMPOSE_PROFILES=gpu
+SPEACHES_TAG=latest-cuda
+SPEACHES_WHISPER_COMPUTE_TYPE=float16
+SPEACHES_PRELOAD_MODELS=["Systran/faster-distil-whisper-large-v3"]
+```
+
+Then:
+
+```bash
+docker compose --env-file .env.docker down
+docker compose --env-file .env.docker up -d
+curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:8000/v1/models
+```
+
+App `.env` stays `SPEACHES_STT_MODEL=Systran/faster-distil-whisper-large-v3`.
 
 ## App wiring (host-run API / web)
 
 ```env
+VOICE_STT_PROVIDER=speaches
+NEXT_PUBLIC_VOICE_STT_PROVIDER=speaches
 REDIS_URL=redis://127.0.0.1:6379
 SPEACHES_BASE_URL=http://127.0.0.1:8000
 SPEACHES_STT_MODEL=Systran/faster-distil-whisper-large-v3
+VOICE_STT_LANGUAGE=en
+VOICE_STT_PROMPT=agenticbot, Speaches, Nx monorepo, Ollama, agent-core, RunManager, ChatInput, Redis, BullMQ
 # Keep chat on cloud — do not point OLLAMA_BASE_URL at Compose
 ```
 
-Voice transcribe proxy (`POST /api/voice/transcribe`) is a separate implementation step.
+If Speaches returns 404 “model not installed”:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/v1/models/Systran%2Ffaster-distil-whisper-large-v3"
+```
+
+### Latency checklist
+
+- One warm GPU request on a short clip should be **&lt; ~3 s** (first request after restart may download/load).
+- Voice UI (Speaches) uses **~2 s** force-chunks + silence flush; Alt+A off still drains in-flight STT.
+- If wall clock is still 9–10 s per phrase, confirm CUDA (`docker compose logs speaches`) and that only one model is preloaded.
 
 ## Useful commands
 
@@ -96,6 +171,6 @@ docker stats agenticbot-redis agenticbot-speaches --no-stream
 docker compose down
 ```
 
-## RAM note
+## RAM / VRAM note
 
-Speaches **faster-distil-whisper-large-v3** needs several GB when loaded. Increase Docker Desktop memory if preload fails. That is independent of your Ollama model directory on D:.
+Speaches **faster-distil-whisper-large-v3** is the default for productive dictation on GPU (`float16`). On CPU it is heavier than `medium` — raise Docker memory if preload OOMs, or temporarily set `SPEACHES_PRELOAD_MODELS` / `SPEACHES_STT_MODEL` to `Systran/faster-whisper-medium`. Ollama model dirs are never mounted by this stack.

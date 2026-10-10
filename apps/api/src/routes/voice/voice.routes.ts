@@ -7,6 +7,11 @@ const SPEACHES_BASE_URL = (
 ).replace(/\/$/, '');
 const SPEACHES_STT_MODEL =
   process.env.SPEACHES_STT_MODEL ?? 'Systran/faster-distil-whisper-large-v3';
+const VOICE_STT_LANGUAGE = process.env.VOICE_STT_LANGUAGE ?? 'en';
+const VOICE_STT_PROMPT = (
+  process.env.VOICE_STT_PROMPT ??
+  'agenticbot, Speaches, Nx monorepo, Ollama, agent-core, RunManager, ChatInput, Redis, BullMQ'
+).trim();
 const MAX_AUDIO_BYTES = Number(process.env.VOICE_MAX_AUDIO_BYTES ?? 10_485_760);
 
 /**
@@ -38,7 +43,7 @@ router.post(
     const contentType =
       typeof req.headers['content-type'] === 'string' &&
       req.headers['content-type'].startsWith('audio/')
-        ? req.headers['content-type'].split(';')[0]!.trim()
+        ? req.headers['content-type'].split(';')[0]?.trim()
         : 'audio/webm';
     const ext = contentType.includes('wav')
       ? 'wav'
@@ -55,6 +60,8 @@ router.post(
       );
       form.append('model', SPEACHES_STT_MODEL);
       form.append('response_format', 'json');
+      form.append('language', VOICE_STT_LANGUAGE);
+      if (VOICE_STT_PROMPT) form.append('prompt', VOICE_STT_PROMPT);
 
       const upstream = await fetch(
         `${SPEACHES_BASE_URL}/v1/audio/transcriptions`,

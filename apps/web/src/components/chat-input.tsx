@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ArrowUp, Mic, Pencil, Plus, Square } from 'lucide-react';
+import { ArrowUp, Loader2, Mic, Pencil, Plus, Square } from 'lucide-react';
 import type { ComposerOptions } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
-import { useVoiceDictation } from '@/features/agent/hooks/use-voice-dictation';
+import { useVoiceInput } from '@/features/agent/hooks/use-voice-input';
+import { appendComposerText } from '@/features/agent/lib/voice-transcript';
 import { estimateTokens } from '@/lib/estimate-tokens';
 import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
@@ -29,6 +30,30 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+
+function composerPlaceholder(opts: {
+  voiceActive: boolean;
+  voiceTranscribing: boolean;
+  isHero: boolean;
+  isRunning: boolean;
+}): string {
+  if (opts.voiceActive) return 'Listening… speech appends here';
+  if (opts.voiceTranscribing) return 'Transcribing…';
+  if (opts.isHero) return 'Ask a research question…';
+  if (opts.isRunning) return 'Send follow-up…';
+  return 'Message';
+}
+
+function sendButtonLabel(opts: {
+  showStop: boolean;
+  voiceActive: boolean;
+  voiceTranscribing: boolean;
+}): string {
+  if (opts.showStop) return 'Stop generating';
+  if (opts.voiceActive) return 'Stop voice mode before sending';
+  if (opts.voiceTranscribing) return 'Wait for transcription before sending';
+  return 'Send message';
+}
 
 export function ChatInput({
   onSend,
@@ -63,13 +88,12 @@ export function ChatInput({
   composerOptionsRef.current = composerOptions;
   onComposerOptionsChangeRef.current = onComposerOptionsChange;
 
-  const appendTranscript = useCallback((text: string) => {
-    const piece = text.trim();
-    if (!piece) return;
-    setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${piece}` : piece));
-  }, []);
-
-  const voice = useVoiceDictation({ onTranscript: appendTranscript });
+  const voice = useVoiceInput({
+    onTranscript: (text) => {
+      setInput((prev) => appendComposerText(prev, text));
+    },
+  });
+  const voiceLocked = voice.enabled && (voice.active || voice.transcribing);
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -79,20 +103,24 @@ export function ChatInput({
   }, [input, variant]);
 
   const handleSend = useCallback(() => {
-    if (!input.trim()) return;
+    if (voiceLocked || !input.trim()) return;
     const content = input.trim();
     setInput('');
     onSend(content, composerOptions);
-  }, [input, onSend, composerOptions]);
+  }, [voiceLocked, input, onSend, composerOptions]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (voiceLocked) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend],
+    [voiceLocked, handleSend],
   );
 
   const handleEditQueued = useCallback(() => {
@@ -144,8 +172,9 @@ export function ChatInput({
       onStop?.();
       return;
     }
+    if (voiceLocked) return;
     handleSend();
-  }, [showStopButton, onStop, handleSend]);
+  }, [showStopButton, onStop, voiceLocked, handleSend]);
 
   return (
     <div
@@ -213,24 +242,29 @@ export function ChatInput({
             <Textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                if (voiceLocked) return;
+                setInput(e.target.value);
+              }}
               onKeyDown={handleKeyDown}
-              placeholder={
-                isHero
-                  ? 'Ask a research question…'
-                  : isRunning
-                    ? 'Send follow-up…'
-                    : 'Message'
-              }
+              readOnly={voiceLocked}
+              aria-readonly={voiceLocked}
+              placeholder={composerPlaceholder({
+                voiceActive: voice.active,
+                voiceTranscribing: voice.transcribing,
+                isHero,
+                isRunning,
+              })}
               rows={1}
               className={cn(
                 'type-composer min-h-10 w-full resize-none rounded-md border-0 bg-transparent px-2 py-2.5 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0',
                 isHero && 'min-h-11',
+                voiceLocked && 'caret-transparent',
               )}
             />
             <div className="flex items-center justify-between gap-2 border-t border-border/30 px-0.5 pt-1">
               <div className="flex min-w-0 flex-1 items-center gap-0.5">
-                {voice.active ? (
+                {voice.enabled && (voice.active || voice.transcribing) ? (
                   <VoiceModePill level={voice.level} className="mr-0.5" />
                 ) : null}
                 <DropdownMenu>
@@ -295,39 +329,66 @@ export function ChatInput({
                   used={usedTokens}
                   limit={modelConfig?.contextLength ?? null}
                 />
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant={voice.active ? 'secondary' : 'ghost'}
-                  onClick={() => voice.toggle()}
-                  className={cn(
-                    'shrink-0 rounded-md',
-                    voice.active && 'text-foreground',
-                  )}
-                  aria-label={
-                    voice.active ? 'Stop voice mode' : 'Start voice mode'
-                  }
-                  aria-pressed={voice.active}
-                  title={
-                    voice.active
-                      ? 'Stop voice mode (Alt+A)'
-                      : 'Start voice mode (Alt+A)'
-                  }
-                >
-                  <Mic className="size-4" strokeWidth={2.25} />
-                </Button>
+                {voice.enabled ? (
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant={
+                      voice.active || voice.transcribing ? 'secondary' : 'ghost'
+                    }
+                    onClick={() => voice.toggle()}
+                    className={cn(
+                      'shrink-0 rounded-md',
+                      (voice.active || voice.transcribing) && 'text-foreground',
+                    )}
+                    aria-label={
+                      voice.transcribing
+                        ? 'Transcribing voice'
+                        : voice.active
+                          ? 'Stop voice mode'
+                          : 'Start voice mode'
+                    }
+                    aria-pressed={voice.active}
+                    aria-busy={voice.transcribing}
+                    title={
+                      voice.transcribing
+                        ? 'Transcribing…'
+                        : 'Voice mode (Alt+A)'
+                    }
+                  >
+                    {voice.transcribing ? (
+                      <Loader2
+                        className="size-4 animate-spin"
+                        strokeWidth={2.25}
+                      />
+                    ) : (
+                      <Mic className="size-4" strokeWidth={2.25} />
+                    )}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="icon-sm"
                   variant={showStopButton ? 'secondary' : 'default'}
                   onClick={handlePrimaryAction}
-                  disabled={!showStopButton && !hasText}
+                  disabled={!showStopButton && (voiceLocked || !hasText)}
                   className={cn(
                     'shrink-0',
                     showStopButton ? 'rounded-md' : 'rounded-full',
                   )}
-                  aria-label={
-                    showStopButton ? 'Stop generating' : 'Send message'
+                  aria-label={sendButtonLabel({
+                    showStop: showStopButton,
+                    voiceActive: voice.active,
+                    voiceTranscribing: voice.transcribing,
+                  })}
+                  title={
+                    voiceLocked && !showStopButton
+                      ? sendButtonLabel({
+                          showStop: false,
+                          voiceActive: voice.active,
+                          voiceTranscribing: voice.transcribing,
+                        })
+                      : undefined
                   }
                 >
                   {showStopButton ? (
@@ -341,7 +402,7 @@ export function ChatInput({
           </CardContent>
         </Card>
 
-        {voice.error ? (
+        {voice.enabled && voice.error ? (
           <p className="type-caption text-destructive" role="alert">
             {voice.error}
           </p>
@@ -349,8 +410,8 @@ export function ChatInput({
 
         {isHero && (
           <p className="type-caption text-center text-muted-foreground/75">
-            Threads are saved locally when you send your first message. Voice:
-            Alt+A.
+            Threads are saved locally when you send your first message.
+            {voice.enabled ? ' Voice: Alt+A.' : null}
           </p>
         )}
       </div>
