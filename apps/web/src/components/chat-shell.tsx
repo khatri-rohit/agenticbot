@@ -56,6 +56,8 @@ export function ChatShell({
           />
         </ResizablePanel>
         <ResizableHandle
+          disabled={sidebarCollapsed}
+          tabIndex={sidebarCollapsed ? -1 : 0}
           className={cn(sidebarCollapsed && 'pointer-events-none opacity-0')}
         />
         <ResizablePanel id="main" order={2} minSize={40} defaultSize={80}>

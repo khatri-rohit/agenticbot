@@ -198,9 +198,28 @@ export function UserMessage({
                         type="button"
                         className="block size-20 overflow-hidden rounded-md ring-1 ring-border/40 transition hover:ring-border"
                         aria-label={attachment.name ?? 'Open attached image'}
-                        onClick={() =>
-                          window.open(attachment.dataUrl, '_blank')
-                        }
+                        onClick={() => {
+                          try {
+                            const [header, data] =
+                              attachment.dataUrl.split(',');
+                            const mime =
+                              /data:([^;]+)/.exec(header)?.[1] ??
+                              'application/octet-stream';
+                            const binary = atob(data ?? '');
+                            const bytes = new Uint8Array(binary.length);
+                            for (let i = 0; i < binary.length; i++) {
+                              bytes[i] = binary.charCodeAt(i);
+                            }
+                            const url = URL.createObjectURL(
+                              new Blob([bytes], { type: mime }),
+                            );
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                            // shortcut: revoke after open; upgrade if blank tabs appear
+                            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                          } catch {
+                            window.open(attachment.dataUrl, '_blank');
+                          }
+                        }}
                       >
                         <img
                           src={attachment.dataUrl}

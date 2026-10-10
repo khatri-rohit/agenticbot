@@ -246,7 +246,9 @@ export function ChatInput({
         count += 1;
       }
       if (next.length > 0) {
-        setPendingAttachments((prev) => [...prev, ...next]);
+        setPendingAttachments((prev) =>
+          [...prev, ...next].slice(0, MAX_IMAGE_ATTACHMENTS),
+        );
       }
     },
     [pendingAttachments.length, voiceLocked],

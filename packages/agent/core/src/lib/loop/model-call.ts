@@ -10,9 +10,7 @@ import type { ToolRegistry } from '../tools/type';
  * Create a ModelCallFn for non-streaming mode.
  * Ignores the onTextDelta parameter (non-streaming has no deltas).
  */
-export function createInvokeModelCall(
-  options?: ModelCallOptions,
-): ModelCallFn {
+export function createInvokeModelCall(options?: ModelCallOptions): ModelCallFn {
   return (
     model: string,
     messages: ChatCompletionMessageParam[],
@@ -26,9 +24,7 @@ export function createInvokeModelCall(
  * Wires the onTextDelta callback (provided by the loop at call time)
  * into streamModelTurn.
  */
-export function createStreamModelCall(
-  options?: ModelCallOptions,
-): ModelCallFn {
+export function createStreamModelCall(options?: ModelCallOptions): ModelCallFn {
   return (
     model: string,
     messages: ChatCompletionMessageParam[],

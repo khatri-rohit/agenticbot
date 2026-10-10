@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { MessageAttachment } from '@org/agent-models';
 import { ChatInput } from '../components/chat-input';
 import { ChatShell } from '../components/chat-shell';
 import {
@@ -23,6 +24,20 @@ const defaultOptions: ComposerOptions = {
   webSearch: true,
   model: readStoredComposerModel(),
 };
+
+function restoreHomeDraft(content: string, attachments?: MessageAttachment[]) {
+  try {
+    localStorage.setItem(
+      `agenticbot:composerDraft:${HOME_DRAFT_SCOPE}`,
+      JSON.stringify({
+        content,
+        attachments: attachments ?? [],
+      }),
+    );
+  } catch {
+    /* quota / private mode */
+  }
+}
 
 export default function HomePage() {
   const router = useRouter();
@@ -49,38 +64,37 @@ export default function HomePage() {
           variant="hero"
           onSend={async (content, options, attachments) => {
             setPendingContent(true);
-            const thread = await createThread('New Chat', options.model);
-            const stashed = stashPendingMessage({
-              content,
-              streaming: options.streaming,
-              webSearch: options.webSearch,
-              model: options.model,
-              thinking: options.thinking,
-              attachments,
-            });
-            if (!stashed) {
-              await deleteThread(thread.id);
-              setPendingContent(false);
-              // Composer cleared on send; put draft back for remount + refresh.
-              try {
-                localStorage.setItem(
-                  `agenticbot:composerDraft:${HOME_DRAFT_SCOPE}`,
-                  JSON.stringify({
-                    content,
-                    attachments: attachments ?? [],
-                  }),
+            try {
+              const thread = await createThread('New Chat', options.model);
+              const stashed = stashPendingMessage({
+                content,
+                streaming: options.streaming,
+                webSearch: options.webSearch,
+                model: options.model,
+                thinking: options.thinking,
+                attachments,
+              });
+              if (!stashed) {
+                await deleteThread(thread.id);
+                setPendingContent(false);
+                restoreHomeDraft(content, attachments);
+                setDraftEpoch((n) => n + 1);
+                toastError(
+                  'Could not start the chat with those images. Try fewer or smaller ones.',
+                  'Images too large to hand off',
                 );
-              } catch {
-                /* quota / private mode */
+                return;
               }
+              router.push(`/chat/${thread.id}`);
+            } catch {
+              setPendingContent(false);
+              restoreHomeDraft(content, attachments);
               setDraftEpoch((n) => n + 1);
               toastError(
-                'Could not start the chat with those images. Try fewer or smaller ones.',
-                'Images too large to hand off',
+                'Could not create the chat. Your draft was restored - try again.',
+                'Failed to start chat',
               );
-              return;
             }
-            router.push(`/chat/${thread.id}`);
           }}
           isRunning={pendingContent}
           queuedMessage={null}

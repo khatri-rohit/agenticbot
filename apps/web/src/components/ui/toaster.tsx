@@ -32,7 +32,7 @@ export function Toaster() {
               ) : null}
             </div>
             {action}
-            <ToastClose />
+            <ToastClose aria-label="Dismiss notification" />
           </Toast>
         );
       })}

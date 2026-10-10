@@ -65,7 +65,11 @@ router.post(
 
       const upstream = await fetch(
         `${SPEACHES_BASE_URL}/v1/audio/transcriptions`,
-        { method: 'POST', body: form },
+        {
+          method: 'POST',
+          body: form,
+          signal: AbortSignal.timeout(30_000),
+        },
       );
 
       if (!upstream.ok) {

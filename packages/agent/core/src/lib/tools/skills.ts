@@ -1,4 +1,4 @@
-import { Skill, SkillMetadata, Tool } from './type';
+import type { Skill, SkillMetadata, Tool } from './type';
 
 const skills: Skill[] = [
   {
@@ -53,6 +53,10 @@ export const load_skill: Tool = {
   execute: async (args) => {
     const skill = String(args.skill_name ?? '');
     const skillBody = getSkill(skill);
-    return skillBody?.instructions ?? 'Skill not found';
+    if (skillBody) return skillBody.instructions;
+    const available = listSkills()
+      .map((s) => s.name)
+      .join(', ');
+    return `Skill not found. Available skills: ${available || '(none)'}`;
   },
 };

@@ -40,14 +40,33 @@ function buildToolGuardrails(registry: ToolRegistry): string {
  */
 export function buildSystemPrompt(registry: ToolRegistry): string {
   const toolNames = Array.from(registry.byName.keys());
-  const catalog = listSkills()
-    .map((skill) => `- ${skill.name}: ${skill.description}`)
-    .join('\n');
+  const hasLoadSkill = registry.byName.has('load_skill');
+  const catalog = hasLoadSkill
+    ? listSkills()
+        .map((skill) => `- ${skill.name}: ${skill.description}`)
+        .join('\n')
+    : '';
 
   const availableTools =
     toolNames.length > 0
       ? toolNames.map((name) => `- ${name}`).join('\n')
       : '- (none)';
+
+  const skillsSection = hasLoadSkill
+    ? `
+# Skills
+
+Available skills:
+${catalog}
+
+These are instruction sets you can load on demand.
+When a skill covers the kind of work you are about to do, call load_skill
+with its name BEFORE starting that work, then follow its instructions.
+Loading instructions does not approve any action they recommend.
+Example: load_skill with web_search_skill
+Then follow the instructions of the skill.
+`
+    : '';
 
   return `
 # Role
@@ -121,19 +140,7 @@ Rules:
 
 Available tools:
 ${availableTools}
-
-# Skills
-
-Available skills:
-${catalog}
-
-These are instruction sets you can load on demand.
-When a skill covers the kind of work you are about to do, call load_skill
-with its name BEFORE starting that work, then follow its instructions.
-Loading instructions does not approve any action they recommend.
-Example: load_skill with web_search_skill
-Then follow the instructions of the skill.
-
+${skillsSection}
 # Per-tool guardrails
 
 ${buildToolGuardrails(registry)}

@@ -72,6 +72,41 @@ export async function runLoop(
   let totalToolCalls = 0;
   const repeatedCalls = new Map<string, number>();
 
+  /** Fresh message lifecycle for limit finalization (never reuse the tool-turn id). */
+  async function finalizeAnswer(): Promise<string> {
+    const finalMessageId = randomUUID();
+    const onTextDelta = config.streaming
+      ? (delta: string) => {
+          emit?.({
+            type: 'assistant.delta',
+            runId,
+            messageId: finalMessageId,
+            delta,
+          });
+        }
+      : undefined;
+
+    if (config.streaming) {
+      emit?.({ type: 'assistant.started', runId, messageId: finalMessageId });
+    }
+
+    const finalContent = await finalizeWithoutTools(
+      modelCall,
+      config.model,
+      messages,
+      onTextDelta,
+    );
+
+    emit?.({
+      type: 'assistant.completed',
+      runId,
+      messageId: finalMessageId,
+      content: finalContent,
+    });
+
+    return finalContent;
+  }
+
   trace({ type: 'run_start', runId, model: config.model });
   emit?.({
     type: 'run.started',
@@ -149,18 +184,7 @@ export async function runLoop(
               'Skipped: tool call limit reached.',
             );
 
-            const finalContent = await finalizeWithoutTools(
-              modelCall,
-              config.model,
-              messages,
-            );
-
-            emit?.({
-              type: 'assistant.completed',
-              runId,
-              messageId,
-              content: finalContent,
-            });
+            const finalContent = await finalizeAnswer();
 
             trace({
               type: 'run_finish',
@@ -243,18 +267,7 @@ export async function runLoop(
               'Skipped: tool call limit reached.',
             );
 
-            const finalContent = await finalizeWithoutTools(
-              modelCall,
-              config.model,
-              messages,
-            );
-
-            emit?.({
-              type: 'assistant.completed',
-              runId,
-              messageId,
-              content: finalContent,
-            });
+            const finalContent = await finalizeAnswer();
 
             trace({
               type: 'run_finish',
@@ -433,19 +446,7 @@ export async function runLoop(
       reason: `max iterations exceeded (${limits.maxIterations})`,
     });
 
-    const finalContent = await finalizeWithoutTools(
-      modelCall,
-      config.model,
-      messages,
-    );
-
-    const finalMessageId = randomUUID();
-    emit?.({
-      type: 'assistant.completed',
-      runId,
-      messageId: finalMessageId,
-      content: finalContent,
-    });
+    const finalContent = await finalizeAnswer();
 
     trace({
       type: 'run_finish',
@@ -494,6 +495,7 @@ async function finalizeWithoutTools(
   modelCall: ModelCallFn,
   model: string,
   messages: ChatCompletionMessageParam[],
+  onTextDelta?: (delta: string) => void,
 ): Promise<string> {
   messages.push({
     role: 'user',
@@ -501,14 +503,15 @@ async function finalizeWithoutTools(
       'Tool budget reached. Answer my original question now using only the information above, and say what is uncertain.',
   });
 
-  const turn = await modelCall(model, messages, {
-    definitions: [],
-    byName: new Map(),
-  });
-  console.log(
-    'Final content: ',
-    turn.content.length,
-    turn.content?.slice(0, 100),
+  const turn = await modelCall(
+    model,
+    messages,
+    {
+      definitions: [],
+      byName: new Map(),
+    },
+    onTextDelta,
   );
+  console.log('Final content length:', turn.content?.length ?? 0);
   return turn.content ?? '';
 }

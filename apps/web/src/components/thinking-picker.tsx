@@ -19,10 +19,7 @@ function thinkingKey(value: ThinkingValue): string {
   return String(value);
 }
 
-function thinkingFromKey(
-  key: string,
-  values: ThinkingValue[],
-): ThinkingValue {
+function thinkingFromKey(key: string, values: ThinkingValue[]): ThinkingValue {
   if (key === 'off') return false;
   if (key === 'on') return true;
   const match = values.find((v) => typeof v === 'string' && v === key);

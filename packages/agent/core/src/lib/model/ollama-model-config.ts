@@ -108,6 +108,7 @@ export async function getOllamaModelConfig(
         : {}),
     },
     body: JSON.stringify({ model }),
+    signal: AbortSignal.timeout(15_000),
   });
 
   const data = (await res.json().catch(() => ({}))) as ShowResponse;

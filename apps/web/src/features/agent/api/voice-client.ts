@@ -8,6 +8,7 @@ export async function transcribeAudio(blob: Blob): Promise<string> {
       'Content-Type': blob.type || 'audio/webm',
     },
     body: blob,
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!res.ok) {
