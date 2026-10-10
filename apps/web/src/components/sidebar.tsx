@@ -44,42 +44,49 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   const threads = useThreads();
   const pathname = usePathname();
 
+  const railBtn =
+    'flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
+
   return (
-    <aside className="flex h-full min-h-0 w-full min-w-0 flex-col bg-sidebar text-sidebar-foreground">
-      <div className="shrink-0 px-2 pt-2">
-        {collapsed ? (
-          <div className="flex flex-col items-stretch gap-1">
+    <aside
+      className={cn(
+        'flex h-full min-h-0 w-full min-w-0 flex-col bg-sidebar text-sidebar-foreground',
+        collapsed && 'items-center',
+      )}
+    >
+      {collapsed ? (
+        <>
+          <div className="flex w-12 shrink-0 flex-col items-center gap-1 pt-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={onExpand}
                   aria-label="Expand sidebar"
-                  className="group/expand flex h-9 w-full items-center justify-center overflow-hidden rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className={railBtn}
                 >
-                  <PanelLeft
-                    className="size-[1.125rem] shrink-0 -translate-x-1 transition-transform duration-200 group-hover/expand:translate-x-0"
-                    strokeWidth={1.75}
-                  />
+                  <PanelLeft className="size-4" strokeWidth={1.75} />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">Open sidebar</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Link
-                  href="/"
-                  aria-label="New chat"
-                  className="flex h-9 w-full items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                >
-                  <Plus className="size-[1.125rem]" strokeWidth={2} />
+                <Link href="/" aria-label="New chat" className={railBtn}>
+                  <Plus className="size-4" strokeWidth={2} />
                 </Link>
               </TooltipTrigger>
               <TooltipContent side="right">New chat</TooltipContent>
             </Tooltip>
           </div>
-        ) : (
-          <>
+          <div className="min-h-0 flex-1" aria-hidden />
+          <footer className="flex w-12 shrink-0 flex-col items-center pb-2">
+            <SidebarSettings collapsed />
+          </footer>
+        </>
+      ) : (
+        <>
+          <div className="shrink-0 px-2 pt-2">
             <header className="flex items-center justify-between gap-2 px-1 pb-2">
               <Link
                 href="/"
@@ -112,41 +119,37 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
               </span>
               <span>New chat</span>
             </Link>
-          </>
-        )}
-      </div>
+          </div>
 
-      {!collapsed ? (
-        <ScrollArea className="min-h-0 flex-1 px-2">
-          {threads?.length === 0 ? (
-            <p className="type-ui px-2 py-6 text-center text-muted-foreground">
-              No conversations yet
-            </p>
-          ) : (
-            <div className="pb-2">
-              <p className="type-ui mb-1 px-2 text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
-                Recent
+          <ScrollArea className="min-h-0 flex-1 px-2">
+            {threads?.length === 0 ? (
+              <p className="type-ui px-2 py-6 text-center text-muted-foreground">
+                No conversations yet
               </p>
-              <ul className="w-full min-w-0 space-y-0.5">
-                {threads?.map((thread) => (
-                  <ThreadItem
-                    key={thread.id}
-                    thread={thread}
-                    active={pathname === `/chat/${thread.id}`}
-                  />
-                ))}
-              </ul>
-            </div>
-          )}
-        </ScrollArea>
-      ) : (
-        <div className="min-h-0 flex-1" aria-hidden />
-      )}
+            ) : (
+              <div className="pb-2">
+                <p className="type-ui mb-1 px-2 text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
+                  Recent
+                </p>
+                <ul className="w-full min-w-0 space-y-0.5">
+                  {threads?.map((thread) => (
+                    <ThreadItem
+                      key={thread.id}
+                      thread={thread}
+                      active={pathname === `/chat/${thread.id}`}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+          </ScrollArea>
 
-      <Separator className="shrink-0 bg-border/40" />
-      <footer className="shrink-0 p-2">
-        <SidebarSettings collapsed={collapsed} />
-      </footer>
+          <Separator className="shrink-0 bg-border/40" />
+          <footer className="shrink-0 p-2">
+            <SidebarSettings collapsed={false} />
+          </footer>
+        </>
+      )}
     </aside>
   );
 }

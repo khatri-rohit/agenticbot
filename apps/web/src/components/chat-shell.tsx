@@ -40,10 +40,14 @@ export function ChatShell({
           minSize={14}
           maxSize={36}
           collapsible
-          collapsedSize={2.5}
+          collapsedSize={3}
           onCollapse={() => setSidebarCollapsed(true)}
           onExpand={() => setSidebarCollapsed(false)}
-          className="flex min-h-0 flex-col bg-sidebar"
+          className={cn(
+            'flex min-h-0 flex-col bg-sidebar',
+            // Pin a fixed ~3rem rail; percent collapsedSize alone drifts with viewport.
+            sidebarCollapsed && '!min-w-12 !max-w-12',
+          )}
         >
           <Sidebar
             collapsed={sidebarCollapsed}
@@ -51,7 +55,9 @@ export function ChatShell({
             onExpand={() => sidebarRef.current?.expand()}
           />
         </ResizablePanel>
-        <ResizableHandle />
+        <ResizableHandle
+          className={cn(sidebarCollapsed && 'pointer-events-none opacity-0')}
+        />
         <ResizablePanel id="main" order={2} minSize={40} defaultSize={80}>
           <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
             {header}

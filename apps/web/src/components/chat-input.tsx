@@ -62,17 +62,6 @@ function composerPlaceholder(opts: {
   return 'Message';
 }
 
-function sendButtonLabel(opts: {
-  showStop: boolean;
-  voiceActive: boolean;
-  voiceTranscribing: boolean;
-}): string {
-  if (opts.showStop) return 'Stop generating';
-  if (opts.voiceActive) return 'Stop voice mode before sending';
-  if (opts.voiceTranscribing) return 'Wait for transcription before sending';
-  return 'Send message';
-}
-
 export function ChatInput({
   onSend,
   isRunning,
@@ -187,7 +176,6 @@ export function ChatInput({
   );
 
   const handleSend = useCallback(() => {
-    if (voiceLocked) return;
     const content = input.trim();
     if (!content && pendingAttachments.length === 0) return;
 
@@ -199,29 +187,37 @@ export function ChatInput({
       return;
     }
 
+    // Enter/send while listening: drop the mic and ship what's already in the box.
+    if (voice.active || voice.transcribing) {
+      voice.stop();
+    }
+
     const attachments =
       pendingAttachments.length > 0 ? pendingAttachments : undefined;
     setInput('');
     setPendingAttachments([]);
     onSend(content, composerOptions, attachments);
   }, [
-    voiceLocked,
     input,
     pendingAttachments,
     visionOk,
+    voice.active,
+    voice.transcribing,
+    voice.stop,
     onSend,
     composerOptions,
   ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (voiceLocked) {
-        e.preventDefault();
-        return;
-      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSend();
+        return;
+      }
+      // Keep the field read-only while dictating; Enter above still sends.
+      if (voiceLocked) {
+        e.preventDefault();
       }
     },
     [voiceLocked, handleSend],
@@ -316,9 +312,8 @@ export function ChatInput({
       onStop?.();
       return;
     }
-    if (voiceLocked) return;
     handleSend();
-  }, [showStopButton, onStop, voiceLocked, handleSend]);
+  }, [showStopButton, onStop, handleSend]);
 
   return (
     <div
@@ -593,24 +588,13 @@ export function ChatInput({
                   size="icon-sm"
                   variant={showStopButton ? 'secondary' : 'default'}
                   onClick={handlePrimaryAction}
-                  disabled={!showStopButton && (voiceLocked || !canSend)}
+                  disabled={!showStopButton && !canSend}
                   className={cn(
                     'shrink-0',
                     showStopButton ? 'rounded-md' : 'rounded-full',
                   )}
-                  aria-label={sendButtonLabel({
-                    showStop: showStopButton,
-                    voiceActive: voice.active,
-                    voiceTranscribing: voice.transcribing,
-                  })}
-                  title={
-                    voiceLocked && !showStopButton
-                      ? sendButtonLabel({
-                          showStop: false,
-                          voiceActive: voice.active,
-                          voiceTranscribing: voice.transcribing,
-                        })
-                      : undefined
+                  aria-label={
+                    showStopButton ? 'Stop generating' : 'Send message'
                   }
                 >
                   {showStopButton ? (

@@ -150,7 +150,7 @@ export function MessageList({
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto scroll-smooth scrollbar-gutter-stable"
       >
-        <div className="mx-auto w-full max-w-3xl px-5 py-7 sm:pl-14 sm:pr-6">
+        <div className="mx-auto w-full max-w-3xl px-4 py-7 sm:px-6">
           {!hasMessages && !isRunning && !streaming?.content && (
             <p className="type-ui text-center text-muted-foreground/80">
               Your research thread will appear here.
