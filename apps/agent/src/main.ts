@@ -6,9 +6,10 @@ import {
   streamModelTurn,
   getContext,
   createToolRegistry,
-  allTools,
+  ALL_TOOLS,
   consoleTrace,
   type AgentEvent,
+  type ModelCallFn,
   RESEARCH_MODE,
 } from '@org/agent-core';
 
@@ -19,17 +20,17 @@ async function main() {
   try {
     const query = 'What is value of PI in 3 decimal places?';
 
-    const tools = createToolRegistry(allTools, RESEARCH_MODE.allowedTools);
+    const tools = createToolRegistry(ALL_TOOLS, [
+      ...new Set([...RESEARCH_MODE.allowedTools, ...RESEARCH_MODE.globalTools]),
+    ]);
     const messages = getContext(query, tools);
 
     // Collect events for display
     const events: AgentEvent[] = [];
 
-    const modelCall = STREAMING
-      ? (model: string, msgs: any, t: any, onDelta?: (d: string) => void) =>
-          streamModelTurn(model, msgs, t, onDelta)
-      : (model: string, msgs: any, t: any, onDelta?: (d: string) => void) =>
-          invokeModelTurn(model, msgs, t, onDelta);
+    const modelCall: ModelCallFn = STREAMING
+      ? (model, msgs, t, onDelta) => streamModelTurn(model, msgs, t, onDelta)
+      : (model, msgs, t, onDelta) => invokeModelTurn(model, msgs, t, onDelta);
 
     console.log(`Mode: ${STREAMING ? 'streaming' : 'non-streaming'}`);
     console.log('================================================');

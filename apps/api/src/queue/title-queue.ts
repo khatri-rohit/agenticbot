@@ -39,8 +39,8 @@ async function generateTitle(firstMessage: string): Promise<string> {
   const response = await client.chat.completions.create({
     model: TITLE_MODEL,
     stream: false,
-    max_tokens: 30,
-    temperature: 0.3,
+    max_tokens: 50,
+    temperature: 0.5,
     messages: [
       {
         role: 'system',

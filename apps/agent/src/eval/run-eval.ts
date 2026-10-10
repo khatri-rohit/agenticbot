@@ -3,7 +3,7 @@ import {
   invokeModelTurn,
   getContext,
   createToolRegistry,
-  allTools,
+  ALL_TOOLS,
   type TraceEvent,
 } from '@org/agent-core';
 import { formatReport, scoreScenario, type ScenarioRunInput } from './metrics';
@@ -33,7 +33,7 @@ async function runScenario(
   scenarioId: string,
   query: string,
 ): Promise<ScenarioRunInput & { answer: string }> {
-  const tools = createToolRegistry(allTools);
+  const tools = createToolRegistry(ALL_TOOLS);
   const messages = getContext(query, tools);
   const stats: RunStats = { toolCalls: 0, iterations: 0, toolNames: [] };
 

@@ -16,22 +16,35 @@ export type {
   ChatMessage,
   ModeName,
   ModeConfig,
+  ThinkingValue,
+  ThinkingMode,
+  OllamaThinkingConfig,
+  OllamaModelConfig,
 } from '@org/agent-models';
 export { RESEARCH_MODE } from '@org/agent-models';
 
 // Model layer
 export { client } from './lib/model/client';
 export { invokeModelTurn } from './lib/model/invoke';
-export { streamModelTurn, type OnTextDelta } from './lib/model/stream';
+export { streamModelTurn } from './lib/model/stream';
+export type {
+  ModelTurn,
+  OnTextDelta,
+  ModelCallOptions,
+} from './lib/model/types';
+export {
+  getOllamaModelConfig,
+  resolveReasoningEffort,
+} from './lib/model/ollama-model-config';
 
 // Loop
 export { runLoop } from './lib/loop/loop';
 export type {
-  ModelTurn,
   ModelCallFn,
   RunLoopConfig,
   RunLoopResult,
-} from './lib/loop/loop';
+  RunLoopStatus,
+} from './lib/loop/types';
 export { DEFAULT_LIMITS, type AgentLimits } from './lib/loop/limits';
 export { getContext } from './lib/loop/context';
 export {
@@ -40,20 +53,23 @@ export {
 } from './lib/loop/model-call';
 
 // Tools
-export { createToolRegistry } from './lib/tools/registry';
+export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
-export { webSearchTool, webFetchTool, allTools } from './lib/tools/web-search';
+export { webSearchTool, webFetchTool } from './lib/tools/web-search';
 
 // Events / trace
-export { consoleTrace, type TraceEvent } from './lib/events/trace';
-export { EventEmitter, type EventSubscriber } from './lib/events/emitter';
+export { consoleTrace } from './lib/events/trace';
+export type { TraceEvent } from './lib/events/trace-types';
+export { EventEmitter } from './lib/events/emitter';
+export type { EventSubscriber } from './lib/events/types';
 
 // Run manager
-export {
-  RunManager,
-  type RunHandle,
-  type StartRunOptions,
-} from './lib/run/run-manager';
+export { RunManager } from './lib/run/run-manager';
+export type {
+  RunHandle,
+  RunHandleStatus,
+  StartRunOptions,
+} from './lib/run/types';
 
 // Prompts
 export { buildSystemPrompt } from './lib/prompts/system-prompt';

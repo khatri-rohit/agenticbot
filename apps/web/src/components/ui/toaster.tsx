@@ -1,0 +1,42 @@
+'use client';
+
+import {
+  Toast,
+  ToastClose,
+  ToastDescription,
+  ToastProvider,
+  ToastTitle,
+  ToastViewport,
+} from '@/components/ui/toast';
+import { useToast } from '@/hooks/use-toast';
+
+/** Renders the active toast queue from use-toast. Mount once in Providers. */
+export function Toaster() {
+  const { toasts } = useToast();
+
+  return (
+    <ToastProvider>
+      {toasts.map(function renderToast({
+        id,
+        title,
+        description,
+        action,
+        ...props
+      }) {
+        return (
+          <Toast key={id} {...props}>
+            <div className="grid gap-0.5">
+              {title ? <ToastTitle>{title}</ToastTitle> : null}
+              {description ? (
+                <ToastDescription>{description}</ToastDescription>
+              ) : null}
+            </div>
+            {action}
+            <ToastClose aria-label="Dismiss notification" />
+          </Toast>
+        );
+      })}
+      <ToastViewport />
+    </ToastProvider>
+  );
+}

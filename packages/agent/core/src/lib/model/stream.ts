@@ -4,14 +4,14 @@ import type {
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 
+import type { PendingToolCall } from '@org/agent-models';
+
 import { client } from './client';
-import type { ModelTurn } from '../loop/loop';
+import type { ModelCallOptions } from './call-options';
+import type { ModelTurn, OnTextDelta } from './types';
 import type { ToolRegistry } from '../tools/type';
 
-/**
- * Callback type for receiving streamed text deltas.
- */
-export type OnTextDelta = (delta: string) => void;
+export type { OnTextDelta } from './types';
 
 /**
  * Internal accumulator for a tool call being reconstructed from stream chunks.
@@ -40,13 +40,19 @@ export async function streamModelTurn(
   messages: ChatCompletionMessageParam[],
   tools: ToolRegistry,
   onTextDelta?: OnTextDelta,
+  options?: ModelCallOptions,
 ): Promise<ModelTurn> {
-  const stream = await client.chat.completions.create({
+  // Ollama accepts reasoning_effort values beyond OpenAI's ReasoningEffort enum.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream: any = await client.chat.completions.create({
     model,
     messages,
     tools: tools.definitions,
     stream: true,
-  });
+    ...(options?.reasoningEffort !== undefined
+      ? { reasoning_effort: options.reasoningEffort }
+      : {}),
+  } as any);
 
   let content = '';
   let finishReason: string | null = null;
@@ -119,7 +125,7 @@ export async function streamModelTurn(
 
   return {
     content,
-    toolCalls: reconstructedToolCalls,
+    toolCalls: reconstructedToolCalls as PendingToolCall[],
     finishReason,
   };
 }

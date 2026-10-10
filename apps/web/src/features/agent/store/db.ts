@@ -19,6 +19,13 @@ export class AgentDB extends Dexie {
       messages: 'id, threadId, createdAt, [threadId+createdAt]',
       runs: 'id, threadId, status, createdAt',
     });
+
+    // v2: Message.attachments (optional) stored on message rows — no index change.
+    this.version(2).stores({
+      threads: 'id, updatedAt',
+      messages: 'id, threadId, createdAt, [threadId+createdAt]',
+      runs: 'id, threadId, status, createdAt',
+    });
   }
 }
 
@@ -50,14 +57,15 @@ export async function getThread(id: string): Promise<Thread | undefined> {
   return db.threads.get(id);
 }
 
+/**
+ * Metadata-only patch (title, model, pin). Does not bump `updatedAt` —
+ * sidebar order follows real conversation activity via message writes.
+ */
 export async function updateThread(
   id: string,
   changes: Partial<Thread>,
 ): Promise<void> {
-  await db.threads.update(id, {
-    ...changes,
-    updatedAt: new Date().toISOString(),
-  });
+  await db.threads.update(id, changes);
 }
 
 export async function deleteThread(id: string): Promise<void> {

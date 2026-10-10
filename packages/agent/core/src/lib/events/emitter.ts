@@ -1,7 +1,8 @@
 import type { AgentEvent, AgentEventWithoutSeq } from '@org/agent-models';
 
-/** A subscriber receives fully-formed events (with seq assigned). */
-export type EventSubscriber = (event: AgentEvent) => void;
+import type { EventSubscriber } from './types';
+
+export type { EventSubscriber } from './types';
 
 /**
  * In-memory event emitter with monotonic seq counters and a ring buffer

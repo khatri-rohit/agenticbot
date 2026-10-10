@@ -33,13 +33,16 @@ export interface ModelTurn {
 }
 
 /**
- * Context message in the OpenAI Chat Completions shape.
- * Kept as a structural type so we don't hard-depend on the OpenAI SDK here
- * (agent-models is a zero-dependency package).
+ * Multimodal content parts for user messages (OpenAI Chat Completions shape).
+ * Used when a user message carries image attachments alongside text.
  */
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export type ChatMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string | ChatContentPart[] }
   | {
       role: 'assistant';
       content: string | null;

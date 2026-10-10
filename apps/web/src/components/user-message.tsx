@@ -46,9 +46,12 @@ export function UserMessage({
     setDraft(message.content);
   }, [message.content]);
 
+  const hasAttachments = (message.attachments?.length ?? 0) > 0;
+  const canResend = Boolean(draft.trim()) || hasAttachments;
+
   const runSubmit = useCallback(async () => {
     const trimmed = draft.trim();
-    if (!trimmed || submitting) return;
+    if ((!trimmed && !hasAttachments) || submitting) return;
     setSubmitting(true);
     try {
       await onEditSubmit(message.id, trimmed);
@@ -57,17 +60,16 @@ export function UserMessage({
     } finally {
       setSubmitting(false);
     }
-  }, [draft, message.id, onEditSubmit, submitting]);
+  }, [draft, hasAttachments, message.id, onEditSubmit, submitting]);
 
   const handleResend = useCallback(() => {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
+    if (!canResend) return;
     if (hasResponseBelow) {
       setConfirmClear(true);
       return;
     }
     void runSubmit();
-  }, [draft, hasResponseBelow, runSubmit]);
+  }, [canResend, hasResponseBelow, runSubmit]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -98,6 +100,18 @@ export function UserMessage({
               role="form"
               aria-label="Edit message"
             >
+              {message.attachments && message.attachments.length > 0 ? (
+                <div className="mb-2 flex flex-wrap justify-end gap-1.5 px-1">
+                  {message.attachments.map((attachment) => (
+                    <img
+                      key={attachment.id}
+                      src={attachment.dataUrl}
+                      alt={attachment.name ?? 'Attachment'}
+                      className="size-14 rounded-md object-cover ring-1 ring-border/40"
+                    />
+                  ))}
+                </div>
+              ) : null}
               <Textarea
                 ref={textareaRef}
                 value={draft}
@@ -137,7 +151,7 @@ export function UserMessage({
                       type="button"
                       size="sm"
                       className="h-7 px-2 text-xs"
-                      disabled={submitting || !draft.trim()}
+                      disabled={submitting || !canResend}
                       onClick={() => void runSubmit()}
                     >
                       {submitting ? 'Sending…' : 'Proceed'}
@@ -160,7 +174,7 @@ export function UserMessage({
                     type="button"
                     size="sm"
                     className="h-7 px-2 text-xs"
-                    disabled={submitting || !draft.trim()}
+                    disabled={submitting || !canResend}
                     onClick={handleResend}
                   >
                     Resend
@@ -175,7 +189,50 @@ export function UserMessage({
                   'type-user rounded-lg border border-border/25 bg-secondary/90 px-3.5 py-2 text-foreground/95',
                 )}
               >
-                <p className="whitespace-pre-wrap">{message.content}</p>
+                {/* Vision attachments sit above the prompt so history scrolls with context. */}
+                {message.attachments && message.attachments.length > 0 ? (
+                  <div className="mb-2 flex flex-wrap justify-end gap-1.5">
+                    {message.attachments.map((attachment) => (
+                      <button
+                        key={attachment.id}
+                        type="button"
+                        className="block size-20 overflow-hidden rounded-md ring-1 ring-border/40 transition hover:ring-border"
+                        aria-label={attachment.name ?? 'Open attached image'}
+                        onClick={() => {
+                          try {
+                            const [header, data] =
+                              attachment.dataUrl.split(',');
+                            const mime =
+                              /data:([^;]+)/.exec(header)?.[1] ??
+                              'application/octet-stream';
+                            const binary = atob(data ?? '');
+                            const bytes = new Uint8Array(binary.length);
+                            for (let i = 0; i < binary.length; i++) {
+                              bytes[i] = binary.charCodeAt(i);
+                            }
+                            const url = URL.createObjectURL(
+                              new Blob([bytes], { type: mime }),
+                            );
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                            // shortcut: revoke after open; upgrade if blank tabs appear
+                            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                          } catch {
+                            window.open(attachment.dataUrl, '_blank');
+                          }
+                        }}
+                      >
+                        <img
+                          src={attachment.dataUrl}
+                          alt={attachment.name ?? 'Attachment'}
+                          className="size-full object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {message.content ? (
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                ) : null}
               </div>
               <MessageActions
                 content={message.content}

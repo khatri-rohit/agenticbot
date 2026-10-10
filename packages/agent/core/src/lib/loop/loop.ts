@@ -5,49 +5,16 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import { consoleTrace, type TraceEvent } from '../events/trace';
-import type { AgentEventWithoutSeq } from '@org/agent-models';
-import { DEFAULT_LIMITS, type AgentLimits } from './limits';
+import { DEFAULT_LIMITS } from './limits';
 import type { ToolRegistry } from '../tools/type';
+import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
-/* ---------- public types ---------- */
-
-export type ModelTurn = {
-  content: string;
-  toolCalls: ChatCompletionMessageToolCall[];
-  finishReason: string | null;
-};
-
-/**
- * Function signature for a model call. The loop is transport-agnostic.
- * onTextDelta is provided at call time so the loop controls messageId
- * and can wire it to assistant.delta events.
- */
-export type ModelCallFn = (
-  model: string,
-  messages: ChatCompletionMessageParam[],
-  tools: ToolRegistry,
-  onTextDelta?: (delta: string) => void,
-) => Promise<ModelTurn>;
-
-export type RunLoopConfig = {
-  runId?: string;
-  threadId?: string;
-  model: string;
-  streaming: boolean;
-  limits?: Partial<AgentLimits>;
-  /** Legacy trace callback (eval harness). Kept for backward compat. */
-  trace?: (event: TraceEvent) => void;
-  /** Event emitter callback (Phase 4+). If provided, emits AgentEvents. */
-  emit?: (event: AgentEventWithoutSeq) => void;
-};
-
-export type RunLoopResult = {
-  runId: string;
-  content: string;
-  iterations: number;
-  toolCalls: number;
-  status: 'completed' | 'error';
-};
+export type {
+  ModelCallFn,
+  RunLoopConfig,
+  RunLoopResult,
+  RunLoopStatus,
+} from './types';
 
 /* ---------- internal helpers ---------- */
 
@@ -104,6 +71,41 @@ export async function runLoop(
   let iterations = 0;
   let totalToolCalls = 0;
   const repeatedCalls = new Map<string, number>();
+
+  /** Fresh message lifecycle for limit finalization (never reuse the tool-turn id). */
+  async function finalizeAnswer(): Promise<string> {
+    const finalMessageId = randomUUID();
+    const onTextDelta = config.streaming
+      ? (delta: string) => {
+          emit?.({
+            type: 'assistant.delta',
+            runId,
+            messageId: finalMessageId,
+            delta,
+          });
+        }
+      : undefined;
+
+    if (config.streaming) {
+      emit?.({ type: 'assistant.started', runId, messageId: finalMessageId });
+    }
+
+    const finalContent = await finalizeWithoutTools(
+      modelCall,
+      config.model,
+      messages,
+      onTextDelta,
+    );
+
+    emit?.({
+      type: 'assistant.completed',
+      runId,
+      messageId: finalMessageId,
+      content: finalContent,
+    });
+
+    return finalContent;
+  }
 
   trace({ type: 'run_start', runId, model: config.model });
   emit?.({
@@ -182,18 +184,7 @@ export async function runLoop(
               'Skipped: tool call limit reached.',
             );
 
-            const finalContent = await finalizeWithoutTools(
-              modelCall,
-              config.model,
-              messages,
-            );
-
-            emit?.({
-              type: 'assistant.completed',
-              runId,
-              messageId,
-              content: turn.content,
-            });
+            const finalContent = await finalizeAnswer();
 
             trace({
               type: 'run_finish',
@@ -276,11 +267,7 @@ export async function runLoop(
               'Skipped: tool call limit reached.',
             );
 
-            const finalContent = await finalizeWithoutTools(
-              modelCall,
-              config.model,
-              messages,
-            );
+            const finalContent = await finalizeAnswer();
 
             trace({
               type: 'run_finish',
@@ -459,11 +446,7 @@ export async function runLoop(
       reason: `max iterations exceeded (${limits.maxIterations})`,
     });
 
-    const finalContent = await finalizeWithoutTools(
-      modelCall,
-      config.model,
-      messages,
-    );
+    const finalContent = await finalizeAnswer();
 
     trace({
       type: 'run_finish',
@@ -512,6 +495,7 @@ async function finalizeWithoutTools(
   modelCall: ModelCallFn,
   model: string,
   messages: ChatCompletionMessageParam[],
+  onTextDelta?: (delta: string) => void,
 ): Promise<string> {
   messages.push({
     role: 'user',
@@ -519,10 +503,15 @@ async function finalizeWithoutTools(
       'Tool budget reached. Answer my original question now using only the information above, and say what is uncertain.',
   });
 
-  const turn = await modelCall(model, messages, {
-    definitions: [],
-    byName: new Map(),
-  });
-
+  const turn = await modelCall(
+    model,
+    messages,
+    {
+      definitions: [],
+      byName: new Map(),
+    },
+    onTextDelta,
+  );
+  console.log('Final content length:', turn.content?.length ?? 0);
   return turn.content ?? '';
 }

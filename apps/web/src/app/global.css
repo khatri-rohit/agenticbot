@@ -9,7 +9,7 @@
 @source "../../../node_modules/@streamdown/mermaid/dist";
 @source inline("absolute relative inset-0 top-2 right-2 bottom-2 left-2 z-10 z-50");
 @source inline("flex flex-col flex-row items-center justify-center gap-1 gap-2");
-@source inline("pointer-events-none pointer-events-auto shrink-0 min-h-28 overflow-hidden");
+@source inline("pointer-events-none pointer-events-auto shrink-0 min-h-28 overflow-hidden overflow-x-auto overflow-y-auto");
 @source inline("max-h-[min(70vh,40rem)] w-full h-full size-full");
 @source inline("supports-[backdrop-filter]:bg-background/70 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm");
 
@@ -72,8 +72,6 @@
   --text-ui-leading: 1.45;
   --text-caption: 0.6875rem;
   --text-caption-leading: 1.4;
-
-  --measure-chat: 65ch;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -140,8 +138,9 @@ body {
 }
 
 .chat-prose {
-  max-width: var(--measure-chat);
+  max-width: 100%;
   width: 100%;
+  min-width: 0;
 }
 
 /* --- Global scrollbars --- */
@@ -310,14 +309,24 @@ body {
   background: var(--muted);
 }
 
-/* Fenced code: calmer chrome, copy only (download hidden via controls). */
-.agent-markdown [data-streamdown='code-block'] {
-  margin: 1rem 0;
+/* Block chrome: theme tokens + Streamdown my-* often miss the Tailwind scan. */
+.agent-markdown [data-streamdown='code-block'],
+.agent-markdown [data-streamdown='table-wrapper'],
+.agent-markdown [data-streamdown='mermaid-block'] {
+  margin: 1.25rem 0;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--md-block-border, var(--border));
+  border-left: 2px solid var(--md-block-accent, var(--ring));
   border-radius: var(--radius);
-  border-color: var(--border);
-  background: var(--card);
+  background: var(--md-block-bg, var(--card));
 }
 
+.agent-markdown [data-streamdown='table-wrapper'] {
+  overflow-x: auto;
+}
+
+/* Fenced code: calmer chrome, copy only (download hidden via controls). */
 .agent-markdown [data-streamdown='code-block-header'] {
   min-height: 2rem;
   padding: 0 0.25rem;
@@ -327,6 +336,8 @@ body {
 
 .agent-markdown [data-streamdown='code-block-body'] {
   margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -350,13 +361,9 @@ body {
   background: color-mix(in oklch, var(--card) 92%, transparent);
 }
 
-/* Mermaid: match code block rhythm */
+/* Mermaid: keep canvas clipped; spacing shared with code/table above. */
 .agent-markdown [data-streamdown='mermaid-block'] {
   position: relative;
-  margin: 1rem 0;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--card);
   overflow: hidden;
 }
 
@@ -365,7 +372,9 @@ body {
   [data-streamdown='code-block'] {
   margin: 0;
   border: none;
+  border-left: none;
   border-radius: 0;
+  background: transparent;
 }
 
 /* Fallback if Tailwind missed Streamdown positioning (pan/zoom toolbar layout). */
@@ -390,7 +399,11 @@ body {
   display: flex;
   justify-content: center;
   padding: 1rem;
-  background: color-mix(in oklch, var(--muted) 55%, transparent);
+  background: color-mix(
+    in oklch,
+    var(--md-block-bg, var(--muted)) 70%,
+    transparent
+  );
 }
 
 .agent-markdown [data-streamdown='mermaid'] svg {

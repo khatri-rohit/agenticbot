@@ -10,7 +10,7 @@ import {
   useAgentRun,
 } from '../../../features/agent/hooks/use-agent-run';
 import { takePendingMessage } from '../../../features/agent/api/agent-client';
-import { resolveOllamaCloudModel } from '@/lib/ollama-cloud-models';
+import { resolveOllamaModel } from '@/lib/ollama-models';
 
 export default function ChatThreadPage({
   params,
@@ -39,17 +39,23 @@ export default function ChatThreadPage({
     const pending = takePendingMessage();
     if (!pending) return;
     sentPendingRef.current = true;
-    const model = resolveOllamaCloudModel(pending.model ?? '');
+    const model = resolveOllamaModel(pending.model ?? '');
     setComposerOptions({
       streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,
       model,
+      thinking: pending.thinking,
     });
-    void sendMessage(pending.content, {
-      streaming: pending.streaming,
-      webSearch: pending.webSearch ?? true,
-      model,
-    });
+    void sendMessage(
+      pending.content,
+      {
+        streaming: pending.streaming,
+        webSearch: pending.webSearch ?? true,
+        model,
+        thinking: pending.thinking,
+      },
+      pending.attachments,
+    );
   }, [sendMessage, setComposerOptions]);
 
   return (
@@ -57,6 +63,8 @@ export default function ChatThreadPage({
       header={<ChatHeader threadId={threadId} />}
       footer={
         <ChatInput
+          key={threadId}
+          draftScope={threadId}
           onSend={sendMessage}
           isRunning={isRunning}
           queuedMessage={queuedMessage}
@@ -65,6 +73,8 @@ export default function ChatThreadPage({
           composerOptions={composerOptions}
           onComposerOptionsChange={setComposerOptions}
           onStop={() => void stopGeneration()}
+          contextMessages={messages ?? []}
+          streamingContent={chatState.activeRun?.streamingMessage?.content}
         />
       }
     >

@@ -7,15 +7,21 @@ import {
   PaginatedResponse,
 } from '@org/models';
 import { agentRouter } from './routes/agent/agent.routes';
+import { voiceRouter } from './routes/voice/voice.routes';
 
 const host = process.env.HOST ?? 'localhost';
 const port = process.env.PORT ? Number(process.env.PORT) : 3333;
 
+/** browser | speaches | off — Speaches routes only when explicitly enabled. */
+const voiceSttProvider = (process.env.VOICE_STT_PROVIDER ?? 'browser')
+  .trim()
+  .toLowerCase();
+
 const app = express();
 const productsService = new ProductsService();
 
-// Middleware
-app.use(express.json());
+// Vision runs send base64 data URLs in JSON — default 100kb is too small.
+app.use(express.json({ limit: '25mb' }));
 
 // CORS configuration for React app
 app.use((req, res, next) => {
@@ -127,6 +133,12 @@ app.get('/api/products/:id', (req, res) => {
 // Agent endpoints
 app.use('/api/agent', agentRouter);
 
+// Speaches STT proxy — only when VOICE_STT_PROVIDER=speaches (not Ollama)
+if (voiceSttProvider === 'speaches') {
+  app.use('/api/voice', voiceRouter);
+}
+
 app.listen(port, host, () => {
   console.log(`[ ready ] http://${host}:${port}`);
+  console.log(`[ voice ] STT provider=${voiceSttProvider}`);
 });

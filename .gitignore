@@ -4,6 +4,7 @@
 dist
 tmp
 out-tsc
+*.tsbuildinfo
 
 # dependencies
 node_modules
@@ -59,4 +60,8 @@ out
 .env
 .env.*
 !.env.example
+!.env.docker.example
+.env.docker
+# Personal Compose binds (paths, GPU, etc.) — never commit machine-specific mounts
+docker-compose.override.yml
 .cursor

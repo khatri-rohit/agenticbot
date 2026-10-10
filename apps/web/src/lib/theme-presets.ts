@@ -1,15 +1,6 @@
 export const THEME_STORAGE_KEY = 'agenticbot-ui-theme';
 
-export type ThemeId =
-  | 'cursor'
-  | 'neutral'
-  | 'vscode'
-  | 'material'
-  | 'midnight'
-  | 'ember'
-  | 'copper'
-  | 'forest'
-  | 'ocean';
+export type ThemeId = 'ink' | 'lamp' | 'glacier' | 'moss' | 'signal';
 
 export type ThemePreset = {
   id: ThemeId;
@@ -21,62 +12,40 @@ export type ThemePreset = {
 
 export const THEME_PRESETS: ThemePreset[] = [
   {
-    id: 'cursor',
-    label: 'Cursor Dark',
-    description: 'Cool neutral, flat IDE feel',
-    swatch: { bg: 'oklch(0.1 0.006 264)', accent: 'oklch(0.7 0.09 238)' },
+    id: 'ink',
+    label: 'Ink',
+    description: 'Soft warm charcoal for long reads',
+    swatch: { bg: 'oklch(0.14 0.012 70)', accent: 'oklch(0.72 0.06 70)' },
   },
   {
-    id: 'neutral',
-    label: 'Classic Dark',
-    description: 'Balanced zinc, minimal tint',
-    swatch: { bg: 'oklch(0.11 0.004 286)', accent: 'oklch(0.75 0.04 286)' },
+    id: 'lamp',
+    label: 'Lamp',
+    description: 'Amber reading-lamp warmth',
+    swatch: { bg: 'oklch(0.13 0.03 65)', accent: 'oklch(0.78 0.12 65)' },
   },
   {
-    id: 'vscode',
-    label: 'VS Code Dark',
-    description: 'Blue-gray editor chrome',
-    swatch: { bg: 'oklch(0.12 0.02 255)', accent: 'oklch(0.62 0.14 250)' },
+    id: 'glacier',
+    label: 'Glacier',
+    description: 'Cool blue-gray, crisp contrast',
+    swatch: { bg: 'oklch(0.13 0.02 240)', accent: 'oklch(0.72 0.09 230)' },
   },
   {
-    id: 'material',
-    label: 'Material Dark',
-    description: 'M3-style violet surfaces',
-    swatch: { bg: 'oklch(0.11 0.02 300)', accent: 'oklch(0.72 0.12 295)' },
+    id: 'moss',
+    label: 'Moss',
+    description: 'Deep green study room',
+    swatch: { bg: 'oklch(0.13 0.025 150)', accent: 'oklch(0.7 0.1 150)' },
   },
   {
-    id: 'midnight',
-    label: 'Midnight',
-    description: 'Deep blue night',
-    swatch: { bg: 'oklch(0.09 0.03 265)', accent: 'oklch(0.68 0.12 255)' },
-  },
-  {
-    id: 'ember',
-    label: 'Ember',
-    description: 'Dark wine and rose hints',
-    swatch: { bg: 'oklch(0.1 0.025 20)', accent: 'oklch(0.68 0.14 18)' },
-  },
-  {
-    id: 'copper',
-    label: 'Copper',
-    description: 'Warm charcoal and amber',
-    swatch: { bg: 'oklch(0.105 0.022 55)', accent: 'oklch(0.72 0.13 55)' },
-  },
-  {
-    id: 'forest',
-    label: 'Forest',
-    description: 'Muted green undertone',
-    swatch: { bg: 'oklch(0.1 0.02 155)', accent: 'oklch(0.7 0.11 155)' },
-  },
-  {
-    id: 'ocean',
-    label: 'Ocean',
-    description: 'Teal depth, calm contrast',
-    swatch: { bg: 'oklch(0.1 0.022 200)', accent: 'oklch(0.72 0.1 195)' },
+    id: 'signal',
+    label: 'Signal',
+    description: 'Near-black with vivid block accents',
+    swatch: { bg: 'oklch(0.1 0.01 280)', accent: 'oklch(0.75 0.18 145)' },
   },
 ];
 
-export const DEFAULT_THEME_ID: ThemeId = 'cursor';
+export const DEFAULT_THEME_ID: ThemeId = 'ink';
+
+export const THEME_IDS: ThemeId[] = THEME_PRESETS.map((p) => p.id);
 
 export function isThemeId(value: string): value is ThemeId {
   return THEME_PRESETS.some((p) => p.id === value);

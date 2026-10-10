@@ -1,29 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import type { AgentEvent } from '@org/agent-models';
-import { runLoop, type ModelCallFn, type RunLoopResult } from '../loop/loop';
-import { EventEmitter, type EventSubscriber } from '../events/emitter';
-import type { ToolRegistry } from '../tools/type';
+import { runLoop } from '../loop/loop';
+import { EventEmitter } from '../events/emitter';
+import type { EventSubscriber } from '../events/types';
+import type { RunHandle, StartRunOptions } from './types';
 
-export type RunHandle = {
-  runId: string;
-  threadId: string;
-  status: 'running' | 'completed' | 'error';
-  cancelled: boolean;
-  emitter: EventEmitter;
-  result: RunLoopResult | null;
-};
-
-export type StartRunOptions = {
-  threadId: string;
-  model: string;
-  streaming: boolean;
-  messages: ChatCompletionMessageParam[];
-  tools: ToolRegistry;
-  modelCall: ModelCallFn;
-  limits?: import('../loop/limits').AgentLimits;
-};
+export type { RunHandle, RunHandleStatus, StartRunOptions } from './types';
 
 /**
  * In-memory run manager. Holds live run state and event emitters.

@@ -38,7 +38,7 @@ export function SidebarSettings({
       className={cn(
         'type-ui font-normal text-muted-foreground hover:bg-accent/55 hover:text-foreground',
         collapsed
-          ? 'mx-auto size-9 w-full max-w-9 justify-center rounded-md px-0'
+          ? 'size-9 shrink-0 justify-center rounded-md px-0'
           : 'h-8 w-full justify-start gap-2 rounded-md px-2.5',
       )}
     >

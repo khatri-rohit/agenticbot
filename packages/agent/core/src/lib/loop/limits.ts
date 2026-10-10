@@ -5,9 +5,9 @@
  * Override per-run via RunConfig.limits.
  */
 export const DEFAULT_LIMITS = {
-  maxIterations: 8,
-  maxToolCalls: 12,
-  maxRepeatedToolCalls: 2,
+  maxIterations: 12,
+  maxToolCalls: 20,
+  maxRepeatedToolCalls: 4,
   toolTimeoutMs: 30_000,
 };
 
