@@ -8,12 +8,26 @@ export type MessageRole = 'user' | 'assistant' | 'tool';
 
 export type MessageStatus = 'complete' | 'interrupted';
 
+/**
+ * An image attached to a user message.
+ * V1 stores a data URL (base64) for both local persistence and model wire.
+ */
+export type MessageAttachment = {
+  id: string;
+  mimeType: string;
+  /** `data:image/...;base64,...` for V1 local persistence + model wire. */
+  dataUrl: string;
+  name?: string;
+};
+
 export interface Message {
   id: string;
   threadId: string;
   runId: string | null;
   role: MessageRole;
   content: string;
+  /** Image attachments on user messages (vision models). */
+  attachments?: MessageAttachment[];
   /** Present only on assistant messages that requested tool calls. */
   toolCalls?: PendingToolCall[];
   /** Present only on tool-role messages, linking back to the assistant tool call. */

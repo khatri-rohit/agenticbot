@@ -19,6 +19,13 @@ export class AgentDB extends Dexie {
       messages: 'id, threadId, createdAt, [threadId+createdAt]',
       runs: 'id, threadId, status, createdAt',
     });
+
+    // v2: Message.attachments (optional) stored on message rows — no index change.
+    this.version(2).stores({
+      threads: 'id, updatedAt',
+      messages: 'id, threadId, createdAt, [threadId+createdAt]',
+      runs: 'id, threadId, status, createdAt',
+    });
   }
 }
 

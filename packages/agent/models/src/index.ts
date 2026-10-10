@@ -31,10 +31,17 @@ export type {
   Message,
   MessageRole,
   MessageStatus,
+  MessageAttachment,
   PendingToolCall,
 } from './lib/message.js';
 
-export type { Run, RunStatus, ModelTurn, ChatMessage } from './lib/run.js';
+export type {
+  Run,
+  RunStatus,
+  ModelTurn,
+  ChatMessage,
+  ChatContentPart,
+} from './lib/run.js';
 
 export type { ModeName, ModeConfig } from './lib/mode.js';
 export { RESEARCH_MODE } from './lib/mode.js';

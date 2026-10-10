@@ -1,13 +1,31 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { ArrowUp, Loader2, Mic, Pencil, Plus, Square } from 'lucide-react';
+import {
+  ArrowUp,
+  ImagePlus,
+  Loader2,
+  Mic,
+  Pencil,
+  Plus,
+  Square,
+  X,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import type { MessageAttachment } from '@org/agent-models';
 import type { ComposerOptions } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
 import { useVoiceInput } from '@/features/agent/hooks/use-voice-input';
 import { appendComposerText } from '@/features/agent/lib/voice-transcript';
+import {
+  MAX_IMAGE_ATTACHMENTS,
+  fileToAttachment,
+  filesFromDataTransfer,
+  imageAttachErrorMessage,
+} from '@/features/agent/lib/image-attachments';
 import { estimateTokens } from '@/lib/estimate-tokens';
+import { OLLAMA_MODELS } from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
@@ -25,6 +43,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -68,21 +87,37 @@ export function ChatInput({
   contextMessages = [],
   streamingContent,
 }: {
-  onSend: (content: string, options: ComposerOptions) => void;
+  onSend: (
+    content: string,
+    options: ComposerOptions,
+    attachments?: MessageAttachment[],
+  ) => void;
   isRunning: boolean;
   queuedMessage: QueuedMessage | null;
   onSendQueuedNow: () => void;
-  onEditQueued: () => string | null;
+  onEditQueued: () => {
+    content: string;
+    attachments?: MessageAttachment[];
+  } | null;
   composerOptions: ComposerOptions;
   onComposerOptionsChange: (options: ComposerOptions) => void;
   /** Stops the active agent run; queue is preserved and runs after stop completes. */
   onStop?: () => void;
   variant?: 'dock' | 'hero';
-  contextMessages?: Array<{ content?: string | null; toolCalls?: unknown }>;
+  contextMessages?: Array<{
+    content?: string | null;
+    toolCalls?: unknown;
+    attachments?: MessageAttachment[];
+  }>;
   streamingContent?: string | null;
 }) {
   const [input, setInput] = useState('');
+  const [pendingAttachments, setPendingAttachments] = useState<
+    MessageAttachment[]
+  >([]);
+  const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const composerOptionsRef = useRef(composerOptions);
   const onComposerOptionsChangeRef = useRef(onComposerOptionsChange);
   composerOptionsRef.current = composerOptions;
@@ -102,12 +137,69 @@ export function ChatInput({
     ta.style.height = `${Math.min(ta.scrollHeight, variant === 'hero' ? 200 : 160)}px`;
   }, [input, variant]);
 
+  const modelConfig = useOllamaModelConfig(composerOptions.model);
+
+  const modelSupportsVision =
+    modelConfig?.supportsVision ??
+    OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.vision ??
+    false;
+
+  const addFiles = useCallback(
+    async (files: File[]) => {
+      if (voiceLocked || files.length === 0) return;
+      let count = pendingAttachments.length;
+      const next: MessageAttachment[] = [];
+      for (const file of files) {
+        if (count >= MAX_IMAGE_ATTACHMENTS) {
+          toast.error(imageAttachErrorMessage('too_many'));
+          break;
+        }
+        const result = await fileToAttachment(file, count);
+        if (!result.ok) {
+          toast.error(imageAttachErrorMessage(result.error));
+          continue;
+        }
+        next.push(result.attachment);
+        count += 1;
+      }
+      if (next.length > 0) {
+        setPendingAttachments((prev) => [...prev, ...next]);
+      }
+    },
+    [pendingAttachments.length, voiceLocked],
+  );
+
+  const removeAttachment = useCallback(
+    (id: string) => {
+      if (voiceLocked) return;
+      setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
+    },
+    [voiceLocked],
+  );
+
   const handleSend = useCallback(() => {
-    if (voiceLocked || !input.trim()) return;
+    if (voiceLocked) return;
     const content = input.trim();
+    if (!content && pendingAttachments.length === 0) return;
+
+    if (pendingAttachments.length > 0 && !modelSupportsVision) {
+      toast.error('This model does not support images. Pick a vision model.');
+      return;
+    }
+
+    const attachments =
+      pendingAttachments.length > 0 ? pendingAttachments : undefined;
     setInput('');
-    onSend(content, composerOptions);
-  }, [voiceLocked, input, onSend, composerOptions]);
+    setPendingAttachments([]);
+    onSend(content, composerOptions, attachments);
+  }, [
+    voiceLocked,
+    input,
+    pendingAttachments,
+    modelSupportsVision,
+    onSend,
+    composerOptions,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -123,13 +215,51 @@ export function ChatInput({
     [voiceLocked, handleSend],
   );
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (voiceLocked) return;
+      const files = filesFromDataTransfer(e.clipboardData);
+      if (files.length === 0) return;
+      e.preventDefault();
+      void addFiles(files);
+    },
+    [voiceLocked, addFiles],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (voiceLocked) return;
+      if (![...e.dataTransfer.types].includes('Files')) return;
+      e.preventDefault();
+      setDragOver(true);
+    },
+    [voiceLocked],
+  );
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDragOver(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      setDragOver(false);
+      if (voiceLocked) return;
+      e.preventDefault();
+      const files = filesFromDataTransfer(e.dataTransfer);
+      void addFiles(files);
+    },
+    [voiceLocked, addFiles],
+  );
+
   const handleEditQueued = useCallback(() => {
-    const text = onEditQueued();
-    if (text) setInput(text);
+    const queued = onEditQueued();
+    if (!queued) return;
+    setInput(queued.content);
+    setPendingAttachments(queued.attachments ?? []);
     textareaRef.current?.focus();
   }, [onEditQueued]);
-
-  const modelConfig = useOllamaModelConfig(composerOptions.model);
 
   // When model config loads, pick a valid thinking value for that model.
   useEffect(() => {
@@ -157,15 +287,17 @@ export function ChatInput({
     });
   }, [modelConfig]);
 
-  const usedTokens = estimateTokens(contextMessages, [
-    input,
-    streamingContent,
-    queuedMessage?.content,
-  ]);
+  const usedTokens = estimateTokens(
+    contextMessages,
+    [input, streamingContent, queuedMessage?.content],
+    pendingAttachments.length + (queuedMessage?.attachments?.length ?? 0),
+  );
 
   const isHero = variant === 'hero';
   const hasText = Boolean(input.trim());
-  const showStopButton = isRunning && !hasText && Boolean(onStop);
+  const canSend = hasText || pendingAttachments.length > 0;
+  const showStopButton =
+    isRunning && !hasText && pendingAttachments.length === 0 && Boolean(onStop);
 
   const handlePrimaryAction = useCallback(() => {
     if (showStopButton) {
@@ -224,10 +356,31 @@ export function ChatInput({
                 </Button>
               </CardAction>
             </CardHeader>
-            <CardContent>
-              <p className="line-clamp-2 text-sm text-muted-foreground">
-                {queuedMessage.content}
-              </p>
+            <CardContent className="space-y-2">
+              {queuedMessage.attachments &&
+              queuedMessage.attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {queuedMessage.attachments.map((a) => (
+                    <img
+                      key={a.id}
+                      src={a.dataUrl}
+                      alt={a.name ?? 'Queued attachment'}
+                      className="size-10 rounded-md object-cover ring-1 ring-border/50"
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {queuedMessage.content ? (
+                <p className="line-clamp-2 text-sm text-muted-foreground">
+                  {queuedMessage.content}
+                </p>
+              ) : queuedMessage.attachments?.length ? (
+                <p className="text-sm text-muted-foreground">
+                  {queuedMessage.attachments.length === 1
+                    ? '1 image'
+                    : `${queuedMessage.attachments.length} images`}
+                </p>
+              ) : null}
             </CardContent>
           </Card>
         )}
@@ -236,9 +389,40 @@ export function ChatInput({
           className={cn(
             'gap-0 border border-border/50 bg-card py-0 shadow-none ring-0 focus-within:border-border/70',
             isHero && 'rounded-xl',
+            dragOver && 'border-primary/60 ring-2 ring-primary/20',
           )}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         >
           <CardContent className="p-1.5 sm:p-2">
+            {pendingAttachments.length > 0 ? (
+              <div className="mb-1.5 flex flex-wrap gap-2 px-1 pt-0.5">
+                {pendingAttachments.map((a) => (
+                  <div
+                    key={a.id}
+                    className="group relative size-16 overflow-hidden rounded-md ring-1 ring-border/50"
+                  >
+                    <img
+                      src={a.dataUrl}
+                      alt={a.name ?? 'Attachment'}
+                      className="size-full object-cover"
+                    />
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="secondary"
+                      disabled={voiceLocked}
+                      className="absolute top-0.5 right-0.5 size-5 rounded-full opacity-90 shadow-sm"
+                      aria-label="Remove image"
+                      onClick={() => removeAttachment(a.id)}
+                    >
+                      <X className="size-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <Textarea
               ref={textareaRef}
               value={input}
@@ -247,6 +431,7 @@ export function ChatInput({
                 setInput(e.target.value);
               }}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               readOnly={voiceLocked}
               aria-readonly={voiceLocked}
               placeholder={composerPlaceholder({
@@ -282,6 +467,16 @@ export function ChatInput({
                   <DropdownMenuContent align="start" className="w-52">
                     <DropdownMenuLabel>Composer</DropdownMenuLabel>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={voiceLocked}
+                      onSelect={() => {
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <ImagePlus className="size-4" />
+                      Attach image
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuCheckboxItem
                       checked={composerOptions.streaming}
                       onCheckedChange={(checked) =>
@@ -306,6 +501,20 @@ export function ChatInput({
                     </DropdownMenuCheckboxItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    const list = e.target.files
+                      ? Array.from(e.target.files)
+                      : [];
+                    e.target.value = '';
+                    void addFiles(list);
+                  }}
+                />
                 <ModelPicker
                   value={composerOptions.model}
                   onChange={(model) =>
@@ -371,7 +580,7 @@ export function ChatInput({
                   size="icon-sm"
                   variant={showStopButton ? 'secondary' : 'default'}
                   onClick={handlePrimaryAction}
-                  disabled={!showStopButton && (voiceLocked || !hasText)}
+                  disabled={!showStopButton && (voiceLocked || !canSend)}
                   className={cn(
                     'shrink-0',
                     showStopButton ? 'rounded-md' : 'rounded-full',

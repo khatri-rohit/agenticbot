@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import type { AgentEvent, ChatMessage, Thread } from '@org/agent-models';
+import type { AgentEvent, MessageAttachment, Thread } from '@org/agent-models';
 import { clampChatTitle } from '@/lib/thread-title';
+import { toChatContext } from '../lib/to-chat-context';
 import {
   db,
   getMessages,
@@ -33,6 +34,7 @@ import {
 export type QueuedMessage = {
   content: string;
   options: ComposerOptions;
+  attachments?: MessageAttachment[];
 };
 
 const defaultComposerOptions = (): ComposerOptions => ({
@@ -40,21 +42,6 @@ const defaultComposerOptions = (): ComposerOptions => ({
   webSearch: true,
   model: readStoredComposerModel(),
 });
-
-function toChatContext(
-  messages: Awaited<ReturnType<typeof getMessages>>,
-): ChatMessage[] {
-  return messages.map((m) => {
-    if (m.role === 'user') return { role: 'user', content: m.content };
-    if (m.role === 'tool')
-      return {
-        role: 'tool',
-        tool_call_id: m.toolCallId!,
-        content: m.content,
-      };
-    return { role: 'assistant', content: m.content };
-  });
-}
 
 /**
  * Hook for managing an active agent run.
@@ -159,13 +146,16 @@ export function useAgentRun(threadId: string | null) {
     async (
       content: string,
       options: ComposerOptions,
-      { skipQueue }: { skipQueue?: boolean } = {},
+      {
+        skipQueue,
+        attachments,
+      }: { skipQueue?: boolean; attachments?: MessageAttachment[] } = {},
     ) => {
       if (!threadId) return;
 
       if (chatStateRef.current.activeRun?.status === 'running') {
         if (!skipQueue) {
-          setQueuedMessage({ content, options });
+          setQueuedMessage({ content, options, attachments });
         }
         return;
       }
@@ -176,6 +166,7 @@ export function useAgentRun(threadId: string | null) {
         runId: null,
         role: 'user' as const,
         content,
+        ...(attachments?.length ? { attachments } : {}),
         status: 'complete' as const,
         createdAt: new Date().toISOString(),
       };
@@ -195,7 +186,8 @@ export function useAgentRun(threadId: string | null) {
 
       const isFirstMessage = history.length <= 1;
       if (isFirstMessage) {
-        enqueueTitle(threadId, content)
+        const titleSeed = content.trim() || '(image)';
+        enqueueTitle(threadId, titleSeed)
           .then((jobId) => pollForTitle(jobId, threadId))
           .catch((err) => console.error('Title generation failed:', err));
       }
@@ -229,7 +221,11 @@ export function useAgentRun(threadId: string | null) {
   }, [disconnect, persistInterruptedAssistant]);
 
   const sendMessage = useCallback(
-    async (content: string, options: Partial<ComposerOptions> = {}) => {
+    async (
+      content: string,
+      options: Partial<ComposerOptions> = {},
+      attachments?: MessageAttachment[],
+    ) => {
       const merged: ComposerOptions = {
         streaming: options.streaming ?? composerOptions.streaming,
         webSearch: options.webSearch ?? composerOptions.webSearch,
@@ -238,28 +234,34 @@ export function useAgentRun(threadId: string | null) {
       };
 
       if (chatStateRef.current.activeRun?.status === 'running') {
-        setQueuedMessage({ content, options: merged });
+        setQueuedMessage({ content, options: merged, attachments });
         return;
       }
 
-      await startRunForMessages(content, merged);
+      await startRunForMessages(content, merged, { attachments });
     },
     [composerOptions, startRunForMessages],
   );
 
   const sendQueuedNow = useCallback(async () => {
     if (!queuedMessage) return;
-    const { content, options } = queuedMessage;
+    const { content, options, attachments } = queuedMessage;
     setQueuedMessage(null);
     await interruptActiveRun();
-    await startRunForMessages(content, options, { skipQueue: true });
+    await startRunForMessages(content, options, {
+      skipQueue: true,
+      attachments,
+    });
   }, [queuedMessage, interruptActiveRun, startRunForMessages]);
 
-  const editQueuedMessage = useCallback((): string | null => {
+  const editQueuedMessage = useCallback((): {
+    content: string;
+    attachments?: MessageAttachment[];
+  } | null => {
     if (!queuedMessage) return null;
-    const content = queuedMessage.content;
+    const { content, attachments } = queuedMessage;
     setQueuedMessage(null);
-    return content;
+    return { content, attachments };
   }, [queuedMessage]);
 
   const clearQueuedMessage = useCallback(() => {
@@ -302,21 +304,21 @@ export function useAgentRun(threadId: string | null) {
     async (messageId: string, newContent: string) => {
       if (!threadId) return;
       const trimmed = newContent.trim();
-      if (!trimmed) return;
 
       if (chatStateRef.current.activeRun?.status === 'running') {
         await interruptActiveRun();
       }
 
       const history = await getMessages(threadId);
-      let lastUserId: string | null = null;
+      let lastUser: (typeof history)[number] | null = null;
       for (let i = history.length - 1; i >= 0; i--) {
         if (history[i].role === 'user') {
-          lastUserId = history[i].id;
+          lastUser = history[i];
           break;
         }
       }
-      if (lastUserId !== messageId) return;
+      if (!lastUser || lastUser.id !== messageId) return;
+      if (!trimmed && !(lastUser.attachments?.length ?? 0)) return;
 
       await updateMessageContent(messageId, trimmed);
       await deleteMessagesAfter(threadId, messageId);
@@ -340,9 +342,12 @@ export function useAgentRun(threadId: string | null) {
   useEffect(() => {
     const running = chatState.activeRun?.status === 'running';
     if (wasRunningRef.current && !running && queuedMessage) {
-      const { content, options } = queuedMessage;
+      const { content, options, attachments } = queuedMessage;
       setQueuedMessage(null);
-      void startRunForMessages(content, options, { skipQueue: true });
+      void startRunForMessages(content, options, {
+        skipQueue: true,
+        attachments,
+      });
     }
     wasRunningRef.current = running;
   }, [chatState.activeRun, queuedMessage, startRunForMessages]);

@@ -51,6 +51,20 @@ router.post('/run', async (req: Request, res: Response) => {
 
   const useStreaming = streaming ?? true;
   const useModel = model ?? RESEARCH_MODE.model;
+
+  if (messagesHaveImageParts(messages)) {
+    try {
+      const config = await getOllamaModelConfig(useModel);
+      if (!config.supportsVision) {
+        return res.status(400).json({
+          error: 'Selected model does not support image inputs',
+        });
+      }
+    } catch {
+      // If /api/show is unavailable, let the model provider reject instead.
+    }
+  }
+
   const clientTools = Array.isArray(allowedTools)
     ? allowedTools
     : RESEARCH_MODE.allowedTools;
@@ -226,6 +240,24 @@ router.get('/title/:jobId', async (req: Request, res: Response) => {
   const result = job.returnvalue as { title: string };
   return res.json({ status: 'completed', title: result.title });
 });
+
+function messagesHaveImageParts(messages: unknown[]): boolean {
+  for (const raw of messages) {
+    if (!raw || typeof raw !== 'object') continue;
+    const content = (raw as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (
+        part &&
+        typeof part === 'object' &&
+        (part as { type?: string }).type === 'image_url'
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 async function resolveCallOptions(
   model: string,

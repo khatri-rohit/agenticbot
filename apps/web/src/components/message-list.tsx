@@ -14,6 +14,7 @@ import type {
   ChatState,
   ToolActivity,
 } from '../features/agent/store/chat-store';
+import { railLabelForUserMessage } from '../features/agent/lib/image-attachments';
 import { groupMessageTurns } from '../lib/group-message-turns';
 import { AgentMarkdown } from './agent-markdown';
 import {
@@ -51,7 +52,7 @@ export function MessageList({
   const userAnchors = useMemo(() => {
     return turns.map((t) => ({
       id: t.userMessage.id,
-      label: t.userMessage.content,
+      label: railLabelForUserMessage(t.userMessage),
     }));
   }, [turns]);
 

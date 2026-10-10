@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   ChatMessage,
+  MessageAttachment,
   OllamaModelConfig,
   ThinkingValue,
 } from '@org/agent-models';
@@ -25,6 +26,7 @@ export type PendingMessage = {
   webSearch?: boolean;
   model?: string;
   thinking?: ThinkingValue;
+  attachments?: MessageAttachment[];
 };
 
 /** Stash a message for the chat page to send on mount. */

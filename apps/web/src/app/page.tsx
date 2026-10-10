@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ChatInput } from '../components/chat-input';
 import { ChatShell } from '../components/chat-shell';
 import { createThread } from '../features/agent/store/db';
+import type { MessageAttachment } from '@org/agent-models';
 import {
   stashPendingMessage,
   type ComposerOptions,
@@ -35,7 +36,11 @@ export default function HomePage() {
   );
 
   const handleSend = useCallback(
-    async (content: string, options: ComposerOptions) => {
+    async (
+      content: string,
+      options: ComposerOptions,
+      attachments?: MessageAttachment[],
+    ) => {
       setPendingContent(true);
       const thread = await createThread('New Chat', options.model);
       stashPendingMessage({
@@ -44,6 +49,7 @@ export default function HomePage() {
         webSearch: options.webSearch,
         model: options.model,
         thinking: options.thinking,
+        attachments,
       });
       router.push(`/chat/${thread.id}`);
     },
