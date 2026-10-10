@@ -49,6 +49,75 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
+type ComposerDraft = {
+  content: string;
+  attachments: MessageAttachment[];
+};
+
+function draftStorageKey(scope: string): string {
+  return `agenticbot:composerDraft:${scope}`;
+}
+
+function loadComposerDraft(scope: string): ComposerDraft | null {
+  try {
+    const raw = localStorage.getItem(draftStorageKey(scope));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      content?: unknown;
+      attachments?: unknown;
+    };
+    const content = typeof parsed.content === 'string' ? parsed.content : '';
+    const attachments = Array.isArray(parsed.attachments)
+      ? parsed.attachments.filter(
+          (a): a is MessageAttachment =>
+            !!a &&
+            typeof a === 'object' &&
+            typeof (a as MessageAttachment).id === 'string' &&
+            typeof (a as MessageAttachment).mimeType === 'string' &&
+            typeof (a as MessageAttachment).dataUrl === 'string',
+        )
+      : [];
+    if (!content.trim() && attachments.length === 0) return null;
+    return { content, attachments };
+  } catch {
+    return null;
+  }
+}
+
+function saveComposerDraft(scope: string, draft: ComposerDraft): void {
+  if (!draft.content.trim() && draft.attachments.length === 0) {
+    try {
+      localStorage.removeItem(draftStorageKey(scope));
+    } catch {
+      /* storage blocked */
+    }
+    return;
+  }
+  try {
+    localStorage.setItem(draftStorageKey(scope), JSON.stringify(draft));
+  } catch {
+    // Quota: keep text if images do not fit.
+    if (draft.attachments.length > 0 && draft.content.trim()) {
+      try {
+        localStorage.setItem(
+          draftStorageKey(scope),
+          JSON.stringify({ content: draft.content, attachments: [] }),
+        );
+      } catch {
+        /* storage blocked */
+      }
+    }
+  }
+}
+
+function clearComposerDraft(scope: string): void {
+  try {
+    localStorage.removeItem(draftStorageKey(scope));
+  } catch {
+    /* storage blocked */
+  }
+}
+
 function composerPlaceholder(opts: {
   voiceActive: boolean;
   voiceTranscribing: boolean;
@@ -74,6 +143,8 @@ export function ChatInput({
   variant = 'dock',
   contextMessages = [],
   streamingContent,
+  /** localStorage draft scope — thread id or home key; remount via `key` when it changes. */
+  draftScope,
 }: {
   onSend: (
     content: string,
@@ -98,11 +169,14 @@ export function ChatInput({
     attachments?: MessageAttachment[];
   }>;
   streamingContent?: string | null;
+  draftScope: string;
 }) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(
+    () => loadComposerDraft(draftScope)?.content ?? '',
+  );
   const [pendingAttachments, setPendingAttachments] = useState<
     MessageAttachment[]
-  >([]);
+  >(() => loadComposerDraft(draftScope)?.attachments ?? []);
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -129,6 +203,17 @@ export function ChatInput({
     ta.style.height = 'auto';
     ta.style.height = `${Math.min(ta.scrollHeight, variant === 'hero' ? 200 : 160)}px`;
   }, [input, variant]);
+
+  // Persist draft per thread / home; cleared on send.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      saveComposerDraft(draftScope, {
+        content: input,
+        attachments: pendingAttachments,
+      });
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [draftScope, input, pendingAttachments]);
 
   const modelConfig = useOllamaModelConfig(composerOptions.model);
   const visionOk = modelSupportsVision(
@@ -196,6 +281,7 @@ export function ChatInput({
       pendingAttachments.length > 0 ? pendingAttachments : undefined;
     setInput('');
     setPendingAttachments([]);
+    clearComposerDraft(draftScope);
     onSend(content, composerOptions, attachments);
   }, [
     input,
@@ -206,6 +292,7 @@ export function ChatInput({
     voice.stop,
     onSend,
     composerOptions,
+    draftScope,
   ]);
 
   const handleKeyDown = useCallback(

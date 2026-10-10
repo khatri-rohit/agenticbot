@@ -63,6 +63,8 @@ export default function ChatThreadPage({
       header={<ChatHeader threadId={threadId} />}
       footer={
         <ChatInput
+          key={threadId}
+          draftScope={threadId}
           onSend={sendMessage}
           isRunning={isRunning}
           queuedMessage={queuedMessage}

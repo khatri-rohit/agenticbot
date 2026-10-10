@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { MessageAttachment } from '@org/agent-models';
 import { ChatInput } from '../components/chat-input';
 import { ChatShell } from '../components/chat-shell';
 import {
@@ -16,6 +15,9 @@ import {
   writeStoredComposerModel,
 } from '@/lib/ollama-models';
 
+/** Must match ChatInput draft key for the home composer. */
+const HOME_DRAFT_SCOPE = '__home__';
+
 const defaultOptions: ComposerOptions = {
   streaming: true,
   webSearch: true,
@@ -25,46 +27,10 @@ const defaultOptions: ComposerOptions = {
 export default function HomePage() {
   const router = useRouter();
   const [pendingContent, setPendingContent] = useState(false);
+  /** Remount ChatInput after a failed send so it reloads the restored draft. */
+  const [draftEpoch, setDraftEpoch] = useState(0);
   const [composerOptions, setComposerOptions] =
     useState<ComposerOptions>(defaultOptions);
-
-  const handleComposerOptionsChange = useCallback(
-    (options: ComposerOptions) => {
-      setComposerOptions(options);
-      writeStoredComposerModel(options.model);
-    },
-    [],
-  );
-
-  const handleSend = useCallback(
-    async (
-      content: string,
-      options: ComposerOptions,
-      attachments?: MessageAttachment[],
-    ) => {
-      setPendingContent(true);
-      const thread = await createThread('New Chat', options.model);
-      const stashed = stashPendingMessage({
-        content,
-        streaming: options.streaming,
-        webSearch: options.webSearch,
-        model: options.model,
-        thinking: options.thinking,
-        attachments,
-      });
-      if (!stashed) {
-        await deleteThread(thread.id);
-        setPendingContent(false);
-        toastError(
-          'Could not start the chat with those images. Try fewer or smaller ones.',
-          'Images too large to hand off',
-        );
-        return;
-      }
-      router.push(`/chat/${thread.id}`);
-    },
-    [router],
-  );
 
   return (
     <ChatShell layout="home">
@@ -78,14 +44,53 @@ export default function HomePage() {
           </p>
         </div>
         <ChatInput
+          key={`${HOME_DRAFT_SCOPE}-${draftEpoch}`}
+          draftScope={HOME_DRAFT_SCOPE}
           variant="hero"
-          onSend={handleSend}
+          onSend={async (content, options, attachments) => {
+            setPendingContent(true);
+            const thread = await createThread('New Chat', options.model);
+            const stashed = stashPendingMessage({
+              content,
+              streaming: options.streaming,
+              webSearch: options.webSearch,
+              model: options.model,
+              thinking: options.thinking,
+              attachments,
+            });
+            if (!stashed) {
+              await deleteThread(thread.id);
+              setPendingContent(false);
+              // Composer cleared on send; put draft back for remount + refresh.
+              try {
+                localStorage.setItem(
+                  `agenticbot:composerDraft:${HOME_DRAFT_SCOPE}`,
+                  JSON.stringify({
+                    content,
+                    attachments: attachments ?? [],
+                  }),
+                );
+              } catch {
+                /* quota / private mode */
+              }
+              setDraftEpoch((n) => n + 1);
+              toastError(
+                'Could not start the chat with those images. Try fewer or smaller ones.',
+                'Images too large to hand off',
+              );
+              return;
+            }
+            router.push(`/chat/${thread.id}`);
+          }}
           isRunning={pendingContent}
           queuedMessage={null}
           onSendQueuedNow={() => undefined}
           onEditQueued={() => null}
           composerOptions={composerOptions}
-          onComposerOptionsChange={handleComposerOptionsChange}
+          onComposerOptionsChange={(options) => {
+            setComposerOptions(options);
+            writeStoredComposerModel(options.model);
+          }}
         />
       </div>
     </ChatShell>

@@ -101,7 +101,7 @@ Never use these patterns:
 - Fake depth: "it's not X, it's Y"; rule-of-three padding; trailing -ing clauses that sound deep but add no mechanism ("highlighting...", "ensuring...", "showcasing...")
 - Empty structure: "Challenges", "Future prospects", "Key takeaways" sections with no concrete content
 - Soft non-answers: "there are several considerations", "it depends" without stating on what and what you recommend
-- Cheerleading, hype, emoji, excessive bold, em-dash floods, synonym churn for the same concept
+- Cheerleading, hype, emoji, excessive bold, em-dash floods, and this character '—' or its variations synonym churn for the same concept
 
 Every paragraph must earn its place. If removing it loses no fact, decision, or mechanism, cut it.
 Take a position. Specific beats vague. Mechanism beats vibes.

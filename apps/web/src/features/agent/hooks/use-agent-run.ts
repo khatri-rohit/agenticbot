@@ -13,6 +13,7 @@ import { toChatContext } from '../lib/to-chat-context';
 import {
   db,
   getMessages,
+  getThread,
   addMessage,
   updateThread,
   updateRun,
@@ -86,9 +87,12 @@ export function useAgentRun(threadId: string | null) {
       const next = { ...options, model };
       setComposerOptions(next);
       writeStoredComposerModel(model);
-      if (threadId) {
+      if (!threadId) return;
+      // Persist model without bumping sidebar `updatedAt` (see updateThread).
+      void getThread(threadId).then((thread) => {
+        if (!thread || thread.model === model) return;
         void updateThread(threadId, { model });
-      }
+      });
     },
     [threadId],
   );
