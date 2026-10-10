@@ -2,6 +2,13 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import type { AgentEvent, MessageAttachment, Thread } from '@org/agent-models';
 import { clampChatTitle } from '@/lib/thread-title';
+import { toastError } from '@/hooks/use-toast';
+import {
+  modelSupportsVision,
+  readStoredComposerModel,
+  resolveOllamaModel,
+  writeStoredComposerModel,
+} from '@/lib/ollama-models';
 import { toChatContext } from '../lib/to-chat-context';
 import {
   db,
@@ -25,11 +32,6 @@ import {
   cancelRun,
   type ComposerOptions,
 } from '../api/agent-client';
-import {
-  readStoredComposerModel,
-  resolveOllamaModel,
-  writeStoredComposerModel,
-} from '@/lib/ollama-models';
 
 export type QueuedMessage = {
   content: string;
@@ -152,6 +154,18 @@ export function useAgentRun(threadId: string | null) {
       }: { skipQueue?: boolean; attachments?: MessageAttachment[] } = {},
     ) => {
       if (!threadId) return;
+
+      // Defense in depth: composer also gates; covers queue flush + hero handoff.
+      if (
+        (attachments?.length ?? 0) > 0 &&
+        !modelSupportsVision(options.model)
+      ) {
+        toastError(
+          'This model does not support images. Pick a vision model.',
+          'Vision not supported',
+        );
+        return;
+      }
 
       if (chatStateRef.current.activeRun?.status === 'running') {
         if (!skipQueue) {

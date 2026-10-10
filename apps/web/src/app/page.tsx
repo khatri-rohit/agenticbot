@@ -2,14 +2,15 @@
 
 import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { MessageAttachment } from '@org/agent-models';
 import { ChatInput } from '../components/chat-input';
 import { ChatShell } from '../components/chat-shell';
-import { createThread } from '../features/agent/store/db';
-import type { MessageAttachment } from '@org/agent-models';
 import {
   stashPendingMessage,
   type ComposerOptions,
 } from '../features/agent/api/agent-client';
+import { createThread, deleteThread } from '../features/agent/store/db';
+import { toastError } from '@/hooks/use-toast';
 import {
   readStoredComposerModel,
   writeStoredComposerModel,
@@ -43,7 +44,7 @@ export default function HomePage() {
     ) => {
       setPendingContent(true);
       const thread = await createThread('New Chat', options.model);
-      stashPendingMessage({
+      const stashed = stashPendingMessage({
         content,
         streaming: options.streaming,
         webSearch: options.webSearch,
@@ -51,6 +52,15 @@ export default function HomePage() {
         thinking: options.thinking,
         attachments,
       });
+      if (!stashed) {
+        await deleteThread(thread.id);
+        setPendingContent(false);
+        toastError(
+          'Could not start the chat with those images. Try fewer or smaller ones.',
+          'Images too large to hand off',
+        );
+        return;
+      }
       router.push(`/chat/${thread.id}`);
     },
     [router],

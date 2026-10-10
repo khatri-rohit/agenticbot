@@ -14,7 +14,6 @@ import type {
   ChatState,
   ToolActivity,
 } from '../features/agent/store/chat-store';
-import { railLabelForUserMessage } from '../features/agent/lib/image-attachments';
 import { groupMessageTurns } from '../lib/group-message-turns';
 import { AgentMarkdown } from './agent-markdown';
 import {
@@ -50,10 +49,20 @@ export function MessageList({
   const turns = useMemo(() => groupMessageTurns(messages ?? []), [messages]);
 
   const userAnchors = useMemo(() => {
-    return turns.map((t) => ({
-      id: t.userMessage.id,
-      label: railLabelForUserMessage(t.userMessage),
-    }));
+    return turns.map((turn) => {
+      const trimmed = turn.userMessage.content.trim();
+      const attachmentCount = turn.userMessage.attachments?.length ?? 0;
+      let label = trimmed;
+      if (!label) {
+        label =
+          attachmentCount === 1
+            ? '1 image'
+            : attachmentCount > 1
+              ? `${attachmentCount} images`
+              : 'Message';
+      }
+      return { id: turn.userMessage.id, label };
+    });
   }, [turns]);
 
   const showRail = shouldShowConversationRail(userAnchors.length);

@@ -11,7 +11,6 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import type { MessageAttachment } from '@org/agent-models';
 import type { ComposerOptions } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
@@ -24,8 +23,9 @@ import {
   filesFromDataTransfer,
   imageAttachErrorMessage,
 } from '@/features/agent/lib/image-attachments';
+import { toastError } from '@/hooks/use-toast';
 import { estimateTokens } from '@/lib/estimate-tokens';
-import { OLLAMA_MODELS } from '@/lib/ollama-models';
+import { modelSupportsVision } from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
@@ -138,11 +138,10 @@ export function ChatInput({
   }, [input, variant]);
 
   const modelConfig = useOllamaModelConfig(composerOptions.model);
-
-  const modelSupportsVision =
-    modelConfig?.supportsVision ??
-    OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.vision ??
-    false;
+  const visionOk = modelSupportsVision(
+    composerOptions.model,
+    modelConfig?.supportsVision,
+  );
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -151,12 +150,18 @@ export function ChatInput({
       const next: MessageAttachment[] = [];
       for (const file of files) {
         if (count >= MAX_IMAGE_ATTACHMENTS) {
-          toast.error(imageAttachErrorMessage('too_many'));
+          toastError(
+            imageAttachErrorMessage('too_many'),
+            'Cannot attach image',
+          );
           break;
         }
         const result = await fileToAttachment(file, count);
         if (!result.ok) {
-          toast.error(imageAttachErrorMessage(result.error));
+          toastError(
+            imageAttachErrorMessage(result.error),
+            'Cannot attach image',
+          );
           continue;
         }
         next.push(result.attachment);
@@ -182,8 +187,11 @@ export function ChatInput({
     const content = input.trim();
     if (!content && pendingAttachments.length === 0) return;
 
-    if (pendingAttachments.length > 0 && !modelSupportsVision) {
-      toast.error('This model does not support images. Pick a vision model.');
+    if (pendingAttachments.length > 0 && !visionOk) {
+      toastError(
+        'This model does not support images. Pick a vision model.',
+        'Vision not supported',
+      );
       return;
     }
 
@@ -196,7 +204,7 @@ export function ChatInput({
     voiceLocked,
     input,
     pendingAttachments,
-    modelSupportsVision,
+    visionOk,
     onSend,
     composerOptions,
   ]);
@@ -360,11 +368,11 @@ export function ChatInput({
               {queuedMessage.attachments &&
               queuedMessage.attachments.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {queuedMessage.attachments.map((a) => (
+                  {queuedMessage.attachments.map((attachment) => (
                     <img
-                      key={a.id}
-                      src={a.dataUrl}
-                      alt={a.name ?? 'Queued attachment'}
+                      key={attachment.id}
+                      src={attachment.dataUrl}
+                      alt={attachment.name ?? 'Queued attachment'}
                       className="size-10 rounded-md object-cover ring-1 ring-border/50"
                     />
                   ))}
@@ -396,16 +404,17 @@ export function ChatInput({
           onDrop={handleDrop}
         >
           <CardContent className="p-1.5 sm:p-2">
+            {/* Pending vision previews — above the textarea, clear before send. */}
             {pendingAttachments.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap gap-2 px-1 pt-0.5">
-                {pendingAttachments.map((a) => (
+                {pendingAttachments.map((attachment) => (
                   <div
-                    key={a.id}
+                    key={attachment.id}
                     className="group relative size-16 overflow-hidden rounded-md ring-1 ring-border/50"
                   >
                     <img
-                      src={a.dataUrl}
-                      alt={a.name ?? 'Attachment'}
+                      src={attachment.dataUrl}
+                      alt={attachment.name ?? 'Attachment'}
                       className="size-full object-cover"
                     />
                     <Button
@@ -415,7 +424,7 @@ export function ChatInput({
                       disabled={voiceLocked}
                       className="absolute top-0.5 right-0.5 size-5 rounded-full opacity-90 shadow-sm"
                       aria-label="Remove image"
-                      onClick={() => removeAttachment(a.id)}
+                      onClick={() => removeAttachment(attachment.id)}
                     >
                       <X className="size-3" />
                     </Button>

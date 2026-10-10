@@ -102,11 +102,11 @@ export function UserMessage({
             >
               {message.attachments && message.attachments.length > 0 ? (
                 <div className="mb-2 flex flex-wrap justify-end gap-1.5 px-1">
-                  {message.attachments.map((a) => (
+                  {message.attachments.map((attachment) => (
                     <img
-                      key={a.id}
-                      src={a.dataUrl}
-                      alt={a.name ?? 'Attachment'}
+                      key={attachment.id}
+                      src={attachment.dataUrl}
+                      alt={attachment.name ?? 'Attachment'}
                       className="size-14 rounded-md object-cover ring-1 ring-border/40"
                     />
                   ))}
@@ -189,19 +189,22 @@ export function UserMessage({
                   'type-user rounded-lg border border-border/25 bg-secondary/90 px-3.5 py-2 text-foreground/95',
                 )}
               >
+                {/* Vision attachments sit above the prompt so history scrolls with context. */}
                 {message.attachments && message.attachments.length > 0 ? (
                   <div className="mb-2 flex flex-wrap justify-end gap-1.5">
-                    {message.attachments.map((a) => (
+                    {message.attachments.map((attachment) => (
                       <button
-                        key={a.id}
+                        key={attachment.id}
                         type="button"
                         className="block size-20 overflow-hidden rounded-md ring-1 ring-border/40 transition hover:ring-border"
-                        aria-label={a.name ?? 'Open attached image'}
-                        onClick={() => window.open(a.dataUrl, '_blank')}
+                        aria-label={attachment.name ?? 'Open attached image'}
+                        onClick={() =>
+                          window.open(attachment.dataUrl, '_blank')
+                        }
                       >
                         <img
-                          src={a.dataUrl}
-                          alt={a.name ?? 'Attachment'}
+                          src={attachment.dataUrl}
+                          alt={attachment.name ?? 'Attachment'}
                           className="size-full object-cover"
                         />
                       </button>

@@ -57,7 +57,7 @@ router.post('/run', async (req: Request, res: Response) => {
       const config = await getOllamaModelConfig(useModel);
       if (!config.supportsVision) {
         return res.status(400).json({
-          error: 'Selected model does not support image inputs',
+          error: 'This model does not support images. Pick a vision model.',
         });
       }
     } catch {
@@ -241,10 +241,11 @@ router.get('/title/:jobId', async (req: Request, res: Response) => {
   return res.json({ status: 'completed', title: result.title });
 });
 
+/** True when any user message content array includes an image_url part. */
 function messagesHaveImageParts(messages: unknown[]): boolean {
-  for (const raw of messages) {
-    if (!raw || typeof raw !== 'object') continue;
-    const content = (raw as { content?: unknown }).content;
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    const content = (message as { content?: unknown }).content;
     if (!Array.isArray(content)) continue;
     for (const part of content) {
       if (

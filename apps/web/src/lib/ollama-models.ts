@@ -346,6 +346,18 @@ export function getOllamaModel(id: string): OllamaModel | undefined {
   return MODEL_BY_ID.get(id);
 }
 
+/**
+ * Prefer live Ollama /api/show when present; otherwise the catalog
+ * `vision` flag so the composer can gate before config loads.
+ */
+export function modelSupportsVision(
+  modelId: string,
+  liveSupportsVision?: boolean | null,
+): boolean {
+  if (typeof liveSupportsVision === 'boolean') return liveSupportsVision;
+  return getOllamaModel(modelId)?.vision ?? false;
+}
+
 export function resolveOllamaModel(id: string): string {
   return MODEL_BY_ID.has(id) ? id : DEFAULT_OLLAMA_MODEL;
 }

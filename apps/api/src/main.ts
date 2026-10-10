@@ -20,7 +20,7 @@ const voiceSttProvider = (process.env.VOICE_STT_PROVIDER ?? 'browser')
 const app = express();
 const productsService = new ProductsService();
 
-// Middleware
+// Vision runs send base64 data URLs in JSON — default 100kb is too small.
 app.use(express.json({ limit: '25mb' }));
 
 // CORS configuration for React app

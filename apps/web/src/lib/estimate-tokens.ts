@@ -1,8 +1,12 @@
 import type { MessageAttachment } from '@org/agent-models';
-import { ESTIMATED_TOKENS_PER_IMAGE } from '@/features/agent/lib/image-attachments';
 
-/** Rough context meter: ~4 chars per token. Not a real tokenizer. */
+/** Rough stand-in when the real vision tokenizer is unknown. */
+const ESTIMATED_TOKENS_PER_IMAGE = 1000;
 
+/**
+ * Rough context meter: ~4 chars per token, plus a fixed per-image
+ * estimate so vision attachments do not look "free" in the UI.
+ */
 export function estimateTokens(
   messages: Array<{
     content?: string | null;
@@ -12,18 +16,21 @@ export function estimateTokens(
   extras: Array<string | null | undefined> = [],
   pendingAttachments = 0,
 ): number {
-  let n = 0;
-  for (const m of messages) {
-    n += Math.ceil((m.content?.length ?? 0) / 4);
-    if (m.toolCalls) n += Math.ceil(JSON.stringify(m.toolCalls).length / 4);
-    n += (m.attachments?.length ?? 0) * ESTIMATED_TOKENS_PER_IMAGE;
-    n += 4;
+  let tokenEstimate = 0;
+  for (const message of messages) {
+    tokenEstimate += Math.ceil((message.content?.length ?? 0) / 4);
+    if (message.toolCalls) {
+      tokenEstimate += Math.ceil(JSON.stringify(message.toolCalls).length / 4);
+    }
+    tokenEstimate +=
+      (message.attachments?.length ?? 0) * ESTIMATED_TOKENS_PER_IMAGE;
+    tokenEstimate += 4;
   }
   for (const extra of extras) {
-    if (extra) n += Math.ceil(extra.length / 4);
+    if (extra) tokenEstimate += Math.ceil(extra.length / 4);
   }
-  n += pendingAttachments * ESTIMATED_TOKENS_PER_IMAGE;
-  return n;
+  tokenEstimate += pendingAttachments * ESTIMATED_TOKENS_PER_IMAGE;
+  return tokenEstimate;
 }
 
 export function formatTokenCount(n: number): string {

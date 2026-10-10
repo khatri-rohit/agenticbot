@@ -29,9 +29,17 @@ export type PendingMessage = {
   attachments?: MessageAttachment[];
 };
 
-/** Stash a message for the chat page to send on mount. */
-export function stashPendingMessage(msg: PendingMessage): void {
-  sessionStorage.setItem(PENDING_MSG_KEY, JSON.stringify(msg));
+/**
+ * Stash a message for the chat page to send on mount.
+ * Returns false when sessionStorage rejects the payload (quota / private mode).
+ */
+export function stashPendingMessage(msg: PendingMessage): boolean {
+  try {
+    sessionStorage.setItem(PENDING_MSG_KEY, JSON.stringify(msg));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Read and clear the stashed message. Returns null if none. */
