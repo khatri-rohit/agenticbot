@@ -1,11 +1,14 @@
 'use client';
 
-import { Palette, Settings } from 'lucide-react';
+import { useState } from 'react';
+import { Palette, Settings, UserRound } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
+import { UserProfileDialog } from '@/components/user-profile-dialog';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -29,6 +32,7 @@ export function SidebarSettings({
   collapsed?: boolean;
 }) {
   const { themeId, setThemeId, presets } = useTheme();
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const menuButton = (
     <Button
@@ -48,69 +52,86 @@ export function SidebarSettings({
   );
 
   return (
-    <DropdownMenu>
-      {collapsed ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>{menuButton}</DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="right">Settings</TooltipContent>
-        </Tooltip>
-      ) : (
-        <DropdownMenuTrigger asChild>{menuButton}</DropdownMenuTrigger>
-      )}
-      <DropdownMenuContent
-        align="start"
-        side={collapsed ? 'right' : 'top'}
-        sideOffset={collapsed ? 8 : 4}
-        className="w-56"
-      >
-        <DropdownMenuLabel>Preferences</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="gap-2">
-            <Palette className="size-4 opacity-80" />
-            Theme
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="max-h-[min(70vh,24rem)] w-64 overflow-y-auto">
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Color scheme
-            </DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={themeId}
-              onValueChange={(value) => setThemeId(value as ThemeId)}
+    <>
+      <DropdownMenu>
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>{menuButton}</DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="right">Settings</TooltipContent>
+          </Tooltip>
+        ) : (
+          <DropdownMenuTrigger asChild>{menuButton}</DropdownMenuTrigger>
+        )}
+        <DropdownMenuContent
+          align="start"
+          side={collapsed ? 'right' : 'top'}
+          sideOffset={collapsed ? 8 : 6}
+          collisionPadding={12}
+          className="w-56"
+        >
+          <DropdownMenuLabel>Preferences</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="gap-2"
+            onSelect={() => {
+              setTimeout(() => setProfileOpen(true), 0);
+            }}
+          >
+            <UserRound className="size-4 opacity-80" />
+            Profile
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="gap-2">
+              <Palette className="size-4 opacity-80" />
+              Theme
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent
+              sideOffset={8}
+              className="max-h-[min(70vh,24rem)] w-64 overflow-y-auto"
             >
-              {presets.map((preset) => (
-                <DropdownMenuRadioItem
-                  key={preset.id}
-                  value={preset.id}
-                  className="items-start gap-2 py-2"
-                >
-                  <span
-                    className="mt-0.5 flex size-4 shrink-0 overflow-hidden rounded-sm ring-1 ring-border/60"
-                    aria-hidden
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Color scheme
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={themeId}
+                onValueChange={(value) => setThemeId(value as ThemeId)}
+              >
+                {presets.map((preset) => (
+                  <DropdownMenuRadioItem
+                    key={preset.id}
+                    value={preset.id}
+                    className="items-start gap-2 py-2"
                   >
                     <span
-                      className="h-full w-1/2"
-                      style={{ background: preset.swatch.bg }}
-                    />
-                    <span
-                      className="h-full w-1/2"
-                      style={{ background: preset.swatch.accent }}
-                    />
-                  </span>
-                  <span className="flex min-w-0 flex-col gap-0.5">
-                    <span className="leading-none">{preset.label}</span>
-                    <span className="text-[11px] leading-snug text-muted-foreground">
-                      {preset.description}
+                      className="mt-0.5 flex size-4 shrink-0 overflow-hidden rounded-sm ring-1 ring-border/60"
+                      aria-hidden
+                    >
+                      <span
+                        className="h-full w-1/2"
+                        style={{ background: preset.swatch.bg }}
+                      />
+                      <span
+                        className="h-full w-1/2"
+                        style={{ background: preset.swatch.accent }}
+                      />
                     </span>
-                  </span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-      </DropdownMenuContent>
-    </DropdownMenu>
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="leading-none">{preset.label}</span>
+                      <span className="text-[11px] leading-snug text-muted-foreground">
+                        {preset.description}
+                      </span>
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
+    </>
   );
 }

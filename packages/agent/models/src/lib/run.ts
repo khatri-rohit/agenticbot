@@ -1,4 +1,5 @@
 import type { PendingToolCall } from './message.js';
+import type { ThinkingValue } from './ollama-model.js';
 
 /**
  * The execution instance of one user request and everything the agent
@@ -49,3 +50,15 @@ export type ChatMessage =
       tool_calls?: PendingToolCall[];
     }
   | { role: 'tool'; tool_call_id: string; content: string };
+
+/** POST /api/agent/run body (server is stateless; client sends full thread). */
+export type StartRunRequest = {
+  threadId: string;
+  messages: ChatMessage[];
+  streaming?: boolean;
+  model?: string;
+  allowedTools?: string[];
+  thinking?: ThinkingValue;
+  /** Frozen profile facts from client settings; injected into system prompt. */
+  userPersona?: string;
+};

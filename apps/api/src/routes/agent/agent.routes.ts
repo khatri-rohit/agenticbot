@@ -1,38 +1,39 @@
 import { Router, type Request, type Response } from 'express';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type { StartRunRequest, ThinkingValue } from '@org/agent-models';
 import {
   RunManager,
   createToolRegistry,
   ALL_TOOLS,
-  getContext,
+  buildSystemPrompt,
   createInvokeModelCall,
   createStreamModelCall,
   RESEARCH_MODE,
   getOllamaModelConfig,
   resolveReasoningEffort,
-  type ThinkingValue,
 } from '@org/agent-core';
 import { titleQueue, type TitleJobData } from '../../queue/title-queue';
 
 const router = Router();
 const runManager = new RunManager();
 
+/** Cap profile text at the API trust boundary (UI mirrors this). */
+const USER_PERSONA_MAX_CHARS = 2000;
+
 /**
  * POST /api/agent/run
- * Start a new agent run.
- *
- * Body: {
- *   threadId: string;
- *   messages: ChatMessage[];     // full context (server is stateless)
- *   streaming?: boolean;          // default: true
- *   model?: string;               // default: RESEARCH_MODE.model
- *   thinking?: boolean | string;  // from model /api/show values
- * }
- *
- * Returns: { runId: string }
+ * Start a new agent run. Body: StartRunRequest. Returns: { runId: string }
  */
 router.post('/run', async (req: Request, res: Response) => {
-  const { threadId, messages, streaming, model, allowedTools, thinking } =
-    req.body;
+  const {
+    threadId,
+    messages,
+    streaming,
+    model,
+    allowedTools,
+    thinking,
+    userPersona,
+  } = req.body as StartRunRequest;
 
   if (!threadId) {
     return res.status(400).json({ error: 'threadId is required' });
@@ -73,17 +74,17 @@ router.post('/run', async (req: Request, res: Response) => {
   ];
   const tools = createToolRegistry(ALL_TOOLS, toolAllowList);
 
-  // Build the OpenAI-format messages from the client's ChatMessage[]
-  const openaiMessages = messages as any[];
-
-  // Ensure system prompt is present
-  const hasSystem = openaiMessages.some((m) => m.role === 'system');
-  if (!hasSystem) {
-    openaiMessages.unshift({
-      role: 'system',
-      content: getContext('', tools)[0].content,
-    });
-  }
+  // System prompt is server-owned; strip any client system message.
+  const persona =
+    typeof userPersona === 'string'
+      ? userPersona.trim().slice(0, USER_PERSONA_MAX_CHARS)
+      : '';
+  const openaiMessages: ChatCompletionMessageParam[] = [
+    { role: 'system', content: buildSystemPrompt(tools, persona) },
+    ...(messages as ChatCompletionMessageParam[]).filter(
+      (message) => message.role !== 'system',
+    ),
+  ];
 
   const callOptions = await resolveCallOptions(useModel, thinking);
   const modelCall = useStreaming

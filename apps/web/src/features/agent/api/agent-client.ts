@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   MessageAttachment,
   OllamaModelConfig,
+  StartRunRequest,
   ThinkingValue,
 } from '@org/agent-models';
 
@@ -62,21 +63,23 @@ export async function startRun(
     model?: string;
     webSearch?: boolean;
     thinking?: ThinkingValue;
+    userPersona?: string;
   } = {},
 ): Promise<string> {
-  const allowedTools = options.webSearch === false ? [] : ['web_search'];
+  const body: StartRunRequest = {
+    threadId,
+    messages,
+    streaming: options.streaming ?? true,
+    model: options.model,
+    allowedTools: options.webSearch === false ? [] : ['web_search'],
+    thinking: options.thinking,
+    userPersona: options.userPersona,
+  };
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      threadId,
-      messages,
-      streaming: options.streaming ?? true,
-      model: options.model,
-      allowedTools,
-      thinking: options.thinking,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {

@@ -41,6 +41,7 @@ export type {
   ModelTurn,
   ChatMessage,
   ChatContentPart,
+  StartRunRequest,
 } from './lib/run.js';
 
 export type { ModeName, ModeConfig } from './lib/mode.js';

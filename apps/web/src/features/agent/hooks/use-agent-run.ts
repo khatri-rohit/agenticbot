@@ -9,6 +9,7 @@ import {
   resolveOllamaModel,
   writeStoredComposerModel,
 } from '@/lib/ollama-models';
+import { getUserPersona } from '@/lib/user-persona';
 import { toChatContext } from '../lib/to-chat-context';
 import {
   db,
@@ -198,6 +199,7 @@ export function useAgentRun(threadId: string | null) {
         webSearch: options.webSearch,
         model: resolveOllamaModel(options.model),
         thinking: options.thinking,
+        userPersona: getUserPersona(),
       });
 
       setChatState(initialChatState());
@@ -312,6 +314,7 @@ export function useAgentRun(threadId: string | null) {
       webSearch: composerOptions.webSearch,
       model: resolveOllamaModel(composerOptions.model),
       thinking: composerOptions.thinking,
+      userPersona: getUserPersona(),
     });
 
     setChatState(initialChatState());
@@ -349,6 +352,7 @@ export function useAgentRun(threadId: string | null) {
         webSearch: composerOptions.webSearch,
         model: resolveOllamaModel(composerOptions.model),
         thinking: composerOptions.thinking,
+        userPersona: getUserPersona(),
       });
 
       setChatState(initialChatState());

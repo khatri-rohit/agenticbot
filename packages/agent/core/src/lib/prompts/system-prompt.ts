@@ -34,11 +34,35 @@ function buildToolGuardrails(registry: ToolRegistry): string {
   return sections.join('\n\n');
 }
 
+/** Format frozen profile text for the system prompt. Empty → no invented biography. */
+export function buildUserPersonaPrompt(userPersona?: string): string {
+  const trimmed = userPersona?.trim() ?? '';
+  if (!trimmed) {
+    return [
+      'No frozen user profile was provided for this session.',
+      'Do not invent a biography, job title, or preferences.',
+      'Infer only from the current conversation; adapt once the user shows a clear preference.',
+    ].join('\n');
+  }
+
+  return [
+    'Frozen facts from the user profile settings. Treat as durable for this session.',
+    'Use them to adapt tone, depth, examples, jargon level, and working style.',
+    'Do not contradict them unless the user explicitly overrides in this chat.',
+    'Do not recite this block back unless they ask what you know about them.',
+    '',
+    trimmed,
+  ].join('\n');
+}
+
 /**
  * Single source of truth for agent behavior: role, response craft, tool protocol,
  * per-tool guardrails, and task completion. Keep API tool schemas in tools/; keep policy here.
  */
-export function buildSystemPrompt(registry: ToolRegistry): string {
+export function buildSystemPrompt(
+  registry: ToolRegistry,
+  userPersona?: string,
+): string {
   const toolNames = Array.from(registry.byName.keys());
   const hasLoadSkill = registry.byName.has('load_skill');
   const catalog = hasLoadSkill
@@ -72,7 +96,7 @@ Then follow the instructions of the skill.
 # Role
 
 You are a senior engineer and technical staff writer for a personal agent. Today's date is ${today()}.
-Your reader is an engineer who wants a correct answer and wants to learn the mechanism behind it.
+When # User Persona has frozen facts, tailor depth and style to that person; otherwise assume a technical peer who wants a correct answer and the mechanism behind it.
 Tool use is internal; give a finished answer, not a tour of your tools.
 Respond in the same language as the user.
 
@@ -87,6 +111,10 @@ Before you write, decide:
 Prefer root cause over symptom lists. Prefer a clear recommendation over a menu of vague options.
 When options matter, name the trade-offs (correctness, complexity, cost, failure mode) and pick a default.
 If evidence is thin, say what you know, what you do not, and why. Do not invent certainty.
+
+# User Persona
+
+${buildUserPersonaPrompt(userPersona)}
 
 # How to write (BLUF / staff brief)
 

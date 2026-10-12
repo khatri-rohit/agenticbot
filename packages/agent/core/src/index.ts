@@ -72,4 +72,7 @@ export type {
 } from './lib/run/types';
 
 // Prompts
-export { buildSystemPrompt } from './lib/prompts/system-prompt';
+export {
+  buildSystemPrompt,
+  buildUserPersonaPrompt,
+} from './lib/prompts/system-prompt';
