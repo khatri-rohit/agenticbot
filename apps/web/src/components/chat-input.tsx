@@ -24,7 +24,7 @@ import {
 } from '@/features/agent/lib/image-attachments';
 import { toastError } from '@/hooks/use-toast';
 import { estimateTokens } from '@/lib/estimate-tokens';
-import { modelSupportsVision } from '@/lib/ollama-models';
+import { modelSupportsVision, OLLAMA_MODELS } from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
@@ -216,6 +216,10 @@ export function ChatInput({
   }, [draftScope, input, pendingAttachments]);
 
   const modelConfig = useOllamaModelConfig(composerOptions.model);
+  const contextLimit =
+    modelConfig?.contextLength ??
+    OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.contextLength ??
+    null;
   const visionOk = modelSupportsVision(
     composerOptions.model,
     modelConfig?.supportsVision,
@@ -631,10 +635,7 @@ export function ChatInput({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
-                <ContextUsage
-                  used={usedTokens}
-                  limit={modelConfig?.contextLength ?? null}
-                />
+                <ContextUsage used={usedTokens} limit={contextLimit} />
                 {voice.enabled ? (
                   <Button
                     type="button"

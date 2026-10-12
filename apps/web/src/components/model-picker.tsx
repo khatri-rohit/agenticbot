@@ -73,12 +73,6 @@ export function ModelPicker({
     return groupModels(filtered);
   }, [query]);
 
-  const handleSelect = (id: string) => {
-    onChange(id);
-    setOpen(false);
-    setQuery('');
-  };
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -133,7 +127,11 @@ export function ModelPicker({
                       'flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent',
                       m.id === modelId && 'bg-accent/60',
                     )}
-                    onClick={() => handleSelect(m.id)}
+                    onClick={() => {
+                      onChange(m.id);
+                      setOpen(false);
+                      setQuery('');
+                    }}
                   >
                     <span className="flex min-w-0 flex-1 items-start gap-2">
                       <Check
@@ -154,7 +152,17 @@ export function ModelPicker({
                         ) : null}
                       </span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-1">
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {m.contextLength != null ? (
+                        <span
+                          className="text-[10px] font-medium tabular-nums text-muted-foreground"
+                          title={`${m.contextLength.toLocaleString()} token context`}
+                        >
+                          {m.contextLength >= 1_000_000
+                            ? `${m.contextLength / 1_000_000}M`
+                            : `${m.contextLength / 1_000}K`}
+                        </span>
+                      ) : null}
                       {m.thinking ? (
                         <Brain
                           className="size-3.5 text-muted-foreground"
