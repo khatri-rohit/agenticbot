@@ -1,10 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Palette, Settings, UserRound } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
-import { UserProfileDialog } from '@/components/user-profile-dialog';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,12 +26,19 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import type { ThemeId } from '@/lib/theme-presets';
+import {
+  USER_PERSONA_MAX_CHARS,
+  getUserPersona,
+  setUserPersona,
+} from '@/lib/user-persona';
 import { cn } from '@/lib/utils';
 
 export function SidebarSettings({
@@ -33,6 +48,11 @@ export function SidebarSettings({
 }) {
   const { themeId, setThemeId, presets } = useTheme();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    if (profileOpen) setDraft(getUserPersona());
+  }, [profileOpen]);
 
   const menuButton = (
     <Button
@@ -131,7 +151,53 @@ export function SidebarSettings({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>User profile</DialogTitle>
+            <DialogDescription>
+              Frozen profile facts sent with every chat so the agent can adapt
+              to you. This is not long-term memory yet; edit here to update.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="about-user">About you</Label>
+            <Textarea
+              id="about-user"
+              value={draft}
+              maxLength={USER_PERSONA_MAX_CHARS}
+              rows={10}
+              autoFocus
+              placeholder={
+                'Name: Rohit\nRole: senior engineer / tech lead\nPrefs: concise BLUF answers, show trade-offs\nStack: TypeScript, Nx, NestJS, Next.js'
+              }
+              className="min-h-40 resize-y"
+              onChange={(event) => setDraft(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Saved in this browser. {draft.length}/{USER_PERSONA_MAX_CHARS}
+            </p>
+          </div>
+
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              onClick={() => {
+                setUserPersona(draft);
+                setProfileOpen(false);
+              }}
+            >
+              Save profile
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

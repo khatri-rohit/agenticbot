@@ -1,12 +1,11 @@
 'use client';
 
-// shadcn radix-nova dialog (registry). CLI blocked on bogus `cn` npm dep;
-// cn lives in @/lib/utils here — same as other ui/* components.
 import * as React from 'react';
-import { XIcon } from 'lucide-react';
+import { cn } from 'cn';
 import { Dialog as DialogPrimitive } from 'radix-ui';
+
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { XIcon } from 'lucide-react';
 
 function Dialog({
   ...props
@@ -68,7 +67,7 @@ function DialogContent({
         {...props}
       >
         {children}
-        {showCloseButton ? (
+        {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
               variant="ghost"
@@ -79,7 +78,7 @@ function DialogContent({
               <span className="sr-only">Close</span>
             </Button>
           </DialogPrimitive.Close>
-        ) : null}
+        )}
       </DialogPrimitive.Content>
     </DialogPortal>
   );
@@ -113,11 +112,11 @@ function DialogFooter({
       {...props}
     >
       {children}
-      {showCloseButton ? (
+      {showCloseButton && (
         <DialogPrimitive.Close asChild>
           <Button variant="outline">Close</Button>
         </DialogPrimitive.Close>
-      ) : null}
+      )}
     </div>
   );
 }
