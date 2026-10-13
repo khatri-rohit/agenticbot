@@ -76,3 +76,4 @@ export {
   buildSystemPrompt,
   buildUserPersonaPrompt,
 } from './lib/prompts/system-prompt';
+export { loadAgentIdentity } from './lib/prompts/load-agent-identity';
