@@ -33,8 +33,10 @@ describe('agent.md identity', () => {
     const identity = loadAgentIdentity();
     expect(identity).toContain('# Identity');
     expect(identity).toContain('# Design language');
+    expect(identity).toContain('# Articulation');
     expect(identity).toContain('# Language influence');
     expect(identity).toContain('# Anti-slop');
+    expect(identity).toContain('Shape by turn, not by template');
 
     const prompt = buildSystemPrompt(createToolRegistry([]), 'Prefs: BLUF');
     expect(prompt.startsWith(identity)).toBe(true);
