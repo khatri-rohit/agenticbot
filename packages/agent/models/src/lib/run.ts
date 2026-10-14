@@ -1,4 +1,5 @@
 import type { PendingToolCall } from './message.js';
+import type { ThinkingValue } from './ollama-model.js';
 
 /**
  * The execution instance of one user request and everything the agent
@@ -22,6 +23,13 @@ export interface Run {
   error: string | null;
 }
 
+/** Provider-reported token counts for one model call (when available). */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens?: number;
+}
+
 /**
  * The completed output of one model call (one iteration of the loop),
  * regardless of streaming vs non-streaming transport.
@@ -30,6 +38,7 @@ export interface ModelTurn {
   content: string;
   toolCalls: PendingToolCall[];
   finishReason: string | null;
+  usage?: TokenUsage;
 }
 
 /**
@@ -49,3 +58,16 @@ export type ChatMessage =
       tool_calls?: PendingToolCall[];
     }
   | { role: 'tool'; tool_call_id: string; content: string };
+
+/** POST /api/agent/run body (server is stateless; client sends full thread). */
+export type StartRunRequest = {
+  threadId: string;
+  messages: ChatMessage[];
+  streaming?: boolean;
+  model?: string;
+  /** When false, omit mode-allowed search tools; globals still apply. Default true. */
+  webSearch?: boolean;
+  thinking?: ThinkingValue;
+  /** Frozen profile facts from client settings; injected into system prompt. */
+  userPersona?: string;
+};

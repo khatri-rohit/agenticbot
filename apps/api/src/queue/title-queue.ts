@@ -1,5 +1,5 @@
 import { Queue, Worker } from 'bullmq';
-import { client } from '@org/agent-core';
+import { getClient } from '@org/agent-core';
 import { clampChatTitle } from '@org/agent-models';
 import { redis } from './redis';
 
@@ -36,7 +36,7 @@ User message: """{MESSAGE}"""`;
 async function generateTitle(firstMessage: string): Promise<string> {
   const prompt = TITLE_PROMPT.replace('{MESSAGE}', firstMessage.slice(0, 1000));
 
-  const response = await client.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: TITLE_MODEL,
     stream: false,
     max_tokens: 50,

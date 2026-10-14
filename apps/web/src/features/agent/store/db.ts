@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type { Thread, Message, Run } from '@org/agent-models';
+import { clearContextAnchor } from '../lib/context-anchor';
 
 /**
  * Local-first IndexedDB schema via Dexie.
@@ -74,6 +75,7 @@ export async function deleteThread(id: string): Promise<void> {
     await db.runs.where('threadId').equals(id).delete();
     await db.threads.delete(id);
   });
+  clearContextAnchor(id);
 }
 
 /* ---------- Message operations ---------- */

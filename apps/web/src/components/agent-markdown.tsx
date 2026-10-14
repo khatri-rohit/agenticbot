@@ -27,6 +27,16 @@ const controls = {
 
 const mermaidConfig = { config: { theme: 'dark' as const } };
 
+/** Word-level stagger: readable cadence, catches up if the SSE buffer runs ahead. */
+const STREAM_ANIMATION = {
+  animation: 'fadeIn' as const,
+  duration: 170,
+  easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+  sep: 'word' as const,
+  stagger: 28,
+  maxBacklogMs: 260,
+};
+
 /**
  * Streamdown enables link-safety by default (full-screen confirm modal).
  * Research citations should open normally in a new tab.
@@ -66,6 +76,8 @@ export function AgentMarkdown({
       <Streamdown
         {...shared}
         mode="streaming"
+        animated={STREAM_ANIMATION}
+        caret="circle"
         isAnimating
         parseIncompleteMarkdown
         plugins={codePlugins}

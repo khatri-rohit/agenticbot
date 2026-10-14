@@ -25,7 +25,11 @@ export type RunLoopConfig = {
   threadId?: string;
   model: string;
   streaming: boolean;
+  /** Mode name for run.started (e.g. RESEARCH_MODE.name). */
+  mode: string;
   limits?: Partial<AgentLimits>;
+  /** Heuristic size of the first request envelope (system + tools + messages). */
+  estimatedPromptTokens?: number;
   /** Legacy trace callback (eval harness). Kept for backward compat. */
   trace?: (event: TraceEvent) => void;
   /** If provided, emits AgentEvents for SSE / UI consumers. */

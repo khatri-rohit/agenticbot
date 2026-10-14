@@ -1,38 +1,84 @@
 import { Router, type Request, type Response } from 'express';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type {
+  ChatMessage,
+  StartRunRequest,
+  ThinkingValue,
+} from '@org/agent-models';
 import {
   RunManager,
   createToolRegistry,
   ALL_TOOLS,
-  getContext,
+  buildSystemPrompt,
   createInvokeModelCall,
   createStreamModelCall,
   RESEARCH_MODE,
   getOllamaModelConfig,
   resolveReasoningEffort,
-  type ThinkingValue,
+  estimatePromptTokens,
+  type ToolRegistry,
 } from '@org/agent-core';
 import { titleQueue, type TitleJobData } from '../../queue/title-queue';
 
 const router = Router();
 const runManager = new RunManager();
 
+/** Cap profile text at the API trust boundary (UI mirrors this). */
+const USER_PERSONA_MAX_CHARS = 2000;
+
+type BuildRunContextInput = {
+  messages: ChatMessage[];
+  /** Default true — omit RESEARCH_MODE.allowedTools when false. */
+  webSearch?: boolean;
+  userPersona?: string;
+};
+
+function buildRunContext(input: BuildRunContextInput): {
+  tools: ToolRegistry;
+  openaiMessages: ChatCompletionMessageParam[];
+  estimatedPromptTokens: number;
+} {
+  const toolAllowList = [
+    ...RESEARCH_MODE.globalTools,
+    ...(input.webSearch !== false ? RESEARCH_MODE.allowedTools : []),
+  ];
+  const tools = createToolRegistry(ALL_TOOLS, toolAllowList);
+
+  const persona =
+    typeof input.userPersona === 'string'
+      ? input.userPersona.trim().slice(0, USER_PERSONA_MAX_CHARS)
+      : '';
+  const openaiMessages: ChatCompletionMessageParam[] = [
+    { role: 'system', content: buildSystemPrompt(tools, persona) },
+    ...(input.messages as ChatCompletionMessageParam[]).filter(
+      (message) => message.role !== 'system',
+    ),
+  ];
+
+  return {
+    tools,
+    openaiMessages,
+    estimatedPromptTokens: estimatePromptTokens(
+      openaiMessages,
+      tools.definitions,
+    ),
+  };
+}
+
 /**
  * POST /api/agent/run
- * Start a new agent run.
- *
- * Body: {
- *   threadId: string;
- *   messages: ChatMessage[];     // full context (server is stateless)
- *   streaming?: boolean;          // default: true
- *   model?: string;               // default: RESEARCH_MODE.model
- *   thinking?: boolean | string;  // from model /api/show values
- * }
- *
- * Returns: { runId: string }
+ * Start a new agent run. Body: StartRunRequest. Returns: { runId: string }
  */
 router.post('/run', async (req: Request, res: Response) => {
-  const { threadId, messages, streaming, model, allowedTools, thinking } =
-    req.body;
+  const {
+    threadId,
+    messages,
+    streaming,
+    model,
+    webSearch,
+    thinking,
+    userPersona,
+  } = req.body as StartRunRequest;
 
   if (!threadId) {
     return res.status(400).json({ error: 'threadId is required' });
@@ -65,25 +111,11 @@ router.post('/run', async (req: Request, res: Response) => {
     }
   }
 
-  const clientTools = Array.isArray(allowedTools)
-    ? allowedTools
-    : RESEARCH_MODE.allowedTools;
-  const toolAllowList = [
-    ...new Set([...clientTools, ...RESEARCH_MODE.globalTools]),
-  ];
-  const tools = createToolRegistry(ALL_TOOLS, toolAllowList);
-
-  // Build the OpenAI-format messages from the client's ChatMessage[]
-  const openaiMessages = messages as any[];
-
-  // Ensure system prompt is present
-  const hasSystem = openaiMessages.some((m) => m.role === 'system');
-  if (!hasSystem) {
-    openaiMessages.unshift({
-      role: 'system',
-      content: getContext('', tools)[0].content,
-    });
-  }
+  const { tools, openaiMessages, estimatedPromptTokens } = buildRunContext({
+    messages,
+    webSearch,
+    userPersona,
+  });
 
   const callOptions = await resolveCallOptions(useModel, thinking);
   const modelCall = useStreaming
@@ -98,9 +130,49 @@ router.post('/run', async (req: Request, res: Response) => {
     tools,
     modelCall,
     limits: RESEARCH_MODE.limits,
+    mode: RESEARCH_MODE.name,
+    estimatedPromptTokens,
   });
 
   return res.json({ runId });
+});
+
+/**
+ * POST /api/agent/context/estimate
+ * Heuristic size of the next request envelope (same system + tools as /run).
+ */
+router.post('/context/estimate', async (req: Request, res: Response) => {
+  const {
+    messages,
+    model,
+    webSearch,
+    userPersona,
+  } = req.body as Partial<StartRunRequest> & { messages?: ChatMessage[] };
+
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array is required' });
+  }
+
+  const useModel = model ?? RESEARCH_MODE.model;
+  const { estimatedPromptTokens } = buildRunContext({
+    messages,
+    webSearch,
+    userPersona,
+  });
+
+  let contextLength: number | null = null;
+  try {
+    const config = await getOllamaModelConfig(useModel);
+    contextLength = config.contextLength;
+  } catch {
+    // Limit optional; client can fall back to static catalog.
+  }
+
+  return res.json({
+    estimatedPromptTokens,
+    contextLength,
+    source: 'estimate' as const,
+  });
 });
 
 /**

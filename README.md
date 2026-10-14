@@ -241,18 +241,15 @@ Enable API logging around agent routes and watch SSE in browser devtools (Networ
 ```
 agenticbot/
 ├── apps/
-│   ├── api/          # Express — agent, voice, products demo
+│   ├── api/          # Express — agent, voice
 │   ├── web/          # Next.js chat UI
 │   ├── agent/        # CLI harness
-│   ├── shop/         # Legacy Nx shop demo (optional)
 │   └── *-e2e/
 ├── packages/
-│   ├── agent/
-│   │   ├── core/     # @org/agent-core — loop, tools, model
-│   │   └── models/   # @org/agent-models — types, RESEARCH_MODE
-│   ├── api/products/ # Products API lib (demo)
-│   ├── shop/         # Shop demo libs
-│   └── shared/
+│   └── agent/
+│       ├── core/     # @org/agent-core — loop, tools, model
+│       └── models/   # @org/agent-models — types, RESEARCH_MODE
+
 ├── docker/           # Compose docs
 ├── docker-compose.yml
 ├── .cursor/skills/   # Nx workspace skills for agents
@@ -280,16 +277,3 @@ System prompt (`system-prompt.ts`) instructs: answer from stable knowledge witho
 - [Ollama web search & fetch](https://docs.ollama.com/capabilities/web-search)
 - [Nx documentation](https://nx.dev/docs)
 - [Docker stack (Redis, Speaches)](./docker/README.md)
-
----
-
-## Legacy Nx shop demo
-
-This repo still contains the original **shop** + **products API** sample (`apps/shop`, `@org/api-products`). It is independent of the agent harness. To run the shop demo:
-
-```bash
-npx nx run @org/shop:serve
-npx nx run @org/api:serve
-```
-
-For agent work, focus on `@org/web`, `@org/api` agent routes, and `@org/agent-core`.

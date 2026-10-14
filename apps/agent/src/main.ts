@@ -1,5 +1,6 @@
 import 'dotenv/config';
 
+import type { AgentEvent } from '@org/agent-models';
 import {
   runLoop,
   invokeModelTurn,
@@ -8,7 +9,6 @@ import {
   createToolRegistry,
   ALL_TOOLS,
   consoleTrace,
-  type AgentEvent,
   type ModelCallFn,
   RESEARCH_MODE,
 } from '@org/agent-core';
@@ -38,6 +38,7 @@ async function main() {
     const result = await runLoop(modelCall, messages, tools, {
       model: MODEL,
       streaming: STREAMING,
+      mode: RESEARCH_MODE.name,
       limits: RESEARCH_MODE.limits,
       trace: consoleTrace,
       emit: (event) => {

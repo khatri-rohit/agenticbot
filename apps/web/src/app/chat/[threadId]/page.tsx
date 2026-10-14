@@ -65,6 +65,7 @@ export default function ChatThreadPage({
         <ChatInput
           key={threadId}
           draftScope={threadId}
+          threadId={threadId}
           onSend={sendMessage}
           isRunning={isRunning}
           queuedMessage={queuedMessage}
@@ -74,7 +75,11 @@ export default function ChatThreadPage({
           onComposerOptionsChange={setComposerOptions}
           onStop={() => void stopGeneration()}
           contextMessages={messages ?? []}
+          occupiedTokens={chatState.activeRun?.occupiedTokens}
+          occupiedCoversStream={chatState.activeRun?.occupiedCoversStream}
+          estimatedPromptTokens={chatState.activeRun?.estimatedPromptTokens}
           streamingContent={chatState.activeRun?.streamingMessage?.content}
+          runModel={chatState.activeRun?.model}
         />
       }
     >

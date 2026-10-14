@@ -11,9 +11,10 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import type { MessageAttachment } from '@org/agent-models';
+import type { Message, MessageAttachment } from '@org/agent-models';
 import type { ComposerOptions } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
+import { useContextMeter } from '@/features/agent/hooks/use-context-meter';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
 import { useVoiceInput } from '@/features/agent/hooks/use-voice-input';
 import {
@@ -23,7 +24,6 @@ import {
   imageAttachErrorMessage,
 } from '@/features/agent/lib/image-attachments';
 import { toastError } from '@/hooks/use-toast';
-import { estimateTokens } from '@/lib/estimate-tokens';
 import { modelSupportsVision, OLLAMA_MODELS } from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
@@ -141,8 +141,13 @@ export function ChatInput({
   onComposerOptionsChange,
   onStop,
   variant = 'dock',
+  threadId,
   contextMessages = [],
+  occupiedTokens,
+  occupiedCoversStream,
+  estimatedPromptTokens,
   streamingContent,
+  runModel,
   /** localStorage draft scope — thread id or home key; remount via `key` when it changes. */
   draftScope,
 }: {
@@ -163,12 +168,13 @@ export function ChatInput({
   /** Stops the active agent run; queue is preserved and runs after stop completes. */
   onStop?: () => void;
   variant?: 'dock' | 'hero';
-  contextMessages?: Array<{
-    content?: string | null;
-    toolCalls?: unknown;
-    attachments?: MessageAttachment[];
-  }>;
+  threadId?: string;
+  contextMessages?: Message[];
+  occupiedTokens?: number;
+  occupiedCoversStream?: boolean;
+  estimatedPromptTokens?: number;
   streamingContent?: string | null;
+  runModel?: string;
   draftScope: string;
 }) {
   const [input, setInput] = useState(
@@ -224,6 +230,21 @@ export function ChatInput({
     composerOptions.model,
     modelConfig?.supportsVision,
   );
+  const contextMeter = useContextMeter({
+    threadId,
+    messages: contextMessages,
+    draft: input,
+    pendingAttachments,
+    queuedContent: queuedMessage?.content,
+    queuedAttachments: queuedMessage?.attachments,
+    composerOptions,
+    contextLimit,
+    streamingContent,
+    liveOccupiedTokens: occupiedTokens,
+    occupiedCoversStream,
+    liveEstimatedPromptTokens: estimatedPromptTokens,
+    liveRunModel: runModel,
+  });
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -387,12 +408,6 @@ export function ChatInput({
       thinking: modelConfig.thinking.default ?? allowed[0],
     });
   }, [modelConfig]);
-
-  const usedTokens = estimateTokens(
-    contextMessages,
-    [input, streamingContent, queuedMessage?.content],
-    pendingAttachments.length + (queuedMessage?.attachments?.length ?? 0),
-  );
 
   const isHero = variant === 'hero';
   const hasText = Boolean(input.trim());
@@ -635,7 +650,12 @@ export function ChatInput({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
-                <ContextUsage used={usedTokens} limit={contextLimit} />
+                <ContextUsage
+                  used={contextMeter.used}
+                  limit={contextMeter.limit}
+                  source={contextMeter.source}
+                  approximate={contextMeter.approximate}
+                />
                 {voice.enabled ? (
                   <Button
                     type="button"

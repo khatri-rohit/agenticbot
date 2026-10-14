@@ -7,6 +7,8 @@ description: 'Link workspace packages in monorepos (npm, yarn, pnpm, bun). USE W
 
 Add dependencies between packages in a monorepo. All package managers support workspaces but with different syntax.
 
+**This workspace uses npm** (`package-lock.json`, `workspaces` in root `package.json`). Link packages with `npm install`; run Nx with `npx nx` or `nx`. Do not add `pnpm-lock.yaml` or `pnpm-workspace.yaml`.
+
 ## Detect Package Manager
 
 Check whether there's a `packageManager` field in the root-level `package.json`.

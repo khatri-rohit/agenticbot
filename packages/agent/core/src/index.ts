@@ -1,37 +1,16 @@
 // @org/agent-core — host-agnostic agent runtime.
 // Pure library: no HTTP, no DOM, no database.
+// Domain types live in @org/agent-models — import them from there.
 
-// Re-export domain types so consumers can import everything from @org/agent-core.
-export type {
-  AgentEvent,
-  AgentEventType,
-  AgentEventWithoutSeq,
-  Thread,
-  Message,
-  MessageRole,
-  MessageStatus,
-  PendingToolCall,
-  Run,
-  RunStatus,
-  ChatMessage,
-  ModeName,
-  ModeConfig,
-  ThinkingValue,
-  ThinkingMode,
-  OllamaThinkingConfig,
-  OllamaModelConfig,
-} from '@org/agent-models';
 export { RESEARCH_MODE } from '@org/agent-models';
 
 // Model layer
-export { client } from './lib/model/client';
+export { getClient } from './lib/model/client';
 export { invokeModelTurn } from './lib/model/invoke';
 export { streamModelTurn } from './lib/model/stream';
-export type {
-  ModelTurn,
-  OnTextDelta,
-  ModelCallOptions,
-} from './lib/model/types';
+export { estimatePromptTokens } from './lib/model/estimate-prompt-tokens';
+export { parseTokenUsage } from './lib/model/parse-usage';
+export type { OnTextDelta, ModelCallOptions } from './lib/model/types';
 export {
   getOllamaModelConfig,
   resolveReasoningEffort,
@@ -72,4 +51,8 @@ export type {
 } from './lib/run/types';
 
 // Prompts
-export { buildSystemPrompt } from './lib/prompts/system-prompt';
+export {
+  buildSystemPrompt,
+  buildUserPersonaPrompt,
+} from './lib/prompts/system-prompt';
+export { loadAgentIdentity } from './lib/prompts/load-agent-identity';

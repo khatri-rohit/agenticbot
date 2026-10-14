@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   MessageAttachment,
   OllamaModelConfig,
+  StartRunRequest,
   ThinkingValue,
 } from '@org/agent-models';
 
@@ -62,21 +63,23 @@ export async function startRun(
     model?: string;
     webSearch?: boolean;
     thinking?: ThinkingValue;
+    userPersona?: string;
   } = {},
 ): Promise<string> {
-  const allowedTools = options.webSearch === false ? [] : ['web_search'];
+  const body: StartRunRequest = {
+    threadId,
+    messages,
+    streaming: options.streaming ?? true,
+    model: options.model,
+    webSearch: options.webSearch,
+    thinking: options.thinking,
+    userPersona: options.userPersona,
+  };
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      threadId,
-      messages,
-      streaming: options.streaming ?? true,
-      model: options.model,
-      allowedTools,
-      thinking: options.thinking,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -176,6 +179,38 @@ export async function fetchOllamaModelConfig(
     throw new Error(body.error ?? `Failed to load model config: ${res.status}`);
   }
   return res.json() as Promise<OllamaModelConfig>;
+}
+
+export type ContextEstimateResponse = {
+  estimatedPromptTokens: number;
+  contextLength: number | null;
+  source: 'estimate';
+};
+
+/** Server-side heuristic for the next request envelope (system + tools + messages). */
+export async function fetchContextEstimate(options: {
+  messages: ChatMessage[];
+  model?: string;
+  webSearch?: boolean;
+  userPersona?: string;
+}): Promise<ContextEstimateResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: options.messages,
+      model: options.model,
+      webSearch: options.webSearch,
+      userPersona: options.userPersona,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      body.error ?? `Failed to estimate context: ${res.status}`,
+    );
+  }
+  return res.json() as Promise<ContextEstimateResponse>;
 }
 
 export async function cancelRun(runId: string): Promise<void> {
