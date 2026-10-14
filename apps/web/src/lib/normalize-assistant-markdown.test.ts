@@ -25,4 +25,9 @@ describe('normalizeAssistantMarkdown', () => {
     const input = 'ReAct is **thought** then action.';
     expect(normalizeAssistantMarkdown(input)).toBe(input);
   });
+
+  it('does not promote a standalone bold sentence', () => {
+    const input = '**This is a caveat.**';
+    expect(normalizeAssistantMarkdown(input)).toBe(input);
+  });
 });

@@ -1,9 +1,10 @@
+import {
+  CHARS_PER_TOKEN,
+  ESTIMATED_TOKENS_PER_IMAGE,
+} from '@org/agent-models';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 
-/** Rough stand-in when the real vision tokenizer is unknown. */
-const ESTIMATED_TOKENS_PER_IMAGE = 1000;
-const CHARS_PER_TOKEN = 4;
 const ROLE_OVERHEAD = 4;
 const TOOLS_BLOCK_OVERHEAD = 4;
 

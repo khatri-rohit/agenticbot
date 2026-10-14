@@ -45,6 +45,12 @@ export type {
   StartRunRequest,
 } from './lib/run.js';
 
+export {
+  CHARS_PER_TOKEN,
+  ESTIMATED_TOKENS_PER_IMAGE,
+  occupiedFromUsage,
+} from './lib/token-estimate.js';
+
 export type { ModeName, ModeConfig } from './lib/mode.js';
 export { RESEARCH_MODE } from './lib/mode.js';
 

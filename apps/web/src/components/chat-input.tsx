@@ -144,6 +144,7 @@ export function ChatInput({
   threadId,
   contextMessages = [],
   occupiedTokens,
+  occupiedCoversStream,
   estimatedPromptTokens,
   streamingContent,
   runModel,
@@ -170,6 +171,7 @@ export function ChatInput({
   threadId?: string;
   contextMessages?: Message[];
   occupiedTokens?: number;
+  occupiedCoversStream?: boolean;
   estimatedPromptTokens?: number;
   streamingContent?: string | null;
   runModel?: string;
@@ -239,6 +241,7 @@ export function ChatInput({
     contextLimit,
     streamingContent,
     liveOccupiedTokens: occupiedTokens,
+    occupiedCoversStream,
     liveEstimatedPromptTokens: estimatedPromptTokens,
     liveRunModel: runModel,
   });

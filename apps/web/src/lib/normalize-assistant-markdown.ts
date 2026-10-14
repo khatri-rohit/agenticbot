@@ -35,6 +35,7 @@ function promoteStandaloneBoldLines(markdown: string): string {
 
       const title = (match[1] ?? match[2]).trim();
       if (title.length < 2 || title.length > 90) return line;
+      if (/[.!?]$/.test(title)) return line;
       return `### ${title}`;
     })
     .join('\n');

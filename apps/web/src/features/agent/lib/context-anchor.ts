@@ -10,30 +10,18 @@ function storageKey(threadId: string): string {
   return `agenticbot:contextAnchor:${threadId}`;
 }
 
-export function occupiedFromUsage(usage: {
-  promptTokens: number;
-  completionTokens: number;
-}): number {
-  return usage.promptTokens + usage.completionTokens;
-}
-
 export function getContextAnchor(threadId: string): ContextAnchor | null {
   try {
     const raw = localStorage.getItem(storageKey(threadId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as {
       occupiedTokens?: unknown;
-      promptTokens?: unknown;
       model?: unknown;
       measuredAt?: unknown;
     };
-    const occupied =
-      typeof parsed.occupiedTokens === 'number'
-        ? parsed.occupiedTokens
-        : parsed.promptTokens;
     if (
-      typeof occupied !== 'number' ||
-      !Number.isFinite(occupied) ||
+      typeof parsed.occupiedTokens !== 'number' ||
+      !Number.isFinite(parsed.occupiedTokens) ||
       typeof parsed.model !== 'string' ||
       !parsed.model ||
       typeof parsed.measuredAt !== 'string'
@@ -41,7 +29,7 @@ export function getContextAnchor(threadId: string): ContextAnchor | null {
       return null;
     }
     return {
-      occupiedTokens: occupied,
+      occupiedTokens: parsed.occupiedTokens,
       model: parsed.model,
       measuredAt: parsed.measuredAt,
     };

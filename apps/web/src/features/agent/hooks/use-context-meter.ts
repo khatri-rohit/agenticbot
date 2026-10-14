@@ -56,6 +56,8 @@ export function useContextMeter(options: {
   composerOptions: ComposerOptions;
   contextLimit: number | null;
   liveOccupiedTokens?: number;
+  /** Last measured usage already includes the current streaming text. */
+  occupiedCoversStream?: boolean;
   liveEstimatedPromptTokens?: number;
   liveRunModel?: string;
 }): ContextMeter {
@@ -70,6 +72,7 @@ export function useContextMeter(options: {
     composerOptions,
     contextLimit,
     liveOccupiedTokens,
+    occupiedCoversStream = false,
     liveEstimatedPromptTokens,
     liveRunModel,
   } = options;
@@ -95,11 +98,13 @@ export function useContextMeter(options: {
       ? persisted.occupiedTokens
       : null;
 
-  const extraTokens = estimateDraftTokens(
-    [draft, queuedContent, streamingContent].filter(Boolean).join('\n') || null,
+  const composerTokens = estimateDraftTokens(
+    [draft, queuedContent].filter(Boolean).join('\n') || null,
     pendingAttachments.length + queuedAttachments.length,
   );
-  const streamingTokens = estimateDraftTokens(streamingContent);
+  const streamingTokens = occupiedCoversStream
+    ? 0
+    : estimateDraftTokens(streamingContent);
 
   const hasAnchor = liveOccupied != null || persistedOccupied != null;
 
@@ -152,17 +157,18 @@ export function useContextMeter(options: {
     null;
 
   if (liveOccupied != null) {
+    const extra = composerTokens + streamingTokens;
     return {
-      used: liveOccupied + extraTokens,
+      used: liveOccupied + extra,
       limit,
       source: 'measured',
-      approximate: extraTokens > 0,
+      approximate: extra > 0,
     };
   }
 
   if (liveEstimated != null) {
     return {
-      used: liveEstimated + extraTokens,
+      used: liveEstimated + composerTokens + streamingTokens,
       limit,
       source: 'estimate',
       approximate: true,
@@ -171,10 +177,10 @@ export function useContextMeter(options: {
 
   if (persistedOccupied != null) {
     return {
-      used: persistedOccupied + extraTokens,
+      used: persistedOccupied + composerTokens,
       limit,
       source: 'measured',
-      approximate: extraTokens > 0,
+      approximate: composerTokens > 0,
     };
   }
 
@@ -188,7 +194,7 @@ export function useContextMeter(options: {
   }
 
   return {
-    used: extraTokens,
+    used: composerTokens + streamingTokens,
     limit,
     source: 'estimate',
     approximate: true,

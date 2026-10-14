@@ -97,7 +97,8 @@ export function ConversationRail({
             </ul>
           ) : (
             <div className={cn('flex flex-col py-2')}>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((anchor, index) => (
+              {/* Always show 10 turns even if there are less than 10 for better UX */}
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((_, index) => (
                 <div
                   key={index}
                   className={cn(

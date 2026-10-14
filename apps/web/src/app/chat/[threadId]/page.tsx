@@ -76,6 +76,7 @@ export default function ChatThreadPage({
           onStop={() => void stopGeneration()}
           contextMessages={messages ?? []}
           occupiedTokens={chatState.activeRun?.occupiedTokens}
+          occupiedCoversStream={chatState.activeRun?.occupiedCoversStream}
           estimatedPromptTokens={chatState.activeRun?.estimatedPromptTokens}
           streamingContent={chatState.activeRun?.streamingMessage?.content}
           runModel={chatState.activeRun?.model}

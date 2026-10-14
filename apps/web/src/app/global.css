@@ -155,15 +155,9 @@ body {
   margin-top: 0;
 }
 
-.agent-markdown > :first-child :is(
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6,
-  [data-streamdown^='heading-']
-) {
+.agent-markdown
+  > :first-child
+  :is(h1, h2, h3, h4, h5, h6, [data-streamdown^='heading-']) {
   margin-top: 0;
 }
 
@@ -217,26 +211,9 @@ body {
 }
 
 .agent-markdown
-  :is(
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    h6,
-    [data-streamdown^='heading-']
-  )
+  :is(h1, h2, h3, h4, h5, h6, [data-streamdown^='heading-'])
   + :is(p, [data-streamdown='paragraph']) {
   margin-top: 0;
-}
-
-.agent-markdown [data-streamdown='paragraph']:has(> strong:only-child) {
-  margin-top: 1.65em;
-  margin-bottom: 0.45em;
-  color: var(--foreground);
-  font-size: var(--text-body);
-  line-height: 1.4;
-  letter-spacing: -0.014em;
 }
 
 .agent-markdown hr,

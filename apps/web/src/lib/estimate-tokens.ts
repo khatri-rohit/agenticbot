@@ -3,9 +3,10 @@
  * server-side (system + tools + history) via POST /api/agent/context/estimate.
  */
 
-/** Rough stand-in when the real vision tokenizer is unknown. */
-const ESTIMATED_TOKENS_PER_IMAGE = 1000;
-const CHARS_PER_TOKEN = 4;
+import {
+  CHARS_PER_TOKEN,
+  ESTIMATED_TOKENS_PER_IMAGE,
+} from '@org/agent-models';
 
 export function estimateDraftTokens(
   text: string | null | undefined,

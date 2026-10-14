@@ -1,5 +1,9 @@
-import type { AgentEvent, Message } from '@org/agent-models';
-import { occupiedFromUsage, setContextAnchor } from '../lib/context-anchor';
+import {
+  occupiedFromUsage,
+  type AgentEvent,
+  type Message,
+} from '@org/agent-models';
+import { setContextAnchor } from '../lib/context-anchor';
 import { addMessage, updateRun, addRun } from './db';
 
 /**
@@ -24,6 +28,8 @@ export type ChatRunState = {
   estimatedPromptTokens?: number;
   /** Latest prompt+completion from turn.completed in this run. */
   occupiedTokens?: number;
+  /** True when occupiedTokens already includes the current streamingMessage. */
+  occupiedCoversStream?: boolean;
 };
 
 export type ChatState = {
@@ -90,6 +96,7 @@ export async function reduceChatState(
         activeRun: {
           ...state.activeRun,
           streamingMessage: { id: event.messageId, content: '' },
+          occupiedCoversStream: false,
           lastSeq,
         },
       };
@@ -220,7 +227,14 @@ export async function reduceChatState(
         activeRun: {
           ...state.activeRun,
           lastSeq,
-          ...(occupied !== undefined ? { occupiedTokens: occupied } : {}),
+          ...(occupied !== undefined
+            ? {
+                occupiedTokens: occupied,
+                occupiedCoversStream: Boolean(
+                  state.activeRun.streamingMessage?.content,
+                ),
+              }
+            : {}),
         },
       };
     }
