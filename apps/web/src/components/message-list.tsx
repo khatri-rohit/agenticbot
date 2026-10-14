@@ -96,7 +96,7 @@ export function MessageList({
   }, [messages?.length, enableStickToBottom]);
 
   useEffect(() => {
-    followContent(streaming?.content ? 'auto' : 'smooth');
+    followContent('auto');
   }, [messages, streaming?.content, toolActivity.length, followContent]);
 
   const hasMessages = (messages?.length ?? 0) > 0;
@@ -148,7 +148,7 @@ export function MessageList({
       )}
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto scroll-smooth scrollbar-gutter-stable"
+        className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-stable [overflow-anchor:none]"
       >
         <div className="mx-auto w-full max-w-3xl px-4 py-7 sm:px-6">
           {!hasMessages && !isRunning && !streaming?.content && (
@@ -163,7 +163,7 @@ export function MessageList({
               return (
                 <section
                   key={turn.userMessage.id}
-                  className="flex flex-col gap-3"
+                  className="flex flex-col gap-6"
                   aria-label="Conversation turn"
                 >
                   <UserMessage
