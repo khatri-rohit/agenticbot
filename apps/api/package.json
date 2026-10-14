@@ -137,8 +137,6 @@
   "dependencies": {
     "@org/agent-core": "*",
     "@org/agent-models": "*",
-    "@org/api-products": "*",
-    "@org/models": "*",
     "bullmq": "^6.3.11",
     "express": "^4.21.2",
     "ioredis": "^6.0.0"

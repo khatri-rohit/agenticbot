@@ -70,8 +70,6 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/agent/*",
-    "packages/api/products",
-    "packages/shared/*"
+    "packages/agent/*"
   ]
 }

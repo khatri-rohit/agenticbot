@@ -241,16 +241,15 @@ Enable API logging around agent routes and watch SSE in browser devtools (Networ
 ```
 agenticbot/
 ├── apps/
-│   ├── api/          # Express — agent, voice, products demo
+│   ├── api/          # Express — agent, voice
 │   ├── web/          # Next.js chat UI
 │   ├── agent/        # CLI harness
 │   └── *-e2e/
 ├── packages/
-│   ├── agent/
-│   │   ├── core/     # @org/agent-core — loop, tools, model
-│   │   └── models/   # @org/agent-models — types, RESEARCH_MODE
-│   ├── api/products/ # Products API lib (demo)
-│   └── shared/
+│   └── agent/
+│       ├── core/     # @org/agent-core — loop, tools, model
+│       └── models/   # @org/agent-models — types, RESEARCH_MODE
+
 ├── docker/           # Compose docs
 ├── docker-compose.yml
 ├── .cursor/skills/   # Nx workspace skills for agents

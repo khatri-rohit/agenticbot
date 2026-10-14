@@ -7,15 +7,6 @@
       "path": "./apps/api"
     },
     {
-      "path": "./packages/api/products"
-    },
-    {
-      "path": "./packages/shared/models"
-    },
-    {
-      "path": "./packages/shared/test-utils"
-    },
-    {
       "path": "./apps/web-e2e"
     },
     {

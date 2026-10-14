@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { streamModelTurn } from './stream.js';
-import { client } from './client.js';
+import { getClient } from './client.js';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type { ToolRegistry } from '../tools/type.js';
 
@@ -12,16 +12,20 @@ const emptyTools: ToolRegistry = { definitions: [], byName: new Map() };
 const emptyMessages: ChatCompletionMessageParam[] = [];
 
 /** Patch the client's create method to return a fake async iterable of chunks. */
-function mockStream(chunks: any[]) {
-  const original = client.chat.completions.create;
-  (client.chat.completions as any).create = async (opts: any) => {
+function mockStream(chunks: unknown[]) {
+  if (!process.env.OLLAMA_BASE_URL && !process.env.OLLAMA_API_KEY) {
+    process.env.OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
+  }
+  const openai = getClient();
+  const original = openai.chat.completions.create.bind(openai.chat.completions);
+  openai.chat.completions.create = (async (opts: { stream?: boolean }) => {
     if (!opts.stream) throw new Error('mockStream expects stream:true');
     return (async function* () {
       for (const chunk of chunks) yield chunk;
     })();
-  };
+  }) as typeof openai.chat.completions.create;
   return () => {
-    (client.chat.completions as any).create = original;
+    openai.chat.completions.create = original;
   };
 }
 

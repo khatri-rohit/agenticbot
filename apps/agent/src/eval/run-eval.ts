@@ -40,6 +40,7 @@ async function runScenario(
   const result = await runLoop(invokeModelTurn, messages, tools, {
     model,
     streaming: false,
+    mode: 'research',
     trace: createTraceCollector(stats),
     limits: {
       maxIterations: 8,

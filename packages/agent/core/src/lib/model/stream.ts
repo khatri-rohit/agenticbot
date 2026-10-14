@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 
 import type { PendingToolCall, TokenUsage } from '@org/agent-models';
 
-import { client } from './client';
-import type { ModelCallOptions } from './call-options';
+import { getClient } from './client';
+import type {
+  ModelCallOptions,
+  OllamaChatCompletionCreateParamsStreaming,
+} from './call-options';
 import { parseTokenUsage } from './parse-usage';
 import type { ModelTurn, OnTextDelta } from './types';
 import type { ToolRegistry } from '../tools/type';
@@ -43,9 +47,7 @@ export async function streamModelTurn(
   onTextDelta?: OnTextDelta,
   options?: ModelCallOptions,
 ): Promise<ModelTurn> {
-  // Ollama accepts reasoning_effort values beyond OpenAI's ReasoningEffort enum.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const stream: any = await client.chat.completions.create({
+  const params: OllamaChatCompletionCreateParamsStreaming = {
     model,
     messages,
     tools: tools.definitions,
@@ -54,7 +56,12 @@ export async function streamModelTurn(
     ...(options?.reasoningEffort !== undefined
       ? { reasoning_effort: options.reasoningEffort }
       : {}),
-  } as any);
+  };
+
+  // Ollama reasoning_effort is wider than OpenAI ReasoningEffort — cast at SDK boundary.
+  const stream = await getClient().chat.completions.create(
+    params as ChatCompletionCreateParamsStreaming,
+  );
 
   let content = '';
   let finishReason: string | null = null;

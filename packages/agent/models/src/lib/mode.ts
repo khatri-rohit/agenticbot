@@ -9,9 +9,9 @@ export interface ModeConfig {
   name: ModeName;
   model: string;
   temperature: number;
-  /** Tool names allowed in this mode. User-toggleable via client. */
+  /** Mode-optional tools (e.g. web_search); gated by client webSearch flag. */
   allowedTools: string[];
-  /** Always-on native tools. Server includes these regardless of client selection. */
+  /** Always-on tools. Server includes these regardless of webSearch. */
   globalTools: string[];
   limits: {
     maxIterations: number;

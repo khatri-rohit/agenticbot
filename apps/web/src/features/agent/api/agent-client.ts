@@ -71,7 +71,7 @@ export async function startRun(
     messages,
     streaming: options.streaming ?? true,
     model: options.model,
-    allowedTools: options.webSearch === false ? [] : ['web_search'],
+    webSearch: options.webSearch,
     thinking: options.thinking,
     userPersona: options.userPersona,
   };
@@ -200,7 +200,7 @@ export async function fetchContextEstimate(options: {
     body: JSON.stringify({
       messages: options.messages,
       model: options.model,
-      allowedTools: options.webSearch === false ? [] : ['web_search'],
+      webSearch: options.webSearch,
       userPersona: options.userPersona,
     }),
   });

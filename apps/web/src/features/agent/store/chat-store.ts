@@ -36,45 +36,19 @@ export type ChatState = {
   activeRun: ChatRunState | null;
 };
 
-/**
- * Initial empty state.
- */
 export function initialChatState(): ChatState {
   return { activeRun: null };
 }
 
 /**
- * Pure reducer over AgentEvent → ChatState.
- * Also performs side-effects (IndexedDB writes) for durable state.
- *
- * Call this from a React event handler.
+ * Pure AgentEvent → ChatState. Persistence is persistChatEffects.
+ * Updates lastSeq so SSE can reconnect without full replay.
  */
-export async function reduceChatState(
-  state: ChatState,
-  event: AgentEvent,
-  threadId: string,
-): Promise<ChatState> {
-  // Track the last seq for reconnection
+export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
   const lastSeq = Math.max(state.activeRun?.lastSeq ?? 0, event.seq);
 
   switch (event.type) {
     case 'run.started': {
-      // Create the run record in IndexedDB
-      await addRun({
-        id: event.runId,
-        threadId,
-        triggerMessageId: '',
-        status: 'running',
-        iteration: 0,
-        toolCallCount: 0,
-        model: event.model,
-        streaming: event.streaming,
-        mode: event.mode,
-        startedAt: new Date().toISOString(),
-        completedAt: null,
-        error: null,
-      });
-
       return {
         activeRun: {
           runId: event.runId,
@@ -118,20 +92,6 @@ export async function reduceChatState(
 
     case 'assistant.completed': {
       if (!state.activeRun) return state;
-
-      // Persist the final assistant message to IndexedDB
-      const now = new Date().toISOString();
-      const message: Message = {
-        id: event.messageId,
-        threadId,
-        runId: event.runId,
-        role: 'assistant',
-        content: event.content,
-        status: 'complete',
-        createdAt: now,
-      };
-      await addMessage(message);
-
       return {
         activeRun: {
           ...state.activeRun,
@@ -187,28 +147,8 @@ export async function reduceChatState(
       };
     }
 
-    case 'run.completed': {
-      if (!state.activeRun) return state;
-
-      await updateRun(event.runId, {
-        status: 'completed',
-        iteration: event.iterations,
-        toolCallCount: event.toolCalls,
-        completedAt: new Date().toISOString(),
-      });
-
-      return { activeRun: null };
-    }
-
+    case 'run.completed':
     case 'run.error': {
-      if (!state.activeRun) return state;
-
-      await updateRun(event.runId, {
-        status: 'error',
-        completedAt: new Date().toISOString(),
-        error: event.error,
-      });
-
       return { activeRun: null };
     }
 
@@ -216,13 +156,6 @@ export async function reduceChatState(
       if (!state.activeRun) return state;
       const usage = event.usage;
       const occupied = usage ? occupiedFromUsage(usage) : undefined;
-      if (occupied !== undefined) {
-        setContextAnchor(threadId, {
-          occupiedTokens: occupied,
-          model: state.activeRun.model,
-          measuredAt: new Date().toISOString(),
-        });
-      }
       return {
         activeRun: {
           ...state.activeRun,
@@ -240,8 +173,7 @@ export async function reduceChatState(
     }
 
     case 'turn.started':
-    case 'limit.hit':
-      // These don't change UI state — just update the cursor
+    case 'limit.hit': {
       if (!state.activeRun) return state;
       return {
         activeRun: {
@@ -249,8 +181,88 @@ export async function reduceChatState(
           lastSeq,
         },
       };
+    }
 
     default:
       return state;
+  }
+}
+
+/**
+ * IndexedDB / localStorage writes for events that mutate durable chat state.
+ * Call after applyChatEvent with the pre-apply state when needed for model.
+ */
+export async function persistChatEffects(
+  prev: ChatState,
+  event: AgentEvent,
+  threadId: string,
+): Promise<void> {
+  switch (event.type) {
+    case 'run.started': {
+      await addRun({
+        id: event.runId,
+        threadId,
+        triggerMessageId: '',
+        status: 'running',
+        iteration: 0,
+        toolCallCount: 0,
+        model: event.model,
+        streaming: event.streaming,
+        mode: event.mode,
+        startedAt: new Date().toISOString(),
+        completedAt: null,
+        error: null,
+      });
+      return;
+    }
+
+    case 'assistant.completed': {
+      const message: Message = {
+        id: event.messageId,
+        threadId,
+        runId: event.runId,
+        role: 'assistant',
+        content: event.content,
+        status: 'complete',
+        createdAt: new Date().toISOString(),
+      };
+      await addMessage(message);
+      return;
+    }
+
+    case 'run.completed': {
+      await updateRun(event.runId, {
+        status: 'completed',
+        iteration: event.iterations,
+        toolCallCount: event.toolCalls,
+        completedAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    case 'run.error': {
+      await updateRun(event.runId, {
+        status: 'error',
+        completedAt: new Date().toISOString(),
+        error: event.error,
+      });
+      return;
+    }
+
+    case 'turn.completed': {
+      const usage = event.usage;
+      const occupied = usage ? occupiedFromUsage(usage) : undefined;
+      if (occupied !== undefined && prev.activeRun) {
+        setContextAnchor(threadId, {
+          occupiedTokens: occupied,
+          model: prev.activeRun.model,
+          measuredAt: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    default:
+      return;
   }
 }

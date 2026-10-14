@@ -123,12 +123,36 @@ export async function runLoop(
     return { content, usage: turn.usage };
   }
 
+  async function completeAfterLimit(): Promise<RunLoopResult> {
+    const final = await finalizeAnswer();
+    trace({
+      type: 'run_finish',
+      runId,
+      iterations,
+      toolCalls: totalToolCalls,
+    });
+    emitTurnCompleted(iterations, final.usage);
+    emit?.({
+      type: 'run.completed',
+      runId,
+      iterations,
+      toolCalls: totalToolCalls,
+    });
+    return {
+      runId,
+      content: final.content,
+      iterations,
+      toolCalls: totalToolCalls,
+      status: 'completed',
+    };
+  }
+
   trace({ type: 'run_start', runId, model: config.model });
   emit?.({
     type: 'run.started',
     runId,
     threadId,
-    mode: 'research',
+    mode: config.mode,
     streaming: config.streaming,
     model: config.model,
     ...(config.estimatedPromptTokens !== undefined
@@ -203,29 +227,7 @@ export async function runLoop(
               'Skipped: tool call limit reached.',
             );
 
-            const final = await finalizeAnswer();
-
-            trace({
-              type: 'run_finish',
-              runId,
-              iterations,
-              toolCalls: totalToolCalls,
-            });
-            emitTurnCompleted(iterations, final.usage);
-            emit?.({
-              type: 'run.completed',
-              runId,
-              iterations,
-              toolCalls: totalToolCalls,
-            });
-
-            return {
-              runId,
-              content: final.content,
-              iterations,
-              toolCalls: totalToolCalls,
-              status: 'completed',
-            };
+            return completeAfterLimit();
           }
 
           const toolName = toolCall.function.name;
@@ -282,29 +284,7 @@ export async function runLoop(
               'Skipped: tool call limit reached.',
             );
 
-            const final = await finalizeAnswer();
-
-            trace({
-              type: 'run_finish',
-              runId,
-              iterations,
-              toolCalls: totalToolCalls,
-            });
-            emitTurnCompleted(iterations, final.usage);
-            emit?.({
-              type: 'run.completed',
-              runId,
-              iterations,
-              toolCalls: totalToolCalls,
-            });
-
-            return {
-              runId,
-              content: final.content,
-              iterations,
-              toolCalls: totalToolCalls,
-              status: 'completed',
-            };
+            return completeAfterLimit();
           }
 
           trace({
@@ -457,29 +437,7 @@ export async function runLoop(
       reason: `max iterations exceeded (${limits.maxIterations})`,
     });
 
-    const final = await finalizeAnswer();
-
-    trace({
-      type: 'run_finish',
-      runId,
-      iterations,
-      toolCalls: totalToolCalls,
-    });
-    emitTurnCompleted(iterations, final.usage);
-    emit?.({
-      type: 'run.completed',
-      runId,
-      iterations,
-      toolCalls: totalToolCalls,
-    });
-
-    return {
-      runId,
-      content: final.content,
-      iterations,
-      toolCalls: totalToolCalls,
-      status: 'completed',
-    };
+    return completeAfterLimit();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 

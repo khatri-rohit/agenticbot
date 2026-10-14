@@ -22,8 +22,9 @@ import {
   updateMessageContent,
 } from '../store/db';
 import {
+  applyChatEvent,
   initialChatState,
-  reduceChatState,
+  persistChatEffects,
   type ChatState,
 } from '../store/chat-store';
 import {
@@ -128,15 +129,21 @@ export function useAgentRun(threadId: string | null) {
     (runId: string) => {
       if (!threadId) return;
 
-      let currentState = initialChatState();
+      const prior = chatStateRef.current;
+      // Same run: keep UI + lastSeq; new run: start empty.
+      let currentState =
+        prior.activeRun?.runId === runId ? prior : initialChatState();
+      const fromSeq = currentState.activeRun?.lastSeq ?? 0;
       let eventChain = Promise.resolve();
       disconnect();
       unsubscribeRef.current = subscribeRun(
         runId,
-        0,
+        fromSeq,
         (event: AgentEvent) => {
           eventChain = eventChain.then(async () => {
-            const next = await reduceChatState(currentState, event, threadId);
+            const prev = currentState;
+            const next = applyChatEvent(prev, event);
+            await persistChatEffects(prev, event, threadId);
             currentState = next;
             setChatState(next);
           });

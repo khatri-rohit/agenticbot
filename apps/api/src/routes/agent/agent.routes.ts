@@ -28,7 +28,8 @@ const USER_PERSONA_MAX_CHARS = 2000;
 
 type BuildRunContextInput = {
   messages: ChatMessage[];
-  allowedTools?: string[];
+  /** Default true — omit RESEARCH_MODE.allowedTools when false. */
+  webSearch?: boolean;
   userPersona?: string;
 };
 
@@ -37,11 +38,9 @@ function buildRunContext(input: BuildRunContextInput): {
   openaiMessages: ChatCompletionMessageParam[];
   estimatedPromptTokens: number;
 } {
-  const clientTools = Array.isArray(input.allowedTools)
-    ? input.allowedTools
-    : RESEARCH_MODE.allowedTools;
   const toolAllowList = [
-    ...new Set([...clientTools, ...RESEARCH_MODE.globalTools]),
+    ...RESEARCH_MODE.globalTools,
+    ...(input.webSearch !== false ? RESEARCH_MODE.allowedTools : []),
   ];
   const tools = createToolRegistry(ALL_TOOLS, toolAllowList);
 
@@ -76,7 +75,7 @@ router.post('/run', async (req: Request, res: Response) => {
     messages,
     streaming,
     model,
-    allowedTools,
+    webSearch,
     thinking,
     userPersona,
   } = req.body as StartRunRequest;
@@ -114,7 +113,7 @@ router.post('/run', async (req: Request, res: Response) => {
 
   const { tools, openaiMessages, estimatedPromptTokens } = buildRunContext({
     messages,
-    allowedTools,
+    webSearch,
     userPersona,
   });
 
@@ -131,6 +130,7 @@ router.post('/run', async (req: Request, res: Response) => {
     tools,
     modelCall,
     limits: RESEARCH_MODE.limits,
+    mode: RESEARCH_MODE.name,
     estimatedPromptTokens,
   });
 
@@ -145,7 +145,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
   const {
     messages,
     model,
-    allowedTools,
+    webSearch,
     userPersona,
   } = req.body as Partial<StartRunRequest> & { messages?: ChatMessage[] };
 
@@ -156,7 +156,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
   const useModel = model ?? RESEARCH_MODE.model;
   const { estimatedPromptTokens } = buildRunContext({
     messages,
-    allowedTools,
+    webSearch,
     userPersona,
   });
 

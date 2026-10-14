@@ -61,6 +61,7 @@ export class RunManager {
       threadId: opts.threadId,
       model: opts.model,
       streaming: opts.streaming,
+      mode: opts.mode,
       limits: opts.limits,
       estimatedPromptTokens: opts.estimatedPromptTokens,
       emit: (event) => {
