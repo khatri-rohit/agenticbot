@@ -36,9 +36,9 @@ export function ChatShell({
           ref={sidebarRef}
           id="sidebar"
           order={1}
-          defaultSize={20}
+          defaultSize={14}
           minSize={14}
-          maxSize={36}
+          maxSize={30}
           collapsible
           collapsedSize={3}
           onCollapse={() => setSidebarCollapsed(true)}

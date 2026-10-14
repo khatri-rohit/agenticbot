@@ -1,6 +1,10 @@
 import { Router, type Request, type Response } from 'express';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import type { StartRunRequest, ThinkingValue } from '@org/agent-models';
+import type {
+  ChatMessage,
+  StartRunRequest,
+  ThinkingValue,
+} from '@org/agent-models';
 import {
   RunManager,
   createToolRegistry,
@@ -11,6 +15,8 @@ import {
   RESEARCH_MODE,
   getOllamaModelConfig,
   resolveReasoningEffort,
+  estimatePromptTokens,
+  type ToolRegistry,
 } from '@org/agent-core';
 import { titleQueue, type TitleJobData } from '../../queue/title-queue';
 
@@ -19,6 +25,46 @@ const runManager = new RunManager();
 
 /** Cap profile text at the API trust boundary (UI mirrors this). */
 const USER_PERSONA_MAX_CHARS = 2000;
+
+type BuildRunContextInput = {
+  messages: ChatMessage[];
+  allowedTools?: string[];
+  userPersona?: string;
+};
+
+function buildRunContext(input: BuildRunContextInput): {
+  tools: ToolRegistry;
+  openaiMessages: ChatCompletionMessageParam[];
+  estimatedPromptTokens: number;
+} {
+  const clientTools = Array.isArray(input.allowedTools)
+    ? input.allowedTools
+    : RESEARCH_MODE.allowedTools;
+  const toolAllowList = [
+    ...new Set([...clientTools, ...RESEARCH_MODE.globalTools]),
+  ];
+  const tools = createToolRegistry(ALL_TOOLS, toolAllowList);
+
+  const persona =
+    typeof input.userPersona === 'string'
+      ? input.userPersona.trim().slice(0, USER_PERSONA_MAX_CHARS)
+      : '';
+  const openaiMessages: ChatCompletionMessageParam[] = [
+    { role: 'system', content: buildSystemPrompt(tools, persona) },
+    ...(input.messages as ChatCompletionMessageParam[]).filter(
+      (message) => message.role !== 'system',
+    ),
+  ];
+
+  return {
+    tools,
+    openaiMessages,
+    estimatedPromptTokens: estimatePromptTokens(
+      openaiMessages,
+      tools.definitions,
+    ),
+  };
+}
 
 /**
  * POST /api/agent/run
@@ -66,25 +112,11 @@ router.post('/run', async (req: Request, res: Response) => {
     }
   }
 
-  const clientTools = Array.isArray(allowedTools)
-    ? allowedTools
-    : RESEARCH_MODE.allowedTools;
-  const toolAllowList = [
-    ...new Set([...clientTools, ...RESEARCH_MODE.globalTools]),
-  ];
-  const tools = createToolRegistry(ALL_TOOLS, toolAllowList);
-
-  // System prompt is server-owned; strip any client system message.
-  const persona =
-    typeof userPersona === 'string'
-      ? userPersona.trim().slice(0, USER_PERSONA_MAX_CHARS)
-      : '';
-  const openaiMessages: ChatCompletionMessageParam[] = [
-    { role: 'system', content: buildSystemPrompt(tools, persona) },
-    ...(messages as ChatCompletionMessageParam[]).filter(
-      (message) => message.role !== 'system',
-    ),
-  ];
+  const { tools, openaiMessages, estimatedPromptTokens } = buildRunContext({
+    messages,
+    allowedTools,
+    userPersona,
+  });
 
   const callOptions = await resolveCallOptions(useModel, thinking);
   const modelCall = useStreaming
@@ -99,9 +131,48 @@ router.post('/run', async (req: Request, res: Response) => {
     tools,
     modelCall,
     limits: RESEARCH_MODE.limits,
+    estimatedPromptTokens,
   });
 
   return res.json({ runId });
+});
+
+/**
+ * POST /api/agent/context/estimate
+ * Heuristic size of the next request envelope (same system + tools as /run).
+ */
+router.post('/context/estimate', async (req: Request, res: Response) => {
+  const {
+    messages,
+    model,
+    allowedTools,
+    userPersona,
+  } = req.body as Partial<StartRunRequest> & { messages?: ChatMessage[] };
+
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array is required' });
+  }
+
+  const useModel = model ?? RESEARCH_MODE.model;
+  const { estimatedPromptTokens } = buildRunContext({
+    messages,
+    allowedTools,
+    userPersona,
+  });
+
+  let contextLength: number | null = null;
+  try {
+    const config = await getOllamaModelConfig(useModel);
+    contextLength = config.contextLength;
+  } catch {
+    // Limit optional; client can fall back to static catalog.
+  }
+
+  return res.json({
+    estimatedPromptTokens,
+    contextLength,
+    source: 'estimate' as const,
+  });
 });
 
 /**

@@ -39,6 +39,7 @@ export type {
   Run,
   RunStatus,
   ModelTurn,
+  TokenUsage,
   ChatMessage,
   ChatContentPart,
   StartRunRequest,

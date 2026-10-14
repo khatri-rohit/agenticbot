@@ -181,6 +181,38 @@ export async function fetchOllamaModelConfig(
   return res.json() as Promise<OllamaModelConfig>;
 }
 
+export type ContextEstimateResponse = {
+  estimatedPromptTokens: number;
+  contextLength: number | null;
+  source: 'estimate';
+};
+
+/** Server-side heuristic for the next request envelope (system + tools + messages). */
+export async function fetchContextEstimate(options: {
+  messages: ChatMessage[];
+  model?: string;
+  webSearch?: boolean;
+  userPersona?: string;
+}): Promise<ContextEstimateResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: options.messages,
+      model: options.model,
+      allowedTools: options.webSearch === false ? [] : ['web_search'],
+      userPersona: options.userPersona,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      body.error ?? `Failed to estimate context: ${res.status}`,
+    );
+  }
+  return res.json() as Promise<ContextEstimateResponse>;
+}
+
 export async function cancelRun(runId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/agent/run/${runId}/cancel`, {
     method: 'POST',

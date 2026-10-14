@@ -58,7 +58,9 @@ export function ConversationRail({
       <div
         className={cn(
           'pointer-events-auto absolute top-1/2 left-0 -translate-y-1/2 transition-[width,opacity] duration-200 ease-out',
-          hovered ? 'w-52 opacity-100' : 'w-3 opacity-90',
+          hovered
+            ? 'w-52 transition-all duration-400 ease-initial'
+            : 'w-3 transition-all duration-300 ease-out',
         )}
         role="navigation"
         aria-label="Conversation turns"
@@ -82,9 +84,9 @@ export function ConversationRail({
                       TURN_ROW_MIN_H,
                       activeId === anchor.id
                         ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground cursor-pointer',
                     )}
-                    title={anchor.label}
+                    title={anchor.label.slice(0, 100) + '...'}
                   >
                     <span className="line-clamp-1">
                       {truncateLabel(anchor.label)}
@@ -94,24 +96,23 @@ export function ConversationRail({
               ))}
             </ul>
           ) : (
-            <div className={cn('flex flex-col py-2', TURN_GAP_CLASS)}>
-              {anchors.map((anchor) => (
+            <div className={cn('flex flex-col py-2')}>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((anchor, index) => (
                 <div
-                  key={anchor.id}
+                  key={index}
                   className={cn(
                     'flex w-full items-center justify-end',
-                    TURN_ROW_MIN_H,
+                    'min-h-3',
                   )}
                 >
                   <button
                     type="button"
-                    onClick={() => scrollToAnchor(anchor.id)}
                     className="shrink-0 rounded-[1px] bg-muted-foreground/40 transition-colors hover:bg-foreground/70"
                     style={{
                       width: MARKER_WIDTH_PX,
                       height: MARKER_HEIGHT_PX,
                     }}
-                    aria-label={truncateLabel(anchor.label, 120)}
+                    aria-label={truncateLabel(index.toString(), 120)}
                   />
                 </div>
               ))}

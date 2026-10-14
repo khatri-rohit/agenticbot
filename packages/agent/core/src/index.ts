@@ -13,6 +13,8 @@ export type {
   PendingToolCall,
   Run,
   RunStatus,
+  ModelTurn,
+  TokenUsage,
   ChatMessage,
   ModeName,
   ModeConfig,
@@ -27,11 +29,9 @@ export { RESEARCH_MODE } from '@org/agent-models';
 export { client } from './lib/model/client';
 export { invokeModelTurn } from './lib/model/invoke';
 export { streamModelTurn } from './lib/model/stream';
-export type {
-  ModelTurn,
-  OnTextDelta,
-  ModelCallOptions,
-} from './lib/model/types';
+export { estimatePromptTokens } from './lib/model/estimate-prompt-tokens';
+export { parseTokenUsage } from './lib/model/parse-usage';
+export type { OnTextDelta, ModelCallOptions } from './lib/model/types';
 export {
   getOllamaModelConfig,
   resolveReasoningEffort,

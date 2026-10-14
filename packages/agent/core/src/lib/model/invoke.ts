@@ -3,6 +3,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import { client } from './client';
 import type { ModelCallOptions } from './call-options';
+import { parseTokenUsage } from './parse-usage';
 import type { ModelTurn } from './types';
 import type { ToolRegistry } from '../tools/type';
 
@@ -38,10 +39,12 @@ export async function invokeModelTurn(
   }
 
   const message = choice.message;
+  const usage = parseTokenUsage(response.usage);
 
   return {
     content: message.content ?? '',
     toolCalls: (message.tool_calls ?? []) as PendingToolCall[],
     finishReason: choice.finish_reason,
+    ...(usage ? { usage } : {}),
   };
 }

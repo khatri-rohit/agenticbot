@@ -25,4 +25,6 @@ export type StartRunOptions = {
   tools: ToolRegistry;
   modelCall: ModelCallFn;
   limits?: AgentLimits;
+  /** Heuristic size of the first request envelope (system + tools + messages). */
+  estimatedPromptTokens?: number;
 };

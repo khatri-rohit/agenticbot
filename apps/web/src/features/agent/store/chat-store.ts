@@ -1,10 +1,10 @@
 import type { AgentEvent, Message } from '@org/agent-models';
+import { occupiedFromUsage, setContextAnchor } from '../lib/context-anchor';
 import { addMessage, updateRun, addRun } from './db';
 
 /**
  * Ephemeral UI state derived from the event stream.
- * This is NOT durable — it lives in React state and is rebuilt from
- * IndexedDB on page reload (plus SSE reconnection for active runs).
+ * Durable pieces: IndexedDB (messages/runs) and context occupancy in localStorage.
  */
 export type ToolActivity = {
   toolCallId: string;
@@ -16,9 +16,14 @@ export type ToolActivity = {
 export type ChatRunState = {
   runId: string;
   status: 'running' | 'completed' | 'error';
+  model: string;
   streamingMessage: { id: string; content: string } | null;
   toolActivity: ToolActivity[];
   lastSeq: number;
+  /** Heuristic from run.started until provider usage arrives. */
+  estimatedPromptTokens?: number;
+  /** Latest prompt+completion from turn.completed in this run. */
+  occupiedTokens?: number;
 };
 
 export type ChatState = {
@@ -68,9 +73,13 @@ export async function reduceChatState(
         activeRun: {
           runId: event.runId,
           status: 'running',
+          model: event.model,
           streamingMessage: null,
           toolActivity: [],
           lastSeq,
+          ...(event.estimatedPromptTokens !== undefined
+            ? { estimatedPromptTokens: event.estimatedPromptTokens }
+            : {}),
         },
       };
     }
@@ -196,8 +205,27 @@ export async function reduceChatState(
       return { activeRun: null };
     }
 
+    case 'turn.completed': {
+      if (!state.activeRun) return state;
+      const usage = event.usage;
+      const occupied = usage ? occupiedFromUsage(usage) : undefined;
+      if (occupied !== undefined) {
+        setContextAnchor(threadId, {
+          occupiedTokens: occupied,
+          model: state.activeRun.model,
+          measuredAt: new Date().toISOString(),
+        });
+      }
+      return {
+        activeRun: {
+          ...state.activeRun,
+          lastSeq,
+          ...(occupied !== undefined ? { occupiedTokens: occupied } : {}),
+        },
+      };
+    }
+
     case 'turn.started':
-    case 'turn.completed':
     case 'limit.hit':
       // These don't change UI state — just update the cursor
       if (!state.activeRun) return state;

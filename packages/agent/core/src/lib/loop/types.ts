@@ -26,6 +26,8 @@ export type RunLoopConfig = {
   model: string;
   streaming: boolean;
   limits?: Partial<AgentLimits>;
+  /** Heuristic size of the first request envelope (system + tools + messages). */
+  estimatedPromptTokens?: number;
   /** Legacy trace callback (eval harness). Kept for backward compat. */
   trace?: (event: TraceEvent) => void;
   /** If provided, emits AgentEvents for SSE / UI consumers. */

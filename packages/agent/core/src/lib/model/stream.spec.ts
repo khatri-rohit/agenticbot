@@ -233,4 +233,34 @@ describe('streamModelTurn — tool-call accumulation', () => {
       restore();
     }
   });
+
+  it('attaches usage from the final stream chunk when present', async () => {
+    const restore = mockStream([
+      { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
+      {
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 512,
+          completion_tokens: 2,
+          total_tokens: 514,
+        },
+      },
+    ]);
+
+    try {
+      const turn = await streamModelTurn(
+        'test-model',
+        emptyMessages,
+        emptyTools,
+      );
+      expect(turn.content).toBe('Hi');
+      expect(turn.usage).toEqual({
+        promptTokens: 512,
+        completionTokens: 2,
+        totalTokens: 514,
+      });
+    } finally {
+      restore();
+    }
+  });
 });

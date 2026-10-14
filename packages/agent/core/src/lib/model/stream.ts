@@ -4,10 +4,11 @@ import type {
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 
-import type { PendingToolCall } from '@org/agent-models';
+import type { PendingToolCall, TokenUsage } from '@org/agent-models';
 
 import { client } from './client';
 import type { ModelCallOptions } from './call-options';
+import { parseTokenUsage } from './parse-usage';
 import type { ModelTurn, OnTextDelta } from './types';
 import type { ToolRegistry } from '../tools/type';
 
@@ -49,6 +50,7 @@ export async function streamModelTurn(
     messages,
     tools: tools.definitions,
     stream: true,
+    stream_options: { include_usage: true },
     ...(options?.reasoningEffort !== undefined
       ? { reasoning_effort: options.reasoningEffort }
       : {}),
@@ -56,10 +58,16 @@ export async function streamModelTurn(
 
   let content = '';
   let finishReason: string | null = null;
+  let usage: TokenUsage | undefined;
   const toolCalls = new Map<number, AccumulatedToolCall>();
 
   for await (const chunk of stream) {
-    const choice = chunk.choices[0];
+    const chunkUsage = parseTokenUsage(chunk.usage);
+    if (chunkUsage) {
+      usage = chunkUsage;
+    }
+
+    const choice = chunk.choices?.[0];
     if (!choice) {
       continue;
     }
@@ -67,13 +75,13 @@ export async function streamModelTurn(
     const delta = choice.delta;
 
     // Text delta — emit immediately.
-    if (delta.content) {
+    if (delta?.content) {
       content += delta.content;
       onTextDelta?.(delta.content);
     }
 
     // Tool-call deltas — accumulate by index.
-    if (delta.tool_calls) {
+    if (delta?.tool_calls) {
       for (const tc of delta.tool_calls) {
         const index = tc.index;
 
@@ -127,5 +135,6 @@ export async function streamModelTurn(
     content,
     toolCalls: reconstructedToolCalls as PendingToolCall[],
     finishReason,
+    ...(usage ? { usage } : {}),
   };
 }

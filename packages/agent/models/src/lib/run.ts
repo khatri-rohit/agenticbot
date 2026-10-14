@@ -23,6 +23,13 @@ export interface Run {
   error: string | null;
 }
 
+/** Provider-reported token counts for one model call (when available). */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens?: number;
+}
+
 /**
  * The completed output of one model call (one iteration of the loop),
  * regardless of streaming vs non-streaming transport.
@@ -31,6 +38,7 @@ export interface ModelTurn {
   content: string;
   toolCalls: PendingToolCall[];
   finishReason: string | null;
+  usage?: TokenUsage;
 }
 
 /**

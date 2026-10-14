@@ -62,6 +62,7 @@ export class RunManager {
       model: opts.model,
       streaming: opts.streaming,
       limits: opts.limits,
+      estimatedPromptTokens: opts.estimatedPromptTokens,
       emit: (event) => {
         if (handle.cancelled) return;
         handle.emitter.emit(event);

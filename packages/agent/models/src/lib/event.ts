@@ -1,3 +1,5 @@
+import type { TokenUsage } from './run.js';
+
 /**
  * AgentEvent — the server's streaming protocol to the client.
  *
@@ -33,6 +35,8 @@ export interface RunStarted {
   mode: string;
   streaming: boolean;
   model: string;
+  /** Heuristic size of the first request envelope (system + tools + messages). */
+  estimatedPromptTokens?: number;
 }
 
 export interface TurnStarted {
@@ -101,6 +105,8 @@ export interface TurnCompleted {
   type: 'turn.completed';
   runId: string;
   iteration: number;
+  /** Provider usage for the model call that finished this iteration. */
+  usage?: TokenUsage;
 }
 
 export interface RunCompleted {
