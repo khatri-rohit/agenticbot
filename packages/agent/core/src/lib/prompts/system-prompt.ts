@@ -77,6 +77,7 @@ export function buildSystemPrompt(
       ? toolNames.map((name) => `- ${name}`).join('\n')
       : '- (none)';
 
+  const hasWebSearch = registry.byName.has('web_search');
   const skillsSection = hasLoadSkill
     ? `
 # Skills
@@ -84,14 +85,16 @@ export function buildSystemPrompt(
 Available skills:
 ${catalog}
 
-These are instruction sets you can load on demand.
-When a skill covers the kind of work you are about to do, call load_skill
-with its name BEFORE starting that work, then follow its instructions.
+Skills are optional instruction packs. Built-in tools like web_search and web_fetch
+work without loading a skill — call them directly when needed.
+Only call load_skill when you want extra procedure text before a specialized workflow.
 Loading instructions does not approve any action they recommend.
-Example: load_skill with web_search_skill
-Then follow the instructions of the skill.
 `
     : '';
+
+  const webSearchRule = hasWebSearch
+    ? `- When web_search is listed below, it is a built-in host tool (not an MCP plugin). If you lack reliable current knowledge for the question, call web_search once with a specific query, then answer from Detailed Sources with URL citations.`
+    : `- web_search is not enabled for this run. Do not invent live web facts; answer from knowledge or ask the user to enable web search.`;
 
   return `
 ${loadAgentIdentity()}
@@ -104,11 +107,12 @@ ${buildUserPersonaPrompt(userPersona)}
 
 # Tool calling protocol
 
-You have access to external tools only through the host's native tool-calling mechanism.
+Tools below are the host's built-in native tools (function calls). They are not third-party plugins the user must configure mid-chat.
 
 Rules:
 - Call a tool only when its guardrails below say it is appropriate for the user's request.
-- If you can answer from stable general knowledge or simple reasoning, respond directly with no tool call. Do not call web_search for general knowledge, definitions, math, or coding help.
+- If you can answer from stable general knowledge or simple reasoning, respond directly with no tool call.
+${webSearchRule}
 - Never invent tool names. Only use: ${toolNames.join(', ') || 'none'}.
 - Never print tool calls as JSON or prose in your reply to the user. Use the tool channel only.
 - After a tool returns, read the result, decide if it is enough, then either call another tool or give the final answer.

@@ -1,62 +1,85 @@
-import type { WebFetchResponse, WebSearchResponse } from './type';
+import type {
+  WebFetchResponse,
+  WebSearchResponse,
+  WebSearchResult,
+} from './type';
+import {
+  firecrawlFetch,
+  firecrawlSearch,
+  isRetryableError,
+  ollamaFetch,
+  ollamaSearch,
+  tavilyFetch,
+  tavilySearch,
+} from './web-search-providers';
 
 /** Number of top search results to auto-fetch full page content for. */
 const AUTO_FETCH_DEPTH = 2;
 /** Max chars of fetched page content to include in tool output. */
 const MAX_PAGE_CONTENT_CHARS = 4_000;
+/**
+ * Hits whose content is already this long (scraped markdown / rich chunks)
+ * skip a second web_fetch — Cursor-style one-shot depth.
+ */
+const MIN_DETAILED_CONTENT_CHARS = 800;
 
-function getOllamaHeaders(): Record<string, string> {
-  const apiKey = process.env.OLLAMA_API_KEY;
-  if (!apiKey) {
-    throw new Error('OLLAMA_API_KEY is not set');
-  }
-  return {
-    Authorization: `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
-  };
+function truncateContent(content: string): string {
+  if (content.length <= MAX_PAGE_CONTENT_CHARS) return content;
+  return `${content.slice(0, MAX_PAGE_CONTENT_CHARS)}\n…[truncated]`;
+}
+
+function snippetPreview(content: string): string {
+  if (content.length <= 280) return content;
+  return `${content.slice(0, 280)}…`;
+}
+
+function hasDetailedContent(result: WebSearchResult): boolean {
+  return result.content.trim().length >= MIN_DETAILED_CONTENT_CHARS;
 }
 
 /**
- * Search the web via Ollama. Returns search result snippets
- * (title, url, content).
+ * Search via the configured provider chain.
+ * Ollama when keyed; otherwise Firecrawl keyless, then Tavily keyless on retryable failure.
  */
 export async function webSearchApi(
   query: string,
   maxResults = 5,
 ): Promise<WebSearchResponse> {
-  const response = await fetch('https://ollama.com/api/web_search', {
-    method: 'POST',
-    headers: getOllamaHeaders(),
-    body: JSON.stringify({ query, max_results: maxResults }),
-  });
-  if (!response.ok) {
-    throw new Error(`web_search API returned ${response.status}`);
+  if (process.env.OLLAMA_API_KEY) {
+    return ollamaSearch(query, maxResults);
   }
-  return (await response.json()) as WebSearchResponse;
+
+  try {
+    return await firecrawlSearch(query, maxResults);
+  } catch (error) {
+    if (!isRetryableError(error)) throw error;
+  }
+
+  return tavilySearch(query, maxResults);
 }
 
 /**
- * Fetch a single web page via Ollama. Returns title, content, and links.
+ * Fetch a single URL via the configured provider chain.
  */
 export async function webFetchApi(url: string): Promise<WebFetchResponse> {
-  const response = await fetch('https://ollama.com/api/web_fetch', {
-    method: 'POST',
-    headers: getOllamaHeaders(),
-    body: JSON.stringify({ url }),
-  });
-  if (!response.ok) {
-    throw new Error(`web_fetch API returned ${response.status}`);
+  if (process.env.OLLAMA_API_KEY) {
+    return ollamaFetch(url);
   }
-  return (await response.json()) as WebFetchResponse;
+
+  try {
+    return await firecrawlFetch(url);
+  } catch (error) {
+    if (!isRetryableError(error)) throw error;
+  }
+
+  return tavilyFetch(url);
 }
 
 /**
- * Tiered web search: searches via Ollama, then auto-fetches full page
- * content for the top results. Returns a structured context string
- * with "Detailed Sources" (fetched pages) and "Further Reading" (snippets).
+ * Tiered web search: one provider search, then auto-fetch only when hits are
+ * short snippets. Returns "Detailed Sources" + "Further Reading".
  *
- * The model gets depth (full pages for top results) + breadth (snippets
- * for remaining results) + agency (can web_fetch any Further Reading URL).
+ * Provider failover stays inside webSearchApi — the model gets one tool result.
  */
 export async function webSearch(
   query: string,
@@ -69,21 +92,26 @@ export async function webSearch(
     return `## Web Search Results: "${query}"\n\nNo results found.`;
   }
 
-  // Auto-fetch top N results for deeper content.
   const detailedResults = await Promise.all(
     results.slice(0, AUTO_FETCH_DEPTH).map(async (result) => {
       if (!result.url) {
         return { ...result, pageContent: null, links: [] as string[] };
       }
-      try {
-        const fetched = await webFetchApi(result.url);
-        const truncated =
-          fetched.content.length > MAX_PAGE_CONTENT_CHARS
-            ? `${fetched.content.slice(0, MAX_PAGE_CONTENT_CHARS)}\n…[truncated]`
-            : fetched.content;
+
+      // Already scraped / chunk-rich — skip a second HTTP fetch.
+      if (hasDetailedContent(result)) {
         return {
           ...result,
-          pageContent: truncated,
+          pageContent: truncateContent(result.content),
+          links: [] as string[],
+        };
+      }
+
+      try {
+        const fetched = await webFetchApi(result.url);
+        return {
+          ...result,
+          pageContent: truncateContent(fetched.content),
           links: fetched.links,
         };
       } catch {
@@ -93,10 +121,8 @@ export async function webSearch(
     }),
   );
 
-  // Build formatted output.
   const lines: string[] = [`## Web Search Results: "${query}"`, ''];
 
-  // Detailed Sources — full page content.
   const detailed = detailedResults.filter((r) => r.pageContent);
   if (detailed.length > 0) {
     lines.push('### Detailed Sources');
@@ -104,9 +130,9 @@ export async function webSearch(
     for (const r of detailed) {
       lines.push(`**${r.title}**`);
       lines.push(`URL: ${r.url}`);
-      lines.push(`Snippet: ${r.content}`);
+      lines.push(`Snippet: ${snippetPreview(r.content)}`);
       lines.push('');
-      lines.push(r.pageContent!);
+      lines.push(r.pageContent ?? '');
       if (r.links.length > 0) {
         lines.push('');
         lines.push(`Related links: ${r.links.slice(0, 5).join(', ')}`);
@@ -117,14 +143,17 @@ export async function webSearch(
     }
   }
 
-  // Further Reading — snippets + links for results we didn't fetch.
-  const furtherReading = results.slice(detailedResults.length);
+  // Snippet-only top hits (fetch skipped/failed) plus remaining search hits.
+  const furtherReading = [
+    ...detailedResults.filter((r) => !r.pageContent),
+    ...results.slice(AUTO_FETCH_DEPTH),
+  ];
   if (furtherReading.length > 0) {
     if (detailed.length > 0) lines.push('');
     lines.push('### Further Reading');
     lines.push('');
     for (const r of furtherReading) {
-      lines.push(`**${r.title}** — ${r.content} — ${r.url}`);
+      lines.push(`**${r.title}** — ${snippetPreview(r.content)} — ${r.url}`);
     }
     lines.push('');
     lines.push('Use web_fetch on any URL above for deeper content if needed.');
@@ -134,15 +163,12 @@ export async function webSearch(
 }
 
 /**
- * Fetch a single URL via Ollama and format as structured context.
+ * Fetch a single URL and format as structured context.
  * Used by the web_fetch tool.
  */
 export async function webFetch(url: string): Promise<string> {
   const fetched = await webFetchApi(url);
-  const truncated =
-    fetched.content.length > MAX_PAGE_CONTENT_CHARS
-      ? `${fetched.content.slice(0, MAX_PAGE_CONTENT_CHARS)}\n…[truncated]`
-      : fetched.content;
+  const truncated = truncateContent(fetched.content);
 
   const lines: string[] = [
     `## Web Fetch: ${url}`,

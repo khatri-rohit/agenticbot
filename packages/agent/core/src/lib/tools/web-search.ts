@@ -2,9 +2,9 @@ import type { Tool } from './type';
 import { webSearch, webFetch } from './web_search_api';
 
 /**
- * web_search tool — searches the web via Ollama for current information.
- * Returns tiered results: top results with full page content, remaining
- * results as snippets with links.
+ * Built-in web_search — host-native function tool (not MCP / not a plugin).
+ * Provider chain (Ollama / Firecrawl / Tavily) is internal; the model only
+ * sees one tool that returns Detailed Sources + Further Reading.
  */
 export const webSearchTool: Tool = {
   definition: {
@@ -12,13 +12,14 @@ export const webSearchTool: Tool = {
     function: {
       name: 'web_search',
       description:
-        'Search the web for current, recent, time-sensitive, or web-specific information.',
+        'Built-in live web search. Use whenever you lack reliable, up-to-date knowledge for the user question (news, releases, docs, prices, people, products, APIs, or anything that may have changed). Returns Detailed Sources with real page text for top hits plus Further Reading links — not vague summaries. Ground your answer in those sources and cite URLs.',
       parameters: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            description: 'The search query to be used to search the web',
+            description:
+              'A specific search query (include product/version names and the current year when freshness matters). Prefer one clear query over a vague topic phrase.',
           },
         },
         required: ['query'],
@@ -28,19 +29,23 @@ export const webSearchTool: Tool = {
   },
   guidance: {
     whenToUse: [
-      'The user asks about current events, recent releases, prices, or anything time-sensitive.',
-      'The user explicitly asks you to search the web or look something up online.',
-      'You need external facts that may have changed after your knowledge cutoff.',
+      'You do not have confident, current knowledge to answer (docs, APIs, releases, news, prices, people, products).',
+      'The user asks you to search, look up, find, verify, or check something online.',
+      'Facts may have changed after your knowledge cutoff, or you would otherwise guess.',
     ],
     whenNotToUse: [
       'Greetings, small talk, or casual conversation.',
-      'Stable general knowledge (capitals, definitions, well-known history).',
-      'Pure reasoning, math, or coding help that does not require live data.',
+      'Stable general knowledge you already know confidently (basic definitions, well-known history, simple math).',
+      'Pure reasoning or coding that does not need live external facts.',
+      'The user already gave a URL to read — use web_fetch instead.',
     ],
     usage: [
+      'Call web_search directly — do not load a skill first.',
       'Write a specific query; include the current year when freshness matters.',
       'Prefer one focused search per sub-question before broadening.',
-      'After results return, stop searching once you can answer; do not run near-duplicate queries.',
+      'After results return, synthesize Detailed Sources into a complete answer with inline URL citations.',
+      'Only web_fetch a Further Reading URL if that page is required to finish the answer.',
+      'After a non-empty result, answer or web_fetch — do not issue another web_search for the same question.',
     ],
   },
   execute: async (args) => {
@@ -50,8 +55,8 @@ export const webSearchTool: Tool = {
 };
 
 /**
- * web_fetch tool — fetches the full content of a single web page by URL.
- * Always available as a native global tool, not user-toggleable.
+ * Built-in web_fetch — host-native function tool for a known URL.
+ * Always available as a global tool (not gated by the web-search toggle).
  */
 export const webFetchTool: Tool = {
   definition: {
@@ -59,14 +64,14 @@ export const webFetchTool: Tool = {
     function: {
       name: 'web_fetch',
       description:
-        'Fetch the full content of a web page by URL. Use when the user provides a URL and asks to read or summarize it, or when you need deeper content from a specific page found in search results.',
+        'Built-in page reader. Fetch the full text of a specific URL (user-pasted link or a Further Reading URL from web_search). Returns page content suitable for citing — use this when you already know the URL.',
       parameters: {
         type: 'object',
         properties: {
           url: {
             type: 'string',
             description:
-              'The full URL of the web page to fetch (including protocol)',
+              'The full URL of the web page to fetch (including https:// or http://)',
           },
         },
         required: ['url'],
@@ -77,17 +82,18 @@ export const webFetchTool: Tool = {
   guidance: {
     whenToUse: [
       'The user provides a URL and asks to read, summarize, or extract information from it.',
-      'You found a promising URL in web_search results and need the full page content.',
+      'A Further Reading URL from web_search is required to complete the answer.',
       'You need to verify a specific claim by reading the original source page.',
     ],
     whenNotToUse: [
       'General conversation or questions without a specific URL.',
-      'You need to search for information (use web_search instead).',
-      'You already have enough content from search snippets to answer.',
+      'You need to discover URLs first — use web_search instead.',
+      'Detailed Sources from web_search already contain enough page text to answer.',
     ],
     usage: [
       'Pass the full URL including the protocol (https:// or http://).',
-      'If the fetch fails, inform the user and try alternative sources if available.',
+      'Answer from the fetched content and cite the URL.',
+      'If the fetch fails, say so and use other available sources — do not invent page content.',
       'Do not fetch the same URL multiple times if it already returned content.',
     ],
   },
