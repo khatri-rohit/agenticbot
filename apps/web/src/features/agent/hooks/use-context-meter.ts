@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import type {
-  ChatMessage,
-  Message,
+  ContextReport,
+  ContextReportLayer,
   MessageAttachment,
 } from '@org/agent-models';
 import {
@@ -11,10 +11,11 @@ import {
   type ComposerOptions,
 } from '@/features/agent/api/agent-client';
 import { getContextAnchor } from '@/features/agent/lib/context-anchor';
-import { toChatContext } from '@/features/agent/lib/to-chat-context';
 import { estimateDraftTokens } from '@/lib/estimate-tokens';
-import { getUserPersona } from '@/lib/user-persona';
 import { OLLAMA_MODELS } from '@/lib/ollama-models';
+
+/** Stable empty list — never use `= []` in hook args (new ref every render → effect loop). */
+const EMPTY_ATTACHMENTS: MessageAttachment[] = [];
 
 export type ContextMeterSource = 'estimate' | 'measured';
 
@@ -23,31 +24,11 @@ export type ContextMeter = {
   limit: number | null;
   source: ContextMeterSource;
   approximate: boolean;
+  layers: ContextReportLayer[];
 };
-
-function draftAsChatMessages(
-  draft: string,
-  attachments: MessageAttachment[],
-): ChatMessage[] {
-  const trimmed = draft.trim();
-  if (!trimmed && attachments.length === 0) return [];
-  return toChatContext([
-    {
-      id: 'draft',
-      threadId: 'draft',
-      runId: null,
-      role: 'user',
-      content: trimmed,
-      status: 'complete',
-      createdAt: '',
-      attachments: attachments.length > 0 ? attachments : undefined,
-    },
-  ]);
-}
 
 export function useContextMeter(options: {
   threadId?: string;
-  messages: Message[];
   draft: string;
   pendingAttachments: MessageAttachment[];
   queuedContent?: string | null;
@@ -59,26 +40,30 @@ export function useContextMeter(options: {
   /** Last measured usage already includes the current streaming text. */
   occupiedCoversStream?: boolean;
   liveEstimatedPromptTokens?: number;
+  liveContextReport?: ContextReport;
   liveRunModel?: string;
 }): ContextMeter {
   const {
     threadId,
-    messages,
     draft,
     pendingAttachments,
     queuedContent,
-    queuedAttachments = [],
+    queuedAttachments: queuedAttachmentsOption,
     streamingContent,
     composerOptions,
     contextLimit,
     liveOccupiedTokens,
     occupiedCoversStream = false,
     liveEstimatedPromptTokens,
+    liveContextReport,
     liveRunModel,
   } = options;
+  const queuedAttachments = queuedAttachmentsOption ?? EMPTY_ATTACHMENTS;
 
-  const userPersona = getUserPersona();
-  const [serverEstimate, setServerEstimate] = useState<number | null>(null);
+  const [serverEstimate, setServerEstimate] = useState<{
+    tokens: number;
+    layers: ContextReportLayer[];
+  } | null>(null);
 
   const sameModel =
     liveRunModel === undefined || liveRunModel === composerOptions.model;
@@ -88,6 +73,8 @@ export function useContextMeter(options: {
     sameModel && liveEstimatedPromptTokens !== undefined
       ? liveEstimatedPromptTokens
       : null;
+  const liveLayers =
+    sameModel && liveContextReport ? liveContextReport.layers : [];
 
   const persisted =
     liveOccupied == null && liveEstimated == null && threadId
@@ -114,20 +101,31 @@ export function useContextMeter(options: {
       return;
     }
 
+    const combinedDraft = [draft, queuedContent].filter(Boolean).join('\n');
+    const attachmentCount =
+      pendingAttachments.length + queuedAttachments.length;
+    // Idle home / empty composer: local char estimate is enough; skip hammering API.
+    if (!threadId && !combinedDraft && attachmentCount === 0) {
+      setServerEstimate(null);
+      return;
+    }
+
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void fetchContextEstimate({
-        messages: [
-          ...toChatContext(messages),
-          ...draftAsChatMessages(draft, pendingAttachments),
-          ...draftAsChatMessages(queuedContent ?? '', queuedAttachments),
-        ],
+        threadId,
+        draft: combinedDraft,
+        attachments: [...pendingAttachments, ...queuedAttachments],
         model: composerOptions.model,
         webSearch: composerOptions.webSearch,
-        userPersona,
       })
         .then((res) => {
-          if (!cancelled) setServerEstimate(res.estimatedPromptTokens);
+          if (!cancelled) {
+            setServerEstimate({
+              tokens: res.estimatedPromptTokens,
+              layers: res.contextReport.layers,
+            });
+          }
         })
         .catch(() => {
           if (!cancelled) setServerEstimate(null);
@@ -141,14 +139,13 @@ export function useContextMeter(options: {
   }, [
     hasAnchor,
     liveEstimated,
-    messages,
+    threadId,
     draft,
     pendingAttachments,
     queuedContent,
     queuedAttachments,
     composerOptions.model,
     composerOptions.webSearch,
-    userPersona,
   ]);
 
   const limit =
@@ -163,6 +160,7 @@ export function useContextMeter(options: {
       limit,
       source: 'measured',
       approximate: extra > 0,
+      layers: liveLayers,
     };
   }
 
@@ -172,6 +170,7 @@ export function useContextMeter(options: {
       limit,
       source: 'estimate',
       approximate: true,
+      layers: liveLayers,
     };
   }
 
@@ -181,15 +180,17 @@ export function useContextMeter(options: {
       limit,
       source: 'measured',
       approximate: composerTokens > 0,
+      layers: liveLayers,
     };
   }
 
   if (serverEstimate != null) {
     return {
-      used: serverEstimate + streamingTokens,
+      used: serverEstimate.tokens + streamingTokens,
       limit,
       source: 'estimate',
       approximate: true,
+      layers: serverEstimate.layers,
     };
   }
 
@@ -198,5 +199,6 @@ export function useContextMeter(options: {
     limit,
     source: 'estimate',
     approximate: true,
+    layers: [],
   };
 }

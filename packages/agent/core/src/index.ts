@@ -36,6 +36,14 @@ export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
 export { toLedgerRecord } from './lib/loop/to-ledger-record';
 export { webSearchTool, webFetchTool } from './lib/tools/web-search';
+export { createMemoryTool } from './lib/tools/memory';
+export type { MemoryToolStore } from './lib/tools/memory';
+export { assembleContext } from './lib/context/assemble-context';
+export type {
+  AssembleContextInput,
+  AssembleContextResult,
+} from './lib/context/assemble-context';
+export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
 // Events / trace
 export { consoleTrace } from './lib/events/trace';
@@ -52,8 +60,5 @@ export type {
 } from './lib/run/types';
 
 // Prompts
-export {
-  buildSystemPrompt,
-  buildUserPersonaPrompt,
-} from './lib/prompts/system-prompt';
+export { buildSystemPrompt } from './lib/prompts/system-prompt';
 export { loadAgentIdentity } from './lib/prompts/load-agent-identity';

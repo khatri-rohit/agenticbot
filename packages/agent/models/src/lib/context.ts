@@ -1,13 +1,26 @@
 /**
- * Token budget for assembleContext (M2). Numbers are illustrative until measured.
+ * Token budget for assembleContext. Numbers are defaults until /api/show
+ * supplies a real window.
  */
 export type ContextBudget = {
   /** Total model context window. */
   windowTokens: number;
   /** Reserved for the model's answer. */
   outputReserveTokens: number;
-  /** Soft trigger for compaction (e.g. 0.65). */
+  /** Soft trigger for compaction (e.g. 0.65). M2 reports this; M4 acts on it. */
   compactAtRatio: number;
+  /** Per-call cap before a tool result is stubbed even in the recent tail. */
+  toolResultMaxTokens: number;
+  /** Tool results older than this many user turns become stubs. */
+  keepToolResultsForTurns: number;
+};
+
+export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
+  windowTokens: 128_000,
+  outputReserveTokens: 20_000,
+  compactAtRatio: 0.65,
+  toolResultMaxTokens: 2_000,
+  keepToolResultsForTurns: 2,
 };
 
 /** Per-layer sizes returned with an assembled prompt for the context meter. */
@@ -22,11 +35,13 @@ export type ContextReport = {
   layers: ContextReportLayer[];
   /** Sum of layer tokens (excludes output reserve). */
   occupiedTokens: number;
+  stubbedToolResults: number;
+  needsCompaction: boolean;
 };
 
 /**
  * Derived compacted window + thread brief. Regenerable; not authoritative history.
- * Full movie remains the ledger.
+ * Full movie remains the ledger. Written in M4; M2 assembler accepts null.
  */
 export type Snapshot = {
   threadId: string;

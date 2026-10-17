@@ -1,70 +1,104 @@
 import { Router, type Request, type Response } from 'express';
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type {
-  ChatMessage,
+  LedgerEnvelope,
+  MemoryTarget,
   MessageAttachment,
   StartRunRequest,
   ThinkingValue,
 } from '@org/agent-models';
 import {
-  RunManager,
-  createToolRegistry,
+  DEFAULT_CONTEXT_BUDGET,
+  DEFAULT_MEMORY_CAPS,
+} from '@org/agent-models';
+import {
   ALL_TOOLS,
-  buildSystemPrompt,
+  RunManager,
+  assembleContext,
   createInvokeModelCall,
+  createMemoryTool,
   createStreamModelCall,
-  RESEARCH_MODE,
+  createToolRegistry,
   getOllamaModelConfig,
+  RESEARCH_MODE,
   resolveReasoningEffort,
-  estimatePromptTokens,
   type ToolRegistry,
 } from '@org/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
-import { getThreadStore } from '../../lib/store-instance';
+import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
 
 const router = Router();
 const runManager = new RunManager();
 
-/** Cap profile text at the API trust boundary (UI mirrors this). */
-const USER_PERSONA_MAX_CHARS = 2000;
+function toolAllowList(webSearch?: boolean): string[] {
+  return [
+    ...RESEARCH_MODE.globalTools,
+    ...(webSearch !== false ? RESEARCH_MODE.allowedTools : []),
+  ];
+}
 
-type BuildRunContextInput = {
-  messages: ChatMessage[];
-  /** Default true — omit RESEARCH_MODE.allowedTools when false. */
-  webSearch?: boolean;
-  userPersona?: string;
+type MemoryUpdatedPayload = {
+  opId: string;
+  target: MemoryTarget;
+  action: 'add' | 'patch' | 'remove';
 };
 
-function buildRunContext(input: BuildRunContextInput): {
+async function prepareRun(input: {
+  threadId: string;
+  webSearch?: boolean;
+  lastUserSeq: number;
+  envelopes: LedgerEnvelope[];
+  model: string;
+  onMemoryUpdated?: (payload: MemoryUpdatedPayload) => void;
+}): Promise<{
   tools: ToolRegistry;
-  openaiMessages: ChatCompletionMessageParam[];
-  estimatedPromptTokens: number;
-} {
-  const toolAllowList = [
-    ...RESEARCH_MODE.globalTools,
-    ...(input.webSearch !== false ? RESEARCH_MODE.allowedTools : []),
-  ];
-  const tools = createToolRegistry(ALL_TOOLS, toolAllowList);
+  messages: ReturnType<typeof assembleContext>['messages'];
+  report: ReturnType<typeof assembleContext>['report'];
+}> {
+  const memory = getMemoryStore();
+  const files = await memory.read();
+  const tools = createToolRegistry(
+    [
+      ...ALL_TOOLS,
+      createMemoryTool({
+        read: () => memory.read(),
+        apply: async (op) => {
+          const applied = await memory.apply(op);
+          input.onMemoryUpdated?.({
+            opId: applied.id,
+            target: applied.target,
+            action: applied.action,
+          });
+          return applied;
+        },
+        stage: (op) => memory.stage(op),
+        source: () => ({
+          threadId: input.threadId,
+          seq: input.lastUserSeq,
+        }),
+      }),
+    ],
+    toolAllowList(input.webSearch),
+  );
 
-  const persona =
-    typeof input.userPersona === 'string'
-      ? input.userPersona.trim().slice(0, USER_PERSONA_MAX_CHARS)
-      : '';
-  const openaiMessages: ChatCompletionMessageParam[] = [
-    { role: 'system', content: buildSystemPrompt(tools, persona) },
-    ...(input.messages as ChatCompletionMessageParam[]).filter(
-      (message) => message.role !== 'system',
-    ),
-  ];
+  let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
+  try {
+    const config = await getOllamaModelConfig(input.model);
+    if (config.contextLength) windowTokens = config.contextLength;
+  } catch {
+    // Keep the default window when /api/show is unavailable.
+  }
 
-  return {
-    tools,
-    openaiMessages,
-    estimatedPromptTokens: estimatePromptTokens(
-      openaiMessages,
-      tools.definitions,
-    ),
-  };
+  const { messages, report } = assembleContext(
+    {
+      tools,
+      memory: files,
+      snapshot: null,
+      envelopes: input.envelopes,
+    },
+    { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
+  );
+
+  return { tools, messages, report };
 }
 
 router.get('/threads', async (_req: Request, res: Response) => {
@@ -140,7 +174,6 @@ router.post('/run', async (req: Request, res: Response) => {
     model,
     webSearch,
     thinking,
-    userPersona,
   } = req.body as StartRunRequest;
 
   if (!threadId) {
@@ -177,18 +210,15 @@ router.post('/run', async (req: Request, res: Response) => {
     });
   }
 
-  const history = await store.toChatMessages(threadId);
-  if (history.length === 0) {
+  const envelopes = await store.hydrateEnvelopes(threadId);
+  if (envelopes.length === 0) {
     return res.status(400).json({ error: 'thread has no messages' });
   }
 
   const useStreaming = streaming ?? true;
   const useModel = model ?? thread.model ?? RESEARCH_MODE.model;
 
-  if (
-    userMessageHasImages(message?.attachments) ||
-    chatHasImageParts(history)
-  ) {
+  if (envelopes.some((envelope) => (envelope.attachments?.length ?? 0) > 0)) {
     try {
       const config = await getOllamaModelConfig(useModel);
       if (!config.supportsVision) {
@@ -201,10 +231,21 @@ router.post('/run', async (req: Request, res: Response) => {
     }
   }
 
-  const { tools, openaiMessages, estimatedPromptTokens } = buildRunContext({
-    messages: history,
+  let assignedRunId = '';
+  const prepared = await prepareRun({
+    threadId,
     webSearch,
-    userPersona,
+    lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
+    envelopes,
+    model: useModel,
+    onMemoryUpdated: (payload) => {
+      const handle = runManager.get(assignedRunId);
+      handle?.emitter.emit({
+        type: 'memory.updated',
+        runId: assignedRunId,
+        ...payload,
+      });
+    },
   });
 
   const callOptions = await resolveCallOptions(useModel, thinking);
@@ -212,19 +253,20 @@ router.post('/run', async (req: Request, res: Response) => {
     ? createStreamModelCall(callOptions)
     : createInvokeModelCall(callOptions);
 
-  const runId = runManager.start({
+  assignedRunId = runManager.start({
     threadId,
     model: useModel,
     streaming: useStreaming,
-    messages: openaiMessages,
-    tools,
+    messages: prepared.messages,
+    tools: prepared.tools,
     modelCall,
     limits: RESEARCH_MODE.limits,
     mode: RESEARCH_MODE.name,
-    estimatedPromptTokens,
+    estimatedPromptTokens: prepared.report.occupiedTokens,
+    contextReport: prepared.report,
     onMessage: async (record) => {
       if (record.role === 'system') return;
-      await store.append({ threadId, runId, record });
+      await store.append({ threadId, runId: assignedRunId, record });
     },
   });
 
@@ -238,41 +280,112 @@ router.post('/run', async (req: Request, res: Response) => {
     store.updateThread(threadId, { title, model: useModel });
   }
 
-  return res.json({ runId });
+  return res.json({ runId: assignedRunId });
 });
 
 /**
  * POST /api/agent/context/estimate
- * Heuristic size of the next request envelope (same system + tools as /run).
+ * Same assembler as /run: host ledger + memory files + optional draft.
  */
 router.post('/context/estimate', async (req: Request, res: Response) => {
-  const { messages, model, webSearch, userPersona } =
-    req.body as Partial<StartRunRequest> & { messages?: ChatMessage[] };
+  const { threadId, draft, attachments, model, webSearch } = req.body as {
+    threadId?: string;
+    draft?: string;
+    attachments?: MessageAttachment[];
+    model?: string;
+    webSearch?: boolean;
+  };
 
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages array is required' });
+  const store = await getThreadStore();
+  let envelopes: LedgerEnvelope[] = [];
+  const id =
+    typeof threadId === 'string' && threadId.trim() ? threadId.trim() : 'draft';
+
+  if (id !== 'draft') {
+    const thread = store.getThread(id);
+    if (!thread) return res.status(404).json({ error: 'Thread not found' });
+    envelopes = await store.hydrateEnvelopes(id);
+  }
+
+  const trimmed = typeof draft === 'string' ? draft.trim() : '';
+  if (trimmed || (attachments?.length ?? 0) > 0) {
+    const seq = (envelopes.at(-1)?.seq ?? 0) + 1;
+    envelopes = [
+      ...envelopes,
+      {
+        v: 1,
+        seq,
+        ts: new Date().toISOString(),
+        threadId: id,
+        runId: null,
+        record: { role: 'user', content: trimmed },
+        ...(attachments?.length ? { attachments } : {}),
+      },
+    ];
   }
 
   const useModel = model ?? RESEARCH_MODE.model;
-  const { estimatedPromptTokens } = buildRunContext({
-    messages,
+  const { report } = await prepareRun({
+    threadId: id,
     webSearch,
-    userPersona,
+    lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
+    envelopes,
+    model: useModel,
   });
-
-  let contextLength: number | null = null;
-  try {
-    const config = await getOllamaModelConfig(useModel);
-    contextLength = config.contextLength;
-  } catch {
-    // Limit optional; client can fall back to static catalog.
-  }
 
   return res.json({
-    estimatedPromptTokens,
-    contextLength,
+    estimatedPromptTokens: report.occupiedTokens,
+    contextLength: report.budget.windowTokens,
     source: 'estimate' as const,
+    contextReport: report,
   });
+});
+
+router.get('/memory', async (_req: Request, res: Response) => {
+  const memory = getMemoryStore();
+  const [files, ops] = await Promise.all([memory.read(), memory.listOps()]);
+  const reverted = new Set(
+    ops
+      .filter((op) => op.reason.startsWith('revert '))
+      .map((op) => op.reason.slice('revert '.length)),
+  );
+  const visible = ops.filter(
+    (op) =>
+      op.status === 'applied' &&
+      !reverted.has(op.id) &&
+      !op.reason.startsWith('revert '),
+  );
+  return res.json({ files, ops: visible, caps: DEFAULT_MEMORY_CAPS });
+});
+
+router.patch('/memory', async (req: Request, res: Response) => {
+  const user = typeof req.body?.user === 'string' ? req.body.user : undefined;
+  if (user === undefined) {
+    return res.status(400).json({ error: 'user is required' });
+  }
+  const threadId =
+    typeof req.body?.threadId === 'string' && req.body.threadId.trim()
+      ? req.body.threadId.trim()
+      : 'settings';
+  try {
+    const op = await getMemoryStore().writeUser(user, { threadId, seq: 0 });
+    return res.json({ op });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return res.status(400).json({ error: msg });
+  }
+});
+
+router.post('/memory/revert', async (req: Request, res: Response) => {
+  const opId = typeof req.body?.opId === 'string' ? req.body.opId.trim() : '';
+  if (!opId) return res.status(400).json({ error: 'opId is required' });
+  try {
+    const op = await getMemoryStore().revert(opId);
+    return res.json({ op });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return res.status(400).json({ error: msg });
+  }
 });
 
 /**
@@ -353,22 +466,6 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
 
   return;
 });
-
-function userMessageHasImages(
-  attachments: MessageAttachment[] | undefined,
-): boolean {
-  return (attachments?.length ?? 0) > 0;
-}
-
-function chatHasImageParts(messages: ChatMessage[]): boolean {
-  for (const message of messages) {
-    if (message.role !== 'user' || !Array.isArray(message.content)) continue;
-    for (const part of message.content) {
-      if (part.type === 'image_url') return true;
-    }
-  }
-  return false;
-}
 
 async function resolveCallOptions(
   model: string,

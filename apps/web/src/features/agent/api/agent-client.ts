@@ -1,6 +1,9 @@
 import type {
   AgentEvent,
-  ChatMessage,
+  ContextReport,
+  MemoryCaps,
+  MemoryFiles,
+  MemoryOp,
   MessageAttachment,
   OllamaModelConfig,
   StartRunRequest,
@@ -63,7 +66,6 @@ export async function startRun(
     model?: string;
     webSearch?: boolean;
     thinking?: ThinkingValue;
-    userPersona?: string;
   } = {},
 ): Promise<string> {
   const body: StartRunRequest = {
@@ -74,7 +76,6 @@ export async function startRun(
     model: options.model,
     webSearch: options.webSearch,
     thinking: options.thinking,
-    userPersona: options.userPersona,
   };
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
@@ -147,23 +148,26 @@ export type ContextEstimateResponse = {
   estimatedPromptTokens: number;
   contextLength: number | null;
   source: 'estimate';
+  contextReport: ContextReport;
 };
 
-/** Server-side heuristic for the next request envelope (system + tools + messages). */
+/** Same assembleContext path as /run: host ledger + memory + optional draft. */
 export async function fetchContextEstimate(options: {
-  messages: ChatMessage[];
+  threadId?: string;
+  draft?: string;
+  attachments?: MessageAttachment[];
   model?: string;
   webSearch?: boolean;
-  userPersona?: string;
 }): Promise<ContextEstimateResponse> {
   const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      messages: options.messages,
+      threadId: options.threadId,
+      draft: options.draft,
+      attachments: options.attachments,
       model: options.model,
       webSearch: options.webSearch,
-      userPersona: options.userPersona,
     }),
   });
   if (!res.ok) {
@@ -171,6 +175,52 @@ export async function fetchContextEstimate(options: {
     throw new Error(body.error ?? `Failed to estimate context: ${res.status}`);
   }
   return res.json() as Promise<ContextEstimateResponse>;
+}
+
+export type MemoryResponse = {
+  files: MemoryFiles;
+  ops: MemoryOp[];
+  caps: MemoryCaps;
+};
+
+export async function fetchMemory(): Promise<MemoryResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/memory`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load memory: ${res.status}`);
+  }
+  return res.json() as Promise<MemoryResponse>;
+}
+
+export async function saveUserMemory(
+  user: string,
+  threadId?: string,
+): Promise<MemoryOp> {
+  const res = await fetch(`${API_BASE}/api/agent/memory`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user, threadId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to save profile: ${res.status}`);
+  }
+  const { op } = (await res.json()) as { op: MemoryOp };
+  return op;
+}
+
+export async function revertMemoryOp(opId: string): Promise<MemoryOp> {
+  const res = await fetch(`${API_BASE}/api/agent/memory/revert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ opId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to revert memory: ${res.status}`);
+  }
+  const { op } = (await res.json()) as { op: MemoryOp };
+  return op;
 }
 
 export async function cancelRun(runId: string): Promise<void> {

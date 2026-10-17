@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { Palette, Settings, UserRound } from 'lucide-react';
+import { DEFAULT_MEMORY_CAPS, type MemoryOp } from '@org/agent-models';
 import { useTheme } from '@/components/theme-provider';
+import {
+  fetchMemory,
+  revertMemoryOp,
+  saveUserMemory,
+} from '@/features/agent/api/agent-client';
+import { toastError } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -34,11 +41,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import type { ThemeId } from '@/lib/theme-presets';
-import {
-  USER_PERSONA_MAX_CHARS,
-  getUserPersona,
-  setUserPersona,
-} from '@/lib/user-persona';
 import { cn } from '@/lib/utils';
 
 export function SidebarSettings({
@@ -49,9 +51,33 @@ export function SidebarSettings({
   const { themeId, setThemeId, presets } = useTheme();
   const [profileOpen, setProfileOpen] = useState(false);
   const [draft, setDraft] = useState('');
+  const [notes, setNotes] = useState('');
+  const [ops, setOps] = useState<MemoryOp[]>([]);
+  const [cap, setCap] = useState(DEFAULT_MEMORY_CAPS.userChars);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (profileOpen) setDraft(getUserPersona());
+    if (!profileOpen) return;
+    let cancelled = false;
+    void fetchMemory()
+      .then((memory) => {
+        if (cancelled) return;
+        setDraft(memory.files.user);
+        setNotes(memory.files.notes);
+        setOps(memory.ops.filter((op) => op.status === 'applied').slice(-8).reverse());
+        setCap(memory.caps.userChars);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          toastError(
+            error instanceof Error ? error.message : String(error),
+            'Could not load profile',
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [profileOpen]);
 
   const menuButton = (
@@ -156,8 +182,8 @@ export function SidebarSettings({
           <DialogHeader>
             <DialogTitle>User profile</DialogTitle>
             <DialogDescription>
-              Frozen profile facts sent with every chat so the agent can adapt
-              to you. This is not long-term memory yet; edit here to update.
+              Durable USER.md facts included in every run. The agent can also
+              write MEMORY.md notes; revert a change below if it got it wrong.
             </DialogDescription>
           </DialogHeader>
 
@@ -166,7 +192,7 @@ export function SidebarSettings({
             <Textarea
               id="about-user"
               value={draft}
-              maxLength={USER_PERSONA_MAX_CHARS}
+              maxLength={cap}
               rows={10}
               autoFocus
               placeholder={
@@ -176,9 +202,69 @@ export function SidebarSettings({
               onChange={(event) => setDraft(event.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Saved in this browser. {draft.length}/{USER_PERSONA_MAX_CHARS}
+              Saved on the host. {draft.length}/{cap}
             </p>
           </div>
+
+          {notes.trim() ? (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-medium text-muted-foreground">
+                Agent notes
+              </p>
+              <p className="max-h-24 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
+                {notes}
+              </p>
+            </div>
+          ) : null}
+
+          {ops.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-xs font-medium text-muted-foreground">
+                Recent memory writes
+              </p>
+              {ops.map((op) => (
+                <div
+                  key={op.id}
+                  className="flex items-start justify-between gap-2 text-xs"
+                >
+                  <span className="min-w-0 truncate text-muted-foreground">
+                    {op.action} {typeof op.target === 'string' ? op.target : 'file'}
+                    {op.reason ? ` — ${op.reason}` : ''}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 shrink-0 px-2"
+                    onClick={() => {
+                      void revertMemoryOp(op.id)
+                        .then(() => fetchMemory())
+                        .then((memory) => {
+                          setDraft(memory.files.user);
+                          setNotes(memory.files.notes);
+                          setOps(
+                            memory.ops
+                              .filter((item) => item.status === 'applied')
+                              .slice(-8)
+                              .reverse(),
+                          );
+                        })
+                        .catch((error) => {
+                          toastError(
+                            error instanceof Error
+                              ? error.message
+                              : String(error),
+                            'Revert failed',
+                          );
+                        });
+                    }}
+                  >
+                    Revert
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           <DialogFooter>
             <DialogClose asChild>
@@ -188,12 +274,21 @@ export function SidebarSettings({
             </DialogClose>
             <Button
               type="button"
+              disabled={saving}
               onClick={() => {
-                setUserPersona(draft);
-                setProfileOpen(false);
+                setSaving(true);
+                void saveUserMemory(draft)
+                  .then(() => setProfileOpen(false))
+                  .catch((error) => {
+                    toastError(
+                      error instanceof Error ? error.message : String(error),
+                      'Could not save profile',
+                    );
+                  })
+                  .finally(() => setSaving(false));
               }}
             >
-              Save profile
+              {saving ? 'Saving…' : 'Save profile'}
             </Button>
           </DialogFooter>
         </DialogContent>

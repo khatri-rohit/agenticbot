@@ -67,6 +67,7 @@ export class RunManager {
       mode: opts.mode,
       limits: opts.limits,
       estimatedPromptTokens: opts.estimatedPromptTokens,
+      contextReport: opts.contextReport,
       signal: handle.abortController.signal,
       origin: opts.origin,
       workspaceRoot: opts.workspaceRoot,
@@ -77,19 +78,21 @@ export class RunManager {
       },
     });
 
-    if (handle.cancelled) return;
-
-    handle.status = result.status === 'error' ? 'error' : 'completed';
+    // Stay 'running' until the loop returns so skip-tool ledger rows
+    // finish before another /run can rewind this thread.
+    handle.status =
+      handle.cancelled || result.status === 'error' ? 'error' : 'completed';
     handle.result = result;
   }
 
   /** Abort in-flight model/tool work and stop SSE for this run. */
   cancel(runId: string): boolean {
     const handle = this.runs.get(runId);
-    if (!handle || handle.status !== 'running') return false;
+    if (!handle || handle.status !== 'running' || handle.cancelled) {
+      return false;
+    }
 
     handle.cancelled = true;
-    handle.status = 'error';
     handle.abortController.abort(new Error('Run cancelled'));
     handle.emitter.emit({
       type: 'run.error',

@@ -138,6 +138,10 @@
   "dependencies": {
     "@org/agent-core": "*",
     "@org/agent-models": "*",
+    "cors": "^2.8.6",
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19"
   }
 }

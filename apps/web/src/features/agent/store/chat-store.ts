@@ -1,4 +1,8 @@
-import { occupiedFromUsage, type AgentEvent } from '@org/agent-models';
+import {
+  occupiedFromUsage,
+  type AgentEvent,
+  type ContextReport,
+} from '@org/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
 
 /**
@@ -23,6 +27,7 @@ export type ChatRunState = {
   lastSeq: number;
   /** Heuristic from run.started until provider usage arrives. */
   estimatedPromptTokens?: number;
+  contextReport?: ContextReport;
   /** Latest prompt+completion from turn.completed in this run. */
   occupiedTokens?: number;
   /** True when occupiedTokens already includes the current streamingMessage. */
@@ -56,6 +61,9 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           lastSeq,
           ...(event.estimatedPromptTokens !== undefined
             ? { estimatedPromptTokens: event.estimatedPromptTokens }
+            : {}),
+          ...(event.contextReport
+            ? { contextReport: event.contextReport }
             : {}),
         },
       };
@@ -172,7 +180,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'turn.started':
     case 'limit.hit':
     case 'approval.requested':
-    case 'approval.resolved': {
+    case 'approval.resolved':
+    case 'memory.updated': {
       if (!state.activeRun) return state;
       return {
         activeRun: {

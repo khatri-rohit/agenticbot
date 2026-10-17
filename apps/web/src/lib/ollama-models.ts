@@ -219,7 +219,7 @@ export const OLLAMA_MODELS: OllamaModel[] = [
 
   // ── Cloud: OpenAI ──
   {
-    id: 'gpt-oss:cloud',
+    id: 'gpt-oss:120b-cloud',
     label: 'GPT-OSS',
     family: 'OpenAI',
     cloud: true,

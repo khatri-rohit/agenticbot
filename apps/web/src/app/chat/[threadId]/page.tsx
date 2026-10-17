@@ -75,10 +75,10 @@ export default function ChatThreadPage({
           composerOptions={composerOptions}
           onComposerOptionsChange={setComposerOptions}
           onStop={() => void stopGeneration()}
-          contextMessages={messages ?? []}
           occupiedTokens={chatState.activeRun?.occupiedTokens}
           occupiedCoversStream={chatState.activeRun?.occupiedCoversStream}
           estimatedPromptTokens={chatState.activeRun?.estimatedPromptTokens}
+          contextReport={chatState.activeRun?.contextReport}
           streamingContent={chatState.activeRun?.streamingMessage?.content}
           runModel={chatState.activeRun?.model}
         />

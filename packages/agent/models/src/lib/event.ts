@@ -1,3 +1,5 @@
+import type { ContextReport } from './context.js';
+import type { MemoryTarget } from './memory.js';
 import type { TokenUsage } from './run.js';
 import type { ToolRisk } from './tool-context.js';
 
@@ -25,6 +27,7 @@ export type AgentEvent =
   | ToolFailed
   | ApprovalRequested
   | ApprovalResolved
+  | MemoryUpdated
   | TurnCompleted
   | RunCompleted
   | RunError
@@ -40,6 +43,8 @@ export interface RunStarted {
   model: string;
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
+  /** Per-layer breakdown from assembleContext (M2). */
+  contextReport?: ContextReport;
 }
 
 export interface TurnStarted {
@@ -151,6 +156,16 @@ export interface ApprovalResolved {
   runId: string;
   approvalId: string;
   decision: 'approved' | 'denied';
+}
+
+/** Curated memory changed (applied or reverted). UI refetches files. */
+export interface MemoryUpdated {
+  seq: number;
+  type: 'memory.updated';
+  runId: string;
+  opId: string;
+  target: MemoryTarget;
+  action: 'add' | 'patch' | 'remove' | 'revert';
 }
 
 /** Union of event types for filtering. */

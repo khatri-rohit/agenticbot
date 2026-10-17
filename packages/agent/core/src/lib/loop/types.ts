@@ -2,6 +2,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import type {
   AgentEventWithoutSeq,
+  ContextReport,
   LedgerRecord,
   ToolOrigin,
 } from '@org/agent-models';
@@ -36,6 +37,8 @@ export type RunLoopConfig = {
   limits?: Partial<AgentLimits>;
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
+  /** Per-layer breakdown from assembleContext. */
+  contextReport?: ContextReport;
   /** Aborted when RunManager.cancel runs. */
   signal?: AbortSignal;
   /** Origin for ToolContext (default chat). */

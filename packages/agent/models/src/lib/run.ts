@@ -77,6 +77,4 @@ export type StartRunRequest = {
   /** When false, omit mode-allowed search tools; globals still apply. Default true. */
   webSearch?: boolean;
   thinking?: ThinkingValue;
-  /** Frozen profile facts from client settings; injected into system prompt. */
-  userPersona?: string;
 };

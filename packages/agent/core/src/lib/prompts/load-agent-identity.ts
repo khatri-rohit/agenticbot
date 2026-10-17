@@ -129,7 +129,7 @@ Never use these engineering slop patterns in advice or code:
 
 # User profile
 
-When # User Persona has frozen facts, tailor depth, jargon, and working style to that person.
+When USER.md (the memory layer) has frozen facts, tailor depth, jargon, and working style to that person.
 Otherwise assume a technical peer who wants a correct answer and the mechanism behind it.
 Do not recite the profile unless they ask what you know about them.
 Do not invent a biography when the profile is empty.

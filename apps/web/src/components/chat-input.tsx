@@ -11,7 +11,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import type { Message, MessageAttachment } from '@org/agent-models';
+import type { ContextReport, MessageAttachment } from '@org/agent-models';
 import type { ComposerOptions } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
 import { useContextMeter } from '@/features/agent/hooks/use-context-meter';
@@ -142,10 +142,10 @@ export function ChatInput({
   onStop,
   variant = 'dock',
   threadId,
-  contextMessages = [],
   occupiedTokens,
   occupiedCoversStream,
   estimatedPromptTokens,
+  contextReport,
   streamingContent,
   runModel,
   /** localStorage draft scope — thread id or home key; remount via `key` when it changes. */
@@ -169,10 +169,10 @@ export function ChatInput({
   onStop?: () => void;
   variant?: 'dock' | 'hero';
   threadId?: string;
-  contextMessages?: Message[];
   occupiedTokens?: number;
   occupiedCoversStream?: boolean;
   estimatedPromptTokens?: number;
+  contextReport?: ContextReport;
   streamingContent?: string | null;
   runModel?: string;
   draftScope: string;
@@ -232,7 +232,6 @@ export function ChatInput({
   );
   const contextMeter = useContextMeter({
     threadId,
-    messages: contextMessages,
     draft: input,
     pendingAttachments,
     queuedContent: queuedMessage?.content,
@@ -243,6 +242,7 @@ export function ChatInput({
     liveOccupiedTokens: occupiedTokens,
     occupiedCoversStream,
     liveEstimatedPromptTokens: estimatedPromptTokens,
+    liveContextReport: contextReport,
     liveRunModel: runModel,
   });
 
@@ -655,6 +655,7 @@ export function ChatInput({
                   limit={contextMeter.limit}
                   source={contextMeter.source}
                   approximate={contextMeter.approximate}
+                  layers={contextMeter.layers}
                 />
                 {voice.enabled ? (
                   <Button

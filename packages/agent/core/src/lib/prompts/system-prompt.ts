@@ -35,35 +35,11 @@ function buildToolGuardrails(registry: ToolRegistry): string {
   return sections.join('\n\n');
 }
 
-/** Format frozen profile text for the system prompt. Empty → no invented biography. */
-export function buildUserPersonaPrompt(userPersona?: string): string {
-  const trimmed = userPersona?.trim() ?? '';
-  if (!trimmed) {
-    return [
-      'No frozen user profile was provided for this session.',
-      'Do not invent a biography, job title, or preferences.',
-      'Infer only from the current conversation; adapt once the user shows a clear preference.',
-    ].join('\n');
-  }
-
-  return [
-    'Frozen facts from the user profile settings. Treat as durable for this session.',
-    'Use them to adapt tone, depth, examples, jargon level, and working style.',
-    'Do not contradict them unless the user explicitly overrides in this chat.',
-    'Do not recite this block back unless they ask what you know about them.',
-    '',
-    trimmed,
-  ].join('\n');
-}
-
 /**
- * Assembles the frozen system prompt: agent.md identity, user persona, then
- * tool protocol. Identity/tone lives in agent.md; keep API schemas in tools/.
+ * Assembles the frozen system prompt: identity + tool protocol.
+ * USER.md / MEMORY.md belong in the memory layer (assembleContext), not here.
  */
-export function buildSystemPrompt(
-  registry: ToolRegistry,
-  userPersona?: string,
-): string {
+export function buildSystemPrompt(registry: ToolRegistry): string {
   const toolNames = Array.from(registry.byName.keys());
   const hasLoadSkill = registry.byName.has('load_skill');
   const catalog = hasLoadSkill
@@ -100,10 +76,6 @@ Loading instructions does not approve any action they recommend.
 ${loadAgentIdentity()}
 
 Today's date is ${today()}.
-
-# User Persona
-
-${buildUserPersonaPrompt(userPersona)}
 
 # Tool calling protocol
 

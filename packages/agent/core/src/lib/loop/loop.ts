@@ -236,6 +236,7 @@ export async function runLoop(
     ...(config.estimatedPromptTokens !== undefined
       ? { estimatedPromptTokens: config.estimatedPromptTokens }
       : {}),
+    ...(config.contextReport ? { contextReport: config.contextReport } : {}),
   });
 
   try {

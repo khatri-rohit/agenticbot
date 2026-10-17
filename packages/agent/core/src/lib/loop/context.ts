@@ -5,17 +5,16 @@ import type { ToolRegistry } from '../tools/type';
 
 /**
  * Harness/CLI helper: system prompt + single user task.
- * Chat API builds messages from the client thread and calls buildSystemPrompt separately.
+ * Chat API builds messages with assembleContext (system + memory + ledger).
  */
 export function getContext(
   task: string,
   tools: ToolRegistry,
-  userPersona?: string,
 ): ChatCompletionMessageParam[] {
   return [
     {
       role: 'system',
-      content: buildSystemPrompt(tools, userPersona),
+      content: buildSystemPrompt(tools),
     },
     {
       role: 'user',

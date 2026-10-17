@@ -6,6 +6,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import type { ContextReportLayer } from '@org/agent-models';
 import type { ContextMeterSource } from '@/features/agent/hooks/use-context-meter';
 
 export function ContextUsage({
@@ -13,11 +14,13 @@ export function ContextUsage({
   limit,
   source,
   approximate,
+  layers = [],
 }: {
   used: number;
   limit: number | null;
   source: ContextMeterSource;
   approximate: boolean;
+  layers?: ContextReportLayer[];
 }) {
   if (limit == null || limit <= 0) return null;
 
@@ -76,7 +79,7 @@ export function ContextUsage({
           </svg>
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" side="top" className="w-44 p-2.5">
+      <PopoverContent align="end" side="top" className="w-52 p-2.5">
         <p className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
           Context
         </p>
@@ -88,8 +91,16 @@ export function ContextUsage({
           </dd>
           <dt className="text-muted-foreground">Limit</dt>
           <dd className="text-right font-medium tabular-nums">{limitLabel}</dd>
-          <dt className="text-muted-foreground">Source</dt>
-          <dd className="text-right font-medium capitalize">{source}</dd>
+          {layers
+            .filter((layer) => layer.tokens > 0)
+            .map((layer) => (
+              <div key={layer.id} className="contents">
+                <dt className="text-muted-foreground">{layer.label}</dt>
+                <dd className="text-right tabular-nums">
+                  {layer.tokens.toLocaleString()}
+                </dd>
+              </div>
+            ))}
         </dl>
         <p className="mt-2 text-[11px] text-muted-foreground tabular-nums">
           {showTilde ? '~' : ''}

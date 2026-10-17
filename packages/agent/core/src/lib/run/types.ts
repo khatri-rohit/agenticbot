@@ -1,6 +1,6 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import type { LedgerRecord, ToolOrigin } from '@org/agent-models';
+import type { ContextReport, LedgerRecord, ToolOrigin } from '@org/agent-models';
 
 import type { EventEmitter } from '../events/emitter';
 import type { AgentLimits } from '../loop/limits';
@@ -32,6 +32,7 @@ export type StartRunOptions = {
   limits?: AgentLimits;
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
+  contextReport?: ContextReport;
   origin?: ToolOrigin;
   workspaceRoot?: string;
   /** Host persistence seam (ledger append in M1). */

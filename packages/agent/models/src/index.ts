@@ -16,6 +16,7 @@ export type {
   ToolFailed,
   ApprovalRequested,
   ApprovalResolved,
+  MemoryUpdated,
   TurnCompleted,
   RunCompleted,
   RunError,
@@ -79,7 +80,16 @@ export type {
   ToolContext,
 } from './lib/tool-context.js';
 
-export type { MemoryTarget, MemoryOp } from './lib/memory.js';
+export type {
+  MemoryTarget,
+  MemoryOp,
+  MemoryFiles,
+  MemoryCaps,
+  ProposedMemoryOp,
+  MemoryGateVerdict,
+  MemoryGateResult,
+} from './lib/memory.js';
+export { DEFAULT_MEMORY_CAPS } from './lib/memory.js';
 
 export type {
   ContextBudget,
@@ -87,3 +97,4 @@ export type {
   ContextReport,
   Snapshot,
 } from './lib/context.js';
+export { DEFAULT_CONTEXT_BUDGET } from './lib/context.js';

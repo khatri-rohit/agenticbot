@@ -151,6 +151,24 @@ export class ThreadStore {
     return buf.toString('utf8');
   }
 
+  /** Inline blob bodies so assembleContext can stub from live content. */
+  async hydrateEnvelopes(threadId: string): Promise<LedgerEnvelope[]> {
+    const envelopes = await this.readLedger(threadId, 0);
+    const hydrated: LedgerEnvelope[] = [];
+    for (const envelope of envelopes) {
+      const toolContent = await this.hydrateToolContent(threadId, envelope);
+      if (!toolContent || envelope.record.role !== 'tool') {
+        hydrated.push(envelope);
+        continue;
+      }
+      hydrated.push({
+        ...envelope,
+        record: { ...envelope.record, content: toolContent },
+      });
+    }
+    return hydrated;
+  }
+
   async toChatMessages(threadId: string): Promise<ChatMessage[]> {
     const envelopes = await this.readLedger(threadId, 0);
     const messages: ChatMessage[] = [];
