@@ -21,6 +21,7 @@ import {
   shouldShowConversationRail,
 } from './conversation-rail';
 import { MessageActions } from './message-actions';
+import { ToolCallPanel } from './tool-call-panel';
 import { UserMessage } from './user-message';
 
 export function MessageList({
@@ -190,6 +191,10 @@ export function MessageList({
 
                   {turn.replies.length > 0 && (
                     <div className="flex flex-col gap-4 pt-1">
+                      <ToolCallPanel
+                        replies={turn.replies}
+                        liveActivity={isLastTurn ? toolActivity : []}
+                      />
                       {turn.replies.map((msg) => (
                         <AssistantMessage
                           key={msg.id}
@@ -202,14 +207,6 @@ export function MessageList({
                           onRetry={onRetryLastResponse}
                           retryDisabled={isRunning}
                         />
-                      ))}
-                    </div>
-                  )}
-
-                  {isLastTurn && toolActivity.length > 0 && (
-                    <div className="space-y-1.5 border-l border-border/50 pl-3">
-                      {toolActivity.map((tool) => (
-                        <ToolStatus key={tool.toolCallId} tool={tool} />
                       ))}
                     </div>
                   )}
@@ -279,16 +276,17 @@ function AssistantMessage({
   onRetry: () => void | Promise<void>;
   retryDisabled?: boolean;
 }) {
-  if (message.role === 'tool') {
-    return (
-      <div>
-        <p className="type-caption text-muted-foreground/80">
-          Tool result
-          {message.toolCallId ? ` (${message.toolCallId.slice(0, 8)}…)` : ''}
-        </p>
-        <MessageActions content={message.content} align="start" />
-      </div>
-    );
+  // Tool results render in the turn's ToolCallPanel, not inline.
+  if (message.role === 'tool') return null;
+
+  // Tool-only assistant messages (no prose) are fully covered by the panel.
+  if (
+    message.role === 'assistant' &&
+    message.toolCalls &&
+    message.toolCalls.length > 0 &&
+    message.content.trim() === ''
+  ) {
+    return null;
   }
 
   return (
@@ -306,19 +304,4 @@ function AssistantMessage({
       />
     </div>
   );
-}
-
-function ToolStatus({
-  tool,
-}: {
-  tool: { toolName: string; status: string; durationMs?: number };
-}) {
-  const label =
-    tool.status === 'running'
-      ? `${tool.toolName} running`
-      : tool.status === 'failed'
-        ? `${tool.toolName} failed`
-        : `${tool.toolName} done${tool.durationMs ? ` (${tool.durationMs}ms)` : ''}`;
-
-  return <p className="type-caption text-muted-foreground/85">{label}</p>;
 }

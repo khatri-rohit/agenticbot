@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 
+import { createLogger, createHttpLogger } from '@org/logger';
 import { agentRouter } from './routes/agent/agent.routes';
 import { voiceRouter } from './routes/voice/voice.routes';
 
@@ -11,6 +12,8 @@ const port = process.env.PORT ? Number(process.env.PORT) : 3333;
 const voiceSttProvider = (process.env.VOICE_STT_PROVIDER ?? 'browser')
   .trim()
   .toLowerCase();
+
+const logger = createLogger('api');
 
 const app = express();
 
@@ -24,6 +27,10 @@ app.use(
 
 app.use(express.json({ limit: '25mb' }));
 
+// Request-scoped structured logging: stamps x-request-id, logs each request in/out.
+// SSE event streams and OPTIONS preflight are skipped (see @org/logger/http).
+app.use(createHttpLogger(logger));
+
 // Agent endpoints
 app.use('/api/agent', agentRouter);
 
@@ -33,6 +40,5 @@ if (voiceSttProvider === 'speaches') {
 }
 
 app.listen(port, host, () => {
-  console.log(`[ ready ] http://${host}:${port}`);
-  console.log(`[ voice ] STT provider=${voiceSttProvider}`);
+  logger.info({ host, port, voiceSttProvider }, 'api ready');
 });

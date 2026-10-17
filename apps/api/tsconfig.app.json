@@ -25,6 +25,9 @@
     },
     {
       "path": "../../packages/agent/core/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/logger/tsconfig.lib.json"
     }
   ]
 }
