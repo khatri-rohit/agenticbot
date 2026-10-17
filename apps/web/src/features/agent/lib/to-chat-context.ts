@@ -41,6 +41,10 @@ export function toChatContext(messages: Message[]): ChatMessage[] {
         content: message.content,
       };
     }
-    return { role: 'assistant', content: message.content };
+    return {
+      role: 'assistant',
+      content: message.content,
+      ...(message.toolCalls?.length ? { tool_calls: message.toolCalls } : {}),
+    };
   });
 }

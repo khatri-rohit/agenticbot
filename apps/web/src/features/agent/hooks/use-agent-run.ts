@@ -1,7 +1,11 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import type { AgentEvent, MessageAttachment, Thread } from '@org/agent-models';
-import { clampChatTitle } from '@/lib/thread-title';
+import {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useSyncExternalStore,
+} from 'react';
+import type { AgentEvent, Message, MessageAttachment } from '@org/agent-models';
 import { toastError } from '@/hooks/use-toast';
 import {
   modelSupportsVision,
@@ -10,17 +14,6 @@ import {
   writeStoredComposerModel,
 } from '@/lib/ollama-models';
 import { getUserPersona } from '@/lib/user-persona';
-import { toChatContext } from '../lib/to-chat-context';
-import {
-  db,
-  getMessages,
-  getThread,
-  addMessage,
-  updateThread,
-  updateRun,
-  deleteMessagesAfter,
-  updateMessageContent,
-} from '../store/db';
 import {
   applyChatEvent,
   initialChatState,
@@ -30,11 +23,21 @@ import {
 import {
   startRun,
   subscribeRun,
-  enqueueTitle,
-  pollTitle,
   cancelRun,
   type ComposerOptions,
 } from '../api/agent-client';
+import {
+  fetchLedger,
+  fetchThread,
+  patchThread,
+  seqFromMessageId,
+} from '../api/thread-client';
+import {
+  ensureThreadsLoaded,
+  getThreadsSnapshot,
+  refreshThreads,
+  subscribeThreads,
+} from '../store/thread-cache';
 
 export type QueuedMessage = {
   content: string;
@@ -50,8 +53,8 @@ const defaultComposerOptions = (): ComposerOptions => ({
 
 /**
  * Hook for managing an active agent run.
- * Starts a run, subscribes to SSE events, reduces them into ChatState,
- * and persists durable state to IndexedDB.
+ * Starts a run, subscribes to SSE events, reduces them into ephemeral
+ * ChatState; durable history comes from the host ledger.
  */
 export function useAgentRun(threadId: string | null) {
   const [chatState, setChatState] = useState<ChatState>(initialChatState());
@@ -67,11 +70,15 @@ export function useAgentRun(threadId: string | null) {
   chatStateRef.current = chatState;
   const wasRunningRef = useRef(false);
   const syncedThreadModelRef = useRef<string | null>(null);
+  const [ledgerEpoch, setLedgerEpoch] = useState(0);
+  const bumpLedger = useCallback(() => {
+    setLedgerEpoch((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     if (!threadId) return;
     let cancelled = false;
-    void db.threads.get(threadId).then((thread) => {
+    void fetchThread(threadId).then((thread) => {
       if (cancelled || !thread) return;
       if (syncedThreadModelRef.current === thread.id) return;
       syncedThreadModelRef.current = thread.id;
@@ -90,10 +97,9 @@ export function useAgentRun(threadId: string | null) {
       setComposerOptions(next);
       writeStoredComposerModel(model);
       if (!threadId) return;
-      // Persist model without bumping sidebar `updatedAt` (see updateThread).
-      void getThread(threadId).then((thread) => {
+      void fetchThread(threadId).then((thread) => {
         if (!thread || thread.model === model) return;
-        void updateThread(threadId, { model });
+        void patchThread(threadId, { model }).then(() => refreshThreads());
       });
     },
     [threadId],
@@ -103,27 +109,6 @@ export function useAgentRun(threadId: string | null) {
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
   }, []);
-
-  const persistInterruptedAssistant = useCallback(
-    async (state: ChatState) => {
-      if (!threadId) return;
-      const run = state.activeRun;
-      if (!run) return;
-      const partial = run?.streamingMessage;
-      if (!partial?.content) return;
-
-      await addMessage({
-        id: partial.id,
-        threadId,
-        runId: run.runId,
-        role: 'assistant',
-        content: partial.content,
-        status: 'interrupted',
-        createdAt: new Date().toISOString(),
-      });
-    },
-    [threadId],
-  );
 
   const subscribeToRun = useCallback(
     (runId: string) => {
@@ -146,6 +131,10 @@ export function useAgentRun(threadId: string | null) {
             await persistChatEffects(prev, event, threadId);
             currentState = next;
             setChatState(next);
+            if (event.type === 'run.completed' || event.type === 'run.error') {
+              bumpLedger();
+              void refreshThreads();
+            }
           });
         },
         (error) => {
@@ -153,7 +142,7 @@ export function useAgentRun(threadId: string | null) {
         },
       );
     },
-    [threadId, disconnect],
+    [threadId, disconnect, bumpLedger],
   );
 
   const startRunForMessages = useCallback(
@@ -186,22 +175,8 @@ export function useAgentRun(threadId: string | null) {
         return;
       }
 
-      const userMessage = {
-        id: crypto.randomUUID(),
-        threadId,
-        runId: null,
-        role: 'user' as const,
-        content,
-        ...(attachments?.length ? { attachments } : {}),
-        status: 'complete' as const,
-        createdAt: new Date().toISOString(),
-      };
-      await addMessage(userMessage);
-
-      const history = await getMessages(threadId);
-      const contextMessages = toChatContext(history);
-
-      const runId = await startRun(threadId, contextMessages, {
+      const runId = await startRun(threadId, {
+        message: { content, attachments },
         streaming: options.streaming,
         webSearch: options.webSearch,
         model: resolveOllamaModel(options.model),
@@ -210,18 +185,13 @@ export function useAgentRun(threadId: string | null) {
       });
 
       setChatState(initialChatState());
-
-      const isFirstMessage = history.length <= 1;
-      if (isFirstMessage) {
-        const titleSeed = content.trim() || '(image)';
-        enqueueTitle(threadId, titleSeed)
-          .then((jobId) => pollForTitle(jobId, threadId))
-          .catch((err) => console.error('Title generation failed:', err));
-      }
+      bumpLedger();
+      // Server writes a model-generated title on first turn before /run returns.
+      void refreshThreads();
 
       subscribeToRun(runId);
     },
-    [threadId, subscribeToRun],
+    [threadId, subscribeToRun, bumpLedger],
   );
 
   const interruptActiveRun = useCallback(async () => {
@@ -229,7 +199,6 @@ export function useAgentRun(threadId: string | null) {
     const run = state.activeRun;
     if (!run || run.status !== 'running') return;
 
-    await persistInterruptedAssistant(state);
     disconnect();
 
     try {
@@ -238,14 +207,8 @@ export function useAgentRun(threadId: string | null) {
       console.error('Cancel run failed:', err);
     }
 
-    await updateRun(run.runId, {
-      status: 'error',
-      completedAt: new Date().toISOString(),
-      error: 'Cancelled',
-    });
-
     setChatState(initialChatState());
-  }, [disconnect, persistInterruptedAssistant]);
+  }, [disconnect]);
 
   const sendMessage = useCallback(
     async (
@@ -299,24 +262,12 @@ export function useAgentRun(threadId: string | null) {
     if (!threadId) return;
     if (chatStateRef.current.activeRun?.status === 'running') return;
 
-    const history = await getMessages(threadId);
-    let lastUserIndex = -1;
-    for (let i = history.length - 1; i >= 0; i--) {
-      if (history[i].role === 'user') {
-        lastUserIndex = i;
-        break;
-      }
-    }
-    if (lastUserIndex === -1) return;
-    if (lastUserIndex === history.length - 1) return;
+    const ledger = await fetchLedger(threadId);
+    if (ledger.lastUserSeq === undefined) return;
+    if (ledger.lastUserSeq === ledger.lastSeq) return;
 
-    const userMessage = history[lastUserIndex];
-    await deleteMessagesAfter(threadId, userMessage.id);
-
-    const remaining = await getMessages(threadId);
-    const contextMessages = toChatContext(remaining);
-
-    const runId = await startRun(threadId, contextMessages, {
+    const runId = await startRun(threadId, {
+      rewindThroughSeq: ledger.lastUserSeq,
       streaming: composerOptions.streaming,
       webSearch: composerOptions.webSearch,
       model: resolveOllamaModel(composerOptions.model),
@@ -325,8 +276,9 @@ export function useAgentRun(threadId: string | null) {
     });
 
     setChatState(initialChatState());
+    bumpLedger();
     subscribeToRun(runId);
-  }, [threadId, composerOptions, subscribeToRun]);
+  }, [threadId, composerOptions, subscribeToRun, bumpLedger]);
 
   const editLastUserMessage = useCallback(
     async (messageId: string, newContent: string) => {
@@ -337,24 +289,23 @@ export function useAgentRun(threadId: string | null) {
         await interruptActiveRun();
       }
 
-      const history = await getMessages(threadId);
-      let lastUser: (typeof history)[number] | null = null;
-      for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i].role === 'user') {
-          lastUser = history[i];
+      const ledger = await fetchLedger(threadId);
+      let lastUser: Message | null = null;
+      for (let i = ledger.messages.length - 1; i >= 0; i--) {
+        if (ledger.messages[i].role === 'user') {
+          lastUser = ledger.messages[i];
           break;
         }
       }
       if (!lastUser || lastUser.id !== messageId) return;
       if (!trimmed && !(lastUser.attachments?.length ?? 0)) return;
 
-      await updateMessageContent(messageId, trimmed);
-      await deleteMessagesAfter(threadId, messageId);
+      const userSeq = seqFromMessageId(messageId);
+      if (userSeq === undefined) return;
 
-      const remaining = await getMessages(threadId);
-      const contextMessages = toChatContext(remaining);
-
-      const runId = await startRun(threadId, contextMessages, {
+      const runId = await startRun(threadId, {
+        rewindThroughSeq: userSeq - 1,
+        message: { content: trimmed, attachments: lastUser.attachments },
         streaming: composerOptions.streaming,
         webSearch: composerOptions.webSearch,
         model: resolveOllamaModel(composerOptions.model),
@@ -363,9 +314,10 @@ export function useAgentRun(threadId: string | null) {
       });
 
       setChatState(initialChatState());
+      bumpLedger();
       subscribeToRun(runId);
     },
-    [threadId, composerOptions, subscribeToRun, interruptActiveRun],
+    [threadId, composerOptions, subscribeToRun, interruptActiveRun, bumpLedger],
   );
 
   useEffect(() => {
@@ -395,50 +347,42 @@ export function useAgentRun(threadId: string | null) {
     disconnect,
     stopGeneration: interruptActiveRun,
     isRunning: chatState.activeRun?.status === 'running',
+    ledgerEpoch,
   };
 }
 
-async function pollForTitle(jobId: string, threadId: string): Promise<void> {
-  const MAX_POLLS = 30;
-  const INTERVAL_MS = 2000;
-
-  for (let i = 0; i < MAX_POLLS; i++) {
-    await new Promise((r) => setTimeout(r, INTERVAL_MS));
-    const result = await pollTitle(jobId);
-
-    if (result.status === 'completed') {
-      await updateThread(threadId, { title: clampChatTitle(result.title) });
-      return;
-    }
-    if (result.status === 'failed') {
-      console.error('Title generation failed for thread', threadId);
-      return;
-    }
-  }
-  console.warn('Title generation timed out for thread', threadId);
-}
-
-function sortThreadsForSidebar(threads: Thread[]) {
-  return [...threads].sort((a, b) => {
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
-    return b.updatedAt.localeCompare(a.updatedAt);
-  });
-}
-
 export function useThreads() {
-  return useLiveQuery(async () => {
-    const threads = await db.threads.toArray();
-    return sortThreadsForSidebar(threads);
+  const threads = useSyncExternalStore(
+    subscribeThreads,
+    getThreadsSnapshot,
+    getThreadsSnapshot,
+  );
+  useEffect(() => {
+    ensureThreadsLoaded();
   }, []);
+  return threads;
 }
 
-export function useMessages(threadId: string | null) {
-  return useLiveQuery(async () => {
-    if (!threadId) return [];
-    return db.messages
-      .where('[threadId+createdAt]')
-      .between([threadId, ''], [threadId, '\uffff'])
-      .toArray();
-  }, [threadId]);
+export function useMessages(threadId: string | null, ledgerEpoch = 0) {
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  useEffect(() => {
+    if (!threadId) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchLedger(threadId)
+      .then((ledger) => {
+        if (!cancelled) setMessages(ledger.messages);
+      })
+      .catch((error) => {
+        console.error('Failed to load ledger', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId, ledgerEpoch]);
+
+  return messages;
 }

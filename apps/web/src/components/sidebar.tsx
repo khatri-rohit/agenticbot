@@ -14,7 +14,8 @@ import {
 import type { Thread } from '@org/agent-models';
 import { CHAT_TITLE_MAX_WORDS, clampChatTitle } from '@/lib/thread-title';
 import { useThreads } from '../features/agent/hooks/use-agent-run';
-import { deleteThread, updateThread } from '../features/agent/store/db';
+import { deleteThread, patchThread } from '../features/agent/api/thread-client';
+import { refreshThreads } from '../features/agent/store/thread-cache';
 import { formatRelativeTime } from '../lib/format-relative-time';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -163,13 +164,15 @@ function ThreadItem({ thread, active }: { thread: Thread; active: boolean }) {
 
   const handleDelete = async () => {
     await deleteThread(thread.id);
+    await refreshThreads();
     if (pathname === `/chat/${thread.id}`) {
       router.push('/');
     }
   };
 
   const handlePinToggle = async () => {
-    await updateThread(thread.id, { pinned: !isPinned });
+    await patchThread(thread.id, { pinned: !isPinned });
+    await refreshThreads();
   };
 
   const handleRename = async () => {
@@ -180,7 +183,8 @@ function ThreadItem({ thread, active }: { thread: Thread; active: boolean }) {
     if (next === null) return;
     const title = clampChatTitle(next);
     if (!title || title === 'New Chat') return;
-    await updateThread(thread.id, { title });
+    await patchThread(thread.id, { title });
+    await refreshThreads();
   };
 
   return (

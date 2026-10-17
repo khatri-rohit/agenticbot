@@ -1,8 +1,7 @@
 /**
  * A conversation thread. The top-level durable entity.
  *
- * Owned by the client (IndexedDB). The server is stateless and does not
- * persist threads — it receives full message context per run.
+ * Owned by the API host catalog. The web UI is a client of /api/agent/threads.
  */
 export const CHAT_TITLE_MIN_WORDS = 5;
 export const CHAT_TITLE_MAX_WORDS = 7;

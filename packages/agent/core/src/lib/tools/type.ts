@@ -3,6 +3,8 @@ import type {
   ChatCompletionFunctionTool,
 } from 'openai/resources/chat/completions';
 
+import type { ToolContext, ToolRisk } from '@org/agent-models';
+
 /**
  * Guidance text injected into the system prompt per tool.
  * This is policy, not schema — kept separate from the OpenAI tool definition.
@@ -16,7 +18,12 @@ export type ToolGuidance = {
 export type Tool = {
   definition: ChatCompletionFunctionTool;
   guidance: ToolGuidance;
-  execute: (args: Record<string, unknown>) => Promise<string>;
+  /** Host approval / cron profiles key off this (default treated as read). */
+  risk?: ToolRisk;
+  execute: (
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ) => Promise<string>;
 };
 
 export type ToolRegistry = {

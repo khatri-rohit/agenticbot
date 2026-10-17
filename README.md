@@ -12,8 +12,8 @@ For Nx-specific conventions (tasks, generators, MCP), see [AGENTS.md](./AGENTS.m
 | -------------- | ------------------- | -------------------------------------------------------------------------------------------- |
 | Domain types   | `@org/agent-models` | `Run`, `Thread`, `AgentEvent`, `RESEARCH_MODE`, chat shapes                                  |
 | Runtime (pure) | `@org/agent-core`   | `runLoop`, `RunManager`, tools, model invoke/stream, system prompt — **no HTTP, DOM, or DB** |
-| Transport      | `apps/api`          | Express: `/api/agent/*`, voice STT proxy, BullMQ title jobs                                  |
-| UI             | `apps/web`          | Chat, IndexedDB threads, SSE via `use-agent-run`                                             |
+| Transport      | `apps/api`          | Express: `/api/agent/*`, disk thread store, voice STT proxy                                  |
+| UI             | `apps/web`          | Chat UI + SSE via `use-agent-run` (threads from API catalog)                                 |
 | Local eval     | `apps/agent`        | Thin script calling core directly                                                            |
 
 ### Request flow (chat)
@@ -27,7 +27,7 @@ User message (apps/web)
   → apps/web chat-store reducer → UI
 ```
 
-**Server is stateless for threads:** the client sends full message history each run. Threads live in the browser (IndexedDB).
+**Threads are host-owned on disk** (`AGENTICBOT_HOME` SQLite catalog + ledger). The first user turn seeds a sidebar title and refines it with the chat model.
 
 **One active run per thread** (enforced in API). Use `POST /api/agent/run/:runId/cancel` to stop generation.
 
@@ -80,7 +80,7 @@ Host-run API (typical dev) — see [.env.example](./.env.example):
 | `OLLAMA_API_KEY`                 | Chat (cloud) + forces Ollama web search/fetch when set        |
 | `FIRECRAWL_API_KEY`              | Optional — higher Firecrawl limits (keyless works without it) |
 | `TAVILY_API_KEY`                 | Optional — higher Tavily limits (keyless works without it)    |
-| `REDIS_URL`                      | BullMQ title queue (`redis://127.0.0.1:6379`)                 |
+| `AGENTICBOT_HOME`                | Session catalog/ledger root (default `~/.local/agenticbot`)   |
 | `VOICE_STT_PROVIDER`             | `browser` (default) \| `speaches` \| `off`                    |
 | `NEXT_PUBLIC_VOICE_STT_PROVIDER` | Same value for the web app (must match)                       |
 | `SPEACHES_BASE_URL`              | Speaches only — STT proxy base URL                            |
@@ -201,13 +201,12 @@ npx nx affected -t typecheck build lint test
 
 ## API surface (agent)
 
-| Method | Path                                     | Description                                                                                                |
-| ------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `POST` | `/api/agent/run`                         | Start run; body includes `threadId`, `messages`, optional `allowedTools`, `model`, `streaming`, `thinking` |
-| `GET`  | `/api/agent/run/:runId/events?fromSeq=N` | SSE stream of `AgentEvent`s                                                                                |
-| `POST` | `/api/agent/run/:runId/cancel`           | Cancel in-flight run                                                                                       |
-| `POST` | `/api/agent/title`                       | Enqueue title generation (needs Redis)                                                                     |
-| `GET`  | `/api/agent/title/:jobId`                | Poll title job                                                                                             |
+| Method | Path                                     | Description                                                             |
+| ------ | ---------------------------------------- | ----------------------------------------------------------------------- |
+| `POST` | `/api/agent/run`                         | Append optional user turn, start run; first turn also titles the thread |
+| `GET`  | `/api/agent/run/:runId/events?fromSeq=N` | SSE stream of `AgentEvent`s                                             |
+| `POST` | `/api/agent/run/:runId/cancel`           | Cancel in-flight run                                                    |
+| `*`    | `/api/agent/threads…`                    | Disk-backed thread catalog / ledger                                     |
 
 Client tool wiring (`apps/web/src/features/agent/api/agent-client.ts`):
 
@@ -240,7 +239,7 @@ External HTTP for tools belongs in core modules (e.g. `web_search_api.ts`), not 
 | `web_fetch` fails                      | Valid full URL; provider rate limit; page blocked or huge (content truncated at 4k chars in harness)    |
 | Run stuck “running”                    | SSE disconnect; `run.completed` / `run.error`; cancel endpoint                                          |
 | 409 on new message                     | Prior run still active on thread; cancel or wait                                                        |
-| Title never updates                    | `REDIS_URL`, Redis up, title worker/queue in API logs                                                   |
+| Title stays “New Chat”                 | First message must go through `POST /run`; check API logs for `[title] generate failed`                 |
 | Voice / STT errors                     | Speaches health `http://127.0.0.1:8000/health`, model pull per [docker/README.md](./docker/README.md)   |
 | Type errors in API after model changes | Rebuild `packages/agent/models` and `core` `.d.ts` (see above)                                          |
 

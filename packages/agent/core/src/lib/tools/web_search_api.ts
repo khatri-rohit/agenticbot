@@ -44,35 +44,39 @@ function hasDetailedContent(result: WebSearchResult): boolean {
 export async function webSearchApi(
   query: string,
   maxResults = 5,
+  signal?: AbortSignal,
 ): Promise<WebSearchResponse> {
   if (process.env.OLLAMA_API_KEY) {
-    return ollamaSearch(query, maxResults);
+    return ollamaSearch(query, maxResults, signal);
   }
 
   try {
-    return await firecrawlSearch(query, maxResults);
+    return await firecrawlSearch(query, maxResults, signal);
   } catch (error) {
     if (!isRetryableError(error)) throw error;
   }
 
-  return tavilySearch(query, maxResults);
+  return tavilySearch(query, maxResults, signal);
 }
 
 /**
  * Fetch a single URL via the configured provider chain.
  */
-export async function webFetchApi(url: string): Promise<WebFetchResponse> {
+export async function webFetchApi(
+  url: string,
+  signal?: AbortSignal,
+): Promise<WebFetchResponse> {
   if (process.env.OLLAMA_API_KEY) {
-    return ollamaFetch(url);
+    return ollamaFetch(url, signal);
   }
 
   try {
-    return await firecrawlFetch(url);
+    return await firecrawlFetch(url, signal);
   } catch (error) {
     if (!isRetryableError(error)) throw error;
   }
 
-  return tavilyFetch(url);
+  return tavilyFetch(url, signal);
 }
 
 /**
@@ -84,8 +88,9 @@ export async function webFetchApi(url: string): Promise<WebFetchResponse> {
 export async function webSearch(
   query: string,
   maxResults = 5,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const searchResponse = await webSearchApi(query, maxResults);
+  const searchResponse = await webSearchApi(query, maxResults, signal);
   const results = searchResponse.results;
 
   if (results.length === 0) {
@@ -108,7 +113,7 @@ export async function webSearch(
       }
 
       try {
-        const fetched = await webFetchApi(result.url);
+        const fetched = await webFetchApi(result.url, signal);
         return {
           ...result,
           pageContent: truncateContent(fetched.content),
@@ -166,8 +171,11 @@ export async function webSearch(
  * Fetch a single URL and format as structured context.
  * Used by the web_fetch tool.
  */
-export async function webFetch(url: string): Promise<string> {
-  const fetched = await webFetchApi(url);
+export async function webFetch(
+  url: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const fetched = await webFetchApi(url, signal);
   const truncated = truncateContent(fetched.content);
 
   const lines: string[] = [

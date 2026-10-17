@@ -48,9 +48,10 @@ export const webSearchTool: Tool = {
       'After a non-empty result, answer or web_fetch — do not issue another web_search for the same question.',
     ],
   },
-  execute: async (args) => {
+  risk: 'network',
+  execute: async (args, ctx) => {
     const query = String(args.query ?? '');
-    return webSearch(query, 5);
+    return webSearch(query, 5, ctx.signal);
   },
 };
 
@@ -97,9 +98,10 @@ export const webFetchTool: Tool = {
       'Do not fetch the same URL multiple times if it already returned content.',
     ],
   },
-  execute: async (args) => {
+  risk: 'network',
+  execute: async (args, ctx) => {
     const url = String(args.url ?? '');
-    return webFetch(url);
+    return webFetch(url, ctx.signal);
   },
 };
 

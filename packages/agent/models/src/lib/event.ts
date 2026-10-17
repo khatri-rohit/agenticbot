@@ -1,4 +1,5 @@
 import type { TokenUsage } from './run.js';
+import type { ToolRisk } from './tool-context.js';
 
 /**
  * AgentEvent — the server's streaming protocol to the client.
@@ -10,7 +11,7 @@ import type { TokenUsage } from './run.js';
  * - `assistant.delta` events (streaming mode only) carry text fragments.
  *   In non-streaming mode the client receives `assistant.completed` directly.
  * - Tool results in events carry a *preview* only (size-capped). The full
- *   payload is stored client-side in IndexedDB `tool_calls`.
+ *   payload is appended to the host ledger (blobs/ when large).
  */
 
 export type AgentEvent =
@@ -22,6 +23,8 @@ export type AgentEvent =
   | ToolStarted
   | ToolCompleted
   | ToolFailed
+  | ApprovalRequested
+  | ApprovalResolved
   | TurnCompleted
   | RunCompleted
   | RunError
@@ -88,7 +91,7 @@ export interface ToolCompleted {
   toolCallId: string;
   toolName: string;
   durationMs: number;
-  /** Truncated result preview for UI display. Full result in IndexedDB. */
+  /** Truncated result preview for UI display. Full result lives in the host ledger. */
   resultPreview: unknown;
 }
 
@@ -129,6 +132,25 @@ export interface LimitHit {
   type: 'limit.hit';
   runId: string;
   reason: string;
+}
+
+/** Host needs the user (or a pre-approved profile) before a privileged tool runs. */
+export interface ApprovalRequested {
+  seq: number;
+  type: 'approval.requested';
+  runId: string;
+  approvalId: string;
+  toolName: string;
+  summary: string;
+  risk: ToolRisk;
+}
+
+export interface ApprovalResolved {
+  seq: number;
+  type: 'approval.resolved';
+  runId: string;
+  approvalId: string;
+  decision: 'approved' | 'denied';
 }
 
 /** Union of event types for filtering. */

@@ -18,7 +18,14 @@
     "tags": [
       "scope:agent",
       "type:logic"
-    ]
+    ],
+    "targets": {
+      "test": {
+        "options": {
+          "command": "node scripts/run-vitest.mjs run"
+        }
+      }
+    }
   },
   "dependencies": {
     "tslib": "^2.3.0",

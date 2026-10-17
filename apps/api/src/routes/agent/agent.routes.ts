@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type {
   ChatMessage,
+  MessageAttachment,
   StartRunRequest,
   ThinkingValue,
 } from '@org/agent-models';
@@ -18,7 +19,8 @@ import {
   estimatePromptTokens,
   type ToolRegistry,
 } from '@org/agent-core';
-import { titleQueue, type TitleJobData } from '../../queue/title-queue';
+import { generateThreadTitle } from '../../lib/generate-thread-title';
+import { getThreadStore } from '../../lib/store-instance';
 
 const router = Router();
 const runManager = new RunManager();
@@ -65,14 +67,75 @@ function buildRunContext(input: BuildRunContextInput): {
   };
 }
 
+router.get('/threads', async (_req: Request, res: Response) => {
+  const store = await getThreadStore();
+  return res.json({ threads: store.listThreads() });
+});
+
+router.post('/threads', async (req: Request, res: Response) => {
+  const model =
+    typeof req.body?.model === 'string' && req.body.model.trim()
+      ? req.body.model.trim()
+      : RESEARCH_MODE.model;
+  const title =
+    typeof req.body?.title === 'string' && req.body.title.trim()
+      ? req.body.title.trim()
+      : 'New Chat';
+  const store = await getThreadStore();
+  const thread = await store.createThread(model, title);
+  return res.status(201).json(thread);
+});
+
+router.get('/threads/:id', async (req: Request, res: Response) => {
+  const store = await getThreadStore();
+  const thread = store.getThread(req.params.id);
+  if (!thread) return res.status(404).json({ error: 'Thread not found' });
+  return res.json(thread);
+});
+
+router.patch('/threads/:id', async (req: Request, res: Response) => {
+  const store = await getThreadStore();
+  const body = req.body as {
+    title?: string;
+    model?: string;
+    pinned?: boolean;
+  };
+  const thread = store.updateThread(req.params.id, {
+    ...(typeof body.title === 'string' ? { title: body.title } : {}),
+    ...(typeof body.model === 'string' ? { model: body.model } : {}),
+    ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
+  });
+  if (!thread) return res.status(404).json({ error: 'Thread not found' });
+  return res.json(thread);
+});
+
+router.delete('/threads/:id', async (req: Request, res: Response) => {
+  const store = await getThreadStore();
+  const ok = await store.deleteThread(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Thread not found' });
+  return res.json({ ok: true });
+});
+
+router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
+  const store = await getThreadStore();
+  const thread = store.getThread(req.params.id);
+  if (!thread) return res.status(404).json({ error: 'Thread not found' });
+  const messages = await store.toUiMessages(req.params.id);
+  const envelopes = await store.readLedger(req.params.id, 0);
+  const lastSeq = envelopes.at(-1)?.seq ?? 0;
+  const lastUserSeq = store.lastUserSeq(envelopes);
+  return res.json({ messages, lastSeq, lastUserSeq });
+});
+
 /**
  * POST /api/agent/run
- * Start a new agent run. Body: StartRunRequest. Returns: { runId: string }
+ * Append optional user turn to the host ledger, then start a run.
  */
 router.post('/run', async (req: Request, res: Response) => {
   const {
     threadId,
-    messages,
+    message,
+    rewindThroughSeq,
     streaming,
     model,
     webSearch,
@@ -84,21 +147,48 @@ router.post('/run', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'threadId is required' });
   }
 
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: 'messages array is required' });
+  const store = await getThreadStore();
+  const thread = store.getThread(threadId);
+  if (!thread) {
+    return res.status(404).json({ error: 'Thread not found' });
   }
 
-  // One active run per thread
   if (runManager.hasActiveRun(threadId)) {
     return res.status(409).json({
       error: 'A run is already active for this thread',
     });
   }
 
-  const useStreaming = streaming ?? true;
-  const useModel = model ?? RESEARCH_MODE.model;
+  if (typeof rewindThroughSeq === 'number') {
+    await store.rewind(threadId, rewindThroughSeq);
+  }
 
-  if (messagesHaveImageParts(messages)) {
+  const ledgerBefore = await store.readLedger(threadId, 0);
+  const isFirstUserTurn = ledgerBefore.length === 0 && Boolean(message);
+
+  if (message) {
+    await store.append({
+      threadId,
+      runId: null,
+      record: { role: 'user', content: message.content },
+      ...(message.attachments?.length
+        ? { attachments: message.attachments }
+        : {}),
+    });
+  }
+
+  const history = await store.toChatMessages(threadId);
+  if (history.length === 0) {
+    return res.status(400).json({ error: 'thread has no messages' });
+  }
+
+  const useStreaming = streaming ?? true;
+  const useModel = model ?? thread.model ?? RESEARCH_MODE.model;
+
+  if (
+    userMessageHasImages(message?.attachments) ||
+    chatHasImageParts(history)
+  ) {
     try {
       const config = await getOllamaModelConfig(useModel);
       if (!config.supportsVision) {
@@ -112,7 +202,7 @@ router.post('/run', async (req: Request, res: Response) => {
   }
 
   const { tools, openaiMessages, estimatedPromptTokens } = buildRunContext({
-    messages,
+    messages: history,
     webSearch,
     userPersona,
   });
@@ -132,7 +222,21 @@ router.post('/run', async (req: Request, res: Response) => {
     limits: RESEARCH_MODE.limits,
     mode: RESEARCH_MODE.name,
     estimatedPromptTokens,
+    onMessage: async (record) => {
+      if (record.role === 'system') return;
+      await store.append({ threadId, runId, record });
+    },
   });
+
+  // First turn: title via the same chat model (runs in parallel with the agent).
+  // Await so POST /run returns after ThreadStore has the real title for refreshThreads.
+  if (isFirstUserTurn && message) {
+    const title = await generateThreadTitle(
+      message.content || 'Image chat',
+      useModel,
+    );
+    store.updateThread(threadId, { title, model: useModel });
+  }
 
   return res.json({ runId });
 });
@@ -142,12 +246,8 @@ router.post('/run', async (req: Request, res: Response) => {
  * Heuristic size of the next request envelope (same system + tools as /run).
  */
 router.post('/context/estimate', async (req: Request, res: Response) => {
-  const {
-    messages,
-    model,
-    webSearch,
-    userPersona,
-  } = req.body as Partial<StartRunRequest> & { messages?: ChatMessage[] };
+  const { messages, model, webSearch, userPersona } =
+    req.body as Partial<StartRunRequest> & { messages?: ChatMessage[] };
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array is required' });
@@ -254,79 +354,17 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
   return;
 });
 
-/**
- * POST /api/agent/title
- * Enqueue a title generation job for a thread's first message.
- *
- * Body: { threadId: string; firstMessage: string }
- * Returns: { jobId: string }
- */
-router.post('/title', async (req: Request, res: Response) => {
-  const { threadId, firstMessage } = req.body;
+function userMessageHasImages(
+  attachments: MessageAttachment[] | undefined,
+): boolean {
+  return (attachments?.length ?? 0) > 0;
+}
 
-  if (!threadId) {
-    return res.status(400).json({ error: 'threadId is required' });
-  }
-  if (!firstMessage || typeof firstMessage !== 'string') {
-    return res.status(400).json({ error: 'firstMessage is required' });
-  }
-
-  try {
-    const job = await titleQueue.add('generate-title', {
-      threadId,
-      firstMessage,
-    } satisfies TitleJobData);
-    return res.json({ jobId: job.id ?? '' });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return res.status(500).json({ error: `Failed to enqueue: ${msg}` });
-  }
-});
-
-/**
- * GET /api/agent/title/:jobId
- * Poll a title generation job's result.
- *
- * Returns:
- *   200 { status: 'completed', title: string }
- *   200 { status: 'pending' }
- *   200 { status: 'failed', error: string }
- *   404 { error: 'Job not found' }
- */
-router.get('/title/:jobId', async (req: Request, res: Response) => {
-  const { jobId } = req.params;
-
-  const job = await titleQueue.getJob(jobId);
-  if (!job) {
-    return res.status(404).json({ error: 'Job not found' });
-  }
-
-  if (await job.isFailed()) {
-    return res.json({ status: 'failed', error: 'Title generation failed' });
-  }
-
-  if (!job.returnvalue) {
-    return res.json({ status: 'pending' });
-  }
-
-  const result = job.returnvalue as { title: string };
-  return res.json({ status: 'completed', title: result.title });
-});
-
-/** True when any user message content array includes an image_url part. */
-function messagesHaveImageParts(messages: unknown[]): boolean {
+function chatHasImageParts(messages: ChatMessage[]): boolean {
   for (const message of messages) {
-    if (!message || typeof message !== 'object') continue;
-    const content = (message as { content?: unknown }).content;
-    if (!Array.isArray(content)) continue;
-    for (const part of content) {
-      if (
-        part &&
-        typeof part === 'object' &&
-        (part as { type?: string }).type === 'image_url'
-      ) {
-        return true;
-      }
+    if (message.role !== 'user' || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part.type === 'image_url') return true;
     }
   }
   return false;

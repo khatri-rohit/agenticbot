@@ -1,15 +1,39 @@
 'use client';
 
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useEffect, useState } from 'react';
 import { clampChatTitle } from '@/lib/thread-title';
-import { db } from '../features/agent/store/db';
+import { fetchThread } from '../features/agent/api/thread-client';
+import {
+  getThreadsSnapshot,
+  subscribeThreads,
+} from '../features/agent/store/thread-cache';
 
 export function ChatHeader({ threadId }: { threadId: string }) {
-  const thread = useLiveQuery(() => db.threads.get(threadId), [threadId]);
+  const [title, setTitle] = useState('New Chat');
 
-  const rawTitle = thread?.title ?? 'New Chat';
-  const isPending = rawTitle === 'New Chat';
-  const title = isPending ? rawTitle : clampChatTitle(rawTitle);
+  useEffect(() => {
+    let cancelled = false;
+
+    const apply = (raw: string | undefined) => {
+      if (cancelled || !raw) return;
+      setTitle(raw);
+    };
+
+    void fetchThread(threadId).then((thread) => apply(thread?.title));
+
+    const unsub = subscribeThreads(() => {
+      const cached = getThreadsSnapshot().find((t) => t.id === threadId);
+      apply(cached?.title);
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [threadId]);
+
+  const isPending = title === 'New Chat';
+  const display = isPending ? title : clampChatTitle(title);
 
   return (
     <header className="shrink-0 border-b border-border/30 px-6 py-2.5">
@@ -20,7 +44,7 @@ export function ChatHeader({ threadId }: { threadId: string }) {
             <span className="h-2.5 w-20 animate-pulse rounded-full bg-muted" />
           </span>
         ) : (
-          <span className="text-foreground/90">{title}</span>
+          <span className="text-foreground/90">{display}</span>
         )}
       </h1>
     </header>

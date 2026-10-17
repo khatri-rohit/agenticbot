@@ -65,3 +65,6 @@ out
 # Personal Compose binds (paths, GPU, etc.) — never commit machine-specific mounts
 docker-compose.override.yml
 .cursor
+
+# Local agent home (dev AGENTICBOT_HOME)
+.local/

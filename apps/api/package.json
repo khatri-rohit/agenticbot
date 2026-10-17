@@ -111,6 +111,7 @@
       },
       "test": {
         "options": {
+          "command": "node scripts/run-vitest.mjs run",
           "passWithNoTests": true
         }
       },
@@ -137,8 +138,6 @@
   "dependencies": {
     "@org/agent-core": "*",
     "@org/agent-models": "*",
-    "bullmq": "^6.3.11",
-    "express": "^4.21.2",
-    "ioredis": "^6.0.0"
+    "express": "^4.21.2"
   }
 }

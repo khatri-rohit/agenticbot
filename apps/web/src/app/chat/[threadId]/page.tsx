@@ -18,7 +18,6 @@ export default function ChatThreadPage({
   params: Promise<{ threadId: string }>;
 }) {
   const { threadId } = use(params);
-  const messages = useMessages(threadId);
   const {
     chatState,
     sendMessage,
@@ -31,7 +30,9 @@ export default function ChatThreadPage({
     stopGeneration,
     retryLastResponse,
     editLastUserMessage,
+    ledgerEpoch,
   } = useAgentRun(threadId);
+  const messages = useMessages(threadId, ledgerEpoch);
   const sentPendingRef = useRef(false);
 
   useEffect(() => {

@@ -34,6 +34,7 @@ export {
 // Tools
 export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
+export { toLedgerRecord } from './lib/loop/to-ledger-record';
 export { webSearchTool, webFetchTool } from './lib/tools/web-search';
 
 // Events / trace

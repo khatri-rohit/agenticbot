@@ -1,4 +1,4 @@
-import type { PendingToolCall } from './message.js';
+import type { MessageAttachment, PendingToolCall } from './message.js';
 import type { ThinkingValue } from './ollama-model.js';
 
 /**
@@ -59,10 +59,19 @@ export type ChatMessage =
     }
   | { role: 'tool'; tool_call_id: string; content: string };
 
-/** POST /api/agent/run body (server is stateless; client sends full thread). */
+/** POST /api/agent/run body. History is loaded from the host ledger. */
 export type StartRunRequest = {
   threadId: string;
-  messages: ChatMessage[];
+  /** New user turn to append. Omit when retrying the current ledger tail. */
+  message?: {
+    content: string;
+    attachments?: MessageAttachment[];
+  };
+  /**
+   * Keep ledger lines with seq <= this value; drop the rest before append/run.
+   * Used for retry (keep last user) and edit (keep the turn before that user).
+   */
+  rewindThroughSeq?: number;
   streaming?: boolean;
   model?: string;
   /** When false, omit mode-allowed search tools; globals still apply. Default true. */

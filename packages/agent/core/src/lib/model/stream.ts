@@ -61,6 +61,7 @@ export async function streamModelTurn(
   // Ollama reasoning_effort is wider than OpenAI ReasoningEffort — cast at SDK boundary.
   const stream = await getClient().chat.completions.create(
     params as ChatCompletionCreateParamsStreaming,
+    options?.signal ? { signal: options.signal } : undefined,
   );
 
   let content = '';
@@ -69,6 +70,12 @@ export async function streamModelTurn(
   const toolCalls = new Map<number, AccumulatedToolCall>();
 
   for await (const chunk of stream) {
+    if (options?.signal?.aborted) {
+      throw options.signal.reason instanceof Error
+        ? options.signal.reason
+        : new Error('Run cancelled');
+    }
+
     const chunkUsage = parseTokenUsage(chunk.usage);
     if (chunkUsage) {
       usage = chunkUsage;

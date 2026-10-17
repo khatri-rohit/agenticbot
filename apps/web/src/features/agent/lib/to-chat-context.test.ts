@@ -51,6 +51,52 @@ describe('toChatContext', () => {
     ]);
   });
 
+  it('preserves assistant tool_calls for the next model turn', () => {
+    expect(
+      toChatContext([
+        {
+          id: 'a1',
+          threadId: 't1',
+          runId: 'r1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'web_search', arguments: '{}' },
+            },
+          ],
+          status: 'complete',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 't1m',
+          threadId: 't1',
+          runId: 'r1',
+          role: 'tool',
+          content: 'hits',
+          toolCallId: 'call_1',
+          status: 'complete',
+          createdAt: '2026-01-01T00:00:01.000Z',
+        },
+      ]),
+    ).toEqual([
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'hits' },
+    ]);
+  });
+
   it('omits empty text when the turn is image-only', () => {
     expect(
       toChatContext([

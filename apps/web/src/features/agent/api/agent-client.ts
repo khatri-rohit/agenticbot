@@ -52,13 +52,13 @@ export function takePendingMessage(): PendingMessage | null {
 }
 
 /**
- * Start an agent run. Returns the runId.
- * The server is stateless — we send the full message context.
+ * Start an agent run. History is owned by the API ledger.
  */
 export async function startRun(
   threadId: string,
-  messages: ChatMessage[],
   options: {
+    message?: { content: string; attachments?: MessageAttachment[] };
+    rewindThroughSeq?: number;
     streaming?: boolean;
     model?: string;
     webSearch?: boolean;
@@ -68,7 +68,8 @@ export async function startRun(
 ): Promise<string> {
   const body: StartRunRequest = {
     threadId,
-    messages,
+    message: options.message,
+    rewindThroughSeq: options.rewindThroughSeq,
     streaming: options.streaming ?? true,
     model: options.model,
     webSearch: options.webSearch,
@@ -89,45 +90,6 @@ export async function startRun(
 
   const { runId } = await res.json();
   return runId;
-}
-
-/**
- * Enqueue a title generation job for a thread's first message.
- * Returns the jobId for polling.
- */
-export async function enqueueTitle(
-  threadId: string,
-  firstMessage: string,
-): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/agent/title`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ threadId, firstMessage }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Failed to enqueue title: ${res.status}`);
-  }
-
-  const { jobId } = await res.json();
-  return jobId;
-}
-
-/**
- * Poll a title generation job.
- * Returns the title string when completed, or null if still pending.
- */
-export async function pollTitle(
-  jobId: string,
-): Promise<
-  | { status: 'completed'; title: string }
-  | { status: 'pending' }
-  | { status: 'failed' }
-> {
-  const res = await fetch(`${API_BASE}/api/agent/title/${jobId}`);
-  if (!res.ok) return { status: 'failed' };
-  return res.json();
 }
 
 /**
@@ -206,9 +168,7 @@ export async function fetchContextEstimate(options: {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(
-      body.error ?? `Failed to estimate context: ${res.status}`,
-    );
+    throw new Error(body.error ?? `Failed to estimate context: ${res.status}`);
   }
   return res.json() as Promise<ContextEstimateResponse>;
 }

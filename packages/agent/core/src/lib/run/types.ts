@@ -1,5 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
+import type { LedgerRecord, ToolOrigin } from '@org/agent-models';
+
 import type { EventEmitter } from '../events/emitter';
 import type { AgentLimits } from '../loop/limits';
 import type { ModelCallFn, RunLoopResult } from '../loop/types';
@@ -13,6 +15,7 @@ export type RunHandle = {
   threadId: string;
   status: RunHandleStatus;
   cancelled: boolean;
+  abortController: AbortController;
   emitter: EventEmitter;
   result: RunLoopResult | null;
 };
@@ -29,4 +32,8 @@ export type StartRunOptions = {
   limits?: AgentLimits;
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
+  origin?: ToolOrigin;
+  workspaceRoot?: string;
+  /** Host persistence seam (ledger append in M1). */
+  onMessage?: (record: LedgerRecord) => void | Promise<void>;
 };

@@ -7,6 +7,8 @@ import type {
 export type ModelCallOptions = {
   /** Ollama OpenAI-compat thinking control (`"none"` = off). */
   reasoningEffort?: string;
+  /** Cancels the in-flight chat.completions request. */
+  signal?: AbortSignal;
 };
 
 /**

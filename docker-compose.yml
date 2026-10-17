@@ -1,4 +1,4 @@
-# Agenticbot local infrastructure: Redis (BullMQ) + Speaches (STT only).
+# Agenticbot local infrastructure: Speaches (STT only).
 #
 # This stack does NOT run Ollama and never mounts Ollama model directories.
 # Chat uses cloud Ollama via host apps/api .env (OLLAMA_BASE_URL=https://ollama.com/v1).
@@ -14,25 +14,6 @@
 name: agenticbot
 
 services:
-  redis:
-    image: redis:7-alpine
-    container_name: agenticbot-redis
-    restart: unless-stopped
-    ports:
-      - '${REDIS_HOST_PORT:-127.0.0.1:6379}:6379'
-    volumes:
-      # Bare name = named volume; absolute/host path = bind mount (set in .env.docker)
-      - ${REDIS_DATA_DIR:-redis-data}:/data
-    command: ['redis-server', '--appendonly', 'yes']
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    networks:
-      - agenticbot
-
   speaches:
     profiles: ['cpu']
     image: ghcr.io/speaches-ai/speaches:${SPEACHES_TAG:-latest-cpu}
@@ -99,5 +80,4 @@ networks:
     name: agenticbot
 
 volumes:
-  redis-data:
   speaches-hf-cache:

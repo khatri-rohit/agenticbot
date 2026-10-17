@@ -14,6 +14,7 @@ export type { RunHandle, RunHandleStatus, StartRunOptions } from './types';
  * One active run per thread (enforced by the caller — the API layer).
  * When a run completes, its handle stays until explicitly cleared
  * (so late SSE subscribers can still replay).
+ * cancel() aborts the run's AbortSignal so in-flight model/tool work stops.
  */
 export class RunManager {
   private runs = new Map<string, RunHandle>();
@@ -22,12 +23,14 @@ export class RunManager {
   start(opts: StartRunOptions): string {
     const runId = randomUUID();
     const emitter = new EventEmitter();
+    const abortController = new AbortController();
 
     const handle: RunHandle = {
       runId,
       threadId: opts.threadId,
       status: 'running',
       cancelled: false,
+      abortController,
       emitter,
       result: null,
     };
@@ -64,6 +67,10 @@ export class RunManager {
       mode: opts.mode,
       limits: opts.limits,
       estimatedPromptTokens: opts.estimatedPromptTokens,
+      signal: handle.abortController.signal,
+      origin: opts.origin,
+      workspaceRoot: opts.workspaceRoot,
+      onMessage: opts.onMessage,
       emit: (event) => {
         if (handle.cancelled) return;
         handle.emitter.emit(event);
@@ -76,13 +83,14 @@ export class RunManager {
     handle.result = result;
   }
 
-  /** Stop a run so a new one can start on the same thread. */
+  /** Abort in-flight model/tool work and stop SSE for this run. */
   cancel(runId: string): boolean {
     const handle = this.runs.get(runId);
     if (!handle || handle.status !== 'running') return false;
 
     handle.cancelled = true;
     handle.status = 'error';
+    handle.abortController.abort(new Error('Run cancelled'));
     handle.emitter.emit({
       type: 'run.error',
       runId,

@@ -1,14 +1,11 @@
-import {
-  occupiedFromUsage,
-  type AgentEvent,
-  type Message,
-} from '@org/agent-models';
+import { occupiedFromUsage, type AgentEvent } from '@org/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
-import { addMessage, updateRun, addRun } from './db';
 
 /**
  * Ephemeral UI state derived from the event stream.
- * Durable pieces: IndexedDB (messages/runs) and context occupancy in localStorage.
+ * Durable chat state lives in the host ledger (apps/api); this reducer
+ * exists only for the live run view. `persistChatEffects` keeps the
+ * localStorage context anchor in sync with provider usage.
  */
 export type ToolActivity = {
   toolCallId: string;
@@ -41,8 +38,8 @@ export function initialChatState(): ChatState {
 }
 
 /**
- * Pure AgentEvent → ChatState. Persistence is persistChatEffects.
- * Updates lastSeq so SSE can reconnect without full replay.
+ * Pure AgentEvent → ChatState. Updates lastSeq so SSE can reconnect
+ * without full replay.
  */
 export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
   const lastSeq = Math.max(state.activeRun?.lastSeq ?? 0, event.seq);
@@ -173,7 +170,9 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     }
 
     case 'turn.started':
-    case 'limit.hit': {
+    case 'limit.hit':
+    case 'approval.requested':
+    case 'approval.resolved': {
       if (!state.activeRun) return state;
       return {
         activeRun: {
@@ -189,80 +188,23 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 }
 
 /**
- * IndexedDB / localStorage writes for events that mutate durable chat state.
- * Call after applyChatEvent with the pre-apply state when needed for model.
+ * Durable side effects for events that mutate client-held chat state.
+ * Only the context anchor (localStorage) survives — the ledger owns history.
  */
 export async function persistChatEffects(
   prev: ChatState,
   event: AgentEvent,
   threadId: string,
 ): Promise<void> {
-  switch (event.type) {
-    case 'run.started': {
-      await addRun({
-        id: event.runId,
-        threadId,
-        triggerMessageId: '',
-        status: 'running',
-        iteration: 0,
-        toolCallCount: 0,
-        model: event.model,
-        streaming: event.streaming,
-        mode: event.mode,
-        startedAt: new Date().toISOString(),
-        completedAt: null,
-        error: null,
+  if (event.type === 'turn.completed' && prev.activeRun) {
+    const usage = event.usage;
+    const occupied = usage ? occupiedFromUsage(usage) : undefined;
+    if (occupied !== undefined) {
+      setContextAnchor(threadId, {
+        occupiedTokens: occupied,
+        model: prev.activeRun.model,
+        measuredAt: new Date().toISOString(),
       });
-      return;
     }
-
-    case 'assistant.completed': {
-      const message: Message = {
-        id: event.messageId,
-        threadId,
-        runId: event.runId,
-        role: 'assistant',
-        content: event.content,
-        status: 'complete',
-        createdAt: new Date().toISOString(),
-      };
-      await addMessage(message);
-      return;
-    }
-
-    case 'run.completed': {
-      await updateRun(event.runId, {
-        status: 'completed',
-        iteration: event.iterations,
-        toolCallCount: event.toolCalls,
-        completedAt: new Date().toISOString(),
-      });
-      return;
-    }
-
-    case 'run.error': {
-      await updateRun(event.runId, {
-        status: 'error',
-        completedAt: new Date().toISOString(),
-        error: event.error,
-      });
-      return;
-    }
-
-    case 'turn.completed': {
-      const usage = event.usage;
-      const occupied = usage ? occupiedFromUsage(usage) : undefined;
-      if (occupied !== undefined && prev.activeRun) {
-        setContextAnchor(threadId, {
-          occupiedTokens: occupied,
-          model: prev.activeRun.model,
-          measuredAt: new Date().toISOString(),
-        });
-      }
-      return;
-    }
-
-    default:
-      return;
   }
 }

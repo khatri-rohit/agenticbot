@@ -18,12 +18,15 @@ function mockStream(chunks: unknown[]) {
   }
   const openai = getClient();
   const original = openai.chat.completions.create.bind(openai.chat.completions);
-  openai.chat.completions.create = (async (opts: { stream?: boolean }) => {
+  openai.chat.completions.create = (async (
+    opts: { stream?: boolean },
+    _requestOptions?: unknown,
+  ) => {
     if (!opts.stream) throw new Error('mockStream expects stream:true');
     return (async function* () {
       for (const chunk of chunks) yield chunk;
     })();
-  }) as typeof openai.chat.completions.create;
+  }) as unknown as typeof openai.chat.completions.create;
   return () => {
     openai.chat.completions.create = original;
   };

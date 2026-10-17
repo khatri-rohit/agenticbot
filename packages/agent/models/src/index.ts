@@ -14,6 +14,8 @@ export type {
   ToolStarted,
   ToolCompleted,
   ToolFailed,
+  ApprovalRequested,
+  ApprovalResolved,
   TurnCompleted,
   RunCompleted,
   RunError,
@@ -60,3 +62,28 @@ export type {
   OllamaThinkingConfig,
   OllamaModelConfig,
 } from './lib/ollama-model.js';
+
+export type {
+  LedgerRecord,
+  LedgerSystemRecord,
+  LedgerUserRecord,
+  LedgerAssistantRecord,
+  LedgerToolRecord,
+  LedgerEnvelope,
+} from './lib/ledger.js';
+export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
+
+export type {
+  ToolRisk,
+  ToolOrigin,
+  ToolContext,
+} from './lib/tool-context.js';
+
+export type { MemoryTarget, MemoryOp } from './lib/memory.js';
+
+export type {
+  ContextBudget,
+  ContextReportLayer,
+  ContextReport,
+  Snapshot,
+} from './lib/context.js';

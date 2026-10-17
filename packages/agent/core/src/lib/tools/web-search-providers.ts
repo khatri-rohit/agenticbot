@@ -29,25 +29,39 @@ function throwForHttpStatus(provider: string, status: number): never {
   throw new Error(`${provider} returned ${status}`);
 }
 
+function withSignal(
+  init: RequestInit,
+  signal?: AbortSignal,
+): RequestInit {
+  return signal ? { ...init, signal } : init;
+}
+
 // --- Ollama -----------------------------------------------------------------
 
 export async function ollamaSearch(
   query: string,
   maxResults: number,
+  signal?: AbortSignal,
 ): Promise<WebSearchResponse> {
   const apiKey = process.env.OLLAMA_API_KEY;
   if (!apiKey) {
     throw new Error('OLLAMA_API_KEY is not set');
   }
 
-  const response = await fetch('https://ollama.com/api/web_search', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query, max_results: maxResults }),
-  });
+  const response = await fetch(
+    'https://ollama.com/api/web_search',
+    withSignal(
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query, max_results: maxResults }),
+      },
+      signal,
+    ),
+  );
   if (!response.ok) {
     throwForHttpStatus('ollama web_search', response.status);
   }
@@ -73,20 +87,29 @@ export async function ollamaSearch(
   return { results: results.slice(0, maxResults) };
 }
 
-export async function ollamaFetch(url: string): Promise<WebFetchResponse> {
+export async function ollamaFetch(
+  url: string,
+  signal?: AbortSignal,
+): Promise<WebFetchResponse> {
   const apiKey = process.env.OLLAMA_API_KEY;
   if (!apiKey) {
     throw new Error('OLLAMA_API_KEY is not set');
   }
 
-  const response = await fetch('https://ollama.com/api/web_fetch', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ url }),
-  });
+  const response = await fetch(
+    'https://ollama.com/api/web_fetch',
+    withSignal(
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url }),
+      },
+      signal,
+    ),
+  );
   if (!response.ok) {
     throwForHttpStatus('ollama web_fetch', response.status);
   }
@@ -124,16 +147,23 @@ function firecrawlHeaders(): Record<string, string> {
 export async function firecrawlSearch(
   query: string,
   maxResults: number,
+  signal?: AbortSignal,
 ): Promise<WebSearchResponse> {
-  const response = await fetch('https://api.firecrawl.dev/v2/search', {
-    method: 'POST',
-    headers: firecrawlHeaders(),
-    body: JSON.stringify({
-      query,
-      limit: maxResults,
-      scrapeOptions: { formats: ['markdown', 'links'] },
-    }),
-  });
+  const response = await fetch(
+    'https://api.firecrawl.dev/v2/search',
+    withSignal(
+      {
+        method: 'POST',
+        headers: firecrawlHeaders(),
+        body: JSON.stringify({
+          query,
+          limit: maxResults,
+          scrapeOptions: { formats: ['markdown', 'links'] },
+        }),
+      },
+      signal,
+    ),
+  );
   if (!response.ok) {
     throwForHttpStatus('firecrawl search', response.status);
   }
@@ -175,15 +205,24 @@ export async function firecrawlSearch(
   return { results: results.slice(0, maxResults) };
 }
 
-export async function firecrawlFetch(url: string): Promise<WebFetchResponse> {
-  const response = await fetch('https://api.firecrawl.dev/v2/scrape', {
-    method: 'POST',
-    headers: firecrawlHeaders(),
-    body: JSON.stringify({
-      url,
-      formats: ['markdown', 'links'],
-    }),
-  });
+export async function firecrawlFetch(
+  url: string,
+  signal?: AbortSignal,
+): Promise<WebFetchResponse> {
+  const response = await fetch(
+    'https://api.firecrawl.dev/v2/scrape',
+    withSignal(
+      {
+        method: 'POST',
+        headers: firecrawlHeaders(),
+        body: JSON.stringify({
+          url,
+          formats: ['markdown', 'links'],
+        }),
+      },
+      signal,
+    ),
+  );
   if (!response.ok) {
     throwForHttpStatus('firecrawl scrape', response.status);
   }
@@ -225,16 +264,23 @@ function tavilyHeaders(): Record<string, string> {
 export async function tavilySearch(
   query: string,
   maxResults: number,
+  signal?: AbortSignal,
 ): Promise<WebSearchResponse> {
-  const response = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: tavilyHeaders(),
-    body: JSON.stringify({
-      query,
-      max_results: maxResults,
-      search_depth: 'basic',
-    }),
-  });
+  const response = await fetch(
+    'https://api.tavily.com/search',
+    withSignal(
+      {
+        method: 'POST',
+        headers: tavilyHeaders(),
+        body: JSON.stringify({
+          query,
+          max_results: maxResults,
+          search_depth: 'basic',
+        }),
+      },
+      signal,
+    ),
+  );
   if (!response.ok) {
     throwForHttpStatus('tavily search', response.status);
   }
@@ -260,12 +306,21 @@ export async function tavilySearch(
   return { results: results.slice(0, maxResults) };
 }
 
-export async function tavilyFetch(url: string): Promise<WebFetchResponse> {
-  const response = await fetch('https://api.tavily.com/extract', {
-    method: 'POST',
-    headers: tavilyHeaders(),
-    body: JSON.stringify({ urls: [url] }),
-  });
+export async function tavilyFetch(
+  url: string,
+  signal?: AbortSignal,
+): Promise<WebFetchResponse> {
+  const response = await fetch(
+    'https://api.tavily.com/extract',
+    withSignal(
+      {
+        method: 'POST',
+        headers: tavilyHeaders(),
+        body: JSON.stringify({ urls: [url] }),
+      },
+      signal,
+    ),
+  );
   if (!response.ok) {
     throwForHttpStatus('tavily extract', response.status);
   }

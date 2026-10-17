@@ -9,7 +9,11 @@ import {
   stashPendingMessage,
   type ComposerOptions,
 } from '../features/agent/api/agent-client';
-import { createThread, deleteThread } from '../features/agent/store/db';
+import {
+  createThread,
+  deleteThread,
+} from '../features/agent/api/thread-client';
+import { refreshThreads } from '../features/agent/store/thread-cache';
 import { toastError } from '@/hooks/use-toast';
 import {
   readStoredComposerModel,
@@ -66,6 +70,7 @@ export default function HomePage() {
             setPendingContent(true);
             try {
               const thread = await createThread('New Chat', options.model);
+              await refreshThreads();
               const stashed = stashPendingMessage({
                 content,
                 streaming: options.streaming,
@@ -76,6 +81,7 @@ export default function HomePage() {
               });
               if (!stashed) {
                 await deleteThread(thread.id);
+                await refreshThreads();
                 setPendingContent(false);
                 restoreHomeDraft(content, attachments);
                 setDraftEpoch((n) => n + 1);
