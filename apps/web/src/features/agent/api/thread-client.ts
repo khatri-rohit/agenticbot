@@ -1,4 +1,4 @@
-import type { Message, Thread, ThreadKind } from '@org/agent-models';
+import type { Message, Snapshot, Thread, ThreadKind } from '@org/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
@@ -123,6 +123,8 @@ export type LedgerResponse = {
   messages: Message[];
   lastSeq: number;
   lastUserSeq?: number;
+  /** Present when M4 compaction has written snapshot.json for this thread. */
+  snapshot?: Snapshot | null;
 };
 
 export async function fetchLedger(threadId: string): Promise<LedgerResponse> {

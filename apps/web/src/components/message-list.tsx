@@ -22,6 +22,7 @@ import {
   shouldShowConversationRail,
 } from './conversation-rail';
 import { MessageActions } from './message-actions';
+import { CompactionCard } from './compaction-card';
 import { ToolStepList } from './tool-call-panel';
 import { UserMessage } from './user-message';
 
@@ -49,6 +50,7 @@ export function MessageList({
 
   const streaming = chatState.activeRun?.streamingMessage;
   const toolActivity = chatState.activeRun?.toolActivity ?? [];
+  const compactionNotice = chatState.compactionNotice;
 
   const turns = useMemo(() => groupMessageTurns(messages ?? []), [messages]);
 
@@ -101,7 +103,13 @@ export function MessageList({
 
   useEffect(() => {
     followContent('auto');
-  }, [messages, streaming?.content, toolActivity.length, followContent]);
+  }, [
+    messages,
+    streaming?.content,
+    toolActivity.length,
+    compactionNotice?.throughSeq,
+    followContent,
+  ]);
 
   const hasMessages = (messages?.length ?? 0) > 0;
   const lastTurnIndex = turns.length - 1;
@@ -248,10 +256,20 @@ export function MessageList({
                       hasStreamingText={Boolean(streaming?.content)}
                     />
                   ) : null}
+
+                  {isLastTurn && !isRunning && compactionNotice ? (
+                    <CompactionCard notice={compactionNotice} />
+                  ) : null}
                 </section>
               );
             })}
           </div>
+
+          {!hasMessages && !isRunning && compactionNotice ? (
+            <div className="mt-4">
+              <CompactionCard notice={compactionNotice} />
+            </div>
+          ) : null}
 
           <div ref={endRef} className="h-6" />
         </div>

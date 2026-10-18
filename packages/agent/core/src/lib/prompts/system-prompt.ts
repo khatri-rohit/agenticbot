@@ -1,3 +1,5 @@
+import type { ModeName } from '@org/agent-models';
+
 import { listSkills } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
 import { loadAgentIdentity } from './load-agent-identity';
@@ -39,7 +41,10 @@ function buildToolGuardrails(registry: ToolRegistry): string {
  * Assembles the frozen system prompt: identity + tool protocol.
  * USER.md / MEMORY.md belong in the memory layer (assembleContext), not here.
  */
-export function buildSystemPrompt(registry: ToolRegistry): string {
+export function buildSystemPrompt(
+  registry: ToolRegistry,
+  mode?: ModeName,
+): string {
   const toolNames = Array.from(registry.byName.keys());
   const hasLoadSkill = registry.byName.has('load_skill');
   const catalog = hasLoadSkill
@@ -54,7 +59,7 @@ export function buildSystemPrompt(registry: ToolRegistry): string {
       : '- (none)';
 
   const hasWebSearch = registry.byName.has('web_search');
-  const isCoding = registry.byName.has('read_file');
+  const isCoding = mode === 'coding';
   const skillsSection = hasLoadSkill
     ? `
 # Skills

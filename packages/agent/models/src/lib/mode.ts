@@ -30,8 +30,8 @@ export const RESEARCH_MODE: ModeConfig = {
   allowedTools: ['web_search'],
   globalTools: ['web_fetch', 'load_skill', 'memory'],
   limits: {
-    maxIterations: 8,
-    maxToolCalls: 12,
+    maxIterations: 16,
+    maxToolCalls: 24,
     maxRepeatedToolCalls: 2,
     toolTimeoutMs: 30_000,
   },
@@ -53,10 +53,10 @@ export const CODING_MODE: ModeConfig = {
     'memory',
   ],
   limits: {
-    maxIterations: 16,
-    maxToolCalls: 24,
-    maxRepeatedToolCalls: 2,
-    toolTimeoutMs: 120_000,
+    maxIterations: 50,
+    maxToolCalls: 100,
+    maxRepeatedToolCalls: 5,
+    toolTimeoutMs: 100_000,
   },
 };
 

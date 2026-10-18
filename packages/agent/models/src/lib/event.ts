@@ -28,6 +28,7 @@ export type AgentEvent =
   | ApprovalRequested
   | ApprovalResolved
   | MemoryUpdated
+  | ContextCompacted
   | TurnCompleted
   | RunCompleted
   | RunError
@@ -166,6 +167,21 @@ export interface MemoryUpdated {
   opId: string;
   target: MemoryTarget;
   action: 'add' | 'patch' | 'remove' | 'revert';
+}
+
+/**
+ * Host wrote a context snapshot after a run (M4). Not a tool call —
+ * UI shows a compaction card, not the tool trail.
+ */
+export interface ContextCompacted {
+  seq: number;
+  type: 'context.compacted';
+  runId: string;
+  threadId: string;
+  throughSeq: number;
+  brief: string;
+  summary: string;
+  createdAt: string;
 }
 
 /** Union of event types for filtering. */

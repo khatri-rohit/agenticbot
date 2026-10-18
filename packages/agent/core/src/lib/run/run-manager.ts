@@ -78,10 +78,8 @@ export class RunManager {
       },
     });
 
-    // Stay 'running' until the loop returns so skip-tool ledger rows
-    // finish before another /run can rewind this thread.
-    handle.status =
-      handle.cancelled || result.status === 'error' ? 'error' : 'completed';
+    // Keep status 'running' through onFinished so compaction can emit
+    // context.compacted to live SSE subscribers (and land in the replay buffer).
     handle.result = result;
     try {
       await opts.onFinished?.(result);
@@ -92,6 +90,8 @@ export class RunManager {
         error instanceof Error ? error.message : error,
       );
     }
+    handle.status =
+      handle.cancelled || result.status === 'error' ? 'error' : 'completed';
   }
 
   /** Abort in-flight model/tool work and stop SSE for this run. */

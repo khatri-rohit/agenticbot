@@ -1,11 +1,20 @@
 import { spawn } from 'node:child_process';
-import { mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 
 import type { Tool } from './type';
 import {
   globMatch,
+  isPathInside,
   resolveWorkspacePath,
   toPosixRelative,
 } from './workspace-path';
@@ -67,12 +76,16 @@ async function readTextCapped(abs: string): Promise<string> {
   }
 }
 
+/**
+ * Walk files under root. Symlinks/junctions whose realpath leaves the root are
+ * skipped (same jail as resolveWorkspacePath). `root` should already be realpath'd.
+ */
 async function walkFiles(
-  root: string,
+  rootReal: string,
   signal: AbortSignal | undefined,
   acc: string[],
 ): Promise<void> {
-  const stack = [root];
+  const stack = [rootReal];
   while (stack.length > 0) {
     if (signal?.aborted) throw new Error('Run cancelled');
     if (acc.length >= WORKSPACE_WALK_MAX_FILES) return;
@@ -86,15 +99,41 @@ async function walkFiles(
     }
     for (const entry of entries) {
       if (acc.length >= WORKSPACE_WALK_MAX_FILES) return;
+      if (SKIP_DIRS.has(entry.name)) continue;
+      if (entry.name.startsWith('.') && entry.name !== '.github') continue;
+
       const abs = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(entry.name)) continue;
-        if (entry.name.startsWith('.') && entry.name !== '.github') continue;
-        stack.push(abs);
+      let real: string;
+      try {
+        real = await realpath(abs);
+      } catch {
         continue;
       }
-      if (entry.isFile()) acc.push(abs);
+      if (!isPathInside(rootReal, real)) continue;
+
+      let info: Awaited<ReturnType<typeof stat>>;
+      try {
+        info = await stat(real);
+      } catch {
+        continue;
+      }
+      if (info.isDirectory()) {
+        stack.push(real);
+        continue;
+      }
+      if (info.isFile()) acc.push(real);
     }
+  }
+}
+
+async function workspaceRootReal(
+  root: string | undefined,
+): Promise<string | null> {
+  if (!root?.trim()) return null;
+  try {
+    return await realpath(root);
+  } catch {
+    return null;
   }
 }
 
@@ -131,7 +170,7 @@ export const globTool: Tool = {
   },
   risk: 'read',
   execute: async (args, ctx) => {
-    const root = ctx.workspaceRoot;
+    const root = await workspaceRootReal(ctx.workspaceRoot);
     if (!root) return 'No workspace is bound to this run';
     const pattern = asString(args.pattern).trim() || '**/*';
     const files: string[] = [];
@@ -188,7 +227,7 @@ export const grepTool: Tool = {
   },
   risk: 'read',
   execute: async (args, ctx) => {
-    const root = ctx.workspaceRoot;
+    const root = await workspaceRootReal(ctx.workspaceRoot);
     if (!root) return 'No workspace is bound to this run';
     const pattern = asString(args.pattern);
     if (!pattern) return 'pattern is required';

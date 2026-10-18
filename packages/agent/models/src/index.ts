@@ -17,6 +17,7 @@ export type {
   ApprovalRequested,
   ApprovalResolved,
   MemoryUpdated,
+  ContextCompacted,
   TurnCompleted,
   RunCompleted,
   RunError,

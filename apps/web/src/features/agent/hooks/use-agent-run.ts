@@ -21,6 +21,7 @@ import {
 import {
   applyChatEvent,
   initialChatState,
+  noticeFromSnapshot,
   persistChatEffects,
   type ChatState,
 } from '../store/chat-store';
@@ -82,6 +83,7 @@ export function useAgentRun(threadId: string | null) {
   }, []);
 
   useEffect(() => {
+    setChatState(initialChatState());
     if (!threadId) return;
     let cancelled = false;
     void fetchThread(threadId).then((thread) => {
@@ -103,6 +105,17 @@ export function useAgentRun(threadId: string | null) {
         webSearch: coding ? false : prev.webSearch,
       }));
     });
+    void fetchLedger(threadId)
+      .then((ledger) => {
+        if (cancelled || !ledger.snapshot) return;
+        setChatState((prev) => ({
+          ...prev,
+          compactionNotice: noticeFromSnapshot(ledger.snapshot!),
+        }));
+      })
+      .catch(() => {
+        /* ledger hydrate is best-effort for the compaction card */
+      });
     return () => {
       cancelled = true;
     };
@@ -133,9 +146,14 @@ export function useAgentRun(threadId: string | null) {
       if (!threadId) return;
 
       const prior = chatStateRef.current;
-      // Same run: keep UI + lastSeq; new run: start empty.
+      // Same run: keep UI + lastSeq; new run: clear active run, keep compaction card.
       let currentState =
-        prior.activeRun?.runId === runId ? prior : initialChatState();
+        prior.activeRun?.runId === runId
+          ? prior
+          : {
+              ...initialChatState(),
+              compactionNotice: prior.compactionNotice,
+            };
       const fromSeq = currentState.activeRun?.lastSeq ?? 0;
       let eventChain = Promise.resolve();
       disconnect();
@@ -152,6 +170,30 @@ export function useAgentRun(threadId: string | null) {
             if (event.type === 'run.completed' || event.type === 'run.error') {
               bumpLedger();
               void refreshThreads();
+              // Sync card with snapshot.json (rewind may have deleted it).
+              void fetchLedger(threadId)
+                .then((ledger) => {
+                  setChatState((prev) => {
+                    if (ledger.snapshot) {
+                      const fromDisk = noticeFromSnapshot(ledger.snapshot);
+                      // Live context.compacted can beat a stale disk read.
+                      if (
+                        prev.compactionNotice &&
+                        prev.compactionNotice.throughSeq > fromDisk.throughSeq
+                      ) {
+                        return prev;
+                      }
+                      return { ...prev, compactionNotice: fromDisk };
+                    }
+                    if (prev.compactionNotice?.runId === event.runId) {
+                      return prev;
+                    }
+                    return { ...prev, compactionNotice: null };
+                  });
+                })
+                .catch(() => {
+                  /* ignore */
+                });
             }
           });
         },
@@ -201,7 +243,10 @@ export function useAgentRun(threadId: string | null) {
         thinking: options.thinking,
       });
 
-      setChatState(initialChatState());
+      setChatState((prev) => ({
+        ...initialChatState(),
+        compactionNotice: prev.compactionNotice,
+      }));
       bumpLedger();
       // Server writes a model-generated title on first turn before /run returns.
       void refreshThreads();
@@ -224,7 +269,10 @@ export function useAgentRun(threadId: string | null) {
       console.error('Cancel run failed:', err);
     }
 
-    setChatState(initialChatState());
+    setChatState((prev) => ({
+      ...initialChatState(),
+      compactionNotice: prev.compactionNotice,
+    }));
   }, [disconnect]);
 
   const sendMessage = useCallback(
@@ -291,7 +339,10 @@ export function useAgentRun(threadId: string | null) {
       thinking: composerOptions.thinking,
     });
 
-    setChatState(initialChatState());
+    setChatState((prev) => ({
+      ...initialChatState(),
+      compactionNotice: prev.compactionNotice,
+    }));
     bumpLedger();
     subscribeToRun(runId);
   }, [threadId, composerOptions, subscribeToRun, bumpLedger]);
@@ -328,7 +379,10 @@ export function useAgentRun(threadId: string | null) {
         thinking: composerOptions.thinking,
       });
 
-      setChatState(initialChatState());
+      setChatState((prev) => ({
+        ...initialChatState(),
+        compactionNotice: prev.compactionNotice,
+      }));
       bumpLedger();
       subscribeToRun(runId);
     },

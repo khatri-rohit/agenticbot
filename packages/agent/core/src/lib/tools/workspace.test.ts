@@ -64,6 +64,7 @@ describe('workspace path jail', () => {
         process.platform === 'win32' ? 'junction' : 'dir',
       );
     } catch {
+      // Symlinks require privileges on some Windows setups.
       return;
     }
     const escaped = await resolveWorkspacePath(root, 'link/planted.txt');

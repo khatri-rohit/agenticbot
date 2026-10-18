@@ -159,17 +159,6 @@ export function setWorkspaceRoot(workspaceRoot: string | null): void {
   emit();
 }
 
-export function rememberFolder(workspaceRoot: string): void {
-  hydrate();
-  const next = normalizeRoot(workspaceRoot.trim());
-  if (!next) return;
-  const recentFolders = upsertFolder(state.recentFolders, next);
-  if (recentFolders === state.recentFolders) return;
-  state = { ...state, recentFolders };
-  persistFolders();
-  emit();
-}
-
 export function removeRecentFolder(workspaceRoot: string): void {
   hydrate();
   const key = folderKey(workspaceRoot);

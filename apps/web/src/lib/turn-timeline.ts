@@ -1,14 +1,6 @@
 import type { Message, PendingToolCall } from '@org/agent-models';
 
-/** Live SSE overlay for a tool call (matches chat-store ToolActivity). */
-export type LiveToolActivity = {
-  toolCallId: string;
-  toolName: string;
-  status: 'running' | 'done' | 'failed';
-  durationMs?: number;
-  argsPreview?: unknown;
-  resultPreview?: unknown;
-};
+import type { ToolActivity } from '../features/agent/store/chat-store';
 
 export type ToolCallRow = {
   toolCallId: string;
@@ -34,10 +26,8 @@ function previewToArgs(value: unknown): string | undefined {
   }
 }
 
-function liveById(
-  liveActivity: LiveToolActivity[],
-): Map<string, LiveToolActivity> {
-  const map = new Map<string, LiveToolActivity>();
+function liveById(liveActivity: ToolActivity[]): Map<string, ToolActivity> {
+  const map = new Map<string, ToolActivity>();
   for (const activity of liveActivity) {
     map.set(activity.toolCallId, activity);
   }
@@ -47,7 +37,7 @@ function liveById(
 function rowFromCall(
   call: PendingToolCall,
   toolMessage: Message | undefined,
-  activity: LiveToolActivity | undefined,
+  activity: ToolActivity | undefined,
 ): ToolCallRow {
   let status: ToolCallRow['status'] = 'running';
   if (activity) {
@@ -69,7 +59,7 @@ function rowFromCall(
   };
 }
 
-function rowFromLive(activity: LiveToolActivity): ToolCallRow {
+function rowFromLive(activity: ToolActivity): ToolCallRow {
   return {
     toolCallId: activity.toolCallId,
     toolName: activity.toolName,
@@ -87,7 +77,7 @@ function rowFromLive(activity: LiveToolActivity): ToolCallRow {
  */
 export function buildTurnTimeline(input: {
   replies: Message[];
-  liveActivity: LiveToolActivity[];
+  liveActivity: ToolActivity[];
   streaming?: { id: string; content: string } | null;
 }): TimelineStep[] {
   const steps: TimelineStep[] = [];

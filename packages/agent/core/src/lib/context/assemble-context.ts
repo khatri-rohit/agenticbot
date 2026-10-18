@@ -4,6 +4,7 @@ import type {
   ContextReport,
   LedgerEnvelope,
   MemoryFiles,
+  ModeName,
   Snapshot,
 } from '@org/agent-models';
 import {
@@ -22,6 +23,8 @@ export type AssembleContextInput = {
   snapshot: Snapshot | null;
   /** Hydrated ledger (blob bodies inlined). Assembler never reads disk. */
   envelopes: LedgerEnvelope[];
+  /** Drives coding vs research system-prompt behavior. */
+  mode?: ModeName;
 };
 
 export type AssembleContextResult = {
@@ -134,7 +137,7 @@ export function assembleContext(
   input: AssembleContextInput,
   budget: ContextBudget = DEFAULT_CONTEXT_BUDGET,
 ): AssembleContextResult {
-  const systemText = buildSystemPrompt(input.tools);
+  const systemText = buildSystemPrompt(input.tools, input.mode);
   const systemMessage: ChatCompletionMessageParam = {
     role: 'system',
     content: systemText,

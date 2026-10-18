@@ -2,6 +2,7 @@ import {
   occupiedFromUsage,
   type AgentEvent,
   type ContextReport,
+  type Snapshot,
 } from '@org/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
 
@@ -18,6 +19,16 @@ export type ToolActivity = {
   durationMs?: number;
   argsPreview?: unknown;
   resultPreview?: unknown;
+};
+
+/** Latest host compaction for this thread (SSE or ledger hydrate). */
+export type CompactionNotice = {
+  runId: string | null;
+  threadId: string;
+  throughSeq: number;
+  brief: string;
+  summary: string;
+  createdAt: string;
 };
 
 export type ChatRunState = {
@@ -38,10 +49,26 @@ export type ChatRunState = {
 
 export type ChatState = {
   activeRun: ChatRunState | null;
+  /** Survives run.completed so the compaction card can render after the turn. */
+  compactionNotice: CompactionNotice | null;
 };
 
 export function initialChatState(): ChatState {
-  return { activeRun: null };
+  return { activeRun: null, compactionNotice: null };
+}
+
+export function noticeFromSnapshot(
+  snapshot: Snapshot,
+  runId: string | null = null,
+): CompactionNotice {
+  return {
+    runId,
+    threadId: snapshot.threadId,
+    throughSeq: snapshot.throughSeq,
+    brief: snapshot.brief,
+    summary: snapshot.summary,
+    createdAt: snapshot.createdAt,
+  };
 }
 
 /**
@@ -68,12 +95,14 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             ? { contextReport: event.contextReport }
             : {}),
         },
+        compactionNotice: state.compactionNotice,
       };
     }
 
     case 'assistant.started': {
       if (!state.activeRun) return state;
       return {
+        ...state,
         activeRun: {
           ...state.activeRun,
           streamingMessage: { id: event.messageId, content: '' },
@@ -86,6 +115,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'assistant.delta': {
       if (!state.activeRun?.streamingMessage) return state;
       return {
+        ...state,
         activeRun: {
           ...state.activeRun,
           streamingMessage: {
@@ -100,6 +130,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'assistant.completed': {
       if (!state.activeRun) return state;
       return {
+        ...state,
         activeRun: {
           ...state.activeRun,
           streamingMessage: null,
@@ -111,6 +142,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'tool.started': {
       if (!state.activeRun) return state;
       return {
+        ...state,
         activeRun: {
           ...state.activeRun,
           toolActivity: [
@@ -130,6 +162,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'tool.completed': {
       if (!state.activeRun) return state;
       return {
+        ...state,
         activeRun: {
           ...state.activeRun,
           toolActivity: state.activeRun.toolActivity.map((t) =>
@@ -150,6 +183,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'tool.failed': {
       if (!state.activeRun) return state;
       return {
+        ...state,
         activeRun: {
           ...state.activeRun,
           toolActivity: state.activeRun.toolActivity.map((t) =>
@@ -160,9 +194,28 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       };
     }
 
+    case 'context.compacted': {
+      return {
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+        compactionNotice: {
+          runId: event.runId,
+          threadId: event.threadId,
+          throughSeq: event.throughSeq,
+          brief: event.brief,
+          summary: event.summary,
+          createdAt: event.createdAt,
+        },
+      };
+    }
+
     case 'run.completed':
     case 'run.error': {
-      return { activeRun: null };
+      return {
+        activeRun: null,
+        compactionNotice: state.compactionNotice,
+      };
     }
 
     case 'turn.completed': {
@@ -170,6 +223,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       const usage = event.usage;
       const occupied = usage ? occupiedFromUsage(usage) : undefined;
       return {
+        ...state,
         activeRun: {
           ...state.activeRun,
           lastSeq,
@@ -192,6 +246,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'memory.updated': {
       if (!state.activeRun) return state;
       return {
+        ...state,
         activeRun: {
           ...state.activeRun,
           lastSeq,

@@ -432,7 +432,7 @@ function OpenFolderButton({ className }: { className?: string }) {
       toastError(
         error instanceof Error
           ? error.message
-          : 'Could not open the folder picker. Restart the API on this machine.',
+          : 'Could not open the folder picker. The dialog runs on the API host — start @org/api on this machine and try again.',
         'Folder picker failed',
       );
     } finally {
@@ -445,6 +445,7 @@ function OpenFolderButton({ className }: { className?: string }) {
       type="button"
       variant="outline"
       size="sm"
+      title="Opens a native folder dialog on the machine running the API"
       className={cn(
         'type-ui h-8 w-full justify-start gap-2 border-border/40 bg-background/50 text-xs font-medium text-foreground/90 hover:bg-accent/50',
         className,

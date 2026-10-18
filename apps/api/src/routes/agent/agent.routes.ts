@@ -136,6 +136,7 @@ async function prepareRun(input: {
       memory: files,
       snapshot,
       envelopes: input.envelopes,
+      mode: mode.name,
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
@@ -145,6 +146,7 @@ async function prepareRun(input: {
 
 async function maybeCompactThread(input: {
   threadId: string;
+  runId: string;
   model: string;
   webSearch?: boolean;
 }): Promise<void> {
@@ -175,6 +177,15 @@ async function maybeCompactThread(input: {
     throughSeq,
   });
   await store.writeSnapshot(input.threadId, snapshot);
+  runManager.get(input.runId)?.emitter.emit({
+    type: 'context.compacted',
+    runId: input.runId,
+    threadId: input.threadId,
+    throughSeq: snapshot.throughSeq,
+    brief: snapshot.brief,
+    summary: snapshot.summary,
+    createdAt: snapshot.createdAt,
+  });
 }
 
 /**
@@ -300,7 +311,8 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
   const envelopes = await store.readLedger(req.params.id, 0);
   const lastSeq = envelopes.at(-1)?.seq ?? 0;
   const lastUserSeq = store.lastUserSeq(envelopes);
-  return res.json({ messages, lastSeq, lastUserSeq });
+  const snapshot = await store.readSnapshot(req.params.id);
+  return res.json({ messages, lastSeq, lastUserSeq, snapshot });
 });
 
 /**
@@ -421,6 +433,7 @@ router.post('/run', async (req: Request, res: Response) => {
     onFinished: () =>
       maybeCompactThread({
         threadId,
+        runId: assignedRunId,
         model: useModel,
         webSearch,
       }),

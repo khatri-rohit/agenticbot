@@ -60,7 +60,7 @@ async function main() {
     const tools = createToolRegistry(ALL_TOOLS, [
       ...new Set([...mode.allowedTools, ...mode.globalTools]),
     ]);
-    const messages = getContext(query, tools);
+    const messages = getContext(query, tools, mode.name);
 
     const events: AgentEvent[] = [];
     const modelCall: ModelCallFn = STREAMING
