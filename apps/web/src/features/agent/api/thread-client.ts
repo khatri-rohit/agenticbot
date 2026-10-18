@@ -7,7 +7,10 @@ async function readError(res: Response, fallback: string): Promise<string> {
   return (body as { error?: string }).error ?? fallback;
 }
 
-/** Opens the host OS folder dialog. Returns null if cancelled. */
+/**
+ * Opens a native folder dialog on the API host (where tools run).
+ * Returns null if the user cancels.
+ */
 export async function pickWorkspaceFolder(
   initialDir?: string | null,
 ): Promise<string | null> {
@@ -27,7 +30,9 @@ export async function pickWorkspaceFolder(
   }
   if (res.status === 204) return null;
   if (!res.ok) {
-    throw new Error(await readError(res, `Failed to pick folder: ${res.status}`));
+    throw new Error(
+      await readError(res, `Failed to pick folder: ${res.status}`),
+    );
   }
   const body = (await res.json()) as { workspaceRoot?: string };
   return body.workspaceRoot?.trim() ? body.workspaceRoot : null;
@@ -36,7 +41,9 @@ export async function pickWorkspaceFolder(
 export async function listThreads(): Promise<Thread[]> {
   const res = await fetch(`${API_BASE}/api/agent/threads`);
   if (!res.ok) {
-    throw new Error(await readError(res, `Failed to list threads: ${res.status}`));
+    throw new Error(
+      await readError(res, `Failed to list threads: ${res.status}`),
+    );
   }
   const body = (await res.json()) as { threads: Thread[] };
   return body.threads;
@@ -54,11 +61,15 @@ export async function createThread(
       title,
       model,
       ...(options?.kind ? { kind: options.kind } : {}),
-      ...(options?.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
+      ...(options?.workspaceRoot
+        ? { workspaceRoot: options.workspaceRoot }
+        : {}),
     }),
   });
   if (!res.ok) {
-    throw new Error(await readError(res, `Failed to create thread: ${res.status}`));
+    throw new Error(
+      await readError(res, `Failed to create thread: ${res.status}`),
+    );
   }
   return res.json() as Promise<Thread>;
 }
@@ -67,7 +78,9 @@ export async function fetchThread(id: string): Promise<Thread | undefined> {
   const res = await fetch(`${API_BASE}/api/agent/threads/${id}`);
   if (res.status === 404) return undefined;
   if (!res.ok) {
-    throw new Error(await readError(res, `Failed to load thread: ${res.status}`));
+    throw new Error(
+      await readError(res, `Failed to load thread: ${res.status}`),
+    );
   }
   return res.json() as Promise<Thread>;
 }
@@ -88,7 +101,9 @@ export async function patchThread(
     body: JSON.stringify(changes),
   });
   if (!res.ok) {
-    throw new Error(await readError(res, `Failed to update thread: ${res.status}`));
+    throw new Error(
+      await readError(res, `Failed to update thread: ${res.status}`),
+    );
   }
   return res.json() as Promise<Thread>;
 }
@@ -98,7 +113,9 @@ export async function deleteThread(id: string): Promise<void> {
     method: 'DELETE',
   });
   if (!res.ok) {
-    throw new Error(await readError(res, `Failed to delete thread: ${res.status}`));
+    throw new Error(
+      await readError(res, `Failed to delete thread: ${res.status}`),
+    );
   }
 }
 
@@ -111,7 +128,9 @@ export type LedgerResponse = {
 export async function fetchLedger(threadId: string): Promise<LedgerResponse> {
   const res = await fetch(`${API_BASE}/api/agent/threads/${threadId}/ledger`);
   if (!res.ok) {
-    throw new Error(await readError(res, `Failed to load ledger: ${res.status}`));
+    throw new Error(
+      await readError(res, `Failed to load ledger: ${res.status}`),
+    );
   }
   return res.json() as Promise<LedgerResponse>;
 }

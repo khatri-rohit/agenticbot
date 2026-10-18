@@ -18,7 +18,6 @@ import {
 import type { Thread } from '@org/agent-models';
 import {
   folderNameFromRoot,
-  rememberFolder,
   removeRecentFolder,
   sameWorkspaceRoot,
   setAgentSpace,
@@ -75,7 +74,9 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
 
   const researchThreads = useMemo(
     () =>
-      (threads ?? []).filter((thread) => (thread.kind ?? 'research') === 'research'),
+      (threads ?? []).filter(
+        (thread) => (thread.kind ?? 'research') === 'research',
+      ),
     [threads],
   );
 
@@ -232,7 +233,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                       <div key={group.root} className="min-w-0">
                         <div
                           className={cn(
-                            'group/folder flex w-full min-w-0 items-center gap-0.5 rounded-md px-1 py-1',
+                            'group/folder flex w-full min-w-0 items-center gap-0.5 rounded-md px-1 py-1.5',
                             activeFolder
                               ? 'bg-accent/70 text-foreground'
                               : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
@@ -256,7 +257,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                           </button>
                           <button
                             type="button"
-                            className="type-ui flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs font-medium"
+                            className="type-ui flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-base! font-medium"
                             title={group.root}
                             onClick={() => {
                               setWorkspaceRoot(group.root);
@@ -328,7 +329,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                         </div>
                         {!collapsedFolder ? (
                           group.threads.length === 0 ? (
-                            <p className="type-ui px-3 py-1.5 pl-8 text-[11px] text-muted-foreground/80">
+                            <p className="type-ui px-3 py-2 pl-8 text-[11px] text-muted-foreground/80">
                               No chats yet
                             </p>
                           ) : (
@@ -416,6 +417,7 @@ function SpaceToggle() {
 function OpenFolderButton({ className }: { className?: string }) {
   const { workspaceRoot } = useAgentSpace();
   const [picking, setPicking] = useState(false);
+  const router = useRouter();
 
   const pick = async () => {
     if (picking) return;
@@ -423,9 +425,9 @@ function OpenFolderButton({ className }: { className?: string }) {
     try {
       const selected = await pickWorkspaceFolder(workspaceRoot);
       if (!selected) return;
-      rememberFolder(selected);
       setWorkspaceRoot(selected);
       setAgentSpace('coding');
+      router.push('/');
     } catch (error) {
       toastError(
         error instanceof Error
@@ -502,8 +504,8 @@ function ThreadItem({
         className={cn(
           'type-ui group relative flex w-full min-w-0 items-stretch rounded-md transition-colors',
           active
-            ? 'bg-accent text-foreground'
-            : 'text-muted-foreground hover:bg-accent/55 hover:text-foreground',
+            ? 'bg-accent/55 text-foreground'
+            : 'text-muted-foreground/80 hover:bg-accent/55 hover:text-foreground',
         )}
       >
         <Link
@@ -511,7 +513,7 @@ function ThreadItem({
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
             dense
-              ? 'py-1 pl-2 pr-[4.25rem] text-xs'
+              ? 'py-1 pl-2 pr-[4.25rem] text-sm'
               : 'py-1.5 pl-2.5 pr-[4.25rem]',
           )}
           title={displayTitle || undefined}

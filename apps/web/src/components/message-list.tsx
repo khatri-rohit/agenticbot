@@ -10,7 +10,10 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import type { Message } from '@org/agent-models';
-import type { ChatState } from '../features/agent/store/chat-store';
+import type {
+  ChatState,
+  ToolActivity,
+} from '../features/agent/store/chat-store';
 import { groupMessageTurns } from '../lib/group-message-turns';
 import { buildTurnTimeline } from '../lib/turn-timeline';
 import { AgentMarkdown } from './agent-markdown';
@@ -226,10 +229,7 @@ export function MessageList({
                             className="group/msg min-w-0 max-w-full"
                           >
                             <article className="chat-prose type-body min-w-0 max-w-full">
-                              <AgentMarkdown
-                                content={step.content}
-                                streaming
-                              />
+                              <AgentMarkdown content={step.content} streaming />
                             </article>
                             <MessageActions
                               content={step.content}
@@ -241,6 +241,13 @@ export function MessageList({
                       })}
                     </div>
                   ) : null}
+
+                  {isLastTurn && isRunning ? (
+                    <TurnStatusLine
+                      toolActivity={toolActivity}
+                      hasStreamingText={Boolean(streaming?.content)}
+                    />
+                  ) : null}
                 </section>
               );
             })}
@@ -250,6 +257,37 @@ export function MessageList({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Quiet “still working” cue for model think gaps when no stream is visible. */
+function TurnStatusLine({
+  toolActivity,
+  hasStreamingText,
+}: {
+  toolActivity: ToolActivity[];
+  hasStreamingText: boolean;
+}) {
+  const running = toolActivity.find((t) => t.status === 'running');
+  let label: string | null = null;
+
+  if (running) {
+    label = `${running.toolName}…`;
+  } else if (toolActivity.length > 0 && !hasStreamingText) {
+    label = 'Working…';
+  } else if (!hasStreamingText) {
+    label = 'Working…';
+  }
+
+  if (!label) return null;
+
+  return (
+    <p
+      className="type-caption pl-0.5 text-left text-muted-foreground/65 tabular-nums"
+      aria-live="polite"
+    >
+      {label}
+    </p>
   );
 }
 

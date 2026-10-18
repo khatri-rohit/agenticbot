@@ -185,7 +185,7 @@ export function UserMessage({
           {/* Document-style prompt card: full column width, soft fill — not a messenger bubble. */}
           <div
             className={cn(
-              'type-user min-w-0 max-w-full overflow-hidden rounded-2xl bg-muted/40 px-4 py-3 text-foreground/95 ring-1 ring-border/30',
+              'type-user min-w-0 max-w-full overflow-hidden rounded-2xl bg-card px-4 py-3 text-foreground/95 ring-1 ring-border/30',
             )}
           >
             {message.attachments && message.attachments.length > 0 ? (

@@ -30,6 +30,7 @@ import {
 } from '@org/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { loadWorkspaceRules } from '../../lib/load-workspace-rules';
+import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
 
 const router = Router();
@@ -177,17 +178,27 @@ async function maybeCompactThread(input: {
 }
 
 /**
- * POST /api/agent/workspace/validate
- * Confirms a client-chosen absolute path exists as a directory on the API host.
- * Body: { workspaceRoot: string } → 200 { workspaceRoot } or 400.
+ * POST /api/agent/workspace/pick
+ * Opens a native folder dialog on the API host and returns the absolute path.
+ * 204 = cancelled, 500 = dialog failed, 200 = { workspaceRoot }.
  */
-router.post('/workspace/validate', async (req: Request, res: Response) => {
-  const raw =
-    typeof req.body?.workspaceRoot === 'string' ? req.body.workspaceRoot : '';
-  if (!raw.trim()) {
-    return res.status(400).json({ error: 'workspaceRoot is required' });
+router.post('/workspace/pick', async (req: Request, res: Response) => {
+  const initial =
+    typeof req.body?.initialDir === 'string' && req.body.initialDir.trim()
+      ? path.resolve(req.body.initialDir.trim())
+      : undefined;
+  const picked = await pickFolderDialog(initial);
+  if (!picked.ok && picked.reason === 'cancelled') {
+    return res.status(204).send();
   }
-  const resolved = await resolveWorkspaceDir(raw);
+  if (!picked.ok) {
+    return res.status(500).json({
+      error:
+        picked.message ||
+        'Folder picker failed. Restart the API on this machine and try again.',
+    });
+  }
+  const resolved = await resolveWorkspaceDir(picked.path);
   if (!resolved.ok) {
     return res.status(400).json({ error: resolved.error });
   }
