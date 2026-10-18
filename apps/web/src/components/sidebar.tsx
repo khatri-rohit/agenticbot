@@ -33,6 +33,7 @@ import {
   pickWorkspaceFolder,
 } from '../features/agent/api/thread-client';
 import { refreshThreads } from '../features/agent/store/thread-cache';
+import { removeRecentThread } from '../features/agent/store/recent-threads-store';
 import { formatRelativeTime } from '../lib/format-relative-time';
 import { toastError } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -476,6 +477,7 @@ function ThreadItem({
 
   const handleDelete = async () => {
     await deleteThread(thread.id);
+    removeRecentThread(thread.id);
     await refreshThreads();
     if (pathname === `/chat/${thread.id}`) {
       router.push('/');

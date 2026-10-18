@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { Sidebar } from './sidebar';
 import {
@@ -9,6 +9,28 @@ import {
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
 import { cn } from '../lib/utils';
+import { getComposerFocus } from './composer-focus';
+import {
+  RecentThreadsSwitcher,
+  isTypeToFocusKey,
+} from './recent-threads-switcher';
+
+function TypeToFocusListener() {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!isTypeToFocusKey(e)) return;
+      const composer = getComposerFocus();
+      if (!composer || composer.isLocked()) return;
+      e.preventDefault();
+      composer.insertText(e.key);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  return null;
+}
 
 export function ChatShell({
   header,
@@ -75,6 +97,8 @@ export function ChatShell({
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <RecentThreadsSwitcher />
+      <TypeToFocusListener />
     </div>
   );
 }

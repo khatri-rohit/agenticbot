@@ -39,6 +39,7 @@ import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
 import { VoiceModePill } from '@/components/voice-mode-pill';
+import { registerComposerFocus } from '@/components/composer-focus';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -268,6 +269,31 @@ export function ChatInput({
     },
   });
   const voiceLocked = voice.enabled && (voice.active || voice.transcribing);
+  const voiceLockedRef = useRef(voiceLocked);
+  voiceLockedRef.current = voiceLocked;
+
+  // Register so ChatShell type-to-focus can route printable keys here.
+  useEffect(() => {
+    registerComposerFocus({
+      focus: () => textareaRef.current?.focus(),
+      insertText: (text) => {
+        if (voiceLockedRef.current) return;
+        setInput((prev) => prev + text);
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        // Place caret at end after React applies the new value.
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          const end = el.value.length;
+          el.setSelectionRange(end, end);
+        });
+      },
+      isLocked: () => voiceLockedRef.current,
+    });
+    return () => registerComposerFocus(null);
+  }, []);
 
   // Grow the textarea and flip to the bottom-toolbar layout once content
   // needs more than one line (measured height), not a fixed clip-only pill.

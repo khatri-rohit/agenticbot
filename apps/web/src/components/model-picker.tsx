@@ -92,7 +92,7 @@ export function ModelPicker({
           variant="ghost"
           size="sm"
           disabled={disabled}
-          className="h-7 max-w-[12rem] gap-1 rounded-full bg-muted/45 px-2.5 text-xs font-normal text-muted-foreground ring-1 ring-border/35 hover:bg-muted/70 hover:text-foreground"
+          className="h-7 max-w-48 gap-1 rounded-full bg-muted/45 px-2.5 text-xs font-normal text-muted-foreground ring-1 ring-border/35 hover:bg-muted/70 hover:text-foreground"
           aria-label={`Model: ${label}`}
         >
           <span className="truncate">{label}</span>
