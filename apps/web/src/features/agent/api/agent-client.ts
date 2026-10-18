@@ -1,8 +1,14 @@
 import type {
   AgentEvent,
-  ChatMessage,
+  ContextReport,
+  MemoryCaps,
+  MemoryFiles,
+  MemoryOp,
   MessageAttachment,
+  OllamaEndpoint,
+  OllamaListedModel,
   OllamaModelConfig,
+  StartRunRequest,
   ThinkingValue,
 } from '@org/agent-models';
 
@@ -16,6 +22,8 @@ export type ComposerOptions = {
   streaming: boolean;
   webSearch: boolean;
   model: string;
+  /** Route chat + discovery to local Ollama daemon. */
+  local?: boolean;
   /** Model-specific thinking: false / true / effort name from `/api/show`. */
   thinking?: ThinkingValue;
 };
@@ -25,6 +33,7 @@ export type PendingMessage = {
   streaming: boolean;
   webSearch?: boolean;
   model?: string;
+  local?: boolean;
   thinking?: ThinkingValue;
   attachments?: MessageAttachment[];
 };
@@ -51,32 +60,35 @@ export function takePendingMessage(): PendingMessage | null {
 }
 
 /**
- * Start an agent run. Returns the runId.
- * The server is stateless — we send the full message context.
+ * Start an agent run. History is owned by the API ledger.
  */
 export async function startRun(
   threadId: string,
-  messages: ChatMessage[],
   options: {
+    message?: { content: string; attachments?: MessageAttachment[] };
+    rewindThroughSeq?: number;
     streaming?: boolean;
     model?: string;
+    local?: boolean;
     webSearch?: boolean;
     thinking?: ThinkingValue;
   } = {},
 ): Promise<string> {
-  const allowedTools = options.webSearch === false ? [] : ['web_search'];
+  const body: StartRunRequest = {
+    threadId,
+    message: options.message,
+    rewindThroughSeq: options.rewindThroughSeq,
+    streaming: options.streaming ?? true,
+    model: options.model,
+    local: options.local,
+    webSearch: options.webSearch,
+    thinking: options.thinking,
+  };
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      threadId,
-      messages,
-      streaming: options.streaming ?? true,
-      model: options.model,
-      allowedTools,
-      thinking: options.thinking,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -86,45 +98,6 @@ export async function startRun(
 
   const { runId } = await res.json();
   return runId;
-}
-
-/**
- * Enqueue a title generation job for a thread's first message.
- * Returns the jobId for polling.
- */
-export async function enqueueTitle(
-  threadId: string,
-  firstMessage: string,
-): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/agent/title`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ threadId, firstMessage }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Failed to enqueue title: ${res.status}`);
-  }
-
-  const { jobId } = await res.json();
-  return jobId;
-}
-
-/**
- * Poll a title generation job.
- * Returns the title string when completed, or null if still pending.
- */
-export async function pollTitle(
-  jobId: string,
-): Promise<
-  | { status: 'completed'; title: string }
-  | { status: 'pending' }
-  | { status: 'failed' }
-> {
-  const res = await fetch(`${API_BASE}/api/agent/title/${jobId}`);
-  if (!res.ok) return { status: 'failed' };
-  return res.json();
 }
 
 /**
@@ -167,15 +140,113 @@ export function subscribeRun(
 
 export async function fetchOllamaModelConfig(
   model: string,
+  endpoint: OllamaEndpoint = 'cloud',
 ): Promise<OllamaModelConfig> {
+  const params = new URLSearchParams({ model, endpoint });
   const res = await fetch(
-    `${API_BASE}/api/agent/models/config?model=${encodeURIComponent(model)}`,
+    `${API_BASE}/api/agent/models/config?${params.toString()}`,
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Failed to load model config: ${res.status}`);
   }
   return res.json() as Promise<OllamaModelConfig>;
+}
+
+export type LocalOllamaModelsResponse = {
+  endpoint: OllamaEndpoint;
+  models: OllamaListedModel[];
+};
+
+/** Discover models installed on the API host's local Ollama (`/api/tags`). */
+export async function fetchLocalOllamaModels(): Promise<LocalOllamaModelsResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/models?endpoint=local`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to list local models: ${res.status}`);
+  }
+  return res.json() as Promise<LocalOllamaModelsResponse>;
+}
+
+export type ContextEstimateResponse = {
+  estimatedPromptTokens: number;
+  contextLength: number | null;
+  source: 'estimate';
+  contextReport: ContextReport;
+};
+
+/** Same assembleContext path as /run: host ledger + memory + optional draft. */
+export async function fetchContextEstimate(options: {
+  threadId?: string;
+  draft?: string;
+  attachments?: MessageAttachment[];
+  model?: string;
+  local?: boolean;
+  webSearch?: boolean;
+}): Promise<ContextEstimateResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      threadId: options.threadId,
+      draft: options.draft,
+      attachments: options.attachments,
+      model: options.model,
+      local: options.local,
+      webSearch: options.webSearch,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to estimate context: ${res.status}`);
+  }
+  return res.json() as Promise<ContextEstimateResponse>;
+}
+
+export type MemoryResponse = {
+  files: MemoryFiles;
+  ops: MemoryOp[];
+  caps: MemoryCaps;
+};
+
+export async function fetchMemory(): Promise<MemoryResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/memory`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load memory: ${res.status}`);
+  }
+  return res.json() as Promise<MemoryResponse>;
+}
+
+export async function saveUserMemory(
+  user: string,
+  threadId?: string,
+): Promise<MemoryOp> {
+  const res = await fetch(`${API_BASE}/api/agent/memory`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user, threadId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to save profile: ${res.status}`);
+  }
+  const { op } = (await res.json()) as { op: MemoryOp };
+  return op;
+}
+
+export async function revertMemoryOp(opId: string): Promise<MemoryOp> {
+  const res = await fetch(`${API_BASE}/api/agent/memory/revert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ opId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to revert memory: ${res.status}`);
+  }
+  const { op } = (await res.json()) as { op: MemoryOp };
+  return op;
 }
 
 export async function cancelRun(runId: string): Promise<void> {

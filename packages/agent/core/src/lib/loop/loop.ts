@@ -4,9 +4,13 @@ import type {
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 
+import type { TokenUsage, ToolContext } from '@org/agent-models';
+
 import { consoleTrace, type TraceEvent } from '../events/trace';
 import { DEFAULT_LIMITS } from './limits';
+import type { ModelTurn } from '../model/types';
 import type { ToolRegistry } from '../tools/type';
+import { toLedgerRecord } from './to-ledger-record';
 import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
 export type {
@@ -27,25 +31,59 @@ function toolCallKey(toolName: string, args: unknown): string {
   return `${toolName}:${JSON.stringify(args)}`;
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`Tool timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-    }),
-  ]);
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error('Run cancelled');
 }
 
-function skipToolCalls(
-  messages: ChatCompletionMessageParam[],
-  toolCalls: ChatCompletionMessageToolCall[],
-  reason: string,
-): void {
-  for (const toolCall of toolCalls) {
-    messages.push({ role: 'tool', tool_call_id: toolCall.id, content: reason });
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (signal?.aborted) {
+    return Promise.reject(
+      signal.reason instanceof Error
+        ? signal.reason
+        : new Error('Run cancelled'),
+    );
   }
+
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Tool timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    const onAbort = () => {
+      cleanup();
+      reject(
+        signal?.reason instanceof Error
+          ? signal.reason
+          : new Error('Run cancelled'),
+      );
+    };
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 /* ---------- the loop ---------- */
@@ -55,6 +93,7 @@ function skipToolCalls(
  *
  * Emits AgentEvents via config.emit (for SSE/UI) AND traces via config.trace
  * (for eval/console). Both are optional — the loop works with either or both.
+ * Durable turns go through config.onMessage (host persistence seam).
  */
 export async function runLoop(
   modelCall: ModelCallFn,
@@ -67,13 +106,61 @@ export async function runLoop(
   const emit = config.emit;
   const runId = config.runId ?? randomUUID();
   const threadId = config.threadId ?? 'unknown';
+  const signal = config.signal;
+  const origin = config.origin ?? 'chat';
 
   let iterations = 0;
   let totalToolCalls = 0;
   const repeatedCalls = new Map<string, number>();
 
+  async function appendDurable(
+    message: ChatCompletionMessageParam,
+  ): Promise<void> {
+    messages.push(message);
+    if (config.onMessage) {
+      await config.onMessage(toLedgerRecord(message));
+    }
+  }
+
+  async function skipToolCalls(
+    toolCalls: ChatCompletionMessageToolCall[],
+    reason: string,
+  ): Promise<void> {
+    for (const toolCall of toolCalls) {
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: reason,
+      });
+    }
+  }
+
+  function buildToolContext(): ToolContext {
+    return {
+      runId,
+      threadId,
+      origin,
+      signal: signal ?? new AbortController().signal,
+      ...(config.workspaceRoot !== undefined
+        ? { workspaceRoot: config.workspaceRoot }
+        : {}),
+    };
+  }
+
+  function emitTurnCompleted(iteration: number, usage?: TokenUsage): void {
+    emit?.({
+      type: 'turn.completed',
+      runId,
+      iteration,
+      ...(usage ? { usage } : {}),
+    });
+  }
+
   /** Fresh message lifecycle for limit finalization (never reuse the tool-turn id). */
-  async function finalizeAnswer(): Promise<string> {
+  async function finalizeAnswer(): Promise<{
+    content: string;
+    usage?: TokenUsage;
+  }> {
     const finalMessageId = randomUUID();
     const onTextDelta = config.streaming
       ? (delta: string) => {
@@ -90,21 +177,52 @@ export async function runLoop(
       emit?.({ type: 'assistant.started', runId, messageId: finalMessageId });
     }
 
-    const finalContent = await finalizeWithoutTools(
+    const turn = await finalizeWithoutTools(
       modelCall,
       config.model,
       messages,
       onTextDelta,
+      signal,
     );
+    const content = turn.content ?? '';
+
+    await appendDurable({
+      role: 'assistant',
+      content,
+    });
 
     emit?.({
       type: 'assistant.completed',
       runId,
       messageId: finalMessageId,
-      content: finalContent,
+      content,
     });
 
-    return finalContent;
+    return { content, usage: turn.usage };
+  }
+
+  async function completeAfterLimit(): Promise<RunLoopResult> {
+    const final = await finalizeAnswer();
+    trace({
+      type: 'run_finish',
+      runId,
+      iterations,
+      toolCalls: totalToolCalls,
+    });
+    emitTurnCompleted(iterations, final.usage);
+    emit?.({
+      type: 'run.completed',
+      runId,
+      iterations,
+      toolCalls: totalToolCalls,
+    });
+    return {
+      runId,
+      content: final.content,
+      iterations,
+      toolCalls: totalToolCalls,
+      status: 'completed',
+    };
   }
 
   trace({ type: 'run_start', runId, model: config.model });
@@ -112,13 +230,18 @@ export async function runLoop(
     type: 'run.started',
     runId,
     threadId,
-    mode: 'research',
+    mode: config.mode,
     streaming: config.streaming,
     model: config.model,
+    ...(config.estimatedPromptTokens !== undefined
+      ? { estimatedPromptTokens: config.estimatedPromptTokens }
+      : {}),
+    ...(config.contextReport ? { contextReport: config.contextReport } : {}),
   });
 
   try {
     while (iterations < limits.maxIterations) {
+      throwIfAborted(signal);
       iterations++;
 
       trace({ type: 'llm_request', runId, iteration: iterations });
@@ -140,7 +263,14 @@ export async function runLoop(
         emit?.({ type: 'assistant.started', runId, messageId });
       }
 
-      const turn = await modelCall(config.model, messages, tools, onTextDelta);
+      const turn = await modelCall(
+        config.model,
+        messages,
+        tools,
+        onTextDelta,
+        signal,
+      );
+      throwIfAborted(signal);
 
       trace({
         type: 'llm_response',
@@ -152,13 +282,23 @@ export async function runLoop(
       });
 
       if (turn.toolCalls.length > 0) {
-        messages.push({
+        await appendDurable({
           role: 'assistant',
           content: turn.content || null,
           tool_calls: turn.toolCalls,
         });
 
         for (const [index, toolCall] of turn.toolCalls.entries()) {
+          // The assistant tool_calls row above is already durable. On abort,
+          // every remaining call still needs a tool row or ledger replay breaks.
+          if (signal?.aborted) {
+            await skipToolCalls(
+              turn.toolCalls.slice(index),
+              'Skipped: run cancelled.',
+            );
+            throwIfAborted(signal);
+          }
+
           if (toolCall.type !== 'function') {
             continue;
           }
@@ -178,46 +318,19 @@ export async function runLoop(
               reason: `max tool calls exceeded (${limits.maxToolCalls})`,
             });
 
-            skipToolCalls(
-              messages,
+            await skipToolCalls(
               turn.toolCalls.slice(index),
               'Skipped: tool call limit reached.',
             );
 
-            const finalContent = await finalizeAnswer();
-
-            trace({
-              type: 'run_finish',
-              runId,
-              iterations,
-              toolCalls: totalToolCalls,
-            });
-            emit?.({
-              type: 'turn.completed',
-              runId,
-              iteration: iterations,
-            });
-            emit?.({
-              type: 'run.completed',
-              runId,
-              iterations,
-              toolCalls: totalToolCalls,
-            });
-
-            return {
-              runId,
-              content: finalContent,
-              iterations,
-              toolCalls: totalToolCalls,
-              status: 'completed',
-            };
+            return completeAfterLimit();
           }
 
           const toolName = toolCall.function.name;
           const tool = tools.byName.get(toolName);
 
           if (!tool) {
-            messages.push({
+            await appendDurable({
               role: 'tool',
               tool_call_id: toolCall.id,
               content: `Tool "${toolName}" does not exist.`,
@@ -229,7 +342,7 @@ export async function runLoop(
           try {
             args = JSON.parse(toolCall.function.arguments);
           } catch {
-            messages.push({
+            await appendDurable({
               role: 'tool',
               tool_call_id: toolCall.id,
               content: 'Invalid tool arguments. Expected valid JSON.',
@@ -254,46 +367,19 @@ export async function runLoop(
               reason: `repeated tool call blocked: ${toolName}`,
             });
 
-            messages.push({
+            await appendDurable({
               role: 'tool',
               tool_call_id: toolCall.id,
               content:
                 'This exact tool call has already been attempted multiple times. Do not repeat it.',
             });
 
-            skipToolCalls(
-              messages,
+            await skipToolCalls(
               turn.toolCalls.slice(index + 1),
               'Skipped: tool call limit reached.',
             );
 
-            const finalContent = await finalizeAnswer();
-
-            trace({
-              type: 'run_finish',
-              runId,
-              iterations,
-              toolCalls: totalToolCalls,
-            });
-            emit?.({
-              type: 'turn.completed',
-              runId,
-              iteration: iterations,
-            });
-            emit?.({
-              type: 'run.completed',
-              runId,
-              iterations,
-              toolCalls: totalToolCalls,
-            });
-
-            return {
-              runId,
-              content: finalContent,
-              iterations,
-              toolCalls: totalToolCalls,
-              status: 'completed',
-            };
+            return completeAfterLimit();
           }
 
           trace({
@@ -312,11 +398,13 @@ export async function runLoop(
           });
 
           const startedAt = Date.now();
+          const toolCtx = buildToolContext();
 
           try {
             const result = await withTimeout(
-              tool.execute(args),
+              tool.execute(args, toolCtx),
               limits.toolTimeoutMs,
+              signal,
             );
 
             trace({
@@ -336,12 +424,23 @@ export async function runLoop(
               resultPreview: preview(result, 200),
             });
 
-            messages.push({
+            await appendDurable({
               role: 'tool',
               tool_call_id: toolCall.id,
               content: result,
             });
           } catch (error) {
+            if (signal?.aborted) {
+              // Cancel mid-tool: the assistant tool_calls row is already durable,
+              // so every unanswered call of this turn needs a tool row to keep
+              // the ledger replay-valid.
+              await skipToolCalls(
+                turn.toolCalls.slice(index),
+                'Skipped: run cancelled.',
+              );
+              throwIfAborted(signal);
+            }
+
             const errorMessage =
               error instanceof Error ? error.message : String(error);
 
@@ -359,7 +458,7 @@ export async function runLoop(
               error: errorMessage,
             });
 
-            messages.push({
+            await appendDurable({
               role: 'tool',
               tool_call_id: toolCall.id,
               content: `Tool execution failed: ${errorMessage}`,
@@ -367,11 +466,16 @@ export async function runLoop(
           }
         }
 
-        emit?.({ type: 'turn.completed', runId, iteration: iterations });
+        emitTurnCompleted(iterations, turn.usage);
         continue;
       }
 
       // No tool calls — this is the final assistant response.
+      await appendDurable({
+        role: 'assistant',
+        content: turn.content ?? '',
+      });
+
       emit?.({
         type: 'assistant.completed',
         runId,
@@ -388,7 +492,7 @@ export async function runLoop(
           iterations,
           toolCalls: totalToolCalls,
         });
-        emit?.({ type: 'turn.completed', runId, iteration: iterations });
+        emitTurnCompleted(iterations, turn.usage);
         emit?.({
           type: 'run.completed',
           runId,
@@ -416,7 +520,7 @@ export async function runLoop(
         runId,
         reason: `unexpected finish reason: ${turn.finishReason}`,
       });
-      emit?.({ type: 'turn.completed', runId, iteration: iterations });
+      emitTurnCompleted(iterations, turn.usage);
       emit?.({
         type: 'run.completed',
         runId,
@@ -446,29 +550,7 @@ export async function runLoop(
       reason: `max iterations exceeded (${limits.maxIterations})`,
     });
 
-    const finalContent = await finalizeAnswer();
-
-    trace({
-      type: 'run_finish',
-      runId,
-      iterations,
-      toolCalls: totalToolCalls,
-    });
-    emit?.({ type: 'turn.completed', runId, iteration: iterations });
-    emit?.({
-      type: 'run.completed',
-      runId,
-      iterations,
-      toolCalls: totalToolCalls,
-    });
-
-    return {
-      runId,
-      content: finalContent,
-      iterations,
-      toolCalls: totalToolCalls,
-      status: 'completed',
-    };
+    return completeAfterLimit();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -491,19 +573,25 @@ export async function runLoop(
   }
 }
 
+/**
+ * Finalize the answer after a limit without offering tools.
+ * The steering prompt joins the live `messages` array only — it is loop
+ * control flow, not a durable turn, so it must never hit onMessage.
+ */
 async function finalizeWithoutTools(
   modelCall: ModelCallFn,
   model: string,
   messages: ChatCompletionMessageParam[],
-  onTextDelta?: (delta: string) => void,
-): Promise<string> {
+  onTextDelta: ((delta: string) => void) | undefined,
+  signal: AbortSignal | undefined,
+): Promise<ModelTurn> {
   messages.push({
     role: 'user',
     content:
       'Tool budget reached. Answer my original question now using only the information above, and say what is uncertain.',
   });
 
-  const turn = await modelCall(
+  return modelCall(
     model,
     messages,
     {
@@ -511,7 +599,6 @@ async function finalizeWithoutTools(
       byName: new Map(),
     },
     onTextDelta,
+    signal,
   );
-  console.log('Final content length:', turn.content?.length ?? 0);
-  return turn.content ?? '';
 }

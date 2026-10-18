@@ -12,27 +12,33 @@ import {
 import type { Message } from '@org/agent-models';
 import type {
   ChatState,
+  CompactionNotice,
   ToolActivity,
 } from '../features/agent/store/chat-store';
 import { groupMessageTurns } from '../lib/group-message-turns';
+import { buildTurnTimeline } from '../lib/turn-timeline';
 import { AgentMarkdown } from './agent-markdown';
 import {
   ConversationRail,
   shouldShowConversationRail,
 } from './conversation-rail';
 import { MessageActions } from './message-actions';
+import { CompactionCard } from './compaction-card';
+import { ToolStepList } from './tool-call-panel';
 import { UserMessage } from './user-message';
 
 export function MessageList({
   messages,
   chatState,
   isRunning,
+  threadKind = 'research',
   onRetryLastResponse,
   onEditLastUserMessage,
 }: {
   messages: Message[] | undefined;
   chatState: ChatState;
   isRunning: boolean;
+  threadKind?: 'research' | 'coding';
   onRetryLastResponse: () => void | Promise<void>;
   onEditLastUserMessage: (
     messageId: string,
@@ -45,6 +51,7 @@ export function MessageList({
 
   const streaming = chatState.activeRun?.streamingMessage;
   const toolActivity = chatState.activeRun?.toolActivity ?? [];
+  const compactionNotice = chatState.compactionNotice;
 
   const turns = useMemo(() => groupMessageTurns(messages ?? []), [messages]);
 
@@ -96,8 +103,15 @@ export function MessageList({
   }, [messages?.length, enableStickToBottom]);
 
   useEffect(() => {
-    followContent(streaming?.content ? 'auto' : 'smooth');
-  }, [messages, streaming?.content, toolActivity.length, followContent]);
+    followContent('auto');
+  }, [
+    messages,
+    streaming?.content,
+    toolActivity.length,
+    compactionNotice?.status,
+    compactionNotice?.throughSeq,
+    followContent,
+  ]);
 
   const hasMessages = (messages?.length ?? 0) > 0;
   const lastTurnIndex = turns.length - 1;
@@ -121,7 +135,7 @@ export function MessageList({
   return (
     <div className="relative flex min-h-0 flex-1">
       {showJumpToBottom && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-30 flex justify-center">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -148,22 +162,43 @@ export function MessageList({
       )}
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto scroll-smooth scrollbar-gutter-stable"
+        className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable [overflow-anchor:none]"
       >
-        <div className="mx-auto w-full max-w-3xl px-4 py-7 sm:px-6">
+        <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-5 sm:px-6">
           {!hasMessages && !isRunning && !streaming?.content && (
-            <p className="type-ui text-center text-muted-foreground/80">
-              Your research thread will appear here.
+            <p className="type-ui text-center text-muted-foreground/70">
+              Conversation will appear here.
             </p>
           )}
 
-          <div className="flex flex-col gap-12">
+          <div className="flex flex-col gap-8">
             {turns.map((turn, index) => {
               const isLastTurn = index === lastTurnIndex;
+              const liveActivity = isLastTurn ? toolActivity : [];
+              const liveStreaming = isLastTurn ? streaming : null;
+              const turnCompaction = turnOwnsCompaction(
+                turn.replies,
+                compactionNotice,
+                isLastTurn,
+              )
+                ? compactionNotice
+                : null;
+              const steps = buildTurnTimeline({
+                replies: turn.replies,
+                liveActivity,
+                streaming: liveStreaming,
+                compaction: turnCompaction,
+              });
+              const showSteps =
+                turn.replies.length > 0 ||
+                liveActivity.length > 0 ||
+                Boolean(liveStreaming?.content) ||
+                Boolean(turnCompaction);
+
               return (
                 <section
                   key={turn.userMessage.id}
-                  className="flex flex-col gap-3"
+                  className="flex flex-col gap-3.5"
                   aria-label="Conversation turn"
                 >
                   <UserMessage
@@ -176,82 +211,118 @@ export function MessageList({
                       isLastTurn &&
                       (turn.replies.length > 0 ||
                         isRunning ||
-                        Boolean(streaming?.content))
+                        Boolean(streaming?.content) ||
+                        Boolean(turnCompaction))
                     }
                     onEditSubmit={onEditLastUserMessage}
                   />
 
-                  {isLastTurn && isRunning && (
+                  {showSteps ? (
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {steps.map((step) => {
+                        if (step.type === 'assistant') {
+                          return (
+                            <AssistantMessage
+                              key={step.message.id}
+                              message={step.message}
+                              showRetry={
+                                !isRunning &&
+                                step.message.id === latestAssistantMessageId
+                              }
+                              onRetry={onRetryLastResponse}
+                              retryDisabled={isRunning}
+                            />
+                          );
+                        }
+                        if (step.type === 'tools') {
+                          return (
+                            <ToolStepList
+                              key={step.key}
+                              rows={step.rows}
+                              variant={threadKind}
+                            />
+                          );
+                        }
+                        if (step.type === 'compaction') {
+                          return (
+                            <CompactionCard
+                              key={`compaction-${step.notice.runId ?? step.notice.throughSeq}`}
+                              notice={step.notice}
+                            />
+                          );
+                        }
+                        return (
+                          <div
+                            key="stream"
+                            className="group/msg min-w-0 max-w-full"
+                          >
+                            <article className="chat-prose type-body min-w-0 max-w-full">
+                              <AgentMarkdown content={step.content} streaming />
+                            </article>
+                            <MessageActions
+                              content={step.content}
+                              align="start"
+                              className="opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/msg:opacity-100 sm:group-focus-within/msg:opacity-100"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  {isLastTurn &&
+                  (isRunning || compactionNotice?.status === 'running') ? (
                     <TurnStatusLine
                       toolActivity={toolActivity}
                       hasStreamingText={Boolean(streaming?.content)}
+                      compacting={compactionNotice?.status === 'running'}
                     />
-                  )}
-
-                  {turn.replies.length > 0 && (
-                    <div className="flex flex-col gap-4 pt-1">
-                      {turn.replies.map((msg) => (
-                        <AssistantMessage
-                          key={msg.id}
-                          message={msg}
-                          showRetry={
-                            !isRunning &&
-                            msg.role === 'assistant' &&
-                            msg.id === latestAssistantMessageId
-                          }
-                          onRetry={onRetryLastResponse}
-                          retryDisabled={isRunning}
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  {isLastTurn && toolActivity.length > 0 && (
-                    <div className="space-y-1.5 border-l border-border/50 pl-3">
-                      {toolActivity.map((tool) => (
-                        <ToolStatus key={tool.toolCallId} tool={tool} />
-                      ))}
-                    </div>
-                  )}
-
-                  {isLastTurn && streaming?.content && (
-                    <div className="group/msg">
-                      <article className="chat-prose type-body">
-                        <AgentMarkdown content={streaming.content} streaming />
-                      </article>
-                      <MessageActions
-                        content={streaming.content}
-                        align="start"
-                        className="opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/msg:opacity-100 sm:group-focus-within/msg:opacity-100"
-                      />
-                    </div>
-                  )}
+                  ) : null}
                 </section>
               );
             })}
           </div>
 
-          <div ref={endRef} className="h-10" />
+          <div ref={endRef} className="h-6" />
         </div>
       </div>
     </div>
   );
 }
 
+/** Attach compaction to the turn that produced it (by runId), else last turn. */
+function turnOwnsCompaction(
+  replies: Message[],
+  notice: CompactionNotice | null,
+  isLastTurn: boolean,
+): boolean {
+  if (!notice) return false;
+  if (notice.status === 'running') return isLastTurn;
+  if (notice.runId) {
+    return replies.some((message) => message.runId === notice.runId);
+  }
+  return isLastTurn;
+}
+
+/** Quiet “still working” cue for model think gaps when no stream is visible. */
 function TurnStatusLine({
   toolActivity,
   hasStreamingText,
+  compacting,
 }: {
   toolActivity: ToolActivity[];
   hasStreamingText: boolean;
+  compacting?: boolean;
 }) {
   const running = toolActivity.find((t) => t.status === 'running');
   let label: string | null = null;
 
-  if (running) {
+  if (compacting) {
+    label = 'Compacting context…';
+  } else if (running) {
     label = `${running.toolName}…`;
   } else if (toolActivity.length > 0 && !hasStreamingText) {
-    label = 'Running tools…';
+    label = 'Working…';
   } else if (!hasStreamingText) {
     label = 'Working…';
   }
@@ -260,7 +331,7 @@ function TurnStatusLine({
 
   return (
     <p
-      className="type-caption text-right text-muted-foreground/70 tabular-nums"
+      className="type-caption pl-0.5 text-left text-muted-foreground/65 tabular-nums"
       aria-live="polite"
     >
       {label}
@@ -279,21 +350,11 @@ function AssistantMessage({
   onRetry: () => void | Promise<void>;
   retryDisabled?: boolean;
 }) {
-  if (message.role === 'tool') {
-    return (
-      <div>
-        <p className="type-caption text-muted-foreground/80">
-          Tool result
-          {message.toolCallId ? ` (${message.toolCallId.slice(0, 8)}…)` : ''}
-        </p>
-        <MessageActions content={message.content} align="start" />
-      </div>
-    );
-  }
+  if (!message.content.trim()) return null;
 
   return (
-    <div className="group/msg">
-      <article className="chat-prose type-body">
+    <div className="group/msg min-w-0 max-w-full">
+      <article className="chat-prose type-body min-w-0 max-w-full">
         <AgentMarkdown content={message.content} />
       </article>
       <MessageActions
@@ -306,19 +367,4 @@ function AssistantMessage({
       />
     </div>
   );
-}
-
-function ToolStatus({
-  tool,
-}: {
-  tool: { toolName: string; status: string; durationMs?: number };
-}) {
-  const label =
-    tool.status === 'running'
-      ? `${tool.toolName} running`
-      : tool.status === 'failed'
-        ? `${tool.toolName} failed`
-        : `${tool.toolName} done${tool.durationMs ? ` (${tool.durationMs}ms)` : ''}`;
-
-  return <p className="type-caption text-muted-foreground/85">{label}</p>;
 }

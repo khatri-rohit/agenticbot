@@ -1,4 +1,5 @@
-import type { PendingToolCall } from './message.js';
+import type { MessageAttachment, PendingToolCall } from './message.js';
+import type { ThinkingValue } from './ollama-model.js';
 
 /**
  * The execution instance of one user request and everything the agent
@@ -22,6 +23,13 @@ export interface Run {
   error: string | null;
 }
 
+/** Provider-reported token counts for one model call (when available). */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens?: number;
+}
+
 /**
  * The completed output of one model call (one iteration of the loop),
  * regardless of streaming vs non-streaming transport.
@@ -30,6 +38,7 @@ export interface ModelTurn {
   content: string;
   toolCalls: PendingToolCall[];
   finishReason: string | null;
+  usage?: TokenUsage;
 }
 
 /**
@@ -49,3 +58,28 @@ export type ChatMessage =
       tool_calls?: PendingToolCall[];
     }
   | { role: 'tool'; tool_call_id: string; content: string };
+
+/** POST /api/agent/run body. History is loaded from the host ledger. */
+export type StartRunRequest = {
+  threadId: string;
+  /** New user turn to append. Omit when retrying the current ledger tail. */
+  message?: {
+    content: string;
+    attachments?: MessageAttachment[];
+  };
+  /**
+   * Keep ledger lines with seq <= this value; drop the rest before append/run.
+   * Used for retry (keep last user) and edit (keep the turn before that user).
+   */
+  rewindThroughSeq?: number;
+  streaming?: boolean;
+  model?: string;
+  /**
+   * When true, route chat completions and /api/show to local Ollama
+   * (`OLLAMA_LOCAL_BASE_URL`, default http://127.0.0.1:11434/v1).
+   */
+  local?: boolean;
+  /** When false, omit mode-allowed search tools; globals still apply. Default true. */
+  webSearch?: boolean;
+  thinking?: ThinkingValue;
+};

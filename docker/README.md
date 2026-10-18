@@ -1,6 +1,6 @@
 # Docker infrastructure (agenticbot)
 
-Compose stack for **Redis** (BullMQ) and optional **Speaches** (STT: **faster-distil-whisper-large-v3**).
+Compose stack for optional **Speaches** (STT: **faster-distil-whisper-large-v3**). Chat titles no longer use Redis.
 
 Voice defaults to the **browser** Web Speech API (`VOICE_STT_PROVIDER=browser`) — no Speaches required. Start this Speaches service only when you set `VOICE_STT_PROVIDER=speaches` (and matching `NEXT_PUBLIC_VOICE_STT_PROVIDER`) in the host `.env`.
 
@@ -10,7 +10,6 @@ Voice defaults to the **browser** Web Speech API (`VOICE_STT_PROVIDER=browser`) 
 
 | Path / service                                           | Owned by this compose?        |
 | -------------------------------------------------------- | ----------------------------- |
-| Redis data (`redis-data` or your Redis bind)             | Yes                           |
 | Speaches HF cache (`speaches-hf-cache` or Speaches bind) | Yes — speech models only      |
 | Ollama models (e.g. `D:\ollama\models`)                  | **No — never referenced**     |
 | Standalone `ollama` container on `:11434`                | **No — leave running as-is**  |
@@ -18,7 +17,7 @@ Voice defaults to the **browser** Web Speech API (`VOICE_STT_PROVIDER=browser`) 
 
 ## Portability (open source)
 
-Committed defaults use **Docker named volumes** (`redis-data`, `speaches-hf-cache`). Works on **macOS, Linux, and Windows**.
+Committed defaults use a **Docker named volume** (`speaches-hf-cache`). Works on **macOS, Linux, and Windows**.
 
 | Layer                         | In git?             | Purpose                           |
 | ----------------------------- | ------------------- | --------------------------------- |
@@ -29,10 +28,9 @@ Committed defaults use **Docker named volumes** (`redis-data`, `speaches-hf-cach
 
 **Contributors:** `docker compose --profile cpu up -d` — no `.env.docker` required.
 
-Optional Windows D: binds for Redis / Speaches only (never Ollama):
+Optional Windows D: bind for Speaches only (never Ollama):
 
 ```env
-REDIS_DATA_DIR=D:/agenticbot/docker-data/redis
 SPEACHES_HF_CACHE_DIR=D:/agenticbot/docker-data/speaches/hf-hub
 ```
 
@@ -66,14 +64,13 @@ curl -s http://127.0.0.1:8000/v1/models
 curl -X POST "http://127.0.0.1:8000/v1/models/Systran%2Ffaster-distil-whisper-large-v3"
 ```
 
-## Optional: Windows D: binds (Redis + Speaches only)
+## Optional: Windows D: bind (Speaches only)
 
 ```powershell
-New-Item -ItemType Directory -Force -Path D:\agenticbot\docker-data\redis
 New-Item -ItemType Directory -Force -Path D:\agenticbot\docker-data\speaches\hf-hub
 ```
 
-Do **not** set Speaches or Redis paths to `D:\ollama\models`.
+Do **not** set Speaches paths to `D:\ollama\models`.
 
 ## Start / stop
 
@@ -82,13 +79,12 @@ docker compose --profile cpu up -d
 # or: docker compose --env-file .env.docker up -d
 
 curl -s http://127.0.0.1:8000/health
-docker exec agenticbot-redis redis-cli ping
 
 # Stop stack — Ollama models dir is not involved
 docker compose down
 ```
 
-`down -v` only removes **this project’s** named volumes (`redis-data`, `speaches-hf-cache`). It cannot remove `D:\ollama\models` because that path is not in the compose file.
+`down -v` only removes **this project’s** named volume (`speaches-hf-cache`). It cannot remove `D:\ollama\models` because that path is not in the compose file.
 
 ## Profiles: CPU vs GPU (Speaches)
 
@@ -143,11 +139,10 @@ App `.env` stays `SPEACHES_STT_MODEL=Systran/faster-distil-whisper-large-v3`.
 ```env
 VOICE_STT_PROVIDER=speaches
 NEXT_PUBLIC_VOICE_STT_PROVIDER=speaches
-REDIS_URL=redis://127.0.0.1:6379
 SPEACHES_BASE_URL=http://127.0.0.1:8000
 SPEACHES_STT_MODEL=Systran/faster-distil-whisper-large-v3
 VOICE_STT_LANGUAGE=en
-VOICE_STT_PROMPT=agenticbot, Speaches, Nx monorepo, Ollama, agent-core, RunManager, ChatInput, Redis, BullMQ
+VOICE_STT_PROMPT=agenticbot, Speaches, Nx monorepo, Ollama, agent-core, RunManager, ChatInput
 # Keep chat on cloud — do not point OLLAMA_BASE_URL at Compose
 ```
 
@@ -167,7 +162,7 @@ curl -X POST "http://127.0.0.1:8000/v1/models/Systran%2Ffaster-distil-whisper-la
 
 ```bash
 docker compose logs -f speaches
-docker stats agenticbot-redis agenticbot-speaches --no-stream
+docker stats agenticbot-speaches --no-stream
 docker compose down
 ```
 

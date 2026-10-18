@@ -12,8 +12,8 @@ For Nx-specific conventions (tasks, generators, MCP), see [AGENTS.md](./AGENTS.m
 | -------------- | ------------------- | -------------------------------------------------------------------------------------------- |
 | Domain types   | `@org/agent-models` | `Run`, `Thread`, `AgentEvent`, `RESEARCH_MODE`, chat shapes                                  |
 | Runtime (pure) | `@org/agent-core`   | `runLoop`, `RunManager`, tools, model invoke/stream, system prompt — **no HTTP, DOM, or DB** |
-| Transport      | `apps/api`          | Express: `/api/agent/*`, voice STT proxy, BullMQ title jobs                                  |
-| UI             | `apps/web`          | Chat, IndexedDB threads, SSE via `use-agent-run`                                             |
+| Transport      | `apps/api`          | Express: `/api/agent/*`, disk thread store, voice STT proxy                                  |
+| UI             | `apps/web`          | Chat UI + SSE via `use-agent-run` (threads from API catalog)                                 |
 | Local eval     | `apps/agent`        | Thin script calling core directly                                                            |
 
 ### Request flow (chat)
@@ -27,7 +27,7 @@ User message (apps/web)
   → apps/web chat-store reducer → UI
 ```
 
-**Server is stateless for threads:** the client sends full message history each run. Threads live in the browser (IndexedDB).
+**Threads are host-owned on disk** (`AGENTICBOT_HOME` SQLite catalog + ledger). The first user turn seeds a sidebar title and refines it with the chat model.
 
 **One active run per thread** (enforced in API). Use `POST /api/agent/run/:runId/cancel` to stop generation.
 
@@ -35,11 +35,11 @@ User message (apps/web)
 
 Tools are registered in `@org/agent-core` and filtered per run:
 
-| Tool         | When available                                                                             | Purpose                                                                                                                                                                                                         |
-| ------------ | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `web_search` | Only if the client enables **Web search** in the composer (`allowedTools: ['web_search']`) | Live search via [Ollama web search API](https://docs.ollama.com/capabilities/web-search). Tiered results: auto-fetches top **2** result URLs for full content; remaining hits are **Further Reading** snippets. |
-| `web_fetch`  | **Always** (server `globalTools`)                                                          | Fetch a single URL via Ollama `web_fetch` — user pasted links or deeper read from search.                                                                                                                       |
-| `load_skill` | **Always** (server `globalTools`)                                                          | Load harness skill instructions (e.g. `web_search_skill`) before complex tool use.                                                                                                                              |
+| Tool         | When available                                                                             | Purpose                                                                                                                                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web_search` | Only if the client enables **Web search** in the composer (`allowedTools: ['web_search']`) | Live search via a provider chain (Ollama if keyed; else Firecrawl keyless → Tavily keyless). Tiered results: rich hits skip a second fetch; short snippets auto-fetch top **2** URLs; remaining hits are **Further Reading**. |
+| `web_fetch`  | **Always** (server `globalTools`)                                                          | Fetch a single URL (same provider chain) — user pasted links or deeper read from search.                                                                                                                                      |
+| `load_skill` | **Always** (server `globalTools`)                                                          | Optional skill packs. `web_search` / `web_fetch` work without loading a skill.                                                                                                                                                |
 
 **Resource discipline (by design):**
 
@@ -55,11 +55,12 @@ Mode defaults live in `packages/agent/models/src/lib/mode.ts` (`RESEARCH_MODE`: 
 
 - **Node.js** 20+ (LTS recommended)
 - **npm** (root `package.json` `workspaces` + `package-lock.json`)
-- **Ollama cloud** API key for chat + web search/fetch ([docs](https://docs.ollama.com/capabilities/web-search))
+- **Ollama** for chat: cloud API key and/or local `OLLAMA_BASE_URL` ([docs](https://docs.ollama.com))
+- **Web search** works with **no search API key** (Firecrawl keyless → Tavily keyless). Optional `OLLAMA_API_KEY` / `FIRECRAWL_API_KEY` / `TAVILY_API_KEY` for higher limits — see env table
 - **Redis** (optional but required for async **thread title** jobs): local Docker or existing instance — see [docker/README.md](./docker/README.md)
 - **Voice STT** (optional): default **browser** Web Speech API; optional **Speaches** via Docker — see env table + [docker/README.md](./docker/README.md)
 
-Ollama **chat** uses the OpenAI-compatible endpoint (`OLLAMA_BASE_URL=https://ollama.com/v1`). Web search/fetch use `https://ollama.com/api/web_search` and `web_fetch` with `OLLAMA_API_KEY` (see `packages/agent/core/src/lib/tools/web_search_api.ts`).
+Ollama **chat** uses the OpenAI-compatible endpoint (`OLLAMA_BASE_URL=https://ollama.com/v1`). Web search/fetch are routed in `packages/agent/core/src/lib/tools/web_search_api.ts`: with `OLLAMA_API_KEY`, Ollama cloud search/fetch; otherwise Firecrawl keyless then Tavily keyless. Keyless tiers are shared / rate-limited — not a production SLA.
 
 ---
 
@@ -73,17 +74,19 @@ cp .env.example .env
 
 Host-run API (typical dev) — see [.env.example](./.env.example):
 
-| Variable                         | Purpose                                       |
-| -------------------------------- | --------------------------------------------- |
-| `OLLAMA_BASE_URL`                | Chat completions base URL (default cloud)     |
-| `OLLAMA_API_KEY`                 | Chat + Ollama web search/fetch                |
-| `REDIS_URL`                      | BullMQ title queue (`redis://127.0.0.1:6379`) |
-| `VOICE_STT_PROVIDER`             | `browser` (default) \| `speaches` \| `off`    |
-| `NEXT_PUBLIC_VOICE_STT_PROVIDER` | Same value for the web app (must match)       |
-| `SPEACHES_BASE_URL`              | Speaches only — STT proxy base URL            |
-| `SPEACHES_STT_MODEL`             | Speaches only — e.g. distil-whisper-large-v3  |
-| `VOICE_STT_LANGUAGE`             | Speaches `language` (default `en`)            |
-| `VOICE_STT_PROMPT`               | Speaches vocabulary hint                      |
+| Variable                         | Purpose                                                       |
+| -------------------------------- | ------------------------------------------------------------- |
+| `OLLAMA_BASE_URL`                | Chat completions base URL (default cloud)                     |
+| `OLLAMA_API_KEY`                 | Chat (cloud) + forces Ollama web search/fetch when set        |
+| `FIRECRAWL_API_KEY`              | Optional — higher Firecrawl limits (keyless works without it) |
+| `TAVILY_API_KEY`                 | Optional — higher Tavily limits (keyless works without it)    |
+| `AGENTICBOT_HOME`                | Session catalog/ledger root (default `~/.local/agenticbot`)   |
+| `VOICE_STT_PROVIDER`             | `browser` (default) \| `speaches` \| `off`                    |
+| `NEXT_PUBLIC_VOICE_STT_PROVIDER` | Same value for the web app (must match)                       |
+| `SPEACHES_BASE_URL`              | Speaches only — STT proxy base URL                            |
+| `SPEACHES_STT_MODEL`             | Speaches only — e.g. distil-whisper-large-v3                  |
+| `VOICE_STT_LANGUAGE`             | Speaches `language` (default `en`)                            |
+| `VOICE_STT_PROMPT`               | Speaches vocabulary hint                                      |
 
 Web app (optional override):
 
@@ -114,22 +117,30 @@ npx nx run @org/web:dev
 
 Open the web app URL printed by Next (often `http://localhost:4200` or `3000` — check Nx output).
 
-### Verify Ollama web APIs (CLI)
+### Verify web search APIs (CLI)
 
-Requires `OLLAMA_API_KEY` in the environment:
+Keyless (no account) — Firecrawl then Tavily:
 
 ```bash
-# Web search
+# Firecrawl keyless search + scrape
+curl -s -X POST https://api.firecrawl.dev/v2/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Firecrawl search API","limit":3,"scrapeOptions":{"formats":["markdown","links"]}}'
+
+# Tavily keyless search
+curl -s -X POST https://api.tavily.com/search \
+  -H "Content-Type: application/json" \
+  -H "X-Tavily-Access-Mode: keyless" \
+  -d '{"query":"Tavily search API","max_results":3}'
+```
+
+Optional Ollama (requires `OLLAMA_API_KEY`):
+
+```bash
 curl -s https://ollama.com/api/web_search \
   -H "Authorization: Bearer $OLLAMA_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query":"Ollama web search API","max_results":3}'
-
-# Web fetch (example)
-curl -s https://ollama.com/api/web_fetch \
-  -H "Authorization: Bearer $OLLAMA_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://docs.ollama.com/capabilities/web-search"}'
 ```
 
 ---
@@ -175,7 +186,8 @@ npx nx affected -t typecheck build lint test
 | Loop limits             | `packages/agent/core/src/lib/loop/limits.ts`                   |
 | Run manager + cancel    | `packages/agent/core/src/lib/run/run-manager.ts`               |
 | Tool registry           | `packages/agent/core/src/lib/tools/registry.ts`                |
-| Ollama web search/fetch | `packages/agent/core/src/lib/tools/web_search_api.ts`          |
+| Web search/fetch router | `packages/agent/core/src/lib/tools/web_search_api.ts`          |
+| Search providers        | `packages/agent/core/src/lib/tools/web-search-providers.ts`    |
 | Tool definitions        | `packages/agent/core/src/lib/tools/web-search.ts`, `skills.ts` |
 | System prompt           | `packages/agent/core/src/lib/prompts/system-prompt.ts`         |
 | Research mode           | `packages/agent/models/src/lib/mode.ts`                        |
@@ -189,13 +201,12 @@ npx nx affected -t typecheck build lint test
 
 ## API surface (agent)
 
-| Method | Path                                     | Description                                                                                                |
-| ------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `POST` | `/api/agent/run`                         | Start run; body includes `threadId`, `messages`, optional `allowedTools`, `model`, `streaming`, `thinking` |
-| `GET`  | `/api/agent/run/:runId/events?fromSeq=N` | SSE stream of `AgentEvent`s                                                                                |
-| `POST` | `/api/agent/run/:runId/cancel`           | Cancel in-flight run                                                                                       |
-| `POST` | `/api/agent/title`                       | Enqueue title generation (needs Redis)                                                                     |
-| `GET`  | `/api/agent/title/:jobId`                | Poll title job                                                                                             |
+| Method | Path                                     | Description                                                             |
+| ------ | ---------------------------------------- | ----------------------------------------------------------------------- |
+| `POST` | `/api/agent/run`                         | Append optional user turn, start run; first turn also titles the thread |
+| `GET`  | `/api/agent/run/:runId/events?fromSeq=N` | SSE stream of `AgentEvent`s                                             |
+| `POST` | `/api/agent/run/:runId/cancel`           | Cancel in-flight run                                                    |
+| `*`    | `/api/agent/threads…`                    | Disk-backed thread catalog / ledger                                     |
 
 Client tool wiring (`apps/web/src/features/agent/api/agent-client.ts`):
 
@@ -224,11 +235,11 @@ External HTTP for tools belongs in core modules (e.g. `web_search_api.ts`), not 
 | Symptom                                | Things to check                                                                                         |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | No tools / wrong tools                 | Request body `allowedTools`; server merge with `RESEARCH_MODE.globalTools`; `createToolRegistry` filter |
-| `web_search` fails                     | `OLLAMA_API_KEY` set for API process; curl test above; rate limits on Ollama cloud                      |
-| `web_fetch` fails                      | Valid full URL; same API key; page blocked or huge (content truncated at 4k chars in harness)           |
+| `web_search` fails                     | Keyless Firecrawl/Tavily 429 (shared caps); or `OLLAMA_API_KEY` path — curl tests above                 |
+| `web_fetch` fails                      | Valid full URL; provider rate limit; page blocked or huge (content truncated at 4k chars in harness)    |
 | Run stuck “running”                    | SSE disconnect; `run.completed` / `run.error`; cancel endpoint                                          |
 | 409 on new message                     | Prior run still active on thread; cancel or wait                                                        |
-| Title never updates                    | `REDIS_URL`, Redis up, title worker/queue in API logs                                                   |
+| Title stays “New Chat”                 | First message must go through `POST /run`; check API logs for `[title] generate failed`                 |
 | Voice / STT errors                     | Speaches health `http://127.0.0.1:8000/health`, model pull per [docker/README.md](./docker/README.md)   |
 | Type errors in API after model changes | Rebuild `packages/agent/models` and `core` `.d.ts` (see above)                                          |
 
@@ -241,18 +252,15 @@ Enable API logging around agent routes and watch SSE in browser devtools (Networ
 ```
 agenticbot/
 ├── apps/
-│   ├── api/          # Express — agent, voice, products demo
+│   ├── api/          # Express — agent, voice
 │   ├── web/          # Next.js chat UI
 │   ├── agent/        # CLI harness
-│   ├── shop/         # Legacy Nx shop demo (optional)
 │   └── *-e2e/
 ├── packages/
-│   ├── agent/
-│   │   ├── core/     # @org/agent-core — loop, tools, model
-│   │   └── models/   # @org/agent-models — types, RESEARCH_MODE
-│   ├── api/products/ # Products API lib (demo)
-│   ├── shop/         # Shop demo libs
-│   └── shared/
+│   └── agent/
+│       ├── core/     # @org/agent-core — loop, tools, model
+│       └── models/   # @org/agent-models — types, RESEARCH_MODE
+
 ├── docker/           # Compose docs
 ├── docker-compose.yml
 ├── .cursor/skills/   # Nx workspace skills for agents
@@ -264,12 +272,12 @@ agenticbot/
 
 ## Design notes (web search behavior)
 
-Implementation in `web_search_api.ts`:
+Implementation in `web_search_api.ts` + `web-search-providers.ts`:
 
-1. Call Ollama `web_search` (default 5 results, each with `title`, `url`, `content` snippet).
-2. **Auto-fetch** full pages for the top **2** URLs (`web_fetch`), truncate page body for context size.
-3. Return formatted markdown-like text: **Detailed Sources** + **Further Reading** (snippets + links).
-4. Model may call **`web_fetch`** on a Further Reading URL if the answer still needs depth.
+1. **Provider router:** `OLLAMA_API_KEY` → Ollama only; else Firecrawl keyless, then Tavily keyless on retryable failure (429 / 5xx / empty / network). Failover is inside the tool — not a second model `web_search`.
+2. One search (default **5** results). Hits that already include long scraped/chunked content skip a second fetch.
+3. **Auto-fetch** only for short snippets on the top **2** URLs; truncate page body at 4k chars.
+4. Return **Detailed Sources** + **Further Reading**. Model may `web_fetch` a listed URL if needed — do not re-search the same question.
 
 System prompt (`system-prompt.ts`) instructs: answer from stable knowledge without tools; synthesize one comprehensive reply when tools are used; cite URLs; do not loop on poor searches.
 
@@ -278,18 +286,7 @@ System prompt (`system-prompt.ts`) instructs: answer from stable knowledge witho
 ## Further reading
 
 - [Ollama web search & fetch](https://docs.ollama.com/capabilities/web-search)
+- [Firecrawl search](https://docs.firecrawl.dev/features/search) (keyless search/scrape)
+- [Tavily keyless](https://docs.tavily.com/documentation/keyless)
 - [Nx documentation](https://nx.dev/docs)
 - [Docker stack (Redis, Speaches)](./docker/README.md)
-
----
-
-## Legacy Nx shop demo
-
-This repo still contains the original **shop** + **products API** sample (`apps/shop`, `@org/api-products`). It is independent of the agent harness. To run the shop demo:
-
-```bash
-npx nx run @org/shop:serve
-npx nx run @org/api:serve
-```
-
-For agent work, focus on `@org/web`, `@org/api` agent routes, and `@org/agent-core`.

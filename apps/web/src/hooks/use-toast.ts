@@ -133,6 +133,10 @@ function toastError(description: string, title = 'Something went wrong') {
   });
 }
 
+function toastSuccess(description: string, title = 'Saved') {
+  return toast({ title, description });
+}
+
 /** Subscribe to the in-memory toast store from React trees. */
 function useToast() {
   const [state, setState] = React.useState<State>(memoryState);
@@ -154,4 +158,4 @@ function useToast() {
   };
 }
 
-export { useToast, toast, toastError };
+export { useToast, toast, toastError, toastSuccess };

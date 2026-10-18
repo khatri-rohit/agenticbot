@@ -1,6 +1,6 @@
 import {
   runLoop,
-  invokeModelTurn,
+  createInvokeModelCall,
   getContext,
   createToolRegistry,
   ALL_TOOLS,
@@ -37,9 +37,10 @@ async function runScenario(
   const messages = getContext(query, tools);
   const stats: RunStats = { toolCalls: 0, iterations: 0, toolNames: [] };
 
-  const result = await runLoop(invokeModelTurn, messages, tools, {
+  const result = await runLoop(createInvokeModelCall(), messages, tools, {
     model,
     streaming: false,
+    mode: 'research',
     trace: createTraceCollector(stats),
     limits: {
       maxIterations: 8,

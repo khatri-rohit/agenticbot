@@ -1,3 +1,8 @@
+import type { ContextReport } from './context.js';
+import type { MemoryTarget } from './memory.js';
+import type { TokenUsage } from './run.js';
+import type { ToolRisk } from './tool-context.js';
+
 /**
  * AgentEvent — the server's streaming protocol to the client.
  *
@@ -8,7 +13,7 @@
  * - `assistant.delta` events (streaming mode only) carry text fragments.
  *   In non-streaming mode the client receives `assistant.completed` directly.
  * - Tool results in events carry a *preview* only (size-capped). The full
- *   payload is stored client-side in IndexedDB `tool_calls`.
+ *   payload is appended to the host ledger (blobs/ when large).
  */
 
 export type AgentEvent =
@@ -20,8 +25,14 @@ export type AgentEvent =
   | ToolStarted
   | ToolCompleted
   | ToolFailed
+  | ApprovalRequested
+  | ApprovalResolved
+  | MemoryUpdated
+  | ContextCompacting
+  | ContextCompacted
   | TurnCompleted
   | RunCompleted
+  | RunSettled
   | RunError
   | LimitHit;
 
@@ -33,6 +44,10 @@ export interface RunStarted {
   mode: string;
   streaming: boolean;
   model: string;
+  /** Heuristic size of the first request envelope (system + tools + messages). */
+  estimatedPromptTokens?: number;
+  /** Per-layer breakdown from assembleContext (M2). */
+  contextReport?: ContextReport;
 }
 
 export interface TurnStarted {
@@ -84,7 +99,7 @@ export interface ToolCompleted {
   toolCallId: string;
   toolName: string;
   durationMs: number;
-  /** Truncated result preview for UI display. Full result in IndexedDB. */
+  /** Truncated result preview for UI display. Full result lives in the host ledger. */
   resultPreview: unknown;
 }
 
@@ -101,6 +116,8 @@ export interface TurnCompleted {
   type: 'turn.completed';
   runId: string;
   iteration: number;
+  /** Provider usage for the model call that finished this iteration. */
+  usage?: TokenUsage;
 }
 
 export interface RunCompleted {
@@ -123,6 +140,68 @@ export interface LimitHit {
   type: 'limit.hit';
   runId: string;
   reason: string;
+}
+
+/** Host needs the user (or a pre-approved profile) before a privileged tool runs. */
+export interface ApprovalRequested {
+  seq: number;
+  type: 'approval.requested';
+  runId: string;
+  approvalId: string;
+  toolName: string;
+  summary: string;
+  risk: ToolRisk;
+}
+
+export interface ApprovalResolved {
+  seq: number;
+  type: 'approval.resolved';
+  runId: string;
+  approvalId: string;
+  decision: 'approved' | 'denied';
+}
+
+/** Curated memory changed (applied or reverted). UI refetches files. */
+export interface MemoryUpdated {
+  seq: number;
+  type: 'memory.updated';
+  runId: string;
+  opId: string;
+  target: MemoryTarget;
+  action: 'add' | 'patch' | 'remove' | 'revert';
+}
+
+/** Host started M4 compaction after the model loop (still before run.settled). */
+export interface ContextCompacting {
+  seq: number;
+  type: 'context.compacting';
+  runId: string;
+  threadId: string;
+}
+
+/**
+ * Host wrote a context snapshot after a run (M4). Not a tool call —
+ * UI shows a compaction step in the turn trail, not ToolStepList.
+ */
+export interface ContextCompacted {
+  seq: number;
+  type: 'context.compacted';
+  runId: string;
+  threadId: string;
+  throughSeq: number;
+  brief: string;
+  summary: string;
+  createdAt: string;
+}
+
+/**
+ * Post-run host work finished (compaction attempted or skipped).
+ * Client may clear ephemeral activeRun after this.
+ */
+export interface RunSettled {
+  seq: number;
+  type: 'run.settled';
+  runId: string;
 }
 
 /** Union of event types for filtering. */

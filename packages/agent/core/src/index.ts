@@ -1,39 +1,23 @@
 // @org/agent-core — host-agnostic agent runtime.
 // Pure library: no HTTP, no DOM, no database.
+// Domain types live in @org/agent-models — import them from there.
 
-// Re-export domain types so consumers can import everything from @org/agent-core.
-export type {
-  AgentEvent,
-  AgentEventType,
-  AgentEventWithoutSeq,
-  Thread,
-  Message,
-  MessageRole,
-  MessageStatus,
-  PendingToolCall,
-  Run,
-  RunStatus,
-  ChatMessage,
-  ModeName,
-  ModeConfig,
-  ThinkingValue,
-  ThinkingMode,
-  OllamaThinkingConfig,
-  OllamaModelConfig,
-} from '@org/agent-models';
-export { RESEARCH_MODE } from '@org/agent-models';
+export { RESEARCH_MODE, CODING_MODE, modeForKind } from '@org/agent-models';
 
 // Model layer
-export { client } from './lib/model/client';
+export {
+  getClient,
+  nativeOllamaBaseUrl,
+  resolveOllamaBaseUrl,
+} from './lib/model/client';
 export { invokeModelTurn } from './lib/model/invoke';
 export { streamModelTurn } from './lib/model/stream';
-export type {
-  ModelTurn,
-  OnTextDelta,
-  ModelCallOptions,
-} from './lib/model/types';
+export { estimatePromptTokens } from './lib/model/estimate-prompt-tokens';
+export { parseTokenUsage } from './lib/model/parse-usage';
+export type { OnTextDelta, ModelCallOptions } from './lib/model/types';
 export {
   getOllamaModelConfig,
+  listOllamaModels,
   resolveReasoningEffort,
 } from './lib/model/ollama-model-config';
 
@@ -55,7 +39,26 @@ export {
 // Tools
 export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
+export { WORKSPACE_TOOLS } from './lib/tools/workspace';
+export {
+  resolveWorkspacePath,
+  isPathInside,
+  globMatch,
+} from './lib/tools/workspace-path';
+export { assembleContext } from './lib/context/assemble-context';
+export type {
+  AssembleContextInput,
+  AssembleContextResult,
+} from './lib/context/assemble-context';
+export {
+  chooseCompactThroughSeq,
+  buildExtractiveSnapshot,
+} from './lib/context/compact-snapshot';
+export { toLedgerRecord } from './lib/loop/to-ledger-record';
 export { webSearchTool, webFetchTool } from './lib/tools/web-search';
+export { createMemoryTool } from './lib/tools/memory';
+export type { MemoryToolStore } from './lib/tools/memory';
+export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
 // Events / trace
 export { consoleTrace } from './lib/events/trace';
@@ -73,3 +76,4 @@ export type {
 
 // Prompts
 export { buildSystemPrompt } from './lib/prompts/system-prompt';
+export { loadAgentIdentity } from './lib/prompts/load-agent-identity';

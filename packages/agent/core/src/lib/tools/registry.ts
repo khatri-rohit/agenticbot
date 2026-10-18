@@ -1,6 +1,7 @@
 import { load_skill } from './skills';
 import type { Tool, ToolRegistry } from './type';
 import { WEB_SEARCH_TOOLS } from './web-search';
+import { WORKSPACE_TOOLS } from './workspace';
 
 /**
  * Build a ToolRegistry from a list of tools.
@@ -20,4 +21,8 @@ export function createToolRegistry(
   };
 }
 
-export const ALL_TOOLS: Tool[] = [load_skill, ...WEB_SEARCH_TOOLS];
+export const ALL_TOOLS: Tool[] = [
+  load_skill,
+  ...WEB_SEARCH_TOOLS,
+  ...WORKSPACE_TOOLS,
+];

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const BOTTOM_THRESHOLD_PX = 80;
+const BOTTOM_THRESHOLD_PX = 96;
 
 export function useStickToBottom(
   scrollRef: React.RefObject<HTMLElement | null>,
@@ -10,6 +10,7 @@ export function useStickToBottom(
   const [stickToBottom, setStickToBottom] = useState(true);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const stickRef = useRef(true);
+  const rafRef = useRef(0);
 
   const syncStickFromScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -21,20 +22,49 @@ export function useStickToBottom(
     setShowJumpToBottom(!atBottom);
   }, [scrollRef]);
 
+  const pinToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || !stickRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [scrollRef]);
+
+  const scheduleFollow = useCallback(() => {
+    if (!stickRef.current) return;
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      pinToBottom();
+    });
+  }, [pinToBottom]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
     const onScroll = () => syncStickFromScroll();
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, [scrollRef, syncStickFromScroll]);
+
+    const ro = new ResizeObserver(() => scheduleFollow());
+    ro.observe(el);
+    const content = el.firstElementChild;
+    if (content) ro.observe(content);
+
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [scrollRef, scheduleFollow, syncStickFromScroll]);
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = 'smooth') => {
       const el = scrollRef.current;
       if (!el) return;
-      el.scrollTo({ top: el.scrollHeight, behavior });
+      if (behavior === 'auto') {
+        el.scrollTop = el.scrollHeight;
+      } else {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      }
       stickRef.current = true;
       setStickToBottom(true);
       setShowJumpToBottom(false);
@@ -43,11 +73,15 @@ export function useStickToBottom(
   );
 
   const followContent = useCallback(
-    (behavior: ScrollBehavior = 'smooth') => {
+    (behavior: ScrollBehavior = 'auto') => {
       if (!stickRef.current) return;
-      scrollToBottom(behavior);
+      if (behavior === 'smooth') {
+        scrollToBottom('smooth');
+        return;
+      }
+      scheduleFollow();
     },
-    [scrollToBottom],
+    [scheduleFollow, scrollToBottom],
   );
 
   const jumpToBottomAndFollow = useCallback(() => {

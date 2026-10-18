@@ -56,9 +56,6 @@
   "references": [
     {
       "path": "../../packages/agent/models/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/shop/shared-ui/tsconfig.lib.json"
     }
   ]
 }

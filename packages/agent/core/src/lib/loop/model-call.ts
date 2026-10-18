@@ -15,8 +15,13 @@ export function createInvokeModelCall(options?: ModelCallOptions): ModelCallFn {
     model: string,
     messages: ChatCompletionMessageParam[],
     tools: ToolRegistry,
+    _onTextDelta?: (delta: string) => void,
+    signal?: AbortSignal,
   ): ReturnType<ModelCallFn> =>
-    invokeModelTurn(model, messages, tools, undefined, options);
+    invokeModelTurn(model, messages, tools, undefined, {
+      ...options,
+      ...(signal ? { signal } : {}),
+    });
 }
 
 /**
@@ -30,6 +35,10 @@ export function createStreamModelCall(options?: ModelCallOptions): ModelCallFn {
     messages: ChatCompletionMessageParam[],
     tools: ToolRegistry,
     onTextDelta?: (delta: string) => void,
+    signal?: AbortSignal,
   ): ReturnType<ModelCallFn> =>
-    streamModelTurn(model, messages, tools, onTextDelta, options);
+    streamModelTurn(model, messages, tools, onTextDelta, {
+      ...options,
+      ...(signal ? { signal } : {}),
+    });
 }

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Brain, Check, ChevronDown, ImageIcon, Search } from 'lucide-react';
 import {
-  OLLAMA_MODELS,
+  CLOUD_OLLAMA_MODELS,
   getOllamaModelLabel,
   resolveOllamaModel,
   type OllamaModel,
@@ -57,21 +57,32 @@ export function ModelPicker({
   value,
   onChange,
   disabled,
+  models = CLOUD_OLLAMA_MODELS,
+  local = false,
+  loading = false,
+  emptyMessage,
 }: {
   value: string;
   onChange: (modelId: string) => void;
   disabled?: boolean;
+  /** Override catalog (e.g. discovered local installs). */
+  models?: OllamaModel[];
+  local?: boolean;
+  loading?: boolean;
+  emptyMessage?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
-  const modelId = resolveOllamaModel(value);
-  const label = getOllamaModelLabel(modelId);
+  const modelId = local ? value.trim() : resolveOllamaModel(value);
+  const label = local
+    ? modelId || 'Select local model'
+    : getOllamaModelLabel(modelId);
 
   const groups = useMemo(() => {
-    const filtered = OLLAMA_MODELS.filter((m) => matchesQuery(m, query));
+    const filtered = models.filter((m) => matchesQuery(m, query));
     return groupModels(filtered);
-  }, [query]);
+  }, [models, query]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -81,7 +92,7 @@ export function ModelPicker({
           variant="ghost"
           size="sm"
           disabled={disabled}
-          className="h-7 max-w-[11rem] gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+          className="h-7 max-w-48 gap-1 rounded-full bg-muted/45 px-2.5 text-xs font-normal text-muted-foreground ring-1 ring-border/35 hover:bg-muted/70 hover:text-foreground"
           aria-label={`Model: ${label}`}
         >
           <span className="truncate">{label}</span>
@@ -92,7 +103,7 @@ export function ModelPicker({
         align="start"
         side="top"
         sideOffset={6}
-        className="flex max-h-[min(24rem,70vh)] w-80 flex-col overflow-hidden p-0"
+        className="flex max-h-[min(24rem,70vh)] w-80 flex-col overflow-hidden p-0 bg-card shadow-lg"
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-2.5 py-2">
           <Search
@@ -109,9 +120,13 @@ export function ModelPicker({
           />
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
-          {groups.length === 0 ? (
+          {loading ? (
             <p className="px-2.5 py-4 text-center text-xs text-muted-foreground">
-              No models found
+              Loading local models…
+            </p>
+          ) : groups.length === 0 ? (
+            <p className="px-2.5 py-4 text-center text-xs text-muted-foreground">
+              {emptyMessage ?? 'No models found'}
             </p>
           ) : (
             groups.map((group) => (

@@ -38,6 +38,8 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-code), ui-monospace, monospace;
 }
 
 /* Scrollbar geometry (thumb colors come from each theme in themes.css). */
@@ -49,29 +51,27 @@
   --scrollbar-thumb-hover: oklch(0.56 0.024 264);
   --scrollbar-thumb-active: oklch(0.64 0.028 264);
 
-  /* Typography scale (agent chat: assistant = primary reading surface) */
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
+  /* Typography — next/font injects --font-ui / --font-code on <html> */
+  --font-ui: ui-sans-serif, system-ui, sans-serif;
+  --font-code: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-code), ui-monospace, monospace;
 
-  --text-hero-title: 1.125rem;
-  --text-hero-title-leading: 1.35;
+  --text-hero-title: 1.25rem;
+  --text-hero-title-leading: 1.3;
   --text-hero-sub: 0.8125rem;
   --text-hero-sub-leading: 1.55;
 
   --text-body: 0.9375rem;
-  --text-body-leading: 1.65;
+  --text-body-leading: 1.68;
   --text-user: 0.875rem;
   --text-user-leading: 1.55;
   --text-composer: 0.9375rem;
   --text-composer-leading: 1.5;
   --text-ui: 0.8125rem;
-  --text-ui-leading: 1.45;
+  --text-ui-leading: 1.4;
   --text-caption: 0.6875rem;
-  --text-caption-leading: 1.4;
+  --text-caption-leading: 1.35;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -102,8 +102,8 @@ body {
 .type-hero-title {
   font-size: var(--text-hero-title);
   line-height: var(--text-hero-title-leading);
-  font-weight: 500;
-  letter-spacing: -0.02em;
+  font-weight: 600;
+  letter-spacing: -0.03em;
 }
 
 .type-hero-sub {
@@ -141,6 +141,120 @@ body {
   max-width: 100%;
   width: 100%;
   min-width: 0;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Reply, not a paper: section labels + readable body rhythm. */
+.agent-markdown {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: var(--text-body);
+  line-height: 1.74;
+  color: color-mix(in oklch, var(--foreground) 88%, var(--muted-foreground));
+  font-weight: 400;
+}
+
+.agent-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.agent-markdown
+  > :first-child
+  :is(h1, h2, h3, h4, h5, h6, [data-streamdown^='heading-']) {
+  margin-top: 0;
+}
+
+.agent-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.agent-markdown h1,
+.agent-markdown h2,
+.agent-markdown h3,
+.agent-markdown h4,
+.agent-markdown h5,
+.agent-markdown h6,
+.agent-markdown [data-streamdown='heading-1'],
+.agent-markdown [data-streamdown='heading-2'],
+.agent-markdown [data-streamdown='heading-3'],
+.agent-markdown [data-streamdown='heading-4'],
+.agent-markdown [data-streamdown='heading-5'],
+.agent-markdown [data-streamdown='heading-6'] {
+  color: var(--foreground);
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  margin: 1.85em 0 0.5em;
+  line-height: 1.4;
+}
+
+.agent-markdown h1,
+.agent-markdown [data-streamdown='heading-1'] {
+  font-size: 1.0625rem;
+}
+
+.agent-markdown h2,
+.agent-markdown [data-streamdown='heading-2'] {
+  font-size: 1.02rem;
+}
+
+.agent-markdown h3,
+.agent-markdown h4,
+.agent-markdown h5,
+.agent-markdown h6,
+.agent-markdown [data-streamdown='heading-3'],
+.agent-markdown [data-streamdown='heading-4'],
+.agent-markdown [data-streamdown='heading-5'],
+.agent-markdown [data-streamdown='heading-6'] {
+  font-size: var(--text-body);
+}
+
+.agent-markdown [data-streamdown='paragraph'],
+.agent-markdown p {
+  margin: 0 0 1.15em;
+}
+
+.agent-markdown
+  :is(h1, h2, h3, h4, h5, h6, [data-streamdown^='heading-'])
+  + :is(p, [data-streamdown='paragraph']) {
+  margin-top: 0;
+}
+
+.agent-markdown hr,
+.agent-markdown [data-streamdown='thematic-break'],
+.agent-markdown [data-streamdown='horizontal-rule'] {
+  border: 0;
+  height: 1px;
+  margin: 1.85em 0;
+  background: color-mix(in oklch, var(--border) 72%, transparent);
+}
+
+.agent-markdown [data-streamdown='list'],
+.agent-markdown ul,
+.agent-markdown ol {
+  margin: 0 0 1.2em;
+  padding-left: 1.25rem;
+}
+
+.agent-markdown [data-streamdown='list-item'],
+.agent-markdown li {
+  margin: 0.4em 0;
+}
+
+.agent-markdown li + li {
+  margin-top: 0.45em;
+}
+
+.agent-markdown [data-streamdown='blockquote'],
+.agent-markdown blockquote {
+  margin: 1.15em 0 1.35em;
+  padding: 0.15em 0 0.15em 0.95rem;
+  border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent);
+  color: color-mix(in oklch, var(--foreground) 78%, var(--muted-foreground));
 }
 
 /* --- Global scrollbars --- */
@@ -205,68 +319,6 @@ body {
 }
 
 /* --- Assistant markdown (Streamdown) --- */
-
-.agent-markdown {
-  font-size: var(--text-body);
-  line-height: var(--text-body-leading);
-  color: color-mix(in oklch, var(--foreground) 96%, transparent);
-  font-weight: 400;
-}
-
-.agent-markdown > *:first-child {
-  margin-top: 0;
-}
-
-.agent-markdown > *:last-child {
-  margin-bottom: 0;
-}
-
-.agent-markdown [data-streamdown='heading-1'],
-.agent-markdown [data-streamdown='heading-2'],
-.agent-markdown [data-streamdown='heading-3'] {
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--foreground);
-  margin: 1.35rem 0 0.45rem;
-}
-
-.agent-markdown [data-streamdown='heading-1'] {
-  font-size: 1.2rem;
-  line-height: 1.35;
-}
-
-.agent-markdown [data-streamdown='heading-2'] {
-  font-size: 1.0625rem;
-  line-height: 1.4;
-}
-
-.agent-markdown [data-streamdown='heading-3'] {
-  font-size: 0.9875rem;
-  line-height: 1.45;
-}
-
-.agent-markdown [data-streamdown='paragraph'] {
-  margin: 0.65rem 0;
-}
-
-.agent-markdown [data-streamdown='list'],
-.agent-markdown ul,
-.agent-markdown ol {
-  margin: 0.5rem 0 0.75rem;
-  padding-left: 1.35rem;
-}
-
-.agent-markdown [data-streamdown='list-item'],
-.agent-markdown li {
-  margin: 0.25rem 0;
-}
-
-.agent-markdown [data-streamdown='blockquote'] {
-  margin: 0.75rem 0;
-  padding-left: 0.85rem;
-  border-left: 2px solid var(--border);
-  color: color-mix(in oklch, var(--foreground) 82%, var(--muted-foreground));
-}
 
 .agent-markdown [data-streamdown='link'] {
   cursor: pointer;
@@ -354,6 +406,7 @@ body {
 .agent-markdown [data-streamdown='code-block-body'] code {
   font-family: var(--font-mono);
   white-space: pre;
+  max-width: 100%;
 }
 
 .agent-markdown [data-streamdown='code-block-actions'] {

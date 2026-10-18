@@ -18,7 +18,6 @@ export default function ChatThreadPage({
   params: Promise<{ threadId: string }>;
 }) {
   const { threadId } = use(params);
-  const messages = useMessages(threadId);
   const {
     chatState,
     sendMessage,
@@ -31,7 +30,10 @@ export default function ChatThreadPage({
     stopGeneration,
     retryLastResponse,
     editLastUserMessage,
+    ledgerEpoch,
+    threadKind,
   } = useAgentRun(threadId);
+  const messages = useMessages(threadId, ledgerEpoch);
   const sentPendingRef = useRef(false);
 
   useEffect(() => {
@@ -39,10 +41,12 @@ export default function ChatThreadPage({
     const pending = takePendingMessage();
     if (!pending) return;
     sentPendingRef.current = true;
-    const model = resolveOllamaModel(pending.model ?? '');
+    const local = pending.local === true;
+    const model = resolveOllamaModel(pending.model ?? '', local);
     setComposerOptions({
       streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,
+      local,
       model,
       thinking: pending.thinking,
     });
@@ -51,6 +55,7 @@ export default function ChatThreadPage({
       {
         streaming: pending.streaming,
         webSearch: pending.webSearch ?? true,
+        local,
         model,
         thinking: pending.thinking,
       },
@@ -65,16 +70,22 @@ export default function ChatThreadPage({
         <ChatInput
           key={threadId}
           draftScope={threadId}
+          threadId={threadId}
           onSend={sendMessage}
           isRunning={isRunning}
           queuedMessage={queuedMessage}
           onSendQueuedNow={() => void sendQueuedNow()}
           onEditQueued={editQueuedMessage}
           composerOptions={composerOptions}
+          hideWebSearch={threadKind === 'coding'}
           onComposerOptionsChange={setComposerOptions}
           onStop={() => void stopGeneration()}
-          contextMessages={messages ?? []}
+          occupiedTokens={chatState.activeRun?.occupiedTokens}
+          occupiedCoversStream={chatState.activeRun?.occupiedCoversStream}
+          estimatedPromptTokens={chatState.activeRun?.estimatedPromptTokens}
+          contextReport={chatState.activeRun?.contextReport}
           streamingContent={chatState.activeRun?.streamingMessage?.content}
+          runModel={chatState.activeRun?.model}
         />
       }
     >
@@ -82,6 +93,7 @@ export default function ChatThreadPage({
         messages={messages}
         chatState={chatState}
         isRunning={isRunning}
+        threadKind={threadKind}
         onRetryLastResponse={() => retryLastResponse()}
         onEditLastUserMessage={(id, content) =>
           editLastUserMessage(id, content)

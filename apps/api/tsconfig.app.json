@@ -27,10 +27,7 @@
       "path": "../../packages/agent/core/tsconfig.lib.json"
     },
     {
-      "path": "../../packages/shared/models/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/api/products/tsconfig.lib.json"
+      "path": "../../packages/logger/tsconfig.lib.json"
     }
   ]
 }

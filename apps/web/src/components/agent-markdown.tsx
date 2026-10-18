@@ -25,7 +25,22 @@ const controls = {
   },
 } as const;
 
-const mermaidConfig = { config: { theme: 'dark' as const } };
+function mermaidTheme(): 'dark' | 'default' {
+  if (typeof document === 'undefined') return 'dark';
+  return document.documentElement.classList.contains('light')
+    ? 'default'
+    : 'dark';
+}
+
+/** Word-level stagger: readable cadence, catches up if the SSE buffer runs ahead. */
+const STREAM_ANIMATION = {
+  animation: 'fadeIn' as const,
+  duration: 170,
+  easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+  sep: 'word' as const,
+  stagger: 28,
+  maxBacklogMs: 260,
+};
 
 /**
  * Streamdown enables link-safety by default (full-screen confirm modal).
@@ -66,6 +81,8 @@ export function AgentMarkdown({
       <Streamdown
         {...shared}
         mode="streaming"
+        animated={STREAM_ANIMATION}
+        caret="circle"
         isAnimating
         parseIncompleteMarkdown
         plugins={codePlugins}
@@ -80,7 +97,7 @@ export function AgentMarkdown({
       {...shared}
       mode="static"
       plugins={fullPlugins}
-      mermaid={mermaidConfig}
+      mermaid={{ config: { theme: mermaidTheme() } }}
     >
       {markdown}
     </Streamdown>

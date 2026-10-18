@@ -10,7 +10,7 @@ const SPEACHES_STT_MODEL =
 const VOICE_STT_LANGUAGE = process.env.VOICE_STT_LANGUAGE ?? 'en';
 const VOICE_STT_PROMPT = (
   process.env.VOICE_STT_PROMPT ??
-  'agenticbot, Speaches, Nx monorepo, Ollama, agent-core, RunManager, ChatInput, Redis, BullMQ'
+  'agenticbot, Speaches, Nx monorepo, Ollama, agent-core, RunManager, ChatInput'
 ).trim();
 const MAX_AUDIO_BYTES = Number(process.env.VOICE_MAX_AUDIO_BYTES ?? 10_485_760);
 

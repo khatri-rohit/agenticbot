@@ -6,13 +6,21 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import type { ContextReportLayer } from '@org/agent-models';
+import type { ContextMeterSource } from '@/features/agent/hooks/use-context-meter';
 
 export function ContextUsage({
   used,
   limit,
+  source,
+  approximate,
+  layers = [],
 }: {
   used: number;
   limit: number | null;
+  source: ContextMeterSource;
+  approximate: boolean;
+  layers?: ContextReportLayer[];
 }) {
   if (limit == null || limit <= 0) return null;
 
@@ -20,6 +28,7 @@ export function ContextUsage({
   const percent = Math.round(ratio * 100);
   const usedLabel = used.toLocaleString();
   const limitLabel = limit.toLocaleString();
+  const showTilde = source === 'estimate' || approximate;
   const size = 20;
   const stroke = 2.25;
   const radius = (size - stroke) / 2;
@@ -32,7 +41,7 @@ export function ContextUsage({
         <button
           type="button"
           className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-          aria-label={`${percent}% context used, ${usedLabel} of ${limitLabel} tokens`}
+          aria-label={`${showTilde ? 'About ' : ''}${percent}% context used, ${usedLabel} of ${limitLabel} tokens, ${source}`}
         >
           <svg
             width={size}
@@ -70,17 +79,31 @@ export function ContextUsage({
           </svg>
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" side="top" className="w-44 p-2.5">
+      <PopoverContent align="end" side="top" className="w-52 p-2.5">
         <p className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
           Context
         </p>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
           <dt className="text-muted-foreground">Used</dt>
-          <dd className="text-right font-medium tabular-nums">{usedLabel}</dd>
+          <dd className="text-right font-medium tabular-nums">
+            {showTilde ? '~' : ''}
+            {usedLabel}
+          </dd>
           <dt className="text-muted-foreground">Limit</dt>
           <dd className="text-right font-medium tabular-nums">{limitLabel}</dd>
+          {layers
+            .filter((layer) => layer.tokens > 0)
+            .map((layer) => (
+              <div key={layer.id} className="contents">
+                <dt className="text-muted-foreground">{layer.label}</dt>
+                <dd className="text-right tabular-nums">
+                  {layer.tokens.toLocaleString()}
+                </dd>
+              </div>
+            ))}
         </dl>
         <p className="mt-2 text-[11px] text-muted-foreground tabular-nums">
+          {showTilde ? '~' : ''}
           {percent}% of window
         </p>
       </PopoverContent>

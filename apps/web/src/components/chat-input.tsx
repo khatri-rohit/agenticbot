@@ -11,9 +11,13 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import type { MessageAttachment } from '@org/agent-models';
-import type { ComposerOptions } from '@/features/agent/api/agent-client';
+import type { ContextReport, MessageAttachment } from '@org/agent-models';
+import {
+  fetchLocalOllamaModels,
+  type ComposerOptions,
+} from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
+import { useContextMeter } from '@/features/agent/hooks/use-context-meter';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
 import { useVoiceInput } from '@/features/agent/hooks/use-voice-input';
 import {
@@ -23,12 +27,19 @@ import {
   imageAttachErrorMessage,
 } from '@/features/agent/lib/image-attachments';
 import { toastError } from '@/hooks/use-toast';
-import { estimateTokens } from '@/lib/estimate-tokens';
-import { modelSupportsVision, OLLAMA_MODELS } from '@/lib/ollama-models';
+import {
+  CLOUD_OLLAMA_MODELS,
+  DEFAULT_OLLAMA_MODEL,
+  listedModelToPickerModel,
+  modelSupportsVision,
+  readStoredComposerModel,
+  type OllamaModel,
+} from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
 import { VoiceModePill } from '@/components/voice-mode-pill';
+import { registerComposerFocus } from '@/components/composer-focus';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -122,13 +133,11 @@ function composerPlaceholder(opts: {
   voiceActive: boolean;
   voiceTranscribing: boolean;
   isHero: boolean;
-  isRunning: boolean;
 }): string {
   if (opts.voiceActive) return 'Listening… speech appends here';
   if (opts.voiceTranscribing) return 'Transcribing…';
-  if (opts.isHero) return 'Ask a research question…';
-  if (opts.isRunning) return 'Send follow-up…';
-  return 'Message';
+  if (opts.isHero) return 'Ask anything to start…';
+  return 'Send a follow-up…';
 }
 
 export function ChatInput({
@@ -141,10 +150,16 @@ export function ChatInput({
   onComposerOptionsChange,
   onStop,
   variant = 'dock',
-  contextMessages = [],
+  threadId,
+  occupiedTokens,
+  occupiedCoversStream,
+  estimatedPromptTokens,
+  contextReport,
   streamingContent,
+  runModel,
   /** localStorage draft scope — thread id or home key; remount via `key` when it changes. */
   draftScope,
+  hideWebSearch = false,
 }: {
   onSend: (
     content: string,
@@ -163,13 +178,15 @@ export function ChatInput({
   /** Stops the active agent run; queue is preserved and runs after stop completes. */
   onStop?: () => void;
   variant?: 'dock' | 'hero';
-  contextMessages?: Array<{
-    content?: string | null;
-    toolCalls?: unknown;
-    attachments?: MessageAttachment[];
-  }>;
+  threadId?: string;
+  occupiedTokens?: number;
+  occupiedCoversStream?: boolean;
+  estimatedPromptTokens?: number;
+  contextReport?: ContextReport;
   streamingContent?: string | null;
+  runModel?: string;
   draftScope: string;
+  hideWebSearch?: boolean;
 }) {
   const [input, setInput] = useState(
     () => loadComposerDraft(draftScope)?.content ?? '',
@@ -178,12 +195,68 @@ export function ChatInput({
     MessageAttachment[]
   >(() => loadComposerDraft(draftScope)?.attachments ?? []);
   const [dragOver, setDragOver] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerOptionsRef = useRef(composerOptions);
   const onComposerOptionsChangeRef = useRef(onComposerOptionsChange);
   composerOptionsRef.current = composerOptions;
   onComposerOptionsChangeRef.current = onComposerOptionsChange;
+
+  const localMode = composerOptions.local === true;
+  const [localModels, setLocalModels] = useState<OllamaModel[]>([]);
+  const [localModelsLoading, setLocalModelsLoading] = useState(false);
+  const [localModelsError, setLocalModelsError] = useState<string | null>(null);
+
+  // Discover installed models from the API host's Ollama when Local is on.
+  useEffect(() => {
+    if (!localMode) {
+      setLocalModels([]);
+      setLocalModelsError(null);
+      setLocalModelsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLocalModelsLoading(true);
+    setLocalModelsError(null);
+    void fetchLocalOllamaModels()
+      .then((res) => {
+        if (cancelled) return;
+        const next = res.models.map(listedModelToPickerModel);
+        setLocalModels(next);
+        setLocalModelsLoading(false);
+
+        const current = composerOptionsRef.current;
+        const stillValid = next.some((m) => m.id === current.model);
+        if (stillValid) return;
+        const preferred = readStoredComposerModel(true);
+        const pick =
+          next.find((m) => m.id === preferred)?.id ?? next[0]?.id ?? '';
+        if (pick !== current.model) {
+          onComposerOptionsChangeRef.current({
+            ...current,
+            local: true,
+            model: pick,
+            thinking: undefined,
+          });
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLocalModels([]);
+        setLocalModelsLoading(false);
+        setLocalModelsError(
+          err instanceof Error
+            ? err.message
+            : 'Could not reach Ollama on the API host (127.0.0.1:11434). Start `ollama serve` there, or set OLLAMA_LOCAL_BASE_URL.',
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [localMode]);
 
   const voice = useVoiceInput({
     onTranscript: (text) => {
@@ -196,13 +269,48 @@ export function ChatInput({
     },
   });
   const voiceLocked = voice.enabled && (voice.active || voice.transcribing);
+  const voiceLockedRef = useRef(voiceLocked);
+  voiceLockedRef.current = voiceLocked;
 
+  // Register so ChatShell type-to-focus can route printable keys here.
+  useEffect(() => {
+    registerComposerFocus({
+      focus: () => textareaRef.current?.focus(),
+      insertText: (text) => {
+        if (voiceLockedRef.current) return;
+        setInput((prev) => prev + text);
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        // Place caret at end after React applies the new value.
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          const end = el.value.length;
+          el.setSelectionRange(end, end);
+        });
+      },
+      isLocked: () => voiceLockedRef.current,
+    });
+    return () => registerComposerFocus(null);
+  }, []);
+
+  // Grow the textarea and flip to the bottom-toolbar layout once content
+  // needs more than one line (measured height), not a fixed clip-only pill.
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    ta.style.height = `${Math.min(ta.scrollHeight, variant === 'hero' ? 200 : 160)}px`;
-  }, [input, variant]);
+    const maxHeight = variant === 'hero' ? 200 : 160;
+    const scrollHeight = ta.scrollHeight;
+    ta.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
+    const singleLineHeight = variant === 'hero' ? 40 : 36;
+    setIsExpanded(
+      scrollHeight > singleLineHeight + 2 ||
+        input.includes('\n') ||
+        pendingAttachments.length > 0,
+    );
+  }, [input, variant, pendingAttachments.length]);
 
   // Persist draft per thread / home; cleared on send.
   useEffect(() => {
@@ -215,15 +323,31 @@ export function ChatInput({
     return () => window.clearTimeout(timer);
   }, [draftScope, input, pendingAttachments]);
 
-  const modelConfig = useOllamaModelConfig(composerOptions.model);
+  const modelConfig = useOllamaModelConfig(composerOptions.model, localMode);
   const contextLimit =
     modelConfig?.contextLength ??
-    OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.contextLength ??
+    CLOUD_OLLAMA_MODELS.find((m) => m.id === composerOptions.model)
+      ?.contextLength ??
     null;
   const visionOk = modelSupportsVision(
     composerOptions.model,
     modelConfig?.supportsVision,
   );
+  const contextMeter = useContextMeter({
+    threadId,
+    draft: input,
+    pendingAttachments,
+    queuedContent: queuedMessage?.content,
+    queuedAttachments: queuedMessage?.attachments,
+    composerOptions,
+    contextLimit,
+    streamingContent,
+    liveOccupiedTokens: occupiedTokens,
+    occupiedCoversStream,
+    liveEstimatedPromptTokens: estimatedPromptTokens,
+    liveContextReport: contextReport,
+    liveRunModel: runModel,
+  });
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -266,9 +390,36 @@ export function ChatInput({
     [voiceLocked],
   );
 
+  const localModelReady =
+    !localMode ||
+    (!localModelsLoading &&
+      !localModelsError &&
+      localModels.some((m) => m.id === composerOptions.model));
+
   const handleSend = useCallback(() => {
     const content = input.trim();
     if (!content && pendingAttachments.length === 0) return;
+
+    if (localMode) {
+      if (localModelsLoading) {
+        toastError(
+          'Wait until installed models finish loading from the API host.',
+          'Discovering local models',
+        );
+        return;
+      }
+      if (
+        localModelsError ||
+        !localModels.some((m) => m.id === composerOptions.model)
+      ) {
+        toastError(
+          localModelsError ??
+            'Pick a model installed on the API host, or turn off Local Ollama.',
+          'Local model not ready',
+        );
+        return;
+      }
+    }
 
     if (pendingAttachments.length > 0 && !visionOk) {
       toastError(
@@ -288,14 +439,25 @@ export function ChatInput({
     setInput('');
     setPendingAttachments([]);
     clearComposerDraft(draftScope);
-    onSend(content, composerOptions, attachments);
+    onSend(
+      content,
+      hideWebSearch
+        ? { ...composerOptions, webSearch: false }
+        : composerOptions,
+      attachments,
+    );
   }, [
     input,
     pendingAttachments,
+    localMode,
+    localModelsLoading,
+    localModelsError,
+    localModels,
     visionOk,
     voice.active,
     voice.transcribing,
     voice.stop,
+    hideWebSearch,
     onSend,
     composerOptions,
     draftScope,
@@ -388,15 +550,9 @@ export function ChatInput({
     });
   }, [modelConfig]);
 
-  const usedTokens = estimateTokens(
-    contextMessages,
-    [input, streamingContent, queuedMessage?.content],
-    pendingAttachments.length + (queuedMessage?.attachments?.length ?? 0),
-  );
-
   const isHero = variant === 'hero';
   const hasText = Boolean(input.trim());
-  const canSend = hasText || pendingAttachments.length > 0;
+  const canSend = (hasText || pendingAttachments.length > 0) && localModelReady;
   const showStopButton =
     isRunning && !hasText && pendingAttachments.length === 0 && Boolean(onStop);
 
@@ -408,18 +564,223 @@ export function ChatInput({
     handleSend();
   }, [showStopButton, onStop, handleSend]);
 
+  const attachMenu = (
+    <>
+      {voice.enabled && (voice.active || voice.transcribing) ? (
+        <VoiceModePill level={voice.level} className="mr-0.5" />
+      ) : null}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+            aria-label="Composer options"
+          >
+            <Plus className="size-4" strokeWidth={2.25} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="w-52 bg-card shadow-lg">
+          <DropdownMenuLabel>Composer</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={voiceLocked}
+            onSelect={() => {
+              fileInputRef.current?.click();
+            }}
+          >
+            <ImagePlus className="size-4" />
+            Attach image
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuCheckboxItem
+            checked={composerOptions.streaming}
+            onCheckedChange={(checked) =>
+              onComposerOptionsChange({
+                ...composerOptions,
+                streaming: checked === true,
+              })
+            }
+          >
+            Stream response
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={localMode}
+            onCheckedChange={(checked) => {
+              const nextLocal = checked === true;
+              if (nextLocal === localMode) return;
+              const model = nextLocal
+                ? readStoredComposerModel(true)
+                : readStoredComposerModel(false) || DEFAULT_OLLAMA_MODEL;
+              onComposerOptionsChange({
+                ...composerOptions,
+                local: nextLocal,
+                model,
+                thinking: undefined,
+              });
+            }}
+          >
+            Local Ollama
+          </DropdownMenuCheckboxItem>
+          {hideWebSearch ? null : (
+            <DropdownMenuCheckboxItem
+              checked={composerOptions.webSearch}
+              onCheckedChange={(checked) =>
+                onComposerOptionsChange({
+                  ...composerOptions,
+                  webSearch: checked === true,
+                })
+              }
+            >
+              Web search tool
+            </DropdownMenuCheckboxItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const list = e.target.files ? Array.from(e.target.files) : [];
+          e.target.value = '';
+          void addFiles(list);
+        }}
+      />
+    </>
+  );
+
+  const modelControls = (
+    <>
+      <ModelPicker
+        value={composerOptions.model}
+        onChange={(model) =>
+          onComposerOptionsChange({
+            ...composerOptions,
+            model,
+            thinking: undefined,
+          })
+        }
+        disabled={isRunning}
+        local={localMode}
+        models={localMode ? localModels : CLOUD_OLLAMA_MODELS}
+        loading={localMode && localModelsLoading}
+        emptyMessage={
+          localMode
+            ? (localModelsError ??
+              'No models on the API host. Run `ollama pull <model>` where apps/api runs, then toggle Local again.')
+            : undefined
+        }
+      />
+      {modelConfig?.thinking.supported ? (
+        <ThinkingPicker
+          thinking={modelConfig.thinking}
+          value={composerOptions.thinking}
+          onChange={(thinking) =>
+            onComposerOptionsChange({ ...composerOptions, thinking })
+          }
+          disabled={isRunning}
+        />
+      ) : null}
+      <ContextUsage
+        used={contextMeter.used}
+        limit={contextMeter.limit}
+        source={contextMeter.source}
+        approximate={contextMeter.approximate}
+        layers={contextMeter.layers}
+      />
+    </>
+  );
+
+  const actionControls = (
+    <>
+      {voice.enabled ? (
+        <Button
+          type="button"
+          size="icon-sm"
+          variant={voice.active || voice.transcribing ? 'secondary' : 'ghost'}
+          onClick={() => voice.toggle()}
+          className={cn(
+            'shrink-0 rounded-full',
+            (voice.active || voice.transcribing) && 'text-foreground',
+          )}
+          aria-label={
+            voice.transcribing
+              ? 'Transcribing voice'
+              : voice.active
+                ? 'Stop voice mode'
+                : 'Start voice mode'
+          }
+          aria-pressed={voice.active}
+          aria-busy={voice.transcribing}
+          title={voice.transcribing ? 'Transcribing…' : 'Voice mode (Alt+A)'}
+        >
+          {voice.transcribing ? (
+            <Loader2 className="size-4 animate-spin" strokeWidth={2.25} />
+          ) : (
+            <Mic className="size-4" strokeWidth={2.25} />
+          )}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        size="icon-sm"
+        variant={showStopButton ? 'secondary' : 'default'}
+        onClick={handlePrimaryAction}
+        disabled={!showStopButton && !canSend}
+        className="shrink-0 rounded-full"
+        aria-label={showStopButton ? 'Stop generating' : 'Send message'}
+      >
+        {showStopButton ? (
+          <Square className="size-3.5 fill-current" strokeWidth={0} />
+        ) : (
+          <ArrowUp className="size-4" strokeWidth={2.25} />
+        )}
+      </Button>
+    </>
+  );
+
+  const composerTextarea = (
+    <Textarea
+      ref={textareaRef}
+      value={input}
+      onChange={(e) => {
+        if (voiceLocked) return;
+        setInput(e.target.value);
+      }}
+      onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
+      readOnly={voiceLocked}
+      aria-readonly={voiceLocked}
+      placeholder={composerPlaceholder({
+        voiceActive: voice.active,
+        voiceTranscribing: voice.transcribing,
+        isHero,
+      })}
+      rows={1}
+      className={cn(
+        'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0',
+        isHero && 'min-h-10',
+        voiceLocked && 'caret-transparent',
+      )}
+    />
+  );
+
   return (
     <div
       className={cn(
-        'shrink-0',
+        'min-w-0 shrink-0',
         isHero
           ? 'w-full px-0 py-0'
-          : 'border-t border-border/25 bg-background/85 px-4 py-3 backdrop-blur-sm sm:px-6',
+          : 'bg-gradient-to-t from-background via-background/95 to-background/0 px-4 pb-4 pt-2 sm:px-6',
       )}
     >
       <div
         className={cn(
-          'mx-auto w-full space-y-2',
+          'mx-auto w-full min-w-0 space-y-2',
           isHero ? 'max-w-none' : 'max-w-3xl',
         )}
       >
@@ -487,16 +848,15 @@ export function ChatInput({
 
         <Card
           className={cn(
-            'gap-0 border border-border/50 bg-card py-0 shadow-none ring-0 focus-within:border-border/70',
-            isHero && 'rounded-xl',
-            dragOver && 'border-primary/60 ring-2 ring-primary/20',
+            'min-w-0 gap-0 overflow-hidden border-0 bg-card/95 py-0 shadow-[0_4px_24px_oklch(0_0_0/0.12)] ring-1 ring-border/40 backdrop-blur-sm transition-[box-shadow,ring-color] focus-within:ring-border/65',
+            isHero || isExpanded ? 'rounded-[1.35rem]' : 'rounded-full',
+            dragOver && 'ring-2 ring-ring/25',
           )}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          <CardContent className="p-1.5 sm:p-2">
-            {/* Pending vision previews — above the textarea, clear before send. */}
+          <CardContent className="min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
             {pendingAttachments.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap gap-2 px-1 pt-0.5">
                 {pendingAttachments.map((attachment) => (
@@ -524,175 +884,28 @@ export function ChatInput({
                 ))}
               </div>
             ) : null}
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => {
-                if (voiceLocked) return;
-                setInput(e.target.value);
-              }}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              readOnly={voiceLocked}
-              aria-readonly={voiceLocked}
-              placeholder={composerPlaceholder({
-                voiceActive: voice.active,
-                voiceTranscribing: voice.transcribing,
-                isHero,
-                isRunning,
-              })}
-              rows={1}
+
+            {/*
+              Smart composer: one-line keeps controls inline; multi-line gives
+              the textarea full width and docks the same controls on a bottom row.
+              Grid areas keep the textarea mounted across the layout flip.
+            */}
+            <div
               className={cn(
-                'type-composer min-h-10 w-full resize-none rounded-md border-0 bg-transparent px-2 py-2.5 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0',
-                isHero && 'min-h-11',
-                voiceLocked && 'caret-transparent',
+                'grid min-w-0 gap-1',
+                isExpanded
+                  ? 'grid-cols-[minmax(0,1fr)_auto] [grid-template-areas:"text_text"_"left_right"]'
+                  : 'grid-cols-[auto_minmax(0,1fr)_auto] items-center [grid-template-areas:"left_text_right"]',
               )}
-            />
-            <div className="flex items-center justify-between gap-2 border-t border-border/30 px-0.5 pt-1">
-              <div className="flex min-w-0 flex-1 items-center gap-0.5">
-                {voice.enabled && (voice.active || voice.transcribing) ? (
-                  <VoiceModePill level={voice.level} className="mr-0.5" />
-                ) : null}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="shrink-0 rounded-md"
-                      aria-label="Composer options"
-                    >
-                      <Plus className="size-4" strokeWidth={2.25} />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-52">
-                    <DropdownMenuLabel>Composer</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      disabled={voiceLocked}
-                      onSelect={() => {
-                        fileInputRef.current?.click();
-                      }}
-                    >
-                      <ImagePlus className="size-4" />
-                      Attach image
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuCheckboxItem
-                      checked={composerOptions.streaming}
-                      onCheckedChange={(checked) =>
-                        onComposerOptionsChange({
-                          ...composerOptions,
-                          streaming: checked === true,
-                        })
-                      }
-                    >
-                      Stream response
-                    </DropdownMenuCheckboxItem>
-                    <DropdownMenuCheckboxItem
-                      checked={composerOptions.webSearch}
-                      onCheckedChange={(checked) =>
-                        onComposerOptionsChange({
-                          ...composerOptions,
-                          webSearch: checked === true,
-                        })
-                      }
-                    >
-                      Web search tool
-                    </DropdownMenuCheckboxItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    const list = e.target.files
-                      ? Array.from(e.target.files)
-                      : [];
-                    e.target.value = '';
-                    void addFiles(list);
-                  }}
-                />
-                <ModelPicker
-                  value={composerOptions.model}
-                  onChange={(model) =>
-                    onComposerOptionsChange({ ...composerOptions, model })
-                  }
-                  disabled={isRunning}
-                />
-                {modelConfig?.thinking.supported ? (
-                  <ThinkingPicker
-                    thinking={modelConfig.thinking}
-                    value={composerOptions.thinking}
-                    onChange={(thinking) =>
-                      onComposerOptionsChange({ ...composerOptions, thinking })
-                    }
-                    disabled={isRunning}
-                  />
-                ) : null}
+            >
+              <div className="flex min-w-0 items-center gap-0.5 [grid-area:left]">
+                {attachMenu}
+                {isExpanded ? modelControls : null}
               </div>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <ContextUsage used={usedTokens} limit={contextLimit} />
-                {voice.enabled ? (
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant={
-                      voice.active || voice.transcribing ? 'secondary' : 'ghost'
-                    }
-                    onClick={() => voice.toggle()}
-                    className={cn(
-                      'shrink-0 rounded-md',
-                      (voice.active || voice.transcribing) && 'text-foreground',
-                    )}
-                    aria-label={
-                      voice.transcribing
-                        ? 'Transcribing voice'
-                        : voice.active
-                          ? 'Stop voice mode'
-                          : 'Start voice mode'
-                    }
-                    aria-pressed={voice.active}
-                    aria-busy={voice.transcribing}
-                    title={
-                      voice.transcribing
-                        ? 'Transcribing…'
-                        : 'Voice mode (Alt+A)'
-                    }
-                  >
-                    {voice.transcribing ? (
-                      <Loader2
-                        className="size-4 animate-spin"
-                        strokeWidth={2.25}
-                      />
-                    ) : (
-                      <Mic className="size-4" strokeWidth={2.25} />
-                    )}
-                  </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant={showStopButton ? 'secondary' : 'default'}
-                  onClick={handlePrimaryAction}
-                  disabled={!showStopButton && !canSend}
-                  className={cn(
-                    'shrink-0',
-                    showStopButton ? 'rounded-md' : 'rounded-full',
-                  )}
-                  aria-label={
-                    showStopButton ? 'Stop generating' : 'Send message'
-                  }
-                >
-                  {showStopButton ? (
-                    <Square className="size-3.5 fill-current" strokeWidth={0} />
-                  ) : (
-                    <ArrowUp className="size-4" strokeWidth={2.25} />
-                  )}
-                </Button>
+              <div className="min-w-0 [grid-area:text]">{composerTextarea}</div>
+              <div className="flex shrink-0 items-center gap-0.5 [grid-area:right]">
+                {isExpanded ? null : modelControls}
+                {actionControls}
               </div>
             </div>
           </CardContent>

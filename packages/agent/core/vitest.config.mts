@@ -1,5 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
+process.env.OLLAMA_BASE_URL ??= 'http://127.0.0.1:11434';
+
 export default defineConfig({
   root: import.meta.dirname,
   cacheDir: '../../../node_modules/.vite/packages/agent/core',

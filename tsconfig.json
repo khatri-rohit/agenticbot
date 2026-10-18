@@ -7,33 +7,6 @@
       "path": "./apps/api"
     },
     {
-      "path": "./apps/shop-e2e"
-    },
-    {
-      "path": "./apps/shop"
-    },
-    {
-      "path": "./packages/api/products"
-    },
-    {
-      "path": "./packages/shared/models"
-    },
-    {
-      "path": "./packages/shop/data"
-    },
-    {
-      "path": "./packages/shop/feature-product-detail"
-    },
-    {
-      "path": "./packages/shop/feature-products"
-    },
-    {
-      "path": "./packages/shop/shared-ui"
-    },
-    {
-      "path": "./packages/shared/test-utils"
-    },
-    {
       "path": "./apps/web-e2e"
     },
     {
@@ -47,6 +20,9 @@
     },
     {
       "path": "./packages/agent/core"
+    },
+    {
+      "path": "./packages/logger"
     }
   ]
 }
