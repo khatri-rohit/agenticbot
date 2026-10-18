@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 
@@ -10,10 +10,14 @@ import {
   toPosixRelative,
 } from './workspace-path';
 
-/** M4a: cap tool payloads before they hit the ledger. */
-export const WORKSPACE_READ_MAX_CHARS = 8_000;
+/** M4a: cap tool payloads before they hit the ledger. Stay under assembler stub (8k). */
+export const WORKSPACE_READ_MAX_CHARS = 7_000;
+export const WORKSPACE_READ_MAX_LOAD_BYTES = 1_000_000;
 export const WORKSPACE_TERMINAL_MAX_CHARS = 8_000;
+export const WORKSPACE_TERMINAL_TIMEOUT_MS = 110_000;
 export const WORKSPACE_GREP_MAX_MATCHES = 50;
+export const WORKSPACE_GREP_LINE_MAX_CHARS = 200;
+export const WORKSPACE_GREP_MAX_CHARS = 7_000;
 export const WORKSPACE_GLOB_MAX_RESULTS = 200;
 export const WORKSPACE_WALK_MAX_FILES = 2_000;
 
@@ -50,6 +54,19 @@ function truncated(text: string, max: number, label: string): string {
   return `${text.slice(0, max)}\n\n(${label} truncated at ${max} chars)`;
 }
 
+async function readTextCapped(abs: string): Promise<string> {
+  const handle = await open(abs, 'r');
+  try {
+    const { size } = await handle.stat();
+    const load = Math.min(size, WORKSPACE_READ_MAX_LOAD_BYTES);
+    const buf = Buffer.alloc(load);
+    await handle.read(buf, 0, load, 0);
+    return buf.toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
 async function walkFiles(
   root: string,
   signal: AbortSignal | undefined,
@@ -69,11 +86,10 @@ async function walkFiles(
     }
     for (const entry of entries) {
       if (acc.length >= WORKSPACE_WALK_MAX_FILES) return;
-      if (entry.name.startsWith('.') && entry.name !== '.') continue;
-      if (entry.name === '.' || entry.name === '..') continue;
       const abs = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name)) continue;
+        if (entry.name.startsWith('.') && entry.name !== '.github') continue;
         stack.push(abs);
         continue;
       }
@@ -186,6 +202,7 @@ export const grepTool: Tool = {
     const files: string[] = [];
     await walkFiles(root, ctx.signal, files);
     const hits: string[] = [];
+    let chars = 0;
     for (const abs of files) {
       if (ctx.signal.aborted) return 'Run cancelled';
       const rel = toPosixRelative(root, abs);
@@ -196,12 +213,22 @@ export const grepTool: Tool = {
       } catch {
         continue;
       }
+      if (text.includes('\0')) continue;
       const lines = text.split('\n');
       for (let i = 0; i < lines.length; i++) {
         if (!regex.test(lines[i])) continue;
-        hits.push(`${rel}:${i + 1}:${lines[i]}`);
-        if (hits.length >= WORKSPACE_GREP_MAX_MATCHES) {
-          return `${hits.join('\n')}\n(grep truncated at ${WORKSPACE_GREP_MAX_MATCHES} matches)`;
+        const line =
+          lines[i].length > WORKSPACE_GREP_LINE_MAX_CHARS
+            ? `${lines[i].slice(0, WORKSPACE_GREP_LINE_MAX_CHARS)}…`
+            : lines[i];
+        const row = `${rel}:${i + 1}:${line}`;
+        hits.push(row);
+        chars += row.length + 1;
+        if (
+          hits.length >= WORKSPACE_GREP_MAX_MATCHES ||
+          chars >= WORKSPACE_GREP_MAX_CHARS
+        ) {
+          return `${hits.join('\n')}\n(grep truncated at ${WORKSPACE_GREP_MAX_MATCHES} matches / ${WORKSPACE_GREP_MAX_CHARS} chars)`;
         }
       }
     }
@@ -256,7 +283,7 @@ export const readFileTool: Tool = {
     if (!resolved.ok) return resolved.error;
     let text: string;
     try {
-      text = await readFile(resolved.abs, 'utf8');
+      text = await readTextCapped(resolved.abs);
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code === 'ENOENT')
@@ -399,11 +426,31 @@ export const runTerminalTool: Tool = {
   },
 };
 
+export function killProcessTree(pid: number): void {
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    }).unref();
+    return;
+  }
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 export function runWorkspaceCommand(
   command: string,
   cwd: string,
   signal: AbortSignal,
   maxChars = WORKSPACE_TERMINAL_MAX_CHARS,
+  timeoutMs = WORKSPACE_TERMINAL_TIMEOUT_MS,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -414,9 +461,12 @@ export function runWorkspaceCommand(
       cwd,
       shell: true,
       windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
     let combined = '';
     let truncatedOut = false;
+    let settled = false;
     const append = (chunk: Buffer | string) => {
       if (truncatedOut) return;
       combined += chunk.toString();
@@ -427,26 +477,44 @@ export function runWorkspaceCommand(
     };
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
-    const onAbort = () => {
-      child.kill();
+
+    const bodyText = () =>
+      truncatedOut
+        ? `${combined}\n\n(run_terminal truncated at ${maxChars} chars)`
+        : combined;
+
+    const finish = (error?: Error, value?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      if (error) reject(error);
+      else resolve(value ?? '');
     };
+
+    const onAbort = () => {
+      if (child.pid) killProcessTree(child.pid);
+      finish(new Error('Run cancelled'));
+    };
+
+    const timer = setTimeout(() => {
+      if (child.pid) killProcessTree(child.pid);
+      finish(
+        undefined,
+        `cwd: ${cwd}\nexit timeout\n${bodyText()}\n\n(run_terminal killed after ${timeoutMs}ms)`.trimEnd(),
+      );
+    }, timeoutMs);
+
     signal.addEventListener('abort', onAbort, { once: true });
-    child.on('error', (error) => {
-      signal.removeEventListener('abort', onAbort);
-      reject(error);
-    });
+    child.on('error', (error) => finish(error));
     child.on('close', (code, killSignal) => {
-      signal.removeEventListener('abort', onAbort);
       if (signal.aborted) {
-        reject(new Error('Run cancelled'));
+        finish(new Error('Run cancelled'));
         return;
       }
       const status =
         killSignal != null ? `signal ${killSignal}` : `exit ${code ?? 0}`;
-      const body = truncatedOut
-        ? `${combined}\n\n(run_terminal truncated at ${maxChars} chars)`
-        : combined;
-      resolve(`cwd: ${cwd}\n${status}\n${body}`.trimEnd());
+      finish(undefined, `cwd: ${cwd}\n${status}\n${bodyText()}`.trimEnd());
     });
   });
 }

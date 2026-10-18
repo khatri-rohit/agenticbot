@@ -1,10 +1,11 @@
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ToolContext } from '@org/agent-models';
 
 import {
+  WORKSPACE_GREP_LINE_MAX_CHARS,
   WORKSPACE_READ_MAX_CHARS,
   WORKSPACE_TERMINAL_MAX_CHARS,
   editFileTool,
@@ -12,6 +13,7 @@ import {
   grepTool,
   readFileTool,
   runTerminalTool,
+  runWorkspaceCommand,
 } from './workspace';
 import { isPathInside, resolveWorkspacePath } from './workspace-path';
 
@@ -51,17 +53,49 @@ describe('workspace path jail', () => {
     expect(isPathInside(root, path.join(root, 'src'))).toBe(true);
     expect(isPathInside(root, outside)).toBe(false);
   });
+
+  it('rejects create paths whose parent symlink leaves the root', async () => {
+    const { root, outside } = await fixture();
+    const link = path.join(root, 'link');
+    try {
+      await symlink(
+        outside,
+        link,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    } catch {
+      return;
+    }
+    const escaped = await resolveWorkspacePath(root, 'link/planted.txt');
+    expect(escaped.ok).toBe(false);
+  });
 });
 
 describe('workspace tools', () => {
   it('glob and grep stay inside the folder', async () => {
     const { root } = await fixture();
+    await writeFile(path.join(root, '.gitignore'), 'dist\n', 'utf8');
     const listed = await globTool.execute({ pattern: '**/*.ts' }, ctx(root));
     expect(listed).toContain('src/main.ts');
     expect(listed).not.toContain('secret.txt');
+    const dots = await globTool.execute({ pattern: '.gitignore' }, ctx(root));
+    expect(dots).toContain('.gitignore');
 
     const hits = await grepTool.execute({ pattern: 'export const n' }, ctx(root));
     expect(hits).toContain('src/main.ts:1:');
+  });
+
+  it('grep clips long lines, skips binary, and caps total payload', async () => {
+    const { root } = await fixture();
+    const long = `needle ${'z'.repeat(WORKSPACE_GREP_LINE_MAX_CHARS + 80)}`;
+    await writeFile(path.join(root, 'wide.txt'), `${long}\n`, 'utf8');
+    await writeFile(path.join(root, 'bin.dat'), `needle\0more`, 'utf8');
+    const hits = await grepTool.execute({ pattern: 'needle' }, ctx(root));
+    expect(hits).toContain('wide.txt:1:');
+    expect(hits).toMatch(/…/);
+    expect(hits).not.toContain('bin.dat');
+    const clippedLine = hits.split('\n')[0]?.split(':').slice(2).join(':') ?? '';
+    expect(clippedLine.length).toBeLessThanOrEqual(WORKSPACE_GREP_LINE_MAX_CHARS + 1);
   });
 
   it('read_file caps output and rejects paths outside the root', async () => {
@@ -128,5 +162,19 @@ describe('workspace tools', () => {
     );
     expect(cap).toMatch(/truncated/);
     expect(cap.length).toBeLessThan(WORKSPACE_TERMINAL_MAX_CHARS + 200);
+  });
+
+  it('run_terminal times out and kills the child instead of hanging', async () => {
+    const { root } = await fixture();
+    const started = Date.now();
+    const out = await runWorkspaceCommand(
+      'node -e "setTimeout(() => {}, 20000)"',
+      root,
+      new AbortController().signal,
+      1_000,
+      400,
+    );
+    expect(Date.now() - started).toBeLessThan(8_000);
+    expect(out).toMatch(/killed after 400ms/);
   });
 });

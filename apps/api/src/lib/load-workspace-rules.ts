@@ -6,6 +6,15 @@ export type WorkspaceRuleFiles = {
   project: string;
 };
 
+/** Keep project law inside the memory-layer budget, not the full disk files. */
+export const WORKSPACE_AGENTS_MD_MAX_CHARS = 8_000;
+export const WORKSPACE_PROJECT_MD_MAX_CHARS = 3_200;
+
+function clipNamed(text: string, max: number, label: string): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n\n(${label} truncated at ${max} chars)`;
+}
+
 type ParsedRule = {
   alwaysApply: boolean;
   globs: string[];
@@ -84,13 +93,19 @@ export async function loadWorkspaceRules(
     const raw = await readFile(filePath, 'utf8');
     const rule = parseFrontmatter(raw, path.basename(filePath));
     if (!rule.body) continue;
+    if (!rule.alwaysApply && rule.globs.length === 0) continue;
     const applies = rule.alwaysApply
       ? 'alwaysApply'
-      : rule.globs.length > 0
-        ? `globs: ${rule.globs.join(', ')}`
-        : 'manual';
+      : `globs: ${rule.globs.join(', ')}`;
     sections.push(`## ${rule.name} (${applies})\n\n${rule.body}`);
   }
 
-  return { agentsMd: sections.join('\n\n'), project };
+  return {
+    agentsMd: clipNamed(
+      sections.join('\n\n'),
+      WORKSPACE_AGENTS_MD_MAX_CHARS,
+      'AGENTS.md',
+    ),
+    project: clipNamed(project, WORKSPACE_PROJECT_MD_MAX_CHARS, 'PROJECT.md'),
+  };
 }

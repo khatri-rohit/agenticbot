@@ -38,6 +38,8 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-code), ui-monospace, monospace;
 }
 
 /* Scrollbar geometry (thumb colors come from each theme in themes.css). */
@@ -49,29 +51,27 @@
   --scrollbar-thumb-hover: oklch(0.56 0.024 264);
   --scrollbar-thumb-active: oklch(0.64 0.028 264);
 
-  /* Typography scale (agent chat: assistant = primary reading surface) */
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
+  /* Typography — next/font injects --font-ui / --font-code on <html> */
+  --font-ui: ui-sans-serif, system-ui, sans-serif;
+  --font-code: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-code), ui-monospace, monospace;
 
-  --text-hero-title: 1.125rem;
-  --text-hero-title-leading: 1.35;
+  --text-hero-title: 1.25rem;
+  --text-hero-title-leading: 1.3;
   --text-hero-sub: 0.8125rem;
   --text-hero-sub-leading: 1.55;
 
   --text-body: 0.9375rem;
-  --text-body-leading: 1.65;
+  --text-body-leading: 1.68;
   --text-user: 0.875rem;
   --text-user-leading: 1.55;
   --text-composer: 0.9375rem;
   --text-composer-leading: 1.5;
   --text-ui: 0.8125rem;
-  --text-ui-leading: 1.45;
+  --text-ui-leading: 1.4;
   --text-caption: 0.6875rem;
-  --text-caption-leading: 1.4;
+  --text-caption-leading: 1.35;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -102,8 +102,8 @@ body {
 .type-hero-title {
   font-size: var(--text-hero-title);
   line-height: var(--text-hero-title-leading);
-  font-weight: 500;
-  letter-spacing: -0.02em;
+  font-weight: 600;
+  letter-spacing: -0.03em;
 }
 
 .type-hero-sub {
@@ -141,10 +141,18 @@ body {
   max-width: 100%;
   width: 100%;
   min-width: 0;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Reply, not a paper: section labels + readable body rhythm. */
 .agent-markdown {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-size: var(--text-body);
   line-height: 1.74;
   color: color-mix(in oklch, var(--foreground) 88%, var(--muted-foreground));
@@ -398,6 +406,7 @@ body {
 .agent-markdown [data-streamdown='code-block-body'] code {
   font-family: var(--font-mono);
   white-space: pre;
+  max-width: 100%;
 }
 
 .agent-markdown [data-streamdown='code-block-actions'] {

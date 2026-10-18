@@ -38,12 +38,7 @@ export async function resolveWorkspacePath(
     ? path.resolve(trimmed)
     : path.resolve(rootReal, trimmed);
 
-  let resolved = candidate;
-  try {
-    resolved = await realpath(candidate);
-  } catch {
-    resolved = path.normalize(candidate);
-  }
+  const resolved = await resolveExistingPrefix(candidate);
 
   if (!isPathInside(rootReal, resolved)) {
     return {
@@ -52,6 +47,28 @@ export async function resolveWorkspacePath(
     };
   }
   return { ok: true, abs: resolved };
+}
+
+/** realpath the longest existing prefix so create paths follow dir symlinks. */
+async function resolveExistingPrefix(candidate: string): Promise<string> {
+  try {
+    return await realpath(candidate);
+  } catch {
+    /* not found — walk parents */
+  }
+  const missing: string[] = [];
+  let current = path.normalize(candidate);
+  while (true) {
+    missing.unshift(path.basename(current));
+    const parent = path.dirname(current);
+    if (parent === current) return path.normalize(candidate);
+    try {
+      const parentReal = await realpath(parent);
+      return path.join(parentReal, ...missing);
+    } catch {
+      current = parent;
+    }
+  }
 }
 
 export function toPosixRelative(root: string, abs: string): string {

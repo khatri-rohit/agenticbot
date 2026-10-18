@@ -16,6 +16,8 @@ export type ToolActivity = {
   toolName: string;
   status: 'running' | 'done' | 'failed';
   durationMs?: number;
+  argsPreview?: unknown;
+  resultPreview?: unknown;
 };
 
 export type ChatRunState = {
@@ -117,6 +119,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
               toolCallId: event.toolCallId,
               toolName: event.toolName,
               status: 'running',
+              argsPreview: event.argsPreview,
             },
           ],
           lastSeq,
@@ -131,7 +134,12 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           ...state.activeRun,
           toolActivity: state.activeRun.toolActivity.map((t) =>
             t.toolCallId === event.toolCallId
-              ? { ...t, status: 'done', durationMs: event.durationMs }
+              ? {
+                  ...t,
+                  status: 'done',
+                  durationMs: event.durationMs,
+                  resultPreview: event.resultPreview,
+                }
               : t,
           ),
           lastSeq,

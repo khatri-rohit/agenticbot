@@ -90,161 +90,157 @@ export function UserMessage({
     <div
       ref={(el) => registerAnchor(message.id, el)}
       id={`conversation-anchor-${message.id}`}
-      className="group/msg scroll-mt-8"
+      className="group/msg min-w-0 max-w-full scroll-mt-6"
     >
-      <div className="flex justify-end">
-        <div className="max-w-[min(100%,32rem)] w-full">
-          {isEditing ? (
+      {isEditing ? (
+        <div
+          className="rounded-2xl bg-muted/45 p-3 ring-1 ring-border/40"
+          role="form"
+          aria-label="Edit message"
+        >
+          {message.attachments && message.attachments.length > 0 ? (
+            <div className="mb-2 flex flex-wrap gap-1.5 px-0.5">
+              {message.attachments.map((attachment) => (
+                <img
+                  key={attachment.id}
+                  src={attachment.dataUrl}
+                  alt={attachment.name ?? 'Attachment'}
+                  className="size-14 rounded-lg object-cover ring-1 ring-border/40"
+                />
+              ))}
+            </div>
+          ) : null}
+          <Textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={4}
+            className="type-user h-24 min-h-24 resize-none border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0"
+          />
+          {confirmClear ? (
             <div
-              className="rounded-lg border border-border/50 bg-card/80 p-2"
-              role="form"
-              aria-label="Edit message"
+              className="mt-2 space-y-2 rounded-xl bg-background/60 px-3 py-2.5 ring-1 ring-border/50"
+              role="alertdialog"
+              aria-labelledby={`edit-clear-title-${message.id}`}
             >
-              {message.attachments && message.attachments.length > 0 ? (
-                <div className="mb-2 flex flex-wrap justify-end gap-1.5 px-1">
-                  {message.attachments.map((attachment) => (
-                    <img
-                      key={attachment.id}
-                      src={attachment.dataUrl}
-                      alt={attachment.name ?? 'Attachment'}
-                      className="size-14 rounded-md object-cover ring-1 ring-border/40"
-                    />
-                  ))}
-                </div>
-              ) : null}
-              <Textarea
-                ref={textareaRef}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={4}
-                className="type-user h-24 min-h-24 resize-none border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0"
-              />
-              {confirmClear ? (
-                <div
-                  className="mt-2 space-y-2 rounded-md border border-border/60 bg-muted/30 px-2.5 py-2"
-                  role="alertdialog"
-                  aria-labelledby={`edit-clear-title-${message.id}`}
+              <p
+                id={`edit-clear-title-${message.id}`}
+                className="type-ui text-foreground/90"
+              >
+                Resending will remove the assistant response for this turn.
+              </p>
+              <p className="type-caption text-muted-foreground">
+                Your edited prompt will be sent again from this point in the
+                thread.
+              </p>
+              <div className="flex flex-wrap justify-end gap-1.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  disabled={submitting}
+                  onClick={() => setConfirmClear(false)}
                 >
-                  <p
-                    id={`edit-clear-title-${message.id}`}
-                    className="type-ui text-foreground/90"
-                  >
-                    Resending will remove the assistant response for this turn.
-                  </p>
-                  <p className="type-caption text-muted-foreground">
-                    Your edited prompt will be sent again from this point in the
-                    thread.
-                  </p>
-                  <div className="flex flex-wrap justify-end gap-1.5">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      disabled={submitting}
-                      onClick={() => setConfirmClear(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      disabled={submitting || !canResend}
-                      onClick={() => void runSubmit()}
-                    >
-                      {submitting ? 'Sending…' : 'Proceed'}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    disabled={submitting}
-                    onClick={cancelEdit}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    disabled={submitting || !canResend}
-                    onClick={handleResend}
-                  >
-                    Resend
-                  </Button>
-                </div>
-              )}
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  disabled={submitting || !canResend}
+                  onClick={() => void runSubmit()}
+                >
+                  {submitting ? 'Sending…' : 'Proceed'}
+                </Button>
+              </div>
             </div>
           ) : (
-            <>
-              <div
-                className={cn(
-                  'type-user rounded-lg border border-border/25 bg-secondary/90 px-3.5 py-2 text-foreground/95',
-                )}
+            <div className="mt-2 flex flex-wrap justify-end gap-1.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={submitting}
+                onClick={cancelEdit}
               >
-                {/* Vision attachments sit above the prompt so history scrolls with context. */}
-                {message.attachments && message.attachments.length > 0 ? (
-                  <div className="mb-2 flex flex-wrap justify-end gap-1.5">
-                    {message.attachments.map((attachment) => (
-                      <button
-                        key={attachment.id}
-                        type="button"
-                        className="block size-20 overflow-hidden rounded-md ring-1 ring-border/40 transition hover:ring-border"
-                        aria-label={attachment.name ?? 'Open attached image'}
-                        onClick={() => {
-                          try {
-                            const [header, data] =
-                              attachment.dataUrl.split(',');
-                            const mime =
-                              /data:([^;]+)/.exec(header)?.[1] ??
-                              'application/octet-stream';
-                            const binary = atob(data ?? '');
-                            const bytes = new Uint8Array(binary.length);
-                            for (let i = 0; i < binary.length; i++) {
-                              bytes[i] = binary.charCodeAt(i);
-                            }
-                            const url = URL.createObjectURL(
-                              new Blob([bytes], { type: mime }),
-                            );
-                            window.open(url, '_blank', 'noopener,noreferrer');
-                            // shortcut: revoke after open; upgrade if blank tabs appear
-                            setTimeout(() => URL.revokeObjectURL(url), 60_000);
-                          } catch {
-                            window.open(attachment.dataUrl, '_blank');
-                          }
-                        }}
-                      >
-                        <img
-                          src={attachment.dataUrl}
-                          alt={attachment.name ?? 'Attachment'}
-                          className="size-full object-cover"
-                        />
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                {message.content ? (
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                ) : null}
-              </div>
-              <MessageActions
-                content={message.content}
-                align="end"
-                showEdit={canEdit}
-                onEdit={startEdit}
-                className="opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100"
-              />
-            </>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={submitting || !canResend}
+                onClick={handleResend}
+              >
+                Resend
+              </Button>
+            </div>
           )}
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Document-style prompt card: full column width, soft fill — not a messenger bubble. */}
+          <div
+            className={cn(
+              'type-user min-w-0 max-w-full overflow-hidden rounded-2xl bg-muted/40 px-4 py-3 text-foreground/95 ring-1 ring-border/30',
+            )}
+          >
+            {message.attachments && message.attachments.length > 0 ? (
+              <div className="mb-2.5 flex flex-wrap gap-1.5">
+                {message.attachments.map((attachment) => (
+                  <button
+                    key={attachment.id}
+                    type="button"
+                    className="block size-20 overflow-hidden rounded-lg ring-1 ring-border/40 transition hover:ring-border"
+                    aria-label={attachment.name ?? 'Open attached image'}
+                    onClick={() => {
+                      try {
+                        const [header, data] = attachment.dataUrl.split(',');
+                        const mime =
+                          /data:([^;]+)/.exec(header)?.[1] ??
+                          'application/octet-stream';
+                        const binary = atob(data ?? '');
+                        const bytes = new Uint8Array(binary.length);
+                        for (let i = 0; i < binary.length; i++) {
+                          bytes[i] = binary.charCodeAt(i);
+                        }
+                        const url = URL.createObjectURL(
+                          new Blob([bytes], { type: mime }),
+                        );
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                      } catch {
+                        window.open(attachment.dataUrl, '_blank');
+                      }
+                    }}
+                  >
+                    <img
+                      src={attachment.dataUrl}
+                      alt={attachment.name ?? 'Attachment'}
+                      className="size-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {message.content ? (
+              <p className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-[1.55]">
+                {message.content}
+              </p>
+            ) : null}
+          </div>
+          <MessageActions
+            content={message.content}
+            align="start"
+            showEdit={canEdit}
+            onEdit={startEdit}
+            className="opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100"
+          />
+        </>
+      )}
     </div>
   );
 }

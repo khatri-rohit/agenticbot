@@ -176,6 +176,24 @@ async function maybeCompactThread(input: {
   await store.writeSnapshot(input.threadId, snapshot);
 }
 
+/**
+ * POST /api/agent/workspace/validate
+ * Confirms a client-chosen absolute path exists as a directory on the API host.
+ * Body: { workspaceRoot: string } → 200 { workspaceRoot } or 400.
+ */
+router.post('/workspace/validate', async (req: Request, res: Response) => {
+  const raw =
+    typeof req.body?.workspaceRoot === 'string' ? req.body.workspaceRoot : '';
+  if (!raw.trim()) {
+    return res.status(400).json({ error: 'workspaceRoot is required' });
+  }
+  const resolved = await resolveWorkspaceDir(raw);
+  if (!resolved.ok) {
+    return res.status(400).json({ error: resolved.error });
+  }
+  return res.json({ workspaceRoot: resolved.root });
+});
+
 router.get('/threads', async (req: Request, res: Response) => {
   const store = await getThreadStore();
   const kind = parseThreadKind(req.query.kind);

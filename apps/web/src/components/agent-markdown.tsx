@@ -25,7 +25,12 @@ const controls = {
   },
 } as const;
 
-const mermaidConfig = { config: { theme: 'dark' as const } };
+function mermaidTheme(): 'dark' | 'default' {
+  if (typeof document === 'undefined') return 'dark';
+  return document.documentElement.classList.contains('light')
+    ? 'default'
+    : 'dark';
+}
 
 /** Word-level stagger: readable cadence, catches up if the SSE buffer runs ahead. */
 const STREAM_ANIMATION = {
@@ -92,7 +97,7 @@ export function AgentMarkdown({
       {...shared}
       mode="static"
       plugins={fullPlugins}
-      mermaid={mermaidConfig}
+      mermaid={{ config: { theme: mermaidTheme() } }}
     >
       {markdown}
     </Streamdown>

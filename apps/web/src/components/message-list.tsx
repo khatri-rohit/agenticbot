@@ -10,30 +10,30 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import type { Message } from '@org/agent-models';
-import type {
-  ChatState,
-  ToolActivity,
-} from '../features/agent/store/chat-store';
+import type { ChatState } from '../features/agent/store/chat-store';
 import { groupMessageTurns } from '../lib/group-message-turns';
+import { buildTurnTimeline } from '../lib/turn-timeline';
 import { AgentMarkdown } from './agent-markdown';
 import {
   ConversationRail,
   shouldShowConversationRail,
 } from './conversation-rail';
 import { MessageActions } from './message-actions';
-import { ToolCallPanel } from './tool-call-panel';
+import { ToolStepList } from './tool-call-panel';
 import { UserMessage } from './user-message';
 
 export function MessageList({
   messages,
   chatState,
   isRunning,
+  threadKind = 'research',
   onRetryLastResponse,
   onEditLastUserMessage,
 }: {
   messages: Message[] | undefined;
   chatState: ChatState;
   isRunning: boolean;
+  threadKind?: 'research' | 'coding';
   onRetryLastResponse: () => void | Promise<void>;
   onEditLastUserMessage: (
     messageId: string,
@@ -122,7 +122,7 @@ export function MessageList({
   return (
     <div className="relative flex min-h-0 flex-1">
       {showJumpToBottom && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-6 z-30 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-30 flex justify-center">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -149,22 +149,34 @@ export function MessageList({
       )}
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-stable [overflow-anchor:none]"
+        className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable [overflow-anchor:none]"
       >
-        <div className="mx-auto w-full max-w-3xl px-4 py-7 sm:px-6">
+        <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-5 sm:px-6">
           {!hasMessages && !isRunning && !streaming?.content && (
-            <p className="type-ui text-center text-muted-foreground/80">
-              Your research thread will appear here.
+            <p className="type-ui text-center text-muted-foreground/70">
+              Conversation will appear here.
             </p>
           )}
 
-          <div className="flex flex-col gap-12">
+          <div className="flex flex-col gap-8">
             {turns.map((turn, index) => {
               const isLastTurn = index === lastTurnIndex;
+              const liveActivity = isLastTurn ? toolActivity : [];
+              const liveStreaming = isLastTurn ? streaming : null;
+              const steps = buildTurnTimeline({
+                replies: turn.replies,
+                liveActivity,
+                streaming: liveStreaming,
+              });
+              const showSteps =
+                turn.replies.length > 0 ||
+                liveActivity.length > 0 ||
+                Boolean(liveStreaming?.content);
+
               return (
                 <section
                   key={turn.userMessage.id}
-                  className="flex flex-col gap-6"
+                  className="flex flex-col gap-3.5"
                   aria-label="Conversation turn"
                 >
                   <UserMessage
@@ -182,86 +194,62 @@ export function MessageList({
                     onEditSubmit={onEditLastUserMessage}
                   />
 
-                  {isLastTurn && isRunning && (
-                    <TurnStatusLine
-                      toolActivity={toolActivity}
-                      hasStreamingText={Boolean(streaming?.content)}
-                    />
-                  )}
-
-                  {turn.replies.length > 0 && (
-                    <div className="flex flex-col gap-4 pt-1">
-                      <ToolCallPanel
-                        replies={turn.replies}
-                        liveActivity={isLastTurn ? toolActivity : []}
-                      />
-                      {turn.replies.map((msg) => (
-                        <AssistantMessage
-                          key={msg.id}
-                          message={msg}
-                          showRetry={
-                            !isRunning &&
-                            msg.role === 'assistant' &&
-                            msg.id === latestAssistantMessageId
-                          }
-                          onRetry={onRetryLastResponse}
-                          retryDisabled={isRunning}
-                        />
-                      ))}
+                  {showSteps ? (
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {steps.map((step) => {
+                        if (step.type === 'assistant') {
+                          return (
+                            <AssistantMessage
+                              key={step.message.id}
+                              message={step.message}
+                              showRetry={
+                                !isRunning &&
+                                step.message.id === latestAssistantMessageId
+                              }
+                              onRetry={onRetryLastResponse}
+                              retryDisabled={isRunning}
+                            />
+                          );
+                        }
+                        if (step.type === 'tools') {
+                          return (
+                            <ToolStepList
+                              key={step.key}
+                              rows={step.rows}
+                              variant={threadKind}
+                            />
+                          );
+                        }
+                        return (
+                          <div
+                            key="stream"
+                            className="group/msg min-w-0 max-w-full"
+                          >
+                            <article className="chat-prose type-body min-w-0 max-w-full">
+                              <AgentMarkdown
+                                content={step.content}
+                                streaming
+                              />
+                            </article>
+                            <MessageActions
+                              content={step.content}
+                              align="start"
+                              className="opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/msg:opacity-100 sm:group-focus-within/msg:opacity-100"
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
-                  )}
-
-                  {isLastTurn && streaming?.content && (
-                    <div className="group/msg">
-                      <article className="chat-prose type-body">
-                        <AgentMarkdown content={streaming.content} streaming />
-                      </article>
-                      <MessageActions
-                        content={streaming.content}
-                        align="start"
-                        className="opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/msg:opacity-100 sm:group-focus-within/msg:opacity-100"
-                      />
-                    </div>
-                  )}
+                  ) : null}
                 </section>
               );
             })}
           </div>
 
-          <div ref={endRef} className="h-10" />
+          <div ref={endRef} className="h-6" />
         </div>
       </div>
     </div>
-  );
-}
-
-function TurnStatusLine({
-  toolActivity,
-  hasStreamingText,
-}: {
-  toolActivity: ToolActivity[];
-  hasStreamingText: boolean;
-}) {
-  const running = toolActivity.find((t) => t.status === 'running');
-  let label: string | null = null;
-
-  if (running) {
-    label = `${running.toolName}…`;
-  } else if (toolActivity.length > 0 && !hasStreamingText) {
-    label = 'Running tools…';
-  } else if (!hasStreamingText) {
-    label = 'Working…';
-  }
-
-  if (!label) return null;
-
-  return (
-    <p
-      className="type-caption text-right text-muted-foreground/70 tabular-nums"
-      aria-live="polite"
-    >
-      {label}
-    </p>
   );
 }
 
@@ -276,22 +264,11 @@ function AssistantMessage({
   onRetry: () => void | Promise<void>;
   retryDisabled?: boolean;
 }) {
-  // Tool results render in the turn's ToolCallPanel, not inline.
-  if (message.role === 'tool') return null;
-
-  // Tool-only assistant messages (no prose) are fully covered by the panel.
-  if (
-    message.role === 'assistant' &&
-    message.toolCalls &&
-    message.toolCalls.length > 0 &&
-    message.content.trim() === ''
-  ) {
-    return null;
-  }
+  if (!message.content.trim()) return null;
 
   return (
-    <div className="group/msg">
-      <article className="chat-prose type-body">
+    <div className="group/msg min-w-0 max-w-full">
+      <article className="chat-prose type-body min-w-0 max-w-full">
         <AgentMarkdown content={message.content} />
       </article>
       <MessageActions

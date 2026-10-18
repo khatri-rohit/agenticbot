@@ -85,8 +85,12 @@ export class RunManager {
     handle.result = result;
     try {
       await opts.onFinished?.(result);
-    } catch {
+    } catch (error) {
       // Compaction must not flip a successful run into an error.
+      console.error(
+        'onFinished failed (run status unchanged):',
+        error instanceof Error ? error.message : error,
+      );
     }
   }
 

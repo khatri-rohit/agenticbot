@@ -80,7 +80,7 @@ export default function HomePage() {
             {space === 'coding'
               ? workspaceRoot
                 ? 'Ask to find, edit, or build in this project.'
-                : 'Use the sidebar to open a project folder, then start a chat.'
+                : 'Use Open folder in the sidebar to pick a project, then start chatting.'
               : 'Ask a question to start a new thread.'}
           </p>
         </div>

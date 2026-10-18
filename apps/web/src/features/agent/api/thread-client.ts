@@ -7,6 +7,32 @@ async function readError(res: Response, fallback: string): Promise<string> {
   return (body as { error?: string }).error ?? fallback;
 }
 
+/** Opens the host OS folder dialog. Returns null if cancelled. */
+export async function pickWorkspaceFolder(
+  initialDir?: string | null,
+): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/agent/workspace/pick`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(
+        initialDir?.trim() ? { initialDir: initialDir.trim() } : {},
+      ),
+    });
+  } catch {
+    throw new Error(
+      `Cannot reach the API at ${API_BASE}. Start it with nx serve @org/api, then try again.`,
+    );
+  }
+  if (res.status === 204) return null;
+  if (!res.ok) {
+    throw new Error(await readError(res, `Failed to pick folder: ${res.status}`));
+  }
+  const body = (await res.json()) as { workspaceRoot?: string };
+  return body.workspaceRoot?.trim() ? body.workspaceRoot : null;
+}
+
 export async function listThreads(): Promise<Thread[]> {
   const res = await fetch(`${API_BASE}/api/agent/threads`);
   if (!res.ok) {

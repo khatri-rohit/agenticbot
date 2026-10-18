@@ -90,6 +90,7 @@ export default function ChatThreadPage({
         messages={messages}
         chatState={chatState}
         isRunning={isRunning}
+        threadKind={threadKind}
         onRetryLastResponse={() => retryLastResponse()}
         onEditLastUserMessage={(id, content) =>
           editLastUserMessage(id, content)

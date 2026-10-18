@@ -123,7 +123,7 @@ export function SidebarSettings({
               className="max-h-[min(70vh,24rem)] w-64 overflow-y-auto"
             >
               <DropdownMenuLabel className="text-xs text-muted-foreground">
-                Color scheme
+                Appearance
               </DropdownMenuLabel>
               <DropdownMenuRadioGroup
                 value={themeId}
@@ -133,10 +133,10 @@ export function SidebarSettings({
                   <DropdownMenuRadioItem
                     key={preset.id}
                     value={preset.id}
-                    className="items-start gap-2 py-2"
+                    className="items-start gap-2.5 py-2"
                   >
                     <span
-                      className="mt-0.5 flex size-4 shrink-0 overflow-hidden rounded-sm ring-1 ring-border/60"
+                      className="mt-0.5 flex size-4 shrink-0 overflow-hidden rounded-[3px] ring-1 ring-border/70"
                       aria-hidden
                     >
                       <span
@@ -149,7 +149,12 @@ export function SidebarSettings({
                       />
                     </span>
                     <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="leading-none">{preset.label}</span>
+                      <span className="flex items-center gap-1.5 leading-none">
+                        {preset.label}
+                        <span className="rounded px-1 py-px text-[9px] font-medium tracking-wide text-muted-foreground uppercase ring-1 ring-border/50">
+                          {preset.scheme}
+                        </span>
+                      </span>
                       <span className="text-[11px] leading-snug text-muted-foreground">
                         {preset.description}
                       </span>

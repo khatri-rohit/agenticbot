@@ -40,25 +40,23 @@ export function ChatHeader({ threadId }: { threadId: string }) {
   const folder = folderNameFromRoot(thread?.workspaceRoot ?? null);
 
   return (
-    <header className="shrink-0 border-b border-border/30 px-6 py-2.5">
-      <p className="type-ui mb-0.5 truncate text-[11px] text-muted-foreground">
-        {coding
-          ? `Coding · ${folder || 'folder'}`
-          : 'Research'}
+    <header className="shrink-0 border-b border-border/40 px-5 py-2.5">
+      <p className="type-caption mb-0.5 truncate tracking-wide text-muted-foreground/80 uppercase">
+        {coding ? `Coding · ${folder || 'folder'}` : 'Research'}
       </p>
       {coding && thread?.workspaceRoot ? (
-        <p className="type-ui mb-0.5 truncate text-[11px] text-muted-foreground/80">
+        <p className="type-caption mb-1 truncate font-mono text-muted-foreground/70">
           {thread.workspaceRoot}
         </p>
       ) : null}
-      <h1 className="type-ui truncate font-medium text-muted-foreground">
+      <h1 className="type-ui truncate font-medium tracking-tight text-foreground/90">
         {isPending ? (
           <span className="inline-flex items-center gap-2">
-            <span>Untitled</span>
+            <span className="text-muted-foreground">Untitled</span>
             <span className="h-2.5 w-20 animate-pulse rounded-full bg-muted" />
           </span>
         ) : (
-          <span className="text-foreground/90">{display}</span>
+          display
         )}
       </h1>
     </header>
