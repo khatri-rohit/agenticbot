@@ -1,7 +1,8 @@
+import type { ThreadKind } from './thread.js';
+
 /**
  * A mode is a policy bundle: model, temperature, system prompt, allowed tools,
- * and loop limits. v1 ships only `research`. The shape is ready for
- * `coding` and `thinking` modes without structural changes.
+ * and loop limits. Research and coding ship as separate spaces; thinking is reserved.
  */
 export type ModeName = 'research' | 'coding' | 'thinking';
 
@@ -35,3 +36,30 @@ export const RESEARCH_MODE: ModeConfig = {
     toolTimeoutMs: 30_000,
   },
 };
+
+/** Project-bound coding space. No default web search. Builds may exceed 30s. */
+export const CODING_MODE: ModeConfig = {
+  name: 'coding',
+  model: RESEARCH_MODE.model,
+  temperature: 0.2,
+  allowedTools: [],
+  globalTools: [
+    'glob',
+    'grep',
+    'read_file',
+    'edit_file',
+    'run_terminal',
+    'load_skill',
+    'memory',
+  ],
+  limits: {
+    maxIterations: 16,
+    maxToolCalls: 24,
+    maxRepeatedToolCalls: 2,
+    toolTimeoutMs: 120_000,
+  },
+};
+
+export function modeForKind(kind: ThreadKind | undefined): ModeConfig {
+  return kind === 'coding' ? CODING_MODE : RESEARCH_MODE;
+}

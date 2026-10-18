@@ -1,39 +1,65 @@
 import { Router, type Request, type Response } from 'express';
+import { stat } from 'node:fs/promises';
+import path from 'node:path';
 import type {
   LedgerEnvelope,
   MemoryTarget,
   MessageAttachment,
+  ModeConfig,
   StartRunRequest,
   ThinkingValue,
+  Thread,
+  ThreadKind,
 } from '@org/agent-models';
-import {
-  DEFAULT_CONTEXT_BUDGET,
-  DEFAULT_MEMORY_CAPS,
-} from '@org/agent-models';
+import { DEFAULT_CONTEXT_BUDGET, DEFAULT_MEMORY_CAPS } from '@org/agent-models';
 import {
   ALL_TOOLS,
   RunManager,
   assembleContext,
+  buildExtractiveSnapshot,
+  chooseCompactThroughSeq,
   createInvokeModelCall,
   createMemoryTool,
   createStreamModelCall,
   createToolRegistry,
   getOllamaModelConfig,
+  modeForKind,
   RESEARCH_MODE,
   resolveReasoningEffort,
   type ToolRegistry,
 } from '@org/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
+import { loadWorkspaceRules } from '../../lib/load-workspace-rules';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
 
 const router = Router();
 const runManager = new RunManager();
 
-function toolAllowList(webSearch?: boolean): string[] {
+function toolAllowList(mode: ModeConfig, webSearch?: boolean): string[] {
   return [
-    ...RESEARCH_MODE.globalTools,
-    ...(webSearch !== false ? RESEARCH_MODE.allowedTools : []),
+    ...mode.globalTools,
+    ...(webSearch !== false ? mode.allowedTools : []),
   ];
+}
+
+async function resolveWorkspaceDir(
+  raw: string,
+): Promise<{ ok: true; root: string } | { ok: false; error: string }> {
+  const root = path.resolve(raw.trim());
+  try {
+    const info = await stat(root);
+    if (!info.isDirectory()) {
+      return { ok: false, error: 'workspaceRoot must be a directory' };
+    }
+  } catch {
+    return { ok: false, error: `workspaceRoot does not exist: ${root}` };
+  }
+  return { ok: true, root };
+}
+
+function parseThreadKind(value: unknown): ThreadKind | undefined {
+  if (value === 'coding' || value === 'research') return value;
+  return undefined;
 }
 
 type MemoryUpdatedPayload = {
@@ -44,6 +70,7 @@ type MemoryUpdatedPayload = {
 
 async function prepareRun(input: {
   threadId: string;
+  thread?: Thread;
   webSearch?: boolean;
   lastUserSeq: number;
   envelopes: LedgerEnvelope[];
@@ -53,9 +80,17 @@ async function prepareRun(input: {
   tools: ToolRegistry;
   messages: ReturnType<typeof assembleContext>['messages'];
   report: ReturnType<typeof assembleContext>['report'];
+  mode: ModeConfig;
 }> {
   const memory = getMemoryStore();
   const files = await memory.read();
+  const kind = input.thread?.kind ?? 'research';
+  const mode = modeForKind(kind);
+  if (kind === 'coding' && input.thread?.workspaceRoot) {
+    const rules = await loadWorkspaceRules(input.thread.workspaceRoot);
+    files.agentsMd = rules.agentsMd;
+    files.project = rules.project;
+  }
   const tools = createToolRegistry(
     [
       ...ALL_TOOLS,
@@ -77,7 +112,7 @@ async function prepareRun(input: {
         }),
       }),
     ],
-    toolAllowList(input.webSearch),
+    toolAllowList(mode, kind === 'coding' ? false : input.webSearch),
   );
 
   let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
@@ -88,22 +123,73 @@ async function prepareRun(input: {
     // Keep the default window when /api/show is unavailable.
   }
 
+  const store = await getThreadStore();
+  const snapshot =
+    input.threadId === 'draft'
+      ? null
+      : await store.readSnapshot(input.threadId);
+
   const { messages, report } = assembleContext(
     {
       tools,
       memory: files,
-      snapshot: null,
+      snapshot,
       envelopes: input.envelopes,
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
 
-  return { tools, messages, report };
+  return { tools, messages, report, mode };
 }
 
-router.get('/threads', async (_req: Request, res: Response) => {
+async function maybeCompactThread(input: {
+  threadId: string;
+  model: string;
+  webSearch?: boolean;
+}): Promise<void> {
   const store = await getThreadStore();
-  return res.json({ threads: store.listThreads() });
+  const thread = store.getThread(input.threadId);
+  if (!thread) return;
+  const envelopes = await store.hydrateEnvelopes(input.threadId);
+  const prepared = await prepareRun({
+    threadId: input.threadId,
+    thread,
+    webSearch: input.webSearch,
+    lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
+    envelopes,
+    model: input.model,
+  });
+  if (!prepared.report.needsCompaction) return;
+  const throughSeq = chooseCompactThroughSeq(
+    envelopes,
+    prepared.report.budget.keepToolResultsForTurns,
+  );
+  if (throughSeq == null) return;
+  const existing = await store.readSnapshot(input.threadId);
+  if (existing && existing.throughSeq >= throughSeq) return;
+  const snapshot = buildExtractiveSnapshot({
+    threadId: input.threadId,
+    model: input.model,
+    envelopes,
+    throughSeq,
+  });
+  await store.writeSnapshot(input.threadId, snapshot);
+}
+
+router.get('/threads', async (req: Request, res: Response) => {
+  const store = await getThreadStore();
+  const kind = parseThreadKind(req.query.kind);
+  const workspaceRoot =
+    typeof req.query.workspaceRoot === 'string' &&
+    req.query.workspaceRoot.trim()
+      ? path.resolve(req.query.workspaceRoot.trim())
+      : undefined;
+  return res.json({
+    threads: store.listThreads({
+      ...(kind ? { kind } : {}),
+      ...(workspaceRoot ? { workspaceRoot } : {}),
+    }),
+  });
 });
 
 router.post('/threads', async (req: Request, res: Response) => {
@@ -115,8 +201,25 @@ router.post('/threads', async (req: Request, res: Response) => {
     typeof req.body?.title === 'string' && req.body.title.trim()
       ? req.body.title.trim()
       : 'New Chat';
+  const kind = parseThreadKind(req.body?.kind) ?? 'research';
+  let workspaceRoot: string | undefined;
+  if (kind === 'coding') {
+    const raw =
+      typeof req.body?.workspaceRoot === 'string' ? req.body.workspaceRoot : '';
+    if (!raw.trim()) {
+      return res
+        .status(400)
+        .json({ error: 'workspaceRoot is required for coding threads' });
+    }
+    const resolved = await resolveWorkspaceDir(raw);
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+    workspaceRoot = resolved.root;
+  }
   const store = await getThreadStore();
-  const thread = await store.createThread(model, title);
+  const thread = await store.createThread(model, title, {
+    kind,
+    workspaceRoot,
+  });
   return res.status(201).json(thread);
 });
 
@@ -133,11 +236,21 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
     title?: string;
     model?: string;
     pinned?: boolean;
+    kind?: ThreadKind;
+    workspaceRoot?: string | null;
   };
+  let workspaceRoot = body.workspaceRoot;
+  if (typeof workspaceRoot === 'string' && workspaceRoot.trim()) {
+    const resolved = await resolveWorkspaceDir(workspaceRoot);
+    if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+    workspaceRoot = resolved.root;
+  }
   const thread = store.updateThread(req.params.id, {
     ...(typeof body.title === 'string' ? { title: body.title } : {}),
     ...(typeof body.model === 'string' ? { model: body.model } : {}),
     ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
+    ...(parseThreadKind(body.kind) ? { kind: parseThreadKind(body.kind) } : {}),
+    ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
   });
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
   return res.json(thread);
@@ -184,6 +297,12 @@ router.post('/run', async (req: Request, res: Response) => {
   const thread = store.getThread(threadId);
   if (!thread) {
     return res.status(404).json({ error: 'Thread not found' });
+  }
+
+  if (thread.kind === 'coding' && !thread.workspaceRoot) {
+    return res
+      .status(400)
+      .json({ error: 'coding thread has no workspaceRoot' });
   }
 
   if (runManager.hasActiveRun(threadId)) {
@@ -234,6 +353,7 @@ router.post('/run', async (req: Request, res: Response) => {
   let assignedRunId = '';
   const prepared = await prepareRun({
     threadId,
+    thread,
     webSearch,
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
@@ -260,14 +380,21 @@ router.post('/run', async (req: Request, res: Response) => {
     messages: prepared.messages,
     tools: prepared.tools,
     modelCall,
-    limits: RESEARCH_MODE.limits,
-    mode: RESEARCH_MODE.name,
+    limits: prepared.mode.limits,
+    mode: prepared.mode.name,
     estimatedPromptTokens: prepared.report.occupiedTokens,
     contextReport: prepared.report,
+    ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     onMessage: async (record) => {
       if (record.role === 'system') return;
       await store.append({ threadId, runId: assignedRunId, record });
     },
+    onFinished: () =>
+      maybeCompactThread({
+        threadId,
+        model: useModel,
+        webSearch,
+      }),
   });
 
   // First turn: title via the same chat model (runs in parallel with the agent).
@@ -324,9 +451,11 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     ];
   }
 
-  const useModel = model ?? RESEARCH_MODE.model;
+  const estimateThread = id === 'draft' ? undefined : store.getThread(id);
+  const useModel = model ?? estimateThread?.model ?? RESEARCH_MODE.model;
   const { report } = await prepareRun({
     threadId: id,
+    thread: estimateThread,
     webSearch,
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,

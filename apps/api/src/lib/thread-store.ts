@@ -18,7 +18,9 @@ import {
   type LedgerRecord,
   type Message,
   type MessageAttachment,
+  type Snapshot,
   type Thread,
+  type ThreadKind,
 } from '@org/agent-models';
 
 const BLOB_INLINE_MAX = 8 * 1024;
@@ -46,40 +48,64 @@ export class ThreadStore {
     this.db.close();
   }
 
-  listThreads(): Thread[] {
+  listThreads(filter?: {
+    kind?: ThreadKind;
+    workspaceRoot?: string;
+  }): Thread[] {
     const rows = this.db
       .prepare(
-        `SELECT id, title, model, pinned, created_at, updated_at
+        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root
          FROM threads
          ORDER BY pinned DESC, updated_at DESC`,
       )
       .all() as CatalogThreadRow[];
-    return rows.map(rowToThread);
+    const threads = rows.map(rowToThread);
+    return threads.filter((thread) => {
+      if (filter?.kind && (thread.kind ?? 'research') !== filter.kind) {
+        return false;
+      }
+      if (
+        filter?.workspaceRoot &&
+        thread.workspaceRoot !== filter.workspaceRoot
+      ) {
+        return false;
+      }
+      return true;
+    });
   }
 
   getThread(id: string): Thread | undefined {
     const row = this.db
       .prepare(
-        `SELECT id, title, model, pinned, created_at, updated_at
+        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root
          FROM threads WHERE id = ?`,
       )
       .get(id) as CatalogThreadRow | undefined;
     return row ? rowToThread(row) : undefined;
   }
 
-  async createThread(model: string, title = 'New Chat'): Promise<Thread> {
+  async createThread(
+    model: string,
+    title = 'New Chat',
+    options?: { kind?: ThreadKind; workspaceRoot?: string },
+  ): Promise<Thread> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const dir = this.threadDir(id);
+    const kind: ThreadKind = options?.kind === 'coding' ? 'coding' : 'research';
+    const workspaceRoot =
+      kind === 'coding' && options?.workspaceRoot
+        ? options.workspaceRoot
+        : null;
     await mkdir(path.join(dir, 'blobs'), { recursive: true });
     await writeFile(path.join(dir, 'ledger.jsonl'), '', { flag: 'wx' });
 
     this.db
       .prepare(
-        `INSERT INTO threads (id, title, model, pinned, created_at, updated_at, last_seq)
-         VALUES (?, ?, ?, 0, ?, ?, 0)`,
+        `INSERT INTO threads (id, title, model, pinned, created_at, updated_at, last_seq, kind, workspace_root)
+         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?)`,
       )
-      .run(id, title, model, now, now);
+      .run(id, title, model, now, now, kind, workspaceRoot);
 
     return {
       id,
@@ -88,12 +114,20 @@ export class ThreadStore {
       createdAt: now,
       updatedAt: now,
       pinned: false,
+      kind,
+      ...(workspaceRoot ? { workspaceRoot } : {}),
     };
   }
 
   updateThread(
     id: string,
-    changes: { title?: string; model?: string; pinned?: boolean },
+    changes: {
+      title?: string;
+      model?: string;
+      pinned?: boolean;
+      kind?: ThreadKind;
+      workspaceRoot?: string | null;
+    },
   ): Thread | undefined {
     const current = this.getThread(id);
     if (!current) return undefined;
@@ -102,12 +136,17 @@ export class ThreadStore {
     const model = changes.model ?? current.model;
     const pinned =
       changes.pinned !== undefined ? (changes.pinned ? 1 : 0) : current.pinned ? 1 : 0;
+    const kind: ThreadKind = changes.kind ?? current.kind ?? 'research';
+    const workspaceRoot =
+      changes.workspaceRoot === undefined
+        ? (current.workspaceRoot ?? null)
+        : changes.workspaceRoot;
 
     this.db
       .prepare(
-        `UPDATE threads SET title = ?, model = ?, pinned = ? WHERE id = ?`,
+        `UPDATE threads SET title = ?, model = ?, pinned = ?, kind = ?, workspace_root = ? WHERE id = ?`,
       )
-      .run(title, model, pinned, id);
+      .run(title, model, pinned, kind, workspaceRoot, id);
 
     return this.getThread(id);
   }
@@ -339,6 +378,42 @@ export class ThreadStore {
         `UPDATE threads SET last_seq = ?, updated_at = ? WHERE id = ?`,
       )
       .run(lastSeq, now, threadId);
+    await this.invalidateSnapshot(threadId, keepThroughSeq);
+  }
+
+  async readSnapshot(threadId: string): Promise<Snapshot | null> {
+    try {
+      const raw = await readFile(this.snapshotPath(threadId), 'utf8');
+      return JSON.parse(raw) as Snapshot;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') return null;
+      if (error instanceof SyntaxError) return null;
+      throw error;
+    }
+  }
+
+  async writeSnapshot(threadId: string, snapshot: Snapshot): Promise<void> {
+    await writeFile(
+      this.snapshotPath(threadId),
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+      'utf8',
+    );
+  }
+
+  async deleteSnapshot(threadId: string): Promise<void> {
+    await rm(this.snapshotPath(threadId), { force: true });
+  }
+
+  private async invalidateSnapshot(
+    threadId: string,
+    keepThroughSeq: number,
+  ): Promise<void> {
+    const snapshot = await this.readSnapshot(threadId);
+    if (!snapshot) return;
+    if (keepThroughSeq < snapshot.throughSeq) {
+      await this.deleteSnapshot(threadId);
+    }
   }
 
   private async putBlob(threadId: string, text: string): Promise<string> {
@@ -361,6 +436,10 @@ export class ThreadStore {
   private ledgerPath(threadId: string): string {
     return path.join(this.threadDir(threadId), 'ledger.jsonl');
   }
+
+  private snapshotPath(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'snapshot.json');
+  }
 }
 
 type CatalogThreadRow = {
@@ -370,9 +449,12 @@ type CatalogThreadRow = {
   pinned: number;
   created_at: string;
   updated_at: string;
+  kind?: string | null;
+  workspace_root?: string | null;
 };
 
 function rowToThread(row: CatalogThreadRow): Thread {
+  const kind: ThreadKind = row.kind === 'coding' ? 'coding' : 'research';
   return {
     id: row.id,
     title: row.title,
@@ -380,7 +462,22 @@ function rowToThread(row: CatalogThreadRow): Thread {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     pinned: row.pinned === 1,
+    kind,
+    ...(row.workspace_root ? { workspaceRoot: row.workspace_root } : {}),
   };
+}
+
+function ensureColumn(
+  db: DatabaseSync,
+  table: string,
+  name: string,
+  ddl: string,
+): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
+  if (cols.some((col) => col.name === name)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
 }
 
 async function appendLineDurable(filePath: string, line: string): Promise<void> {
@@ -408,5 +505,7 @@ export async function openThreadStore(home: string): Promise<ThreadStore> {
       last_seq INTEGER NOT NULL DEFAULT 0
     );
   `);
+  ensureColumn(db, 'threads', 'kind', `kind TEXT NOT NULL DEFAULT 'research'`);
+  ensureColumn(db, 'threads', 'workspace_root', `workspace_root TEXT`);
   return new ThreadStore(home, db);
 }

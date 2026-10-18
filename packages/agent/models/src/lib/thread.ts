@@ -13,6 +13,9 @@ export function clampChatTitle(title: string, fallback = 'New Chat'): string {
   return words.slice(0, CHAT_TITLE_MAX_WORDS).join(' ');
 }
 
+/** Two product spaces. Default for existing catalog rows is research. */
+export type ThreadKind = 'research' | 'coding';
+
 export interface Thread {
   id: string;
   title: string;
@@ -21,4 +24,8 @@ export interface Thread {
   updatedAt: string;
   /** Pinned threads stay at the top of the sidebar (by updatedAt among pins). */
   pinned?: boolean;
+  /** Research vs coding space. Omitted/legacy rows are research. */
+  kind?: ThreadKind;
+  /** Absolute workspace folder when kind is coding. */
+  workspaceRoot?: string;
 }

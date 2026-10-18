@@ -150,6 +150,7 @@ export function ChatInput({
   runModel,
   /** localStorage draft scope — thread id or home key; remount via `key` when it changes. */
   draftScope,
+  hideWebSearch = false,
 }: {
   onSend: (
     content: string,
@@ -176,6 +177,7 @@ export function ChatInput({
   streamingContent?: string | null;
   runModel?: string;
   draftScope: string;
+  hideWebSearch?: boolean;
 }) {
   const [input, setInput] = useState(
     () => loadComposerDraft(draftScope)?.content ?? '',
@@ -309,7 +311,13 @@ export function ChatInput({
     setInput('');
     setPendingAttachments([]);
     clearComposerDraft(draftScope);
-    onSend(content, composerOptions, attachments);
+    onSend(
+      content,
+      hideWebSearch
+        ? { ...composerOptions, webSearch: false }
+        : composerOptions,
+      attachments,
+    );
   }, [
     input,
     pendingAttachments,
@@ -317,6 +325,7 @@ export function ChatInput({
     voice.active,
     voice.transcribing,
     voice.stop,
+    hideWebSearch,
     onSend,
     composerOptions,
     draftScope,
@@ -604,17 +613,19 @@ export function ChatInput({
                     >
                       Stream response
                     </DropdownMenuCheckboxItem>
-                    <DropdownMenuCheckboxItem
-                      checked={composerOptions.webSearch}
-                      onCheckedChange={(checked) =>
-                        onComposerOptionsChange({
-                          ...composerOptions,
-                          webSearch: checked === true,
-                        })
-                      }
-                    >
-                      Web search tool
-                    </DropdownMenuCheckboxItem>
+                    {hideWebSearch ? null : (
+                      <DropdownMenuCheckboxItem
+                        checked={composerOptions.webSearch}
+                        onCheckedChange={(checked) =>
+                          onComposerOptionsChange({
+                            ...composerOptions,
+                            webSearch: checked === true,
+                          })
+                        }
+                      >
+                        Web search tool
+                      </DropdownMenuCheckboxItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <input

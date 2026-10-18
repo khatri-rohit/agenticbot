@@ -2,7 +2,7 @@
 // Pure library: no HTTP, no DOM, no database.
 // Domain types live in @org/agent-models — import them from there.
 
-export { RESEARCH_MODE } from '@org/agent-models';
+export { RESEARCH_MODE, CODING_MODE, modeForKind } from '@org/agent-models';
 
 // Model layer
 export { getClient } from './lib/model/client';
@@ -34,15 +34,25 @@ export {
 // Tools
 export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
-export { toLedgerRecord } from './lib/loop/to-ledger-record';
-export { webSearchTool, webFetchTool } from './lib/tools/web-search';
-export { createMemoryTool } from './lib/tools/memory';
-export type { MemoryToolStore } from './lib/tools/memory';
+export { WORKSPACE_TOOLS } from './lib/tools/workspace';
+export {
+  resolveWorkspacePath,
+  isPathInside,
+  globMatch,
+} from './lib/tools/workspace-path';
 export { assembleContext } from './lib/context/assemble-context';
 export type {
   AssembleContextInput,
   AssembleContextResult,
 } from './lib/context/assemble-context';
+export {
+  chooseCompactThroughSeq,
+  buildExtractiveSnapshot,
+} from './lib/context/compact-snapshot';
+export { toLedgerRecord } from './lib/loop/to-ledger-record';
+export { webSearchTool, webFetchTool } from './lib/tools/web-search';
+export { createMemoryTool } from './lib/tools/memory';
+export type { MemoryToolStore } from './lib/tools/memory';
 export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
 // Events / trace

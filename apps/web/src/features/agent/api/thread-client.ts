@@ -1,4 +1,4 @@
-import type { Message, Thread } from '@org/agent-models';
+import type { Message, Thread, ThreadKind } from '@org/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
@@ -19,11 +19,17 @@ export async function listThreads(): Promise<Thread[]> {
 export async function createThread(
   title: string,
   model: string,
+  options?: { kind?: ThreadKind; workspaceRoot?: string },
 ): Promise<Thread> {
   const res = await fetch(`${API_BASE}/api/agent/threads`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, model }),
+    body: JSON.stringify({
+      title,
+      model,
+      ...(options?.kind ? { kind: options.kind } : {}),
+      ...(options?.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
+    }),
   });
   if (!res.ok) {
     throw new Error(await readError(res, `Failed to create thread: ${res.status}`));
@@ -42,7 +48,13 @@ export async function fetchThread(id: string): Promise<Thread | undefined> {
 
 export async function patchThread(
   id: string,
-  changes: { title?: string; model?: string; pinned?: boolean },
+  changes: {
+    title?: string;
+    model?: string;
+    pinned?: boolean;
+    kind?: ThreadKind;
+    workspaceRoot?: string | null;
+  },
 ): Promise<Thread> {
   const res = await fetch(`${API_BASE}/api/agent/threads/${id}`, {
     method: 'PATCH',

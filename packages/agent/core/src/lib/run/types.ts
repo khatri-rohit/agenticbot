@@ -37,4 +37,6 @@ export type StartRunOptions = {
   workspaceRoot?: string;
   /** Host persistence seam (ledger append in M1). */
   onMessage?: (record: LedgerRecord) => void | Promise<void>;
+  /** After the loop returns (success or error). Used for M4 compaction. */
+  onFinished?: (result: RunLoopResult) => void | Promise<void>;
 };

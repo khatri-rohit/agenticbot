@@ -83,6 +83,11 @@ export class RunManager {
     handle.status =
       handle.cancelled || result.status === 'error' ? 'error' : 'completed';
     handle.result = result;
+    try {
+      await opts.onFinished?.(result);
+    } catch {
+      // Compaction must not flip a successful run into an error.
+    }
   }
 
   /** Abort in-flight model/tool work and stop SSE for this run. */

@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import {
+  FolderOpen,
   MoreHorizontal,
   PanelLeft,
   PanelLeftClose,
@@ -12,6 +14,13 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Thread } from '@org/agent-models';
+import {
+  folderNameFromRoot,
+  sameWorkspaceRoot,
+  setAgentSpace,
+  setWorkspaceRoot,
+  useAgentSpace,
+} from '@/features/agent/store/space-store';
 import { CHAT_TITLE_MAX_WORDS, clampChatTitle } from '@/lib/thread-title';
 import { useThreads } from '../features/agent/hooks/use-agent-run';
 import { deleteThread, patchThread } from '../features/agent/api/thread-client';
@@ -44,6 +53,15 @@ type SidebarProps = {
 export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   const threads = useThreads();
   const pathname = usePathname();
+  const { space, workspaceRoot } = useAgentSpace();
+  const visibleThreads = (threads ?? []).filter((thread) => {
+    const kind = thread.kind ?? 'research';
+    if (kind !== space) return false;
+    if (space === 'coding') {
+      return sameWorkspaceRoot(thread.workspaceRoot, workspaceRoot);
+    }
+    return true;
+  });
 
   const railBtn =
     'flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
@@ -111,6 +129,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                 <TooltipContent side="bottom">Close sidebar</TooltipContent>
               </Tooltip>
             </header>
+            <SpaceChrome />
             <Link
               href="/"
               className="type-ui mb-2 inline-flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground"
@@ -118,22 +137,32 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
               <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/45 bg-background/40 text-foreground">
                 <Plus className="size-4 opacity-90" strokeWidth={2} />
               </span>
-              <span>New chat</span>
+              <span>
+                {space === 'coding'
+                  ? workspaceRoot
+                    ? `New chat in ${folderNameFromRoot(workspaceRoot)}`
+                    : 'New chat'
+                  : 'New chat'}
+              </span>
             </Link>
           </div>
 
           <ScrollArea className="min-h-0 flex-1 px-2">
-            {threads?.length === 0 ? (
+            {space === 'coding' && !workspaceRoot ? (
+              <p className="type-ui px-2 py-6 text-center text-muted-foreground">
+                Open a folder to see coding chats
+              </p>
+            ) : visibleThreads.length === 0 ? (
               <p className="type-ui px-2 py-6 text-center text-muted-foreground">
                 No conversations yet
               </p>
             ) : (
               <div className="pb-2">
                 <p className="type-ui mb-1 px-2 text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
-                  Recent
+                  {space === 'coding' ? 'This folder' : 'Recent'}
                 </p>
                 <ul className="w-full min-w-0 space-y-0.5">
-                  {threads?.map((thread) => (
+                  {visibleThreads.map((thread) => (
                     <ThreadItem
                       key={thread.id}
                       thread={thread}
@@ -152,6 +181,82 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
         </>
       )}
     </aside>
+  );
+}
+
+function SpaceChrome() {
+  const { space, workspaceRoot } = useAgentSpace();
+  const [draft, setDraft] = useState(workspaceRoot ?? '');
+  useEffect(() => {
+    setDraft(workspaceRoot ?? '');
+  }, [workspaceRoot]);
+
+  const openFolder = () => {
+    const next = draft.trim();
+    if (!next) return;
+    setWorkspaceRoot(next);
+  };
+
+  return (
+    <div className="mb-2 space-y-2 px-1">
+      <div className="grid grid-cols-2 gap-1 rounded-md border border-border/45 p-0.5">
+        <button
+          type="button"
+          className={cn(
+            'type-ui rounded-sm px-2 py-1 text-xs font-medium',
+            space === 'research'
+              ? 'bg-accent text-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          onClick={() => setAgentSpace('research')}
+        >
+          Research
+        </button>
+        <button
+          type="button"
+          className={cn(
+            'type-ui rounded-sm px-2 py-1 text-xs font-medium',
+            space === 'coding'
+              ? 'bg-accent text-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          onClick={() => setAgentSpace('coding')}
+        >
+          Coding
+        </button>
+      </div>
+      {space === 'coding' ? (
+        <div className="space-y-1.5">
+          <p className="type-ui truncate text-[11px] text-muted-foreground">
+            {workspaceRoot
+              ? `Folder: ${folderNameFromRoot(workspaceRoot)}`
+              : 'No folder open'}
+          </p>
+          <div className="flex gap-1">
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') openFolder();
+              }}
+              placeholder="D:\\work\\my-app"
+              aria-label="Workspace folder path"
+              className="type-ui min-w-0 flex-1 rounded-md border border-border/45 bg-background/40 px-2 py-1 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="shrink-0"
+              onClick={openFolder}
+              aria-label="Open folder"
+            >
+              <FolderOpen className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

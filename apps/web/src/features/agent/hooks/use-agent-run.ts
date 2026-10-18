@@ -5,7 +5,12 @@ import {
   useEffect,
   useSyncExternalStore,
 } from 'react';
-import type { AgentEvent, Message, MessageAttachment } from '@org/agent-models';
+import type {
+  AgentEvent,
+  Message,
+  MessageAttachment,
+  ThreadKind,
+} from '@org/agent-models';
 import { toastError } from '@/hooks/use-toast';
 import {
   modelSupportsVision,
@@ -37,6 +42,7 @@ import {
   refreshThreads,
   subscribeThreads,
 } from '../store/thread-cache';
+import { setAgentSpace, setWorkspaceRoot } from '../store/space-store';
 
 export type QueuedMessage = {
   content: string;
@@ -69,6 +75,7 @@ export function useAgentRun(threadId: string | null) {
   chatStateRef.current = chatState;
   const wasRunningRef = useRef(false);
   const syncedThreadModelRef = useRef<string | null>(null);
+  const [threadKind, setThreadKind] = useState<ThreadKind>('research');
   const [ledgerEpoch, setLedgerEpoch] = useState(0);
   const bumpLedger = useCallback(() => {
     setLedgerEpoch((n) => n + 1);
@@ -82,7 +89,19 @@ export function useAgentRun(threadId: string | null) {
       if (syncedThreadModelRef.current === thread.id) return;
       syncedThreadModelRef.current = thread.id;
       const model = resolveOllamaModel(thread.model);
-      setComposerOptions((prev) => ({ ...prev, model }));
+      const coding = thread.kind === 'coding';
+      setThreadKind(coding ? 'coding' : 'research');
+      if (coding) {
+        setAgentSpace('coding');
+        if (thread.workspaceRoot) setWorkspaceRoot(thread.workspaceRoot);
+      } else {
+        setAgentSpace('research');
+      }
+      setComposerOptions((prev) => ({
+        ...prev,
+        model,
+        webSearch: coding ? false : prev.webSearch,
+      }));
     });
     return () => {
       cancelled = true;
@@ -344,6 +363,7 @@ export function useAgentRun(threadId: string | null) {
     stopGeneration: interruptActiveRun,
     isRunning: chatState.activeRun?.status === 'running',
     ledgerEpoch,
+    threadKind,
   };
 }
 

@@ -54,6 +54,7 @@ export function buildSystemPrompt(registry: ToolRegistry): string {
       : '- (none)';
 
   const hasWebSearch = registry.byName.has('web_search');
+  const isCoding = registry.byName.has('read_file');
   const skillsSection = hasLoadSkill
     ? `
 # Skills
@@ -70,7 +71,9 @@ Loading instructions does not approve any action they recommend.
 
   const webSearchRule = hasWebSearch
     ? `- When web_search is listed below, it is a built-in host tool (not an MCP plugin). If you lack reliable current knowledge for the question, call web_search once with a specific query, then answer from Detailed Sources with URL citations.`
-    : `- web_search is not enabled for this run. Do not invent live web facts; answer from knowledge or ask the user to enable web search.`;
+    : isCoding
+      ? `- web_search is not part of coding mode. Work from the open folder, project files, and AGENTS.md.`
+      : `- web_search is not enabled for this run. Do not invent live web facts; answer from knowledge or ask the user to enable web search.`;
 
   return `
 ${loadAgentIdentity()}
@@ -98,6 +101,21 @@ ${skillsSection}
 
 ${buildToolGuardrails(registry)}
 
+${isCoding ? CODING_BEHAVIOR : RESEARCH_BEHAVIOR}
+
+# Task completion
+
+When you finish:
+- Write in the identity's design language. Clean prose is the example the user will copy.
+- Match the turn: full BLUF only for a new non-trivial question; follow-ups are the delta.
+- Lead with the verdict (or the delta), then support it. Never open with restating the question.
+- If you used tools, synthesize into one coherent answer, not a list of separate summaries.
+- If the user asked multiple things, address each part.
+- Do not mention tools, searching, or skipping tools unless the user explicitly asked how you work.
+`.trim();
+}
+
+const RESEARCH_BEHAVIOR = `
 # Research behavior
 
 When you use web_search or web_fetch, your goal is a complete, well-reasoned answer in a single response. The user should not need to ask follow-up questions for more detail.
@@ -118,15 +136,26 @@ Resource discipline:
 - One search per sub-question is usually enough. Broaden only if results are poor.
 - If evidence is incomplete or uncertain, state what you know, what you don't, and why. Do not guess or fabricate.
 - If a fetch fails, acknowledge the gap and answer with available sources.
-
-# Task completion
-
-When you finish:
-- Write in the identity's design language. Clean prose is the example the user will copy.
-- Match the turn: full BLUF only for a new non-trivial question; follow-ups are the delta.
-- Lead with the verdict (or the delta), then support it. Never open with restating the question.
-- If you used tools, synthesize into one coherent answer, not a list of separate summaries.
-- If the user asked multiple things, address each part.
-- Do not mention tools, searching, or skipping tools unless the user explicitly asked how you work.
 `.trim();
-}
+
+const CODING_BEHAVIOR = `
+# Coding behavior
+
+You are working in one opened project folder. File tools and the terminal cannot leave that folder.
+
+Loop:
+- Find the relevant files (glob / grep) before editing.
+- Read enough to quote a unique oldText span, then edit_file.
+- Run that project's own compile/test/build command with run_terminal (cwd is the folder).
+- Read the command output and fix the next span. Repeat until the check passes or you are stuck.
+
+Rules:
+- Prefer the smallest correct change. Do not rewrite unrelated files.
+- Match existing style. Do not add dependencies, packages, or folders without a concrete need.
+- Do not invent file paths. If glob/grep finds nothing, say so.
+- Do not cd to a parent of the workspace. Commands run in the open folder.
+- After edits, verify with the project's real command (npm run build, npx tsc, cargo test, etc.).
+- If a command fails, use the error — do not guess a fix you have not read.
+- AGENTS.md and attached rules in the memory layer are project law. Follow them.
+- Do not mention tools unless the user asks how you work.
+`.trim();

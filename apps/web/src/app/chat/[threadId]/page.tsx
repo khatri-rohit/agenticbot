@@ -31,6 +31,7 @@ export default function ChatThreadPage({
     retryLastResponse,
     editLastUserMessage,
     ledgerEpoch,
+    threadKind,
   } = useAgentRun(threadId);
   const messages = useMessages(threadId, ledgerEpoch);
   const sentPendingRef = useRef(false);
@@ -73,6 +74,7 @@ export default function ChatThreadPage({
           onSendQueuedNow={() => void sendQueuedNow()}
           onEditQueued={editQueuedMessage}
           composerOptions={composerOptions}
+          hideWebSearch={threadKind === 'coding'}
           onComposerOptionsChange={setComposerOptions}
           onStop={() => void stopGeneration()}
           occupiedTokens={chatState.activeRun?.occupiedTokens}

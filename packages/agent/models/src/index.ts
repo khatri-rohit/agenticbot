@@ -1,5 +1,5 @@
 // @org/agent-models — agent domain types.
-// Pure types + the RESEARCH_MODE config constant. Zero runtime deps.
+// Pure types + mode config constants. Zero runtime deps.
 // Consumed by @org/agent-core, apps/api, apps/web.
 
 export type {
@@ -23,7 +23,7 @@ export type {
   LimitHit,
 } from './lib/event.js';
 
-export type { Thread } from './lib/thread.js';
+export type { Thread, ThreadKind } from './lib/thread.js';
 export {
   CHAT_TITLE_MIN_WORDS,
   CHAT_TITLE_MAX_WORDS,
@@ -55,7 +55,7 @@ export {
 } from './lib/token-estimate.js';
 
 export type { ModeName, ModeConfig } from './lib/mode.js';
-export { RESEARCH_MODE } from './lib/mode.js';
+export { RESEARCH_MODE, CODING_MODE, modeForKind } from './lib/mode.js';
 
 export type {
   ThinkingValue,
