@@ -17,9 +17,11 @@ export type {
   ApprovalRequested,
   ApprovalResolved,
   MemoryUpdated,
+  ContextCompacting,
   ContextCompacted,
   TurnCompleted,
   RunCompleted,
+  RunSettled,
   RunError,
   LimitHit,
 } from './lib/event.js';

@@ -21,10 +21,11 @@ export type ToolActivity = {
   resultPreview?: unknown;
 };
 
-/** Latest host compaction for this thread (SSE or ledger hydrate). */
+/** Host compaction activity for a turn (SSE or ledger hydrate). */
 export type CompactionNotice = {
   runId: string | null;
   threadId: string;
+  status: 'running' | 'done';
   throughSeq: number;
   brief: string;
   summary: string;
@@ -64,6 +65,7 @@ export function noticeFromSnapshot(
   return {
     runId,
     threadId: snapshot.threadId,
+    status: 'done',
     throughSeq: snapshot.throughSeq,
     brief: snapshot.brief,
     summary: snapshot.summary,
@@ -194,6 +196,23 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       };
     }
 
+    case 'context.compacting': {
+      return {
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+        compactionNotice: {
+          runId: event.runId,
+          threadId: event.threadId,
+          status: 'running',
+          throughSeq: state.compactionNotice?.throughSeq ?? 0,
+          brief: state.compactionNotice?.brief ?? '',
+          summary: state.compactionNotice?.summary ?? '',
+          createdAt: state.compactionNotice?.createdAt ?? '',
+        },
+      };
+    }
+
     case 'context.compacted': {
       return {
         activeRun: state.activeRun
@@ -202,6 +221,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         compactionNotice: {
           runId: event.runId,
           threadId: event.threadId,
+          status: 'done',
           throughSeq: event.throughSeq,
           brief: event.brief,
           summary: event.summary,
@@ -210,7 +230,28 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       };
     }
 
-    case 'run.completed':
+    case 'run.completed': {
+      // Model loop done — keep activeRun until run.settled so compaction
+      // can appear in the turn trail like a late tool step.
+      if (!state.activeRun) return state;
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          status: 'completed',
+          streamingMessage: null,
+          lastSeq,
+        },
+      };
+    }
+
+    case 'run.settled': {
+      return {
+        activeRun: null,
+        compactionNotice: state.compactionNotice,
+      };
+    }
+
     case 'run.error': {
       return {
         activeRun: null,

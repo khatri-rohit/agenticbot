@@ -12,6 +12,7 @@ import {
 import type { Message } from '@org/agent-models';
 import type {
   ChatState,
+  CompactionNotice,
   ToolActivity,
 } from '../features/agent/store/chat-store';
 import { groupMessageTurns } from '../lib/group-message-turns';
@@ -107,6 +108,7 @@ export function MessageList({
     messages,
     streaming?.content,
     toolActivity.length,
+    compactionNotice?.status,
     compactionNotice?.throughSeq,
     followContent,
   ]);
@@ -174,15 +176,24 @@ export function MessageList({
               const isLastTurn = index === lastTurnIndex;
               const liveActivity = isLastTurn ? toolActivity : [];
               const liveStreaming = isLastTurn ? streaming : null;
+              const turnCompaction = turnOwnsCompaction(
+                turn.replies,
+                compactionNotice,
+                isLastTurn,
+              )
+                ? compactionNotice
+                : null;
               const steps = buildTurnTimeline({
                 replies: turn.replies,
                 liveActivity,
                 streaming: liveStreaming,
+                compaction: turnCompaction,
               });
               const showSteps =
                 turn.replies.length > 0 ||
                 liveActivity.length > 0 ||
-                Boolean(liveStreaming?.content);
+                Boolean(liveStreaming?.content) ||
+                Boolean(turnCompaction);
 
               return (
                 <section
@@ -200,7 +211,8 @@ export function MessageList({
                       isLastTurn &&
                       (turn.replies.length > 0 ||
                         isRunning ||
-                        Boolean(streaming?.content))
+                        Boolean(streaming?.content) ||
+                        Boolean(turnCompaction))
                     }
                     onEditSubmit={onEditLastUserMessage}
                   />
@@ -231,6 +243,14 @@ export function MessageList({
                             />
                           );
                         }
+                        if (step.type === 'compaction') {
+                          return (
+                            <CompactionCard
+                              key={`compaction-${step.notice.runId ?? step.notice.throughSeq}`}
+                              notice={step.notice}
+                            />
+                          );
+                        }
                         return (
                           <div
                             key="stream"
@@ -250,26 +270,18 @@ export function MessageList({
                     </div>
                   ) : null}
 
-                  {isLastTurn && isRunning ? (
+                  {isLastTurn &&
+                  (isRunning || compactionNotice?.status === 'running') ? (
                     <TurnStatusLine
                       toolActivity={toolActivity}
                       hasStreamingText={Boolean(streaming?.content)}
+                      compacting={compactionNotice?.status === 'running'}
                     />
-                  ) : null}
-
-                  {isLastTurn && !isRunning && compactionNotice ? (
-                    <CompactionCard notice={compactionNotice} />
                   ) : null}
                 </section>
               );
             })}
           </div>
-
-          {!hasMessages && !isRunning && compactionNotice ? (
-            <div className="mt-4">
-              <CompactionCard notice={compactionNotice} />
-            </div>
-          ) : null}
 
           <div ref={endRef} className="h-6" />
         </div>
@@ -278,18 +290,36 @@ export function MessageList({
   );
 }
 
+/** Attach compaction to the turn that produced it (by runId), else last turn. */
+function turnOwnsCompaction(
+  replies: Message[],
+  notice: CompactionNotice | null,
+  isLastTurn: boolean,
+): boolean {
+  if (!notice) return false;
+  if (notice.status === 'running') return isLastTurn;
+  if (notice.runId) {
+    return replies.some((message) => message.runId === notice.runId);
+  }
+  return isLastTurn;
+}
+
 /** Quiet “still working” cue for model think gaps when no stream is visible. */
 function TurnStatusLine({
   toolActivity,
   hasStreamingText,
+  compacting,
 }: {
   toolActivity: ToolActivity[];
   hasStreamingText: boolean;
+  compacting?: boolean;
 }) {
   const running = toolActivity.find((t) => t.status === 'running');
   let label: string | null = null;
 
-  if (running) {
+  if (compacting) {
+    label = 'Compacting context…';
+  } else if (running) {
     label = `${running.toolName}…`;
   } else if (toolActivity.length > 0 && !hasStreamingText) {
     label = 'Working…';

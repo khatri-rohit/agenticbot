@@ -1,6 +1,9 @@
 import type { Message, PendingToolCall } from '@org/agent-models';
 
-import type { ToolActivity } from '../features/agent/store/chat-store';
+import type {
+  CompactionNotice,
+  ToolActivity,
+} from '../features/agent/store/chat-store';
 
 export type ToolCallRow = {
   toolCallId: string;
@@ -14,6 +17,7 @@ export type ToolCallRow = {
 export type TimelineStep =
   | { type: 'assistant'; message: Message }
   | { type: 'tools'; key: string; rows: ToolCallRow[] }
+  | { type: 'compaction'; notice: CompactionNotice }
   | { type: 'stream'; content: string };
 
 function previewToArgs(value: unknown): string | undefined {
@@ -71,14 +75,14 @@ function rowFromLive(activity: ToolActivity): ToolCallRow {
 }
 
 /**
- * Ordered turn steps for the chat UI: assistant prose, then that assistant's
- * tools, then the next assistant, then live-only tools, then streaming text.
- * Ledger is the durable tape; liveActivity overlays status before hydrate.
+ * Ordered turn steps: assistant → tools → assistant → live tools → stream →
+ * compaction (host post-loop step, same visual column as tools).
  */
 export function buildTurnTimeline(input: {
   replies: Message[];
   liveActivity: ToolActivity[];
   streaming?: { id: string; content: string } | null;
+  compaction?: CompactionNotice | null;
 }): TimelineStep[] {
   const steps: TimelineStep[] = [];
   const activityMap = liveById(input.liveActivity);
@@ -146,6 +150,10 @@ export function buildTurnTimeline(input: {
   const streamContent = input.streaming?.content?.trim();
   if (streamContent) {
     steps.push({ type: 'stream', content: input.streaming!.content });
+  }
+
+  if (input.compaction) {
+    steps.push({ type: 'compaction', notice: input.compaction });
   }
 
   return steps;

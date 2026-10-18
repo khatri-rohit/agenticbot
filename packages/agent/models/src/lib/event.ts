@@ -28,9 +28,11 @@ export type AgentEvent =
   | ApprovalRequested
   | ApprovalResolved
   | MemoryUpdated
+  | ContextCompacting
   | ContextCompacted
   | TurnCompleted
   | RunCompleted
+  | RunSettled
   | RunError
   | LimitHit;
 
@@ -169,9 +171,17 @@ export interface MemoryUpdated {
   action: 'add' | 'patch' | 'remove' | 'revert';
 }
 
+/** Host started M4 compaction after the model loop (still before run.settled). */
+export interface ContextCompacting {
+  seq: number;
+  type: 'context.compacting';
+  runId: string;
+  threadId: string;
+}
+
 /**
  * Host wrote a context snapshot after a run (M4). Not a tool call —
- * UI shows a compaction card, not the tool trail.
+ * UI shows a compaction step in the turn trail, not ToolStepList.
  */
 export interface ContextCompacted {
   seq: number;
@@ -182,6 +192,16 @@ export interface ContextCompacted {
   brief: string;
   summary: string;
   createdAt: string;
+}
+
+/**
+ * Post-run host work finished (compaction attempted or skipped).
+ * Client may clear ephemeral activeRun after this.
+ */
+export interface RunSettled {
+  seq: number;
+  type: 'run.settled';
+  runId: string;
 }
 
 /** Union of event types for filtering. */

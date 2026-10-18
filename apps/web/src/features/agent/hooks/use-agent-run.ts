@@ -167,16 +167,21 @@ export function useAgentRun(threadId: string | null) {
             await persistChatEffects(prev, event, threadId);
             currentState = next;
             setChatState(next);
-            if (event.type === 'run.completed' || event.type === 'run.error') {
+            if (
+              event.type === 'run.settled' ||
+              event.type === 'run.error' ||
+              event.type === 'context.compacted'
+            ) {
               bumpLedger();
               void refreshThreads();
+            }
+            if (event.type === 'run.settled' || event.type === 'run.error') {
               // Sync card with snapshot.json (rewind may have deleted it).
               void fetchLedger(threadId)
                 .then((ledger) => {
                   setChatState((prev) => {
                     if (ledger.snapshot) {
                       const fromDisk = noticeFromSnapshot(ledger.snapshot);
-                      // Live context.compacted can beat a stale disk read.
                       if (
                         prev.compactionNotice &&
                         prev.compactionNotice.throughSeq > fromDisk.throughSeq
@@ -228,7 +233,7 @@ export function useAgentRun(threadId: string | null) {
         return;
       }
 
-      if (chatStateRef.current.activeRun?.status === 'running') {
+      if (chatStateRef.current.activeRun) {
         if (!skipQueue) {
           setQueuedMessage({ content, options, attachments });
         }
@@ -259,14 +264,16 @@ export function useAgentRun(threadId: string | null) {
   const interruptActiveRun = useCallback(async () => {
     const state = chatStateRef.current;
     const run = state.activeRun;
-    if (!run || run.status !== 'running') return;
+    if (!run) return;
 
     disconnect();
 
-    try {
-      await cancelRun(run.runId);
-    } catch (err) {
-      console.error('Cancel run failed:', err);
+    if (run.status === 'running') {
+      try {
+        await cancelRun(run.runId);
+      } catch (err) {
+        console.error('Cancel run failed:', err);
+      }
     }
 
     setChatState((prev) => ({
@@ -288,7 +295,7 @@ export function useAgentRun(threadId: string | null) {
         thinking: options.thinking ?? composerOptions.thinking,
       };
 
-      if (chatStateRef.current.activeRun?.status === 'running') {
+      if (chatStateRef.current.activeRun) {
         setQueuedMessage({ content, options: merged, attachments });
         return;
       }
@@ -325,7 +332,7 @@ export function useAgentRun(threadId: string | null) {
 
   const retryLastResponse = useCallback(async () => {
     if (!threadId) return;
-    if (chatStateRef.current.activeRun?.status === 'running') return;
+    if (chatStateRef.current.activeRun) return;
 
     const ledger = await fetchLedger(threadId);
     if (ledger.lastUserSeq === undefined) return;
@@ -352,7 +359,7 @@ export function useAgentRun(threadId: string | null) {
       if (!threadId) return;
       const trimmed = newContent.trim();
 
-      if (chatStateRef.current.activeRun?.status === 'running') {
+      if (chatStateRef.current.activeRun) {
         await interruptActiveRun();
       }
 
@@ -390,8 +397,9 @@ export function useAgentRun(threadId: string | null) {
   );
 
   useEffect(() => {
-    const running = chatState.activeRun?.status === 'running';
-    if (wasRunningRef.current && !running && queuedMessage) {
+    // activeRun stays until run.settled (covers post-loop compaction).
+    const busy = chatState.activeRun !== null;
+    if (wasRunningRef.current && !busy && queuedMessage) {
       const { content, options, attachments } = queuedMessage;
       setQueuedMessage(null);
       void startRunForMessages(content, options, {
@@ -399,7 +407,7 @@ export function useAgentRun(threadId: string | null) {
         attachments,
       });
     }
-    wasRunningRef.current = running;
+    wasRunningRef.current = busy;
   }, [chatState.activeRun, queuedMessage, startRunForMessages]);
 
   return {
@@ -415,7 +423,8 @@ export function useAgentRun(threadId: string | null) {
     editLastUserMessage,
     disconnect,
     stopGeneration: interruptActiveRun,
-    isRunning: chatState.activeRun?.status === 'running',
+    // Busy through post-loop compaction until run.settled clears activeRun.
+    isRunning: chatState.activeRun !== null,
     ledgerEpoch,
     threadKind,
   };

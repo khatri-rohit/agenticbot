@@ -78,8 +78,8 @@ export class RunManager {
       },
     });
 
-    // Keep status 'running' through onFinished so compaction can emit
-    // context.compacted to live SSE subscribers (and land in the replay buffer).
+    // Keep status 'running' through onFinished so compaction SSE reaches
+    // live subscribers, then emit run.settled so the UI can leave the turn.
     handle.result = result;
     try {
       await opts.onFinished?.(result);
@@ -92,6 +92,12 @@ export class RunManager {
     }
     handle.status =
       handle.cancelled || result.status === 'error' ? 'error' : 'completed';
+    if (!handle.cancelled) {
+      handle.emitter.emit({
+        type: 'run.settled',
+        runId,
+      });
+    }
   }
 
   /** Abort in-flight model/tool work and stop SSE for this run. */

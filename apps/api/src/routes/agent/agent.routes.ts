@@ -170,6 +170,14 @@ async function maybeCompactThread(input: {
   if (throughSeq == null) return;
   const existing = await store.readSnapshot(input.threadId);
   if (existing && existing.throughSeq >= throughSeq) return;
+
+  const emitter = runManager.get(input.runId)?.emitter;
+  emitter?.emit({
+    type: 'context.compacting',
+    runId: input.runId,
+    threadId: input.threadId,
+  });
+
   const snapshot = buildExtractiveSnapshot({
     threadId: input.threadId,
     model: input.model,
@@ -177,7 +185,7 @@ async function maybeCompactThread(input: {
     throughSeq,
   });
   await store.writeSnapshot(input.threadId, snapshot);
-  runManager.get(input.runId)?.emitter.emit({
+  emitter?.emit({
     type: 'context.compacted',
     runId: input.runId,
     threadId: input.threadId,
