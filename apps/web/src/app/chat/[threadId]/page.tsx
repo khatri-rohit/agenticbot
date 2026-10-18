@@ -41,10 +41,12 @@ export default function ChatThreadPage({
     const pending = takePendingMessage();
     if (!pending) return;
     sentPendingRef.current = true;
-    const model = resolveOllamaModel(pending.model ?? '');
+    const local = pending.local === true;
+    const model = resolveOllamaModel(pending.model ?? '', local);
     setComposerOptions({
       streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,
+      local,
       model,
       thinking: pending.thinking,
     });
@@ -53,6 +55,7 @@ export default function ChatThreadPage({
       {
         streaming: pending.streaming,
         webSearch: pending.webSearch ?? true,
+        local,
         model,
         thinking: pending.thinking,
       },

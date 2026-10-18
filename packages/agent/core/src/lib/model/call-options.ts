@@ -2,6 +2,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
 } from 'openai/resources/chat/completions';
+import type { OllamaEndpoint } from '@org/agent-models';
 
 /** Optional knobs closed over by createInvoke/StreamModelCall. */
 export type ModelCallOptions = {
@@ -9,6 +10,8 @@ export type ModelCallOptions = {
   reasoningEffort?: string;
   /** Cancels the in-flight chat.completions request. */
   signal?: AbortSignal;
+  /** Cloud vs local Ollama base URL for this call. Default cloud. */
+  endpoint?: OllamaEndpoint;
 };
 
 /**

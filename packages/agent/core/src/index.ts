@@ -5,7 +5,11 @@
 export { RESEARCH_MODE, CODING_MODE, modeForKind } from '@org/agent-models';
 
 // Model layer
-export { getClient } from './lib/model/client';
+export {
+  getClient,
+  nativeOllamaBaseUrl,
+  resolveOllamaBaseUrl,
+} from './lib/model/client';
 export { invokeModelTurn } from './lib/model/invoke';
 export { streamModelTurn } from './lib/model/stream';
 export { estimatePromptTokens } from './lib/model/estimate-prompt-tokens';
@@ -13,6 +17,7 @@ export { parseTokenUsage } from './lib/model/parse-usage';
 export type { OnTextDelta, ModelCallOptions } from './lib/model/types';
 export {
   getOllamaModelConfig,
+  listOllamaModels,
   resolveReasoningEffort,
 } from './lib/model/ollama-model-config';
 

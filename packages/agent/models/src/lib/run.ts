@@ -74,6 +74,11 @@ export type StartRunRequest = {
   rewindThroughSeq?: number;
   streaming?: boolean;
   model?: string;
+  /**
+   * When true, route chat completions and /api/show to local Ollama
+   * (`OLLAMA_LOCAL_BASE_URL`, default http://127.0.0.1:11434/v1).
+   */
+  local?: boolean;
   /** When false, omit mode-allowed search tools; globals still apply. Default true. */
   webSearch?: boolean;
   thinking?: ThinkingValue;

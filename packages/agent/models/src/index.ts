@@ -61,6 +61,8 @@ export type { ModeName, ModeConfig } from './lib/mode.js';
 export { RESEARCH_MODE, CODING_MODE, modeForKind } from './lib/mode.js';
 
 export type {
+  OllamaEndpoint,
+  OllamaListedModel,
   ThinkingValue,
   ThinkingMode,
   OllamaThinkingConfig,
@@ -77,11 +79,7 @@ export type {
 } from './lib/ledger.js';
 export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
 
-export type {
-  ToolRisk,
-  ToolOrigin,
-  ToolContext,
-} from './lib/tool-context.js';
+export type { ToolRisk, ToolOrigin, ToolContext } from './lib/tool-context.js';
 
 export type {
   MemoryTarget,

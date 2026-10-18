@@ -6,6 +6,7 @@ import type {
   MemoryTarget,
   MessageAttachment,
   ModeConfig,
+  OllamaEndpoint,
   StartRunRequest,
   ThinkingValue,
   Thread,
@@ -23,6 +24,7 @@ import {
   createStreamModelCall,
   createToolRegistry,
   getOllamaModelConfig,
+  listOllamaModels,
   modeForKind,
   RESEARCH_MODE,
   resolveReasoningEffort,
@@ -63,6 +65,20 @@ function parseThreadKind(value: unknown): ThreadKind | undefined {
   return undefined;
 }
 
+function endpointFromLocal(local: boolean | undefined): OllamaEndpoint {
+  return local === true ? 'local' : 'cloud';
+}
+
+/** Returns null when the query is present but not a known endpoint. */
+function parseEndpointQuery(
+  value: unknown,
+  fallback: OllamaEndpoint,
+): OllamaEndpoint | null {
+  if (value === undefined || value === '') return fallback;
+  if (value === 'cloud' || value === 'local') return value;
+  return null;
+}
+
 type MemoryUpdatedPayload = {
   opId: string;
   target: MemoryTarget;
@@ -76,6 +92,7 @@ async function prepareRun(input: {
   lastUserSeq: number;
   envelopes: LedgerEnvelope[];
   model: string;
+  endpoint?: OllamaEndpoint;
   onMemoryUpdated?: (payload: MemoryUpdatedPayload) => void;
 }): Promise<{
   tools: ToolRegistry;
@@ -118,7 +135,10 @@ async function prepareRun(input: {
 
   let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
   try {
-    const config = await getOllamaModelConfig(input.model);
+    const config = await getOllamaModelConfig(
+      input.model,
+      input.endpoint ?? 'cloud',
+    );
     if (config.contextLength) windowTokens = config.contextLength;
   } catch {
     // Keep the default window when /api/show is unavailable.
@@ -149,6 +169,7 @@ async function maybeCompactThread(input: {
   runId: string;
   model: string;
   webSearch?: boolean;
+  endpoint?: OllamaEndpoint;
 }): Promise<void> {
   const store = await getThreadStore();
   const thread = store.getThread(input.threadId);
@@ -161,6 +182,7 @@ async function maybeCompactThread(input: {
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
     model: input.model,
+    endpoint: input.endpoint,
   });
   if (!prepared.report.needsCompaction) return;
   const throughSeq = chooseCompactThroughSeq(
@@ -334,6 +356,7 @@ router.post('/run', async (req: Request, res: Response) => {
     rewindThroughSeq,
     streaming,
     model,
+    local,
     webSearch,
     thinking,
   } = req.body as StartRunRequest;
@@ -385,10 +408,11 @@ router.post('/run', async (req: Request, res: Response) => {
 
   const useStreaming = streaming ?? true;
   const useModel = model ?? thread.model ?? RESEARCH_MODE.model;
+  const endpoint = endpointFromLocal(local);
 
   if (envelopes.some((envelope) => (envelope.attachments?.length ?? 0) > 0)) {
     try {
-      const config = await getOllamaModelConfig(useModel);
+      const config = await getOllamaModelConfig(useModel, endpoint);
       if (!config.supportsVision) {
         return res.status(400).json({
           error: 'This model does not support images. Pick a vision model.',
@@ -407,6 +431,7 @@ router.post('/run', async (req: Request, res: Response) => {
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
     model: useModel,
+    endpoint,
     onMemoryUpdated: (payload) => {
       const handle = runManager.get(assignedRunId);
       handle?.emitter.emit({
@@ -417,7 +442,7 @@ router.post('/run', async (req: Request, res: Response) => {
     },
   });
 
-  const callOptions = await resolveCallOptions(useModel, thinking);
+  const callOptions = await resolveCallOptions(useModel, thinking, endpoint);
   const modelCall = useStreaming
     ? createStreamModelCall(callOptions)
     : createInvokeModelCall(callOptions);
@@ -444,6 +469,7 @@ router.post('/run', async (req: Request, res: Response) => {
         runId: assignedRunId,
         model: useModel,
         webSearch,
+        endpoint,
       }),
   });
 
@@ -453,6 +479,7 @@ router.post('/run', async (req: Request, res: Response) => {
     const title = await generateThreadTitle(
       message.content || 'Image chat',
       useModel,
+      endpoint,
     );
     store.updateThread(threadId, { title, model: useModel });
   }
@@ -465,13 +492,15 @@ router.post('/run', async (req: Request, res: Response) => {
  * Same assembler as /run: host ledger + memory files + optional draft.
  */
 router.post('/context/estimate', async (req: Request, res: Response) => {
-  const { threadId, draft, attachments, model, webSearch } = req.body as {
-    threadId?: string;
-    draft?: string;
-    attachments?: MessageAttachment[];
-    model?: string;
-    webSearch?: boolean;
-  };
+  const { threadId, draft, attachments, model, webSearch, local } =
+    req.body as {
+      threadId?: string;
+      draft?: string;
+      attachments?: MessageAttachment[];
+      model?: string;
+      webSearch?: boolean;
+      local?: boolean;
+    };
 
   const store = await getThreadStore();
   let envelopes: LedgerEnvelope[] = [];
@@ -510,6 +539,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
     model: useModel,
+    endpoint: endpointFromLocal(local),
   });
 
   return res.json({
@@ -568,8 +598,9 @@ router.post('/memory/revert', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/agent/models/config?model=
+ * GET /api/agent/models/config?model=&endpoint=local|cloud
  * Proxy for Ollama /api/show (context length, thinking values).
+ * Registered before /models so a future /models/:id never shadows this path.
  */
 router.get('/models/config', async (req: Request, res: Response) => {
   const model =
@@ -577,10 +608,37 @@ router.get('/models/config', async (req: Request, res: Response) => {
   if (!model) {
     return res.status(400).json({ error: 'model is required' });
   }
+  // Default cloud when omitted (backward compatible with existing clients).
+  const endpoint = parseEndpointQuery(req.query.endpoint, 'cloud');
+  if (!endpoint) {
+    return res
+      .status(400)
+      .json({ error: 'endpoint must be "local" or "cloud"' });
+  }
 
   try {
-    const config = await getOllamaModelConfig(model);
+    const config = await getOllamaModelConfig(model, endpoint);
     return res.json(config);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(502).json({ error: msg });
+  }
+});
+
+/**
+ * GET /api/agent/models?endpoint=local|cloud
+ * Proxy for Ollama GET /api/tags (installed models). Defaults to local.
+ */
+router.get('/models', async (req: Request, res: Response) => {
+  const endpoint = parseEndpointQuery(req.query.endpoint, 'local');
+  if (!endpoint) {
+    return res
+      .status(400)
+      .json({ error: 'endpoint must be "local" or "cloud"' });
+  }
+  try {
+    const models = await listOllamaModels(endpoint);
+    return res.json({ endpoint, models });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return res.status(502).json({ error: msg });
@@ -649,7 +707,11 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
 async function resolveCallOptions(
   model: string,
   thinking: unknown,
-): Promise<{ reasoningEffort: string } | undefined> {
+  endpoint: OllamaEndpoint,
+): Promise<{
+  reasoningEffort?: string;
+  endpoint: OllamaEndpoint;
+}> {
   const requested: ThinkingValue | undefined =
     typeof thinking === 'boolean' ||
     (typeof thinking === 'string' && thinking.length > 0)
@@ -657,12 +719,15 @@ async function resolveCallOptions(
       : undefined;
 
   try {
-    const config = await getOllamaModelConfig(model);
+    const config = await getOllamaModelConfig(model, endpoint);
     const reasoningEffort = resolveReasoningEffort(config, requested);
-    return reasoningEffort !== undefined ? { reasoningEffort } : undefined;
+    return {
+      endpoint,
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    };
   } catch {
-    // /api/show unavailable — omit; provider keeps its default
-    return undefined;
+    // /api/show unavailable — omit effort; still route to the chosen endpoint
+    return { endpoint };
   }
 }
 

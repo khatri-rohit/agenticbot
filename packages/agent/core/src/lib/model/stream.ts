@@ -59,7 +59,9 @@ export async function streamModelTurn(
   };
 
   // Ollama reasoning_effort is wider than OpenAI ReasoningEffort — cast at SDK boundary.
-  const stream = await getClient().chat.completions.create(
+  const stream = await getClient(
+    options?.endpoint ?? 'cloud',
+  ).chat.completions.create(
     params as ChatCompletionCreateParamsStreaming,
     options?.signal ? { signal: options.signal } : undefined,
   );

@@ -342,6 +342,11 @@ export const OLLAMA_MODELS: OllamaModel[] = [
 
 const MODEL_BY_ID = new Map(OLLAMA_MODELS.map((m) => [m.id, m]));
 
+/** Curated cloud catalog only — local picker uses live `/api/tags`. */
+export const CLOUD_OLLAMA_MODELS: OllamaModel[] = OLLAMA_MODELS.filter(
+  (m) => m.cloud,
+);
+
 function getOllamaModel(id: string): OllamaModel | undefined {
   return MODEL_BY_ID.get(id);
 }
@@ -358,30 +363,90 @@ export function modelSupportsVision(
   return getOllamaModel(modelId)?.vision ?? false;
 }
 
-export function resolveOllamaModel(id: string): string {
-  return MODEL_BY_ID.has(id) ? id : DEFAULT_OLLAMA_MODEL;
+export function resolveOllamaModel(id: string, local = false): string {
+  const trimmed = id.trim();
+  if (local) return trimmed;
+  return MODEL_BY_ID.has(trimmed) ? trimmed : DEFAULT_OLLAMA_MODEL;
 }
 
 export function getOllamaModelLabel(id: string): string {
   return getOllamaModel(id)?.label ?? id;
 }
 
-const MODEL_STORAGE_KEY = 'agenticbot:composerModel';
+/** Map a discovered local install into the picker row shape. */
+export function listedModelToPickerModel(input: {
+  id: string;
+  family: string | null;
+  size: number | null;
+}): OllamaModel {
+  const family = input.family?.trim() || 'Installed';
+  return {
+    id: input.id,
+    label: input.id,
+    family,
+    cloud: false,
+    vision: false,
+    thinking: false,
+    tools: false,
+    contextLength: null,
+    hint:
+      input.size != null && input.size > 0
+        ? formatModelSize(input.size)
+        : undefined,
+  };
+}
 
-export function readStoredComposerModel(): string {
-  if (typeof window === 'undefined') return DEFAULT_OLLAMA_MODEL;
+function formatModelSize(bytes: number): string {
+  const gib = bytes / 1024 ** 3;
+  if (gib >= 1) return `${gib.toFixed(1)} GB on disk`;
+  const mib = bytes / 1024 ** 2;
+  return `${Math.max(1, Math.round(mib))} MB on disk`;
+}
+
+const MODEL_STORAGE_KEY = 'agenticbot:composerModel';
+const LOCAL_MODEL_STORAGE_KEY = 'agenticbot:composerLocalModel';
+const LOCAL_MODE_KEY = 'agenticbot:composerLocal';
+
+export function readStoredComposerLocal(): boolean {
+  if (typeof window === 'undefined') return false;
   try {
-    const raw = localStorage.getItem(MODEL_STORAGE_KEY);
-    return raw ? resolveOllamaModel(raw) : DEFAULT_OLLAMA_MODEL;
+    return localStorage.getItem(LOCAL_MODE_KEY) === '1';
   } catch {
-    return DEFAULT_OLLAMA_MODEL;
+    return false;
   }
 }
 
-export function writeStoredComposerModel(model: string): void {
+export function writeStoredComposerLocal(local: boolean): void {
   try {
-    localStorage.setItem(MODEL_STORAGE_KEY, resolveOllamaModel(model));
+    localStorage.setItem(LOCAL_MODE_KEY, local ? '1' : '0');
   } catch {
     /* ignore */
   }
 }
+
+export function readStoredComposerModel(local = false): string {
+  if (typeof window === 'undefined') {
+    return local ? '' : DEFAULT_OLLAMA_MODEL;
+  }
+  try {
+    const key = local ? LOCAL_MODEL_STORAGE_KEY : MODEL_STORAGE_KEY;
+    const raw = localStorage.getItem(key);
+    if (local) return raw?.trim() ?? '';
+    return raw ? resolveOllamaModel(raw) : DEFAULT_OLLAMA_MODEL;
+  } catch {
+    return local ? '' : DEFAULT_OLLAMA_MODEL;
+  }
+}
+
+export function writeStoredComposerModel(model: string, local = false): void {
+  try {
+    const key = local ? LOCAL_MODEL_STORAGE_KEY : MODEL_STORAGE_KEY;
+    const value = local ? model.trim() : resolveOllamaModel(model);
+    if (!value) return;
+    localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
+
+export { DEFAULT_OLLAMA_MODEL };

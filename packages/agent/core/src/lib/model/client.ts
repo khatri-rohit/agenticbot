@@ -1,18 +1,40 @@
 import { OpenAI } from 'openai';
+import type { OllamaEndpoint } from '@org/agent-models';
 
 /**
- * OpenAI-compatible client for Ollama. Defaults to cloud (`https://ollama.com/v1`).
- * Lazy singleton so importing the package does not require env until first use.
+ * OpenAI-compatible clients for Ollama cloud vs local daemon.
+ * Lazy per-endpoint singletons so importing the package does not require env until first use.
  */
 const DEFAULT_CLOUD_BASE_URL = 'https://ollama.com/v1';
+const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:11434/v1';
 
-let cached: OpenAI | undefined;
+const clients = new Map<OllamaEndpoint, OpenAI>();
 
-export function getClient(): OpenAI {
+export function resolveOllamaBaseUrl(
+  endpoint: OllamaEndpoint = 'cloud',
+): string {
+  if (endpoint === 'local') {
+    return process.env.OLLAMA_LOCAL_BASE_URL ?? DEFAULT_LOCAL_BASE_URL;
+  }
+  return process.env.OLLAMA_BASE_URL ?? DEFAULT_CLOUD_BASE_URL;
+}
+
+/** Strip OpenAI-compat `/v1` for native Ollama routes (`/api/tags`, `/api/show`). */
+export function nativeOllamaBaseUrl(
+  endpoint: OllamaEndpoint = 'cloud',
+): string {
+  return resolveOllamaBaseUrl(endpoint)
+    .replace(/\/v1\/?$/, '')
+    .replace(/\/$/, '');
+}
+
+export function getClient(endpoint: OllamaEndpoint = 'cloud'): OpenAI {
+  const cached = clients.get(endpoint);
   if (cached) return cached;
 
-  const baseURL = process.env.OLLAMA_BASE_URL ?? DEFAULT_CLOUD_BASE_URL;
-  const usingCloudDefault = baseURL === DEFAULT_CLOUD_BASE_URL;
+  const baseURL = resolveOllamaBaseUrl(endpoint);
+  const usingCloudDefault =
+    endpoint === 'cloud' && baseURL === DEFAULT_CLOUD_BASE_URL;
 
   if (usingCloudDefault && !process.env.OLLAMA_API_KEY) {
     throw new Error(
@@ -20,9 +42,10 @@ export function getClient(): OpenAI {
     );
   }
 
-  cached = new OpenAI({
+  const client = new OpenAI({
     baseURL,
     apiKey: process.env.OLLAMA_API_KEY ?? 'ollama',
   });
-  return cached;
+  clients.set(endpoint, client);
+  return client;
 }

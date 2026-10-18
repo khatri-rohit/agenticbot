@@ -16,7 +16,9 @@ import {
 import { refreshThreads } from '../features/agent/store/thread-cache';
 import { toastError } from '@/hooks/use-toast';
 import {
+  readStoredComposerLocal,
   readStoredComposerModel,
+  writeStoredComposerLocal,
   writeStoredComposerModel,
 } from '@/lib/ollama-models';
 import {
@@ -28,11 +30,15 @@ import {
 /** Must match ChatInput draft key for the home composer. */
 const HOME_DRAFT_SCOPE = '__home__';
 
-const defaultOptions = (webSearch: boolean): ComposerOptions => ({
-  streaming: true,
-  webSearch,
-  model: readStoredComposerModel(),
-});
+const defaultOptions = (webSearch: boolean): ComposerOptions => {
+  const local = readStoredComposerLocal();
+  return {
+    streaming: true,
+    webSearch,
+    local,
+    model: readStoredComposerModel(local),
+  };
+};
 
 function restoreHomeDraft(content: string, attachments?: MessageAttachment[]) {
   try {
@@ -114,6 +120,7 @@ export default function HomePage() {
                 streaming: options.streaming,
                 webSearch: space === 'coding' ? false : options.webSearch,
                 model: options.model,
+                local: options.local,
                 thinking: options.thinking,
                 attachments,
               });
@@ -146,8 +153,10 @@ export default function HomePage() {
           onEditQueued={() => null}
           composerOptions={composerOptions}
           onComposerOptionsChange={(options) => {
-            setComposerOptions(options);
-            writeStoredComposerModel(options.model);
+            const local = options.local === true;
+            setComposerOptions({ ...options, local });
+            writeStoredComposerLocal(local);
+            writeStoredComposerModel(options.model, local);
           }}
         />
       </div>

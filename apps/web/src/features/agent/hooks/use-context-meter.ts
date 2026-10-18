@@ -117,6 +117,7 @@ export function useContextMeter(options: {
         draft: combinedDraft,
         attachments: [...pendingAttachments, ...queuedAttachments],
         model: composerOptions.model,
+        local: composerOptions.local,
         webSearch: composerOptions.webSearch,
       })
         .then((res) => {
@@ -145,6 +146,7 @@ export function useContextMeter(options: {
     queuedContent,
     queuedAttachments,
     composerOptions.model,
+    composerOptions.local,
     composerOptions.webSearch,
   ]);
 

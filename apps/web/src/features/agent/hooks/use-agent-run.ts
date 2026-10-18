@@ -14,8 +14,10 @@ import type {
 import { toastError } from '@/hooks/use-toast';
 import {
   modelSupportsVision,
+  readStoredComposerLocal,
   readStoredComposerModel,
   resolveOllamaModel,
+  writeStoredComposerLocal,
   writeStoredComposerModel,
 } from '@/lib/ollama-models';
 import {
@@ -51,11 +53,15 @@ export type QueuedMessage = {
   attachments?: MessageAttachment[];
 };
 
-const defaultComposerOptions = (): ComposerOptions => ({
-  streaming: true,
-  webSearch: true,
-  model: readStoredComposerModel(),
-});
+const defaultComposerOptions = (): ComposerOptions => {
+  const local = readStoredComposerLocal();
+  return {
+    streaming: true,
+    webSearch: true,
+    local,
+    model: readStoredComposerModel(local),
+  };
+};
 
 /**
  * Hook for managing an active agent run.
@@ -90,7 +96,6 @@ export function useAgentRun(threadId: string | null) {
       if (cancelled || !thread) return;
       if (syncedThreadModelRef.current === thread.id) return;
       syncedThreadModelRef.current = thread.id;
-      const model = resolveOllamaModel(thread.model);
       const coding = thread.kind === 'coding';
       setThreadKind(coding ? 'coding' : 'research');
       if (coding) {
@@ -99,11 +104,15 @@ export function useAgentRun(threadId: string | null) {
       } else {
         setAgentSpace('research');
       }
-      setComposerOptions((prev) => ({
-        ...prev,
-        model,
-        webSearch: coding ? false : prev.webSearch,
-      }));
+      setComposerOptions((prev) => {
+        const local = prev.local === true;
+        const model = resolveOllamaModel(thread.model, local);
+        return {
+          ...prev,
+          model,
+          webSearch: coding ? false : prev.webSearch,
+        };
+      });
     });
     void fetchLedger(threadId)
       .then((ledger) => {
@@ -123,11 +132,13 @@ export function useAgentRun(threadId: string | null) {
 
   const setComposerOptionsPersisted = useCallback(
     (options: ComposerOptions) => {
-      const model = resolveOllamaModel(options.model);
-      const next = { ...options, model };
+      const local = options.local === true;
+      const model = resolveOllamaModel(options.model, local);
+      const next = { ...options, local, model };
       setComposerOptions(next);
-      writeStoredComposerModel(model);
-      if (!threadId) return;
+      writeStoredComposerLocal(local);
+      writeStoredComposerModel(model, local);
+      if (!threadId || !model) return;
       void fetchThread(threadId).then((thread) => {
         if (!thread || thread.model === model) return;
         void patchThread(threadId, { model }).then(() => refreshThreads());
@@ -221,9 +232,11 @@ export function useAgentRun(threadId: string | null) {
     ) => {
       if (!threadId) return;
 
-      // Defense in depth: composer also gates; covers queue flush + hero handoff.
+      // Defense in depth for cloud catalog; local models rely on live /api/show
+      // (composer) + server vision check — catalog flags are not available.
       if (
         (attachments?.length ?? 0) > 0 &&
+        options.local !== true &&
         !modelSupportsVision(options.model)
       ) {
         toastError(
@@ -240,11 +253,13 @@ export function useAgentRun(threadId: string | null) {
         return;
       }
 
+      const local = options.local === true;
       const runId = await startRun(threadId, {
         message: { content, attachments },
         streaming: options.streaming,
         webSearch: options.webSearch,
-        model: resolveOllamaModel(options.model),
+        model: resolveOllamaModel(options.model, local),
+        local,
         thinking: options.thinking,
       });
 
@@ -288,10 +303,15 @@ export function useAgentRun(threadId: string | null) {
       options: Partial<ComposerOptions> = {},
       attachments?: MessageAttachment[],
     ) => {
+      const local = options.local ?? composerOptions.local === true;
       const merged: ComposerOptions = {
         streaming: options.streaming ?? composerOptions.streaming,
         webSearch: options.webSearch ?? composerOptions.webSearch,
-        model: resolveOllamaModel(options.model ?? composerOptions.model),
+        local,
+        model: resolveOllamaModel(
+          options.model ?? composerOptions.model,
+          local,
+        ),
         thinking: options.thinking ?? composerOptions.thinking,
       };
 
@@ -338,11 +358,13 @@ export function useAgentRun(threadId: string | null) {
     if (ledger.lastUserSeq === undefined) return;
     if (ledger.lastUserSeq === ledger.lastSeq) return;
 
+    const local = composerOptions.local === true;
     const runId = await startRun(threadId, {
       rewindThroughSeq: ledger.lastUserSeq,
       streaming: composerOptions.streaming,
       webSearch: composerOptions.webSearch,
-      model: resolveOllamaModel(composerOptions.model),
+      model: resolveOllamaModel(composerOptions.model, local),
+      local,
       thinking: composerOptions.thinking,
     });
 
@@ -377,12 +399,14 @@ export function useAgentRun(threadId: string | null) {
       const userSeq = seqFromMessageId(messageId);
       if (userSeq === undefined) return;
 
+      const local = composerOptions.local === true;
       const runId = await startRun(threadId, {
         rewindThroughSeq: userSeq - 1,
         message: { content: trimmed, attachments: lastUser.attachments },
         streaming: composerOptions.streaming,
         webSearch: composerOptions.webSearch,
-        model: resolveOllamaModel(composerOptions.model),
+        model: resolveOllamaModel(composerOptions.model, local),
+        local,
         thinking: composerOptions.thinking,
       });
 

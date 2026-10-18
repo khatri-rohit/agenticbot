@@ -1,14 +1,18 @@
 /**
- * Ollama POST /api/show → context length + thinking values.
+ * Ollama native APIs: POST /api/show (capabilities) and GET /api/tags (installed models).
  * Chat still uses the OpenAI-compatible /v1 client.
  */
 
 import type {
+  OllamaEndpoint,
+  OllamaListedModel,
   OllamaModelConfig,
   OllamaThinkingConfig,
   ThinkingMode,
   ThinkingValue,
 } from '@org/agent-models';
+
+import { nativeOllamaBaseUrl } from './client';
 
 type ShowResponse = {
   error?: string;
@@ -17,11 +21,22 @@ type ShowResponse = {
   model_info?: Record<string, unknown>;
 };
 
-const cache = new Map<string, OllamaModelConfig>();
+type TagsResponse = {
+  models?: Array<{
+    name?: string;
+    model?: string;
+    size?: number;
+    modified_at?: string;
+    details?: { family?: string };
+  }>;
+  error?: string;
+};
 
-function nativeBaseUrl(): string {
-  const base = process.env.OLLAMA_BASE_URL ?? 'https://ollama.com/v1';
-  return base.replace(/\/v1\/?$/, '').replace(/\/$/, '');
+const configCache = new Map<string, OllamaModelConfig>();
+
+function authHeaders(): Record<string, string> {
+  if (!process.env.OLLAMA_API_KEY) return {};
+  return { Authorization: `Bearer ${process.env.OLLAMA_API_KEY}` };
 }
 
 function contextLength(
@@ -93,19 +108,23 @@ export function resolveReasoningEffort(
     : undefined;
 }
 
+function cacheKey(endpoint: OllamaEndpoint, model: string): string {
+  return `${endpoint}:${model}`;
+}
+
 export async function getOllamaModelConfig(
   model: string,
+  endpoint: OllamaEndpoint = 'cloud',
 ): Promise<OllamaModelConfig> {
-  const hit = cache.get(model);
+  const key = cacheKey(endpoint, model);
+  const hit = configCache.get(key);
   if (hit) return hit;
 
-  const res = await fetch(`${nativeBaseUrl()}/api/show`, {
+  const res = await fetch(`${nativeOllamaBaseUrl(endpoint)}/api/show`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(process.env.OLLAMA_API_KEY
-        ? { Authorization: `Bearer ${process.env.OLLAMA_API_KEY}` }
-        : {}),
+      ...authHeaders(),
     },
     body: JSON.stringify({ model }),
     signal: AbortSignal.timeout(15_000),
@@ -128,6 +147,38 @@ export async function getOllamaModelConfig(
     supportsTools: capabilities.includes('tools'),
     supportsVision: capabilities.includes('vision'),
   };
-  cache.set(model, config);
+  configCache.set(key, config);
   return config;
+}
+
+/** List models installed on the Ollama daemon (GET /api/tags). */
+export async function listOllamaModels(
+  endpoint: OllamaEndpoint = 'local',
+): Promise<OllamaListedModel[]> {
+  const res = await fetch(`${nativeOllamaBaseUrl(endpoint)}/api/tags`, {
+    headers: { ...authHeaders() },
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  const data = (await res.json().catch(() => ({}))) as TagsResponse;
+  if (!res.ok) {
+    throw new Error(
+      `tags failed: ${res.status} ${data.error ?? JSON.stringify(data)}`,
+    );
+  }
+  if (data.error) throw new Error(data.error);
+
+  const models: OllamaListedModel[] = [];
+  for (const row of data.models ?? []) {
+    const id = (row.name ?? row.model ?? '').trim();
+    if (!id) continue;
+    models.push({
+      id,
+      size: typeof row.size === 'number' ? row.size : null,
+      modifiedAt: typeof row.modified_at === 'string' ? row.modified_at : null,
+      family:
+        typeof row.details?.family === 'string' ? row.details.family : null,
+    });
+  }
+  return models;
 }

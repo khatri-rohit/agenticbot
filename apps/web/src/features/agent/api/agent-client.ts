@@ -5,6 +5,8 @@ import type {
   MemoryFiles,
   MemoryOp,
   MessageAttachment,
+  OllamaEndpoint,
+  OllamaListedModel,
   OllamaModelConfig,
   StartRunRequest,
   ThinkingValue,
@@ -20,6 +22,8 @@ export type ComposerOptions = {
   streaming: boolean;
   webSearch: boolean;
   model: string;
+  /** Route chat + discovery to local Ollama daemon. */
+  local?: boolean;
   /** Model-specific thinking: false / true / effort name from `/api/show`. */
   thinking?: ThinkingValue;
 };
@@ -29,6 +33,7 @@ export type PendingMessage = {
   streaming: boolean;
   webSearch?: boolean;
   model?: string;
+  local?: boolean;
   thinking?: ThinkingValue;
   attachments?: MessageAttachment[];
 };
@@ -64,6 +69,7 @@ export async function startRun(
     rewindThroughSeq?: number;
     streaming?: boolean;
     model?: string;
+    local?: boolean;
     webSearch?: boolean;
     thinking?: ThinkingValue;
   } = {},
@@ -74,6 +80,7 @@ export async function startRun(
     rewindThroughSeq: options.rewindThroughSeq,
     streaming: options.streaming ?? true,
     model: options.model,
+    local: options.local,
     webSearch: options.webSearch,
     thinking: options.thinking,
   };
@@ -133,15 +140,32 @@ export function subscribeRun(
 
 export async function fetchOllamaModelConfig(
   model: string,
+  endpoint: OllamaEndpoint = 'cloud',
 ): Promise<OllamaModelConfig> {
+  const params = new URLSearchParams({ model, endpoint });
   const res = await fetch(
-    `${API_BASE}/api/agent/models/config?model=${encodeURIComponent(model)}`,
+    `${API_BASE}/api/agent/models/config?${params.toString()}`,
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Failed to load model config: ${res.status}`);
   }
   return res.json() as Promise<OllamaModelConfig>;
+}
+
+export type LocalOllamaModelsResponse = {
+  endpoint: OllamaEndpoint;
+  models: OllamaListedModel[];
+};
+
+/** Discover models installed on the API host's local Ollama (`/api/tags`). */
+export async function fetchLocalOllamaModels(): Promise<LocalOllamaModelsResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/models?endpoint=local`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to list local models: ${res.status}`);
+  }
+  return res.json() as Promise<LocalOllamaModelsResponse>;
 }
 
 export type ContextEstimateResponse = {
@@ -157,6 +181,7 @@ export async function fetchContextEstimate(options: {
   draft?: string;
   attachments?: MessageAttachment[];
   model?: string;
+  local?: boolean;
   webSearch?: boolean;
 }): Promise<ContextEstimateResponse> {
   const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
@@ -167,6 +192,7 @@ export async function fetchContextEstimate(options: {
       draft: options.draft,
       attachments: options.attachments,
       model: options.model,
+      local: options.local,
       webSearch: options.webSearch,
     }),
   });

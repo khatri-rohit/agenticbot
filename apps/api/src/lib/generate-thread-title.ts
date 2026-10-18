@@ -1,5 +1,5 @@
 import { getClient } from '@org/agent-core';
-import { clampChatTitle } from '@org/agent-models';
+import { clampChatTitle, type OllamaEndpoint } from '@org/agent-models';
 
 /** Fallback when the model call fails or the message is empty. */
 export function seedThreadTitle(firstMessage: string): string {
@@ -15,13 +15,14 @@ export function seedThreadTitle(firstMessage: string): string {
 export async function generateThreadTitle(
   firstMessage: string,
   model: string,
+  endpoint: OllamaEndpoint = 'cloud',
 ): Promise<string> {
   const fallback = seedThreadTitle(firstMessage);
   const snippet = firstMessage.trim().slice(0, 1000);
   if (!snippet) return fallback;
 
   try {
-    const response = await getClient().chat.completions.create({
+    const response = await getClient(endpoint).chat.completions.create({
       model,
       stream: false,
       max_tokens: 50,

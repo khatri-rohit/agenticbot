@@ -12,7 +12,10 @@ import {
   X,
 } from 'lucide-react';
 import type { ContextReport, MessageAttachment } from '@org/agent-models';
-import type { ComposerOptions } from '@/features/agent/api/agent-client';
+import {
+  fetchLocalOllamaModels,
+  type ComposerOptions,
+} from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
 import { useContextMeter } from '@/features/agent/hooks/use-context-meter';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
@@ -24,7 +27,14 @@ import {
   imageAttachErrorMessage,
 } from '@/features/agent/lib/image-attachments';
 import { toastError } from '@/hooks/use-toast';
-import { modelSupportsVision, OLLAMA_MODELS } from '@/lib/ollama-models';
+import {
+  CLOUD_OLLAMA_MODELS,
+  DEFAULT_OLLAMA_MODEL,
+  listedModelToPickerModel,
+  modelSupportsVision,
+  readStoredComposerModel,
+  type OllamaModel,
+} from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
@@ -192,6 +202,61 @@ export function ChatInput({
   composerOptionsRef.current = composerOptions;
   onComposerOptionsChangeRef.current = onComposerOptionsChange;
 
+  const localMode = composerOptions.local === true;
+  const [localModels, setLocalModels] = useState<OllamaModel[]>([]);
+  const [localModelsLoading, setLocalModelsLoading] = useState(false);
+  const [localModelsError, setLocalModelsError] = useState<string | null>(null);
+
+  // Discover installed models from the API host's Ollama when Local is on.
+  useEffect(() => {
+    if (!localMode) {
+      setLocalModels([]);
+      setLocalModelsError(null);
+      setLocalModelsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLocalModelsLoading(true);
+    setLocalModelsError(null);
+    void fetchLocalOllamaModels()
+      .then((res) => {
+        if (cancelled) return;
+        const next = res.models.map(listedModelToPickerModel);
+        setLocalModels(next);
+        setLocalModelsLoading(false);
+
+        const current = composerOptionsRef.current;
+        const stillValid = next.some((m) => m.id === current.model);
+        if (stillValid) return;
+        const preferred = readStoredComposerModel(true);
+        const pick =
+          next.find((m) => m.id === preferred)?.id ?? next[0]?.id ?? '';
+        if (pick !== current.model) {
+          onComposerOptionsChangeRef.current({
+            ...current,
+            local: true,
+            model: pick,
+            thinking: undefined,
+          });
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLocalModels([]);
+        setLocalModelsLoading(false);
+        setLocalModelsError(
+          err instanceof Error
+            ? err.message
+            : 'Could not reach Ollama on the API host (127.0.0.1:11434). Start `ollama serve` there, or set OLLAMA_LOCAL_BASE_URL.',
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [localMode]);
+
   const voice = useVoiceInput({
     onTranscript: (text) => {
       const piece = text.trim();
@@ -232,10 +297,11 @@ export function ChatInput({
     return () => window.clearTimeout(timer);
   }, [draftScope, input, pendingAttachments]);
 
-  const modelConfig = useOllamaModelConfig(composerOptions.model);
+  const modelConfig = useOllamaModelConfig(composerOptions.model, localMode);
   const contextLimit =
     modelConfig?.contextLength ??
-    OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.contextLength ??
+    CLOUD_OLLAMA_MODELS.find((m) => m.id === composerOptions.model)
+      ?.contextLength ??
     null;
   const visionOk = modelSupportsVision(
     composerOptions.model,
@@ -298,9 +364,36 @@ export function ChatInput({
     [voiceLocked],
   );
 
+  const localModelReady =
+    !localMode ||
+    (!localModelsLoading &&
+      !localModelsError &&
+      localModels.some((m) => m.id === composerOptions.model));
+
   const handleSend = useCallback(() => {
     const content = input.trim();
     if (!content && pendingAttachments.length === 0) return;
+
+    if (localMode) {
+      if (localModelsLoading) {
+        toastError(
+          'Wait until installed models finish loading from the API host.',
+          'Discovering local models',
+        );
+        return;
+      }
+      if (
+        localModelsError ||
+        !localModels.some((m) => m.id === composerOptions.model)
+      ) {
+        toastError(
+          localModelsError ??
+            'Pick a model installed on the API host, or turn off Local Ollama.',
+          'Local model not ready',
+        );
+        return;
+      }
+    }
 
     if (pendingAttachments.length > 0 && !visionOk) {
       toastError(
@@ -330,6 +423,10 @@ export function ChatInput({
   }, [
     input,
     pendingAttachments,
+    localMode,
+    localModelsLoading,
+    localModelsError,
+    localModels,
     visionOk,
     voice.active,
     voice.transcribing,
@@ -429,7 +526,7 @@ export function ChatInput({
 
   const isHero = variant === 'hero';
   const hasText = Boolean(input.trim());
-  const canSend = hasText || pendingAttachments.length > 0;
+  const canSend = (hasText || pendingAttachments.length > 0) && localModelReady;
   const showStopButton =
     isRunning && !hasText && pendingAttachments.length === 0 && Boolean(onStop);
 
@@ -458,7 +555,7 @@ export function ChatInput({
             <Plus className="size-4" strokeWidth={2.25} />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuContent align="center" className="w-52 bg-card shadow-lg">
           <DropdownMenuLabel>Composer</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -481,6 +578,24 @@ export function ChatInput({
             }
           >
             Stream response
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={localMode}
+            onCheckedChange={(checked) => {
+              const nextLocal = checked === true;
+              if (nextLocal === localMode) return;
+              const model = nextLocal
+                ? readStoredComposerModel(true)
+                : readStoredComposerModel(false) || DEFAULT_OLLAMA_MODEL;
+              onComposerOptionsChange({
+                ...composerOptions,
+                local: nextLocal,
+                model,
+                thinking: undefined,
+              });
+            }}
+          >
+            Local Ollama
           </DropdownMenuCheckboxItem>
           {hideWebSearch ? null : (
             <DropdownMenuCheckboxItem
@@ -517,9 +632,22 @@ export function ChatInput({
       <ModelPicker
         value={composerOptions.model}
         onChange={(model) =>
-          onComposerOptionsChange({ ...composerOptions, model })
+          onComposerOptionsChange({
+            ...composerOptions,
+            model,
+            thinking: undefined,
+          })
         }
         disabled={isRunning}
+        local={localMode}
+        models={localMode ? localModels : CLOUD_OLLAMA_MODELS}
+        loading={localMode && localModelsLoading}
+        emptyMessage={
+          localMode
+            ? (localModelsError ??
+              'No models on the API host. Run `ollama pull <model>` where apps/api runs, then toggle Local again.')
+            : undefined
+        }
       />
       {modelConfig?.thinking.supported ? (
         <ThinkingPicker
