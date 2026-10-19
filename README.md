@@ -20,7 +20,7 @@ For Nx-specific conventions (tasks, generators, MCP), see [AGENTS.md](./AGENTS.m
 
 ```
 User message (apps/web)
-  → POST /api/agent/run  { threadId, messages, allowedTools?, model?, streaming?, thinking? }
+  → POST /api/agent/run  { threadId, messages, allowedTools?, model?, thinking? }
   → createToolRegistry(ALL_TOOLS, clientTools ∪ globalTools)
   → RunManager.start → runLoop(modelCall, messages, tools)
   → GET /api/agent/run/:runId/events  (SSE AgentEvents)

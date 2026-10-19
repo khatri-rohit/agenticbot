@@ -10,7 +10,6 @@ import {
 } from '@org/agent-models';
 import {
   runLoop,
-  invokeModelTurn,
   streamModelTurn,
   assembleContext,
   createToolRegistry,
@@ -23,7 +22,6 @@ import {
   modeForKind,
 } from '@org/agent-core';
 
-const STREAMING = process.env.STREAMING === '1';
 
 function parseHarnessArgs(argv: string[]): {
   mode: ModeName;
@@ -125,21 +123,17 @@ async function main() {
 
     const events: AgentEvent[] = [];
     const callOptions = { temperature: mode.temperature };
-    const modelCall: ModelCallFn = STREAMING
-      ? (model, msgs, t, onDelta) =>
-          streamModelTurn(model, msgs, t, onDelta, callOptions)
-      : (model, msgs, t, onDelta) =>
-          invokeModelTurn(model, msgs, t, onDelta, callOptions);
+    const modelCall: ModelCallFn = (model, msgs, t, onDelta) =>
+      streamModelTurn(model, msgs, t, onDelta, callOptions);
 
     console.log(
-      `Profile: ${mode.name} / ${posture} (${STREAMING ? 'streaming' : 'non-streaming'})`,
+      `Profile: ${mode.name} / ${posture} (streaming)`,
     );
     if (workspaceRoot) console.log(`Workspace: ${workspaceRoot}`);
     console.log('================================================');
 
     const result = await runLoop(modelCall, messages, tools, {
       model: mode.model,
-      streaming: STREAMING,
       mode: mode.name,
       posture,
       limits: mode.limits,
@@ -169,11 +163,7 @@ async function main() {
       },
     });
 
-    if (!STREAMING) {
-      console.log('Result:', result.content);
-    } else {
-      console.log('');
-    }
+    console.log('');
     console.log('================================================');
     console.log('Status:', result.status, '| iterations:', result.iterations);
   } catch (err) {

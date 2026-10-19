@@ -85,8 +85,7 @@ export interface Message {
 /**
  * A tool call reconstructed from the model's response.
  *
- * In streaming mode this is assembled fragment-by-fragment from chunk deltas;
- * in non-streaming mode it arrives complete. Both paths produce the same shape.
+ * Assembled fragment-by-fragment from streamed chunk deltas.
  */
 export interface PendingToolCall {
   id: string;

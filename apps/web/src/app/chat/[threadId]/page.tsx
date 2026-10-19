@@ -55,7 +55,6 @@ export default function ChatThreadPage({
     const local = pending.local === true;
     const model = resolveOllamaModel(pending.model ?? '', local);
     setComposerOptions({
-      streaming: pending.streaming,
       webSearch: pending.webSearch ?? true,
       local,
       model,
@@ -65,7 +64,6 @@ export default function ChatThreadPage({
     void sendMessage(
       pending.content,
       {
-        streaming: pending.streaming,
         webSearch: pending.webSearch ?? true,
         local,
         model,

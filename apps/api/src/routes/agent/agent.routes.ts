@@ -34,7 +34,6 @@ import {
   assembleContext,
   buildExtractiveSnapshot,
   chooseCompactThroughSeq,
-  createInvokeModelCall,
   createMemoryTool,
   createPlanTools,
   createStreamModelCall,
@@ -473,7 +472,6 @@ router.post('/run', async (req: Request, res: Response) => {
     threadId,
     message,
     rewindThroughSeq,
-    streaming,
     model,
     local,
     webSearch,
@@ -528,7 +526,6 @@ router.post('/run', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'thread has no messages' });
   }
 
-  const useStreaming = streaming ?? true;
   const useModel = model ?? thread.model ?? HOME_MODE.model;
   const endpoint = endpointFromLocal(local);
 
@@ -584,14 +581,11 @@ router.post('/run', async (req: Request, res: Response) => {
     endpoint,
     prepared.mode.temperature,
   );
-  const modelCall = useStreaming
-    ? createStreamModelCall(callOptions)
-    : createInvokeModelCall(callOptions);
+  const modelCall = createStreamModelCall(callOptions);
 
   assignedRunId = runManager.start({
     threadId,
     model: useModel,
-    streaming: useStreaming,
     messages: prepared.messages,
     tools: prepared.tools,
     modelCall,

@@ -55,7 +55,6 @@ describe('runLoop limits', () => {
     ];
     const result = await runLoop(modelCall, messages, tools, {
       model: 'test',
-      streaming: false,
       mode: 'home',
       limits: {
         maxIterations: 8,
@@ -81,8 +80,7 @@ describe('runLoop limits', () => {
       tools,
       {
         model: 'test',
-        streaming: false,
-        mode: 'home',
+          mode: 'home',
       },
     );
     expect(result.status).toBe('incomplete');
@@ -103,8 +101,7 @@ describe('runLoop limits', () => {
       tools,
       {
         model: 'test',
-        streaming: false,
-        mode: 'workspace',
+          mode: 'workspace',
         hasOpenPlanWork: () => true,
         limits: { maxIterations: 8, toolTimeoutMs: 5_000 },
       },
@@ -133,8 +130,7 @@ describe('runLoop limits', () => {
       tools,
       {
         model: 'test',
-        streaming: false,
-        mode: 'workspace',
+          mode: 'workspace',
         hasOpenPlanWork: () => open,
         limits: { maxIterations: 8, toolTimeoutMs: 5_000 },
       },
@@ -196,8 +192,7 @@ describe('runLoop limits', () => {
       tools,
       {
         model: 'test',
-        streaming: false,
-        mode: 'workspace',
+          mode: 'workspace',
         limits: { maxIterations: 6, toolTimeoutMs: 5_000 },
       },
     );

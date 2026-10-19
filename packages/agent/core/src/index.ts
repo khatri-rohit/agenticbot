@@ -11,7 +11,6 @@ export {
   nativeOllamaBaseUrl,
   resolveOllamaBaseUrl,
 } from './lib/model/client';
-export { invokeModelTurn } from './lib/model/invoke';
 export { streamModelTurn } from './lib/model/stream';
 export { estimatePromptTokens } from './lib/model/estimate-prompt-tokens';
 export { parseTokenUsage } from './lib/model/parse-usage';
@@ -32,10 +31,7 @@ export type {
 } from './lib/loop/types';
 export { DEFAULT_LIMITS, type AgentLimits } from './lib/loop/limits';
 export { getContext } from './lib/loop/context';
-export {
-  createInvokeModelCall,
-  createStreamModelCall,
-} from './lib/loop/model-call';
+export { createStreamModelCall } from './lib/loop/model-call';
 
 // Tools
 export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';

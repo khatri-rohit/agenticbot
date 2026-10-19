@@ -16,8 +16,7 @@ import type {
  * - Every event carries `seq`, a monotonic per-run counter. This enables
  *   SSE reconnection with `?fromSeq=N` to replay missed events.
  * - Events are provider-agnostic. The UI never sees OpenAI chunk shapes.
- * - `assistant.delta` events (streaming mode only) carry text fragments.
- *   In non-streaming mode the client receives `assistant.completed` directly.
+ * - `assistant.delta` events carry text fragments as they arrive.
  * - Every assistant message ends with `assistant.completed` — tool-call turns
  *   included, emitted after the ledger append and before tool execution, so
  *   clients can settle each assistant message mid-run, not just at run end.
@@ -54,7 +53,6 @@ export interface RunStarted {
   runId: string;
   threadId: string;
   mode: string;
-  streaming: boolean;
   model: string;
   /** Host-applied Ask | Agent for this run. Composer chips are not this field. */
   posture: RunPosture;

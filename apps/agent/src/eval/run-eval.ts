@@ -1,7 +1,7 @@
 import { HOME_MODE } from '@org/agent-models';
 import {
   runLoop,
-  createInvokeModelCall,
+  createStreamModelCall,
   assembleContext,
   createToolRegistry,
   ALL_TOOLS,
@@ -54,12 +54,11 @@ async function runScenario(
   const stats: RunStats = { toolCalls: 0, iterations: 0, toolNames: [] };
 
   const result = await runLoop(
-    createInvokeModelCall({ temperature: HOME_MODE.temperature }),
+    createStreamModelCall({ temperature: HOME_MODE.temperature }),
     messages,
     tools,
     {
       model,
-      streaming: false,
       mode: 'home',
       trace: createTraceCollector(stats),
       limits: {

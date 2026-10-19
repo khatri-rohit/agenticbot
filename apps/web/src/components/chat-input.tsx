@@ -756,17 +756,6 @@ export function ChatInput({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuCheckboxItem
-            checked={composerOptions.streaming}
-            onCheckedChange={(checked) =>
-              onComposerOptionsChange({
-                ...composerOptions,
-                streaming: checked === true,
-              })
-            }
-          >
-            Stream response
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuCheckboxItem
             checked={localMode}
             onCheckedChange={(checked) => {
               const nextLocal = checked === true;

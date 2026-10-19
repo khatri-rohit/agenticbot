@@ -16,7 +16,6 @@ export interface Run {
   iteration: number;
   toolCallCount: number;
   model: string;
-  streaming: boolean;
   mode: string;
   startedAt: string;
   completedAt: string | null;
@@ -32,7 +31,7 @@ export interface TokenUsage {
 
 /**
  * The completed output of one model call (one iteration of the loop),
- * regardless of streaming vs non-streaming transport.
+ * regardless of transport.
  */
 export interface ModelTurn {
   content: string;
@@ -99,7 +98,6 @@ export type StartRunRequest = {
    * Used for retry (keep last user) and edit (keep the turn before that user).
    */
   rewindThroughSeq?: number;
-  streaming?: boolean;
   model?: string;
   /**
    * When true, route chat completions and /api/show to local Ollama

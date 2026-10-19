@@ -803,20 +803,16 @@ export async function runLoop(
     usage?: TokenUsage;
   }> {
     const finalMessageId = randomUUID();
-    const onTextDelta = config.streaming
-      ? (delta: string) => {
-          emit?.({
-            type: 'assistant.delta',
-            runId,
-            messageId: finalMessageId,
-            delta,
-          });
-        }
-      : undefined;
+    const onTextDelta = (delta: string) => {
+      emit?.({
+        type: 'assistant.delta',
+        runId,
+        messageId: finalMessageId,
+        delta,
+      });
+    };
 
-    if (config.streaming) {
-      emit?.({ type: 'assistant.started', runId, messageId: finalMessageId });
-    }
+    emit?.({ type: 'assistant.started', runId, messageId: finalMessageId });
 
     const turn = await finalizeWithoutTools(
       modelCall,
@@ -876,7 +872,6 @@ export async function runLoop(
     threadId,
     mode: config.mode,
     posture,
-    streaming: config.streaming,
     model: config.model,
     ...(config.estimatedPromptTokens !== undefined
       ? { estimatedPromptTokens: config.estimatedPromptTokens }
@@ -893,20 +888,16 @@ export async function runLoop(
       emit?.({ type: 'turn.started', runId, iteration: iterations });
 
       const messageId = randomUUID();
-      const onTextDelta = config.streaming
-        ? (delta: string) => {
-            emit?.({
-              type: 'assistant.delta',
-              runId,
-              messageId,
-              delta,
-            });
-          }
-        : undefined;
+      const onTextDelta = (delta: string) => {
+        emit?.({
+          type: 'assistant.delta',
+          runId,
+          messageId,
+          delta,
+        });
+      };
 
-      if (config.streaming) {
-        emit?.({ type: 'assistant.started', runId, messageId });
-      }
+      emit?.({ type: 'assistant.started', runId, messageId });
 
       const turn = await modelCall(
         config.model,

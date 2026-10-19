@@ -87,7 +87,6 @@ export class RunManager {
       runId,
       threadId: opts.threadId,
       model: opts.model,
-      streaming: opts.streaming,
       mode: opts.mode,
       posture: opts.posture ?? 'agent',
       limits: opts.limits,

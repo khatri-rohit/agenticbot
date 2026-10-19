@@ -33,7 +33,6 @@ const HOME_DRAFT_SCOPE = '__home__';
 const defaultOptions = (webSearch: boolean): ComposerOptions => {
   const local = readStoredComposerLocal();
   return {
-    streaming: true,
     webSearch,
     local,
     model: readStoredComposerModel(local),
@@ -100,7 +99,6 @@ export default function HomePage() {
               await refreshThreads();
               const stashed = stashPendingMessage({
                 content,
-                streaming: options.streaming,
                 webSearch: options.webSearch,
                 model: options.model,
                 local: options.local,

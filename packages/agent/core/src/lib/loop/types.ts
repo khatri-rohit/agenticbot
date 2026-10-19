@@ -37,7 +37,6 @@ export type RunLoopConfig = {
   runId?: string;
   threadId?: string;
   model: string;
-  streaming: boolean;
   /** Mode name for run.started (e.g. HOME_MODE.name). */
   mode: string;
   /** Host-applied Ask | Agent. Loop refuses write/exec when ask. */

@@ -62,7 +62,6 @@ export type QueuedMessage = {
 const defaultComposerOptions = (): ComposerOptions => {
   const local = readStoredComposerLocal();
   return {
-    streaming: true,
     webSearch: true,
     local,
     model: readStoredComposerModel(local),
@@ -289,7 +288,6 @@ export function useAgentRun(threadId: string | null) {
       const local = options.local === true;
       const runId = await startRun(threadId, {
         message: { content, attachments },
-        streaming: options.streaming,
         webSearch: options.webSearch,
         model: resolveOllamaModel(options.model, local),
         local,
@@ -398,7 +396,6 @@ export function useAgentRun(threadId: string | null) {
     ) => {
       const local = options.local ?? composerOptions.local === true;
       const merged: ComposerOptions = {
-        streaming: options.streaming ?? composerOptions.streaming,
         webSearch: options.webSearch ?? composerOptions.webSearch,
         local,
         model: resolveOllamaModel(
@@ -467,7 +464,6 @@ export function useAgentRun(threadId: string | null) {
     const local = composerOptions.local === true;
     const runId = await startRun(threadId, {
       rewindThroughSeq: ledger.lastUserSeq,
-      streaming: composerOptions.streaming,
       webSearch: composerOptions.webSearch,
       model: resolveOllamaModel(composerOptions.model, local),
       local,
@@ -514,7 +510,6 @@ export function useAgentRun(threadId: string | null) {
       const runId = await startRun(threadId, {
         rewindThroughSeq: userSeq - 1,
         message: { content: trimmed, attachments: lastUser.attachments },
-        streaming: composerOptions.streaming,
         webSearch: composerOptions.webSearch,
         model: resolveOllamaModel(composerOptions.model, local),
         local,
