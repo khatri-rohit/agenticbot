@@ -51,6 +51,7 @@ import {
   subscribeThreads,
 } from '../store/thread-cache';
 import { setWorkspaceRoot } from '../store/space-store';
+import { observeRunEvent } from '../lib/run-alerts';
 
 export type QueuedMessage = {
   content: string;
@@ -89,6 +90,8 @@ export function useAgentRun(threadId: string | null) {
   });
   const chatStateRef = useRef(chatState);
   chatStateRef.current = chatState;
+  const threadIdRef = useRef(threadId);
+  threadIdRef.current = threadId;
   const wasRunningRef = useRef(false);
   const syncedThreadModelRef = useRef<string | null>(null);
   const [threadKind, setThreadKind] = useState<ThreadKind>('home');
@@ -141,6 +144,8 @@ export function useAgentRun(threadId: string | null) {
       });
     return () => {
       cancelled = true;
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
     };
   }, [threadId]);
 
@@ -188,11 +193,19 @@ export function useAgentRun(threadId: string | null) {
         fromSeq,
         (event: AgentEvent) => {
           eventChain = eventChain.then(async () => {
+            if (threadIdRef.current !== threadId) return;
             const prev = currentState;
             const next = applyChatEvent(prev, event);
             await persistChatEffects(prev, event, threadId);
+            if (threadIdRef.current !== threadId) return;
             currentState = next;
             setChatState(next);
+            observeRunEvent({
+              event,
+              subscribedRunId: runId,
+              subscribedThreadId: threadId,
+              liveThreadId: threadIdRef.current,
+            });
             if (
               event.type === 'run.settled' ||
               event.type === 'run.error' ||

@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  Bell,
   Palette,
   RefreshCw,
   RotateCcw,
   Settings,
   Trash2,
   UserRound,
+  Volume2,
 } from 'lucide-react';
 import { DEFAULT_MEMORY_CAPS, type MemoryOp } from '@org/agent-models';
 import { useTheme } from '@/components/theme-provider';
@@ -30,6 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -51,6 +54,13 @@ import {
 } from '@/components/ui/tooltip';
 import type { ThemeId } from '@/lib/theme-presets';
 import { cn } from '@/lib/utils';
+import {
+  enableBrowserNotifications,
+  readNotifyPref,
+  readSoundPref,
+  writeNotifyPref,
+  writeSoundPref,
+} from '@/features/agent/lib/run-alerts';
 
 /** agent-client throws plain Error objects; normalize once for catch blocks. */
 function describeError(error: unknown): string {
@@ -64,6 +74,23 @@ export function SidebarSettings({
 }) {
   const { themeId, setThemeId, presets } = useTheme();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const [notifyOn, setNotifyOn] = useState(false);
+
+  useEffect(() => {
+    setSoundOn(readSoundPref());
+    const notify = readNotifyPref();
+    if (
+      notify &&
+      typeof Notification !== 'undefined' &&
+      Notification.permission !== 'granted'
+    ) {
+      writeNotifyPref(false);
+      setNotifyOn(false);
+      return;
+    }
+    setNotifyOn(notify);
+  }, []);
 
   const menuButton = (
     <Button
@@ -100,7 +127,7 @@ export function SidebarSettings({
           side={collapsed ? 'right' : 'top'}
           sideOffset={collapsed ? 8 : 6}
           collisionPadding={12}
-          className="w-56"
+          className="w-64"
         >
           <DropdownMenuLabel>Preferences</DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -164,6 +191,46 @@ export function SidebarSettings({
               </DropdownMenuRadioGroup>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          <DropdownMenuSeparator />
+          <DropdownMenuCheckboxItem
+            checked={soundOn}
+            className="items-start gap-2 py-2 whitespace-normal"
+            onCheckedChange={(checked) => {
+              const on = checked === true;
+              writeSoundPref(on);
+              setSoundOn(on);
+            }}
+          >
+            <Volume2 className="mt-0.5 size-4 shrink-0 opacity-80" />
+            <span className="leading-snug">
+              Play sound when agent needs you or finishes
+            </span>
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={notifyOn}
+            className="items-start gap-2 py-2 whitespace-normal"
+            onCheckedChange={(checked) => {
+              if (checked !== true) {
+                writeNotifyPref(false);
+                setNotifyOn(false);
+                return;
+              }
+              void enableBrowserNotifications().then((granted) => {
+                setNotifyOn(granted);
+                if (!granted) {
+                  toastError(
+                    'Enable notifications for this site in the browser settings.',
+                    'Notifications blocked',
+                  );
+                }
+              });
+            }}
+          >
+            <Bell className="mt-0.5 size-4 shrink-0 opacity-80" />
+            <span className="leading-snug">
+              Browser notifications when tab is in background
+            </span>
+          </DropdownMenuCheckboxItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
