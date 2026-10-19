@@ -69,7 +69,7 @@ export function ConversationRail({
           className={cn(
             'relative rounded-md border border-transparent transition-colors',
             hovered &&
-              'border-border/50 bg-popover/98 px-2 py-2 shadow-sm backdrop-blur-md',
+              'border-border/50 px-2 py-2 shadow-sm backdrop-blur-md bg-card',
           )}
         >
           {hovered ? (
@@ -84,7 +84,7 @@ export function ConversationRail({
                       TURN_ROW_MIN_H,
                       activeId === anchor.id
                         ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground cursor-pointer',
+                        : 'text-muted-foreground hover:bg-sidebar/60 hover:text-foreground cursor-pointer',
                     )}
                     title={anchor.label.slice(0, 100) + '...'}
                   >

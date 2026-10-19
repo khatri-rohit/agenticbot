@@ -65,8 +65,10 @@ function parseFrontmatter(raw: string, name: string): ParsedRule {
 }
 
 /**
- * Load AGENTS.md, PROJECT.md, and .cursor/rules/*.mdc from a workspace.
- * alwaysApply rules are always attached; glob rules are attached with their glob.
+ * Load AGENTS.md, PROJECT.md, and .cursor/rules/*.mdc from the open folder.
+ * alwaysApply rules are always attached. Glob rules are attached with their
+ * glob so the model applies them when those paths are in play. Description-only
+ * rules (no alwaysApply, no globs) stay out of this wave.
  */
 export async function loadWorkspaceRules(
   workspaceRoot: string,

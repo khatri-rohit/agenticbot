@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import path from 'node:path';
 
-import type { AgentEvent } from '@org/agent-models';
+import type { AgentEvent, ModeName } from '@org/agent-models';
 import {
   runLoop,
   invokeModelTurn,
@@ -10,29 +10,39 @@ import {
   createToolRegistry,
   ALL_TOOLS,
   consoleTrace,
+  loadWorkspaceRules,
   type ModelCallFn,
   modeForKind,
 } from '@org/agent-core';
+import { normalizeThreadKind } from '@org/agent-models';
 
 const STREAMING = process.env.STREAMING === '1';
 
 function parseHarnessArgs(argv: string[]): {
-  mode: 'research' | 'coding';
+  mode: ModeName;
   workspace?: string;
   query: string;
 } {
-  let mode: 'research' | 'coding' = 'research';
+  let mode: ModeName = 'home';
   let workspace: string | undefined;
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--mode') {
       const value = argv[++i];
-      if (value === 'coding' || value === 'research') mode = value;
+      if (
+        value === 'home' ||
+        value === 'workspace' ||
+        value === 'research' ||
+        value === 'coding'
+      ) {
+        mode = normalizeThreadKind(value);
+      }
       continue;
     }
     if (arg === '--workspace') {
       workspace = argv[++i];
+      mode = 'workspace';
       continue;
     }
     rest.push(arg);
@@ -43,17 +53,18 @@ function parseHarnessArgs(argv: string[]): {
 async function main() {
   try {
     const parsed = parseHarnessArgs(process.argv.slice(2));
-    const mode = modeForKind(parsed.mode);
+    const kind = normalizeThreadKind(parsed.mode);
+    const mode = modeForKind(kind);
     const workspaceRoot = parsed.workspace
       ? path.resolve(parsed.workspace)
       : undefined;
-    if (parsed.mode === 'coding' && !workspaceRoot) {
-      throw new Error('coding mode requires --workspace <path>');
+    if (kind === 'workspace' && !workspaceRoot) {
+      throw new Error('workspace profile requires --workspace <path>');
     }
 
     const query =
       parsed.query ||
-      (parsed.mode === 'coding'
+      (kind === 'workspace'
         ? 'List the files in this workspace and say what the project appears to be.'
         : 'What is value of PI in 3 decimal places?');
 
@@ -61,13 +72,30 @@ async function main() {
       ...new Set([...mode.allowedTools, ...mode.globalTools]),
     ]);
     const messages = getContext(query, tools, mode.name);
+    if (workspaceRoot) {
+      const rules = await loadWorkspaceRules(workspaceRoot);
+      const extra = [
+        rules.agentsMd
+          ? `# Project instructions (AGENTS.md)\n${rules.agentsMd}`
+          : '',
+        rules.project ? `# Project notes (PROJECT.md)\n${rules.project}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+      if (extra) {
+        messages.splice(1, 0, { role: 'system', content: extra });
+      }
+    }
 
     const events: AgentEvent[] = [];
+    const callOptions = { temperature: mode.temperature };
     const modelCall: ModelCallFn = STREAMING
-      ? (model, msgs, t, onDelta) => streamModelTurn(model, msgs, t, onDelta)
-      : (model, msgs, t, onDelta) => invokeModelTurn(model, msgs, t, onDelta);
+      ? (model, msgs, t, onDelta) =>
+          streamModelTurn(model, msgs, t, onDelta, callOptions)
+      : (model, msgs, t, onDelta) =>
+          invokeModelTurn(model, msgs, t, onDelta, callOptions);
 
-    console.log(`Mode: ${mode.name} (${STREAMING ? 'streaming' : 'non-streaming'})`);
+    console.log(`Profile: ${mode.name} (${STREAMING ? 'streaming' : 'non-streaming'})`);
     if (workspaceRoot) console.log(`Workspace: ${workspaceRoot}`);
     console.log('================================================');
 

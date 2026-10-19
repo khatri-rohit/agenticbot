@@ -5,11 +5,12 @@ import {
   useEffect,
   useSyncExternalStore,
 } from 'react';
-import type {
-  AgentEvent,
-  Message,
-  MessageAttachment,
-  ThreadKind,
+import {
+  isWorkspaceKind,
+  type AgentEvent,
+  type Message,
+  type MessageAttachment,
+  type ThreadKind,
 } from '@org/agent-models';
 import { toastError } from '@/hooks/use-toast';
 import {
@@ -45,7 +46,7 @@ import {
   refreshThreads,
   subscribeThreads,
 } from '../store/thread-cache';
-import { setAgentSpace, setWorkspaceRoot } from '../store/space-store';
+import { setWorkspaceRoot } from '../store/space-store';
 
 export type QueuedMessage = {
   content: string;
@@ -82,7 +83,7 @@ export function useAgentRun(threadId: string | null) {
   chatStateRef.current = chatState;
   const wasRunningRef = useRef(false);
   const syncedThreadModelRef = useRef<string | null>(null);
-  const [threadKind, setThreadKind] = useState<ThreadKind>('research');
+  const [threadKind, setThreadKind] = useState<ThreadKind>('home');
   const [ledgerEpoch, setLedgerEpoch] = useState(0);
   const bumpLedger = useCallback(() => {
     setLedgerEpoch((n) => n + 1);
@@ -96,13 +97,12 @@ export function useAgentRun(threadId: string | null) {
       if (cancelled || !thread) return;
       if (syncedThreadModelRef.current === thread.id) return;
       syncedThreadModelRef.current = thread.id;
-      const coding = thread.kind === 'coding';
-      setThreadKind(coding ? 'coding' : 'research');
-      if (coding) {
-        setAgentSpace('coding');
-        if (thread.workspaceRoot) setWorkspaceRoot(thread.workspaceRoot);
+      const workspace = isWorkspaceKind(thread.kind);
+      setThreadKind(workspace ? 'workspace' : 'home');
+      if (workspace && thread.workspaceRoot) {
+        setWorkspaceRoot(thread.workspaceRoot);
       } else {
-        setAgentSpace('research');
+        setWorkspaceRoot(null);
       }
       setComposerOptions((prev) => {
         const local = prev.local === true;
@@ -110,7 +110,7 @@ export function useAgentRun(threadId: string | null) {
         return {
           ...prev,
           model,
-          webSearch: coding ? false : prev.webSearch,
+          webSearch: !workspace,
         };
       });
     });

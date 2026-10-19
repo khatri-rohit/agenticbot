@@ -1,6 +1,12 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+} from 'react';
 import {
   ArrowUp,
   ImagePlus,
@@ -36,6 +42,7 @@ import {
   type OllamaModel,
 } from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
+import { WorkspacePicker } from '@/components/workspace-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
 import { VoiceModePill } from '@/components/voice-mode-pill';
@@ -160,6 +167,7 @@ export function ChatInput({
   /** localStorage draft scope — thread id or home key; remount via `key` when it changes. */
   draftScope,
   hideWebSearch = false,
+  showWorkspacePicker = false,
 }: {
   onSend: (
     content: string,
@@ -187,6 +195,7 @@ export function ChatInput({
   runModel?: string;
   draftScope: string;
   hideWebSearch?: boolean;
+  showWorkspacePicker?: boolean;
 }) {
   const [input, setInput] = useState(
     () => loadComposerDraft(draftScope)?.content ?? '',
@@ -195,7 +204,6 @@ export function ChatInput({
     MessageAttachment[]
   >(() => loadComposerDraft(draftScope)?.attachments ?? []);
   const [dragOver, setDragOver] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerOptionsRef = useRef(composerOptions);
@@ -295,22 +303,15 @@ export function ChatInput({
     return () => registerComposerFocus(null);
   }, []);
 
-  // Grow the textarea and flip to the bottom-toolbar layout once content
-  // needs more than one line (measured height), not a fixed clip-only pill.
-  useEffect(() => {
+  // Size the textarea to its content, before paint. The composer is always in
+  // the two-row layout, so there is no expand decision to oscillate.
+  useLayoutEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = 'auto';
     const maxHeight = variant === 'hero' ? 200 : 160;
-    const scrollHeight = ta.scrollHeight;
-    ta.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
-    const singleLineHeight = variant === 'hero' ? 40 : 36;
-    setIsExpanded(
-      scrollHeight > singleLineHeight + 2 ||
-        input.includes('\n') ||
-        pendingAttachments.length > 0,
-    );
-  }, [input, variant, pendingAttachments.length]);
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, maxHeight)}px`;
+  }, [input, variant]);
 
   // Persist draft per thread / home; cleared on send.
   useEffect(() => {
@@ -849,14 +850,14 @@ export function ChatInput({
         <Card
           className={cn(
             'min-w-0 gap-0 overflow-hidden border-0 bg-card/95 py-0 shadow-[0_4px_24px_oklch(0_0_0/0.12)] ring-1 ring-border/40 backdrop-blur-sm transition-[box-shadow,ring-color] focus-within:ring-border/65',
-            isHero || isExpanded ? 'rounded-[1.35rem]' : 'rounded-full',
+            'rounded-[1.35rem]',
             dragOver && 'ring-2 ring-ring/25',
           )}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          <CardContent className="min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <CardContent className="relative min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
             {pendingAttachments.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap gap-2 px-1 pt-0.5">
                 {pendingAttachments.map((attachment) => (
@@ -886,25 +887,19 @@ export function ChatInput({
             ) : null}
 
             {/*
-              Smart composer: one-line keeps controls inline; multi-line gives
-              the textarea full width and docks the same controls on a bottom row.
-              Grid areas keep the textarea mounted across the layout flip.
+              Composer: textarea on top, controls on a bottom row. One layout,
+              no expand/collapse flip, so nothing can oscillate while typing.
             */}
-            <div
-              className={cn(
-                'grid min-w-0 gap-1',
-                isExpanded
-                  ? 'grid-cols-[minmax(0,1fr)_auto] [grid-template-areas:"text_text"_"left_right"]'
-                  : 'grid-cols-[auto_minmax(0,1fr)_auto] items-center [grid-template-areas:"left_text_right"]',
-              )}
-            >
+            <div className="grid min-w-0 gap-1 [grid-template-areas:'text_text'_'left_right'] grid-cols-[minmax(0,1fr)_auto]">
               <div className="flex min-w-0 items-center gap-0.5 [grid-area:left]">
                 {attachMenu}
-                {isExpanded ? modelControls : null}
+                {showWorkspacePicker ? (
+                  <WorkspacePicker disabled={isRunning} />
+                ) : null}
+                {modelControls}
               </div>
               <div className="min-w-0 [grid-area:text]">{composerTextarea}</div>
               <div className="flex shrink-0 items-center gap-0.5 [grid-area:right]">
-                {isExpanded ? null : modelControls}
                 {actionControls}
               </div>
             </div>

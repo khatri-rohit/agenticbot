@@ -1,6 +1,6 @@
 # agenticbot
 
-Personal **agent harness** in an [Nx](https://nx.dev) monorepo: a host-agnostic runtime (`@org/agent-core`), Express API with SSE (`apps/api`), Next.js chat UI (`apps/web`), and a CLI eval harness (`apps/agent`). The goal is a **single-turn research experience**—deep, cited answers when tools are used, without unnecessary web calls for general knowledge.
+Personal **agent harness** in an [Nx](https://nx.dev) monorepo: a host-agnostic runtime (`@org/agent-core`), Express API with SSE (`apps/api`), Next.js chat UI (`apps/web`), and a CLI eval harness (`apps/agent`). One engine, two bindings: **Home** (chat, optional web) and **Workspace** (folder-bound coding tools).
 
 For Nx-specific conventions (tasks, generators, MCP), see [AGENTS.md](./AGENTS.md). For Cursor/agent context, see [.cursor/rules/agenticbot-system.mdc](./.cursor/rules/agenticbot-system.mdc).
 
@@ -10,7 +10,7 @@ For Nx-specific conventions (tasks, generators, MCP), see [AGENTS.md](./AGENTS.m
 
 | Layer          | Package / app       | Responsibility                                                                               |
 | -------------- | ------------------- | -------------------------------------------------------------------------------------------- |
-| Domain types   | `@org/agent-models` | `Run`, `Thread`, `AgentEvent`, `RESEARCH_MODE`, chat shapes                                  |
+| Domain types   | `@org/agent-models` | `Run`, `Thread`, `AgentEvent`, `HOME_MODE` / `WORKSPACE_MODE`, chat shapes                   |
 | Runtime (pure) | `@org/agent-core`   | `runLoop`, `RunManager`, tools, model invoke/stream, system prompt — **no HTTP, DOM, or DB** |
 | Transport      | `apps/api`          | Express: `/api/agent/*`, disk thread store, voice STT proxy                                  |
 | UI             | `apps/web`          | Chat UI + SSE via `use-agent-run` (threads from API catalog)                                 |
@@ -47,7 +47,7 @@ Tools are registered in `@org/agent-core` and filtered per run:
 - `web_search` is not “always on”; the UI toggle controls whether it is in the allow list.
 - `web_fetch` does not imply searching; use it for URLs and selective deep reads.
 
-Mode defaults live in `packages/agent/models/src/lib/mode.ts` (`RESEARCH_MODE`: `allowedTools`, `globalTools`, limits).
+Profile defaults live in `packages/agent/models/src/lib/mode.ts` (`HOME_MODE` / `WORKSPACE_MODE`: `allowedTools`, `globalTools`, limits).
 
 ---
 
@@ -190,7 +190,7 @@ npx nx affected -t typecheck build lint test
 | Search providers        | `packages/agent/core/src/lib/tools/web-search-providers.ts`    |
 | Tool definitions        | `packages/agent/core/src/lib/tools/web-search.ts`, `skills.ts` |
 | System prompt           | `packages/agent/core/src/lib/prompts/system-prompt.ts`         |
-| Research mode           | `packages/agent/models/src/lib/mode.ts`                        |
+| Home / Workspace profiles | `packages/agent/models/src/lib/mode.ts`                      |
 | API routes              | `apps/api/src/routes/agent/agent.routes.ts`                    |
 | Voice STT proxy         | `apps/api/src/routes/voice/voice.routes.ts`                    |
 | Web SSE client          | `apps/web/src/features/agent/api/agent-client.ts`              |
@@ -210,8 +210,8 @@ npx nx affected -t typecheck build lint test
 
 Client tool wiring (`apps/web/src/features/agent/api/agent-client.ts`):
 
-- `webSearch === false` → `allowedTools: []` (only **global** tools remain: `web_fetch`, `load_skill`).
-- `webSearch === true` (default) → `allowedTools: ['web_search']` plus globals.
+- Home: `web_fetch`, `load_skill`, `memory`; `web_search` when the client leaves web search on.
+- Workspace: `glob`, `grep`, `read_file`, `edit_file`, `run_terminal`, `load_skill`, `memory` (no default web search).
 
 ---
 
@@ -219,10 +219,10 @@ Client tool wiring (`apps/web/src/features/agent/api/agent-client.ts`):
 
 1. **Define the tool** in `@org/agent-core` (`Tool`: OpenAI `definition`, `guidance`, `execute`).
 2. **Register** in `ALL_TOOLS` (`packages/agent/core/src/lib/tools/registry.ts`).
-3. **Expose to the model** via mode policy:
-   - User-toggleable → `RESEARCH_MODE.allowedTools` and/or client `allowedTools`.
-   - Always on → `RESEARCH_MODE.globalTools` (merged in `agent.routes.ts`).
-4. **System prompt** — per-tool guardrails are injected from `guidance` in `buildSystemPrompt()`. Add policy in `system-prompt.ts` only when it is cross-tool behavior (e.g. research synthesis).
+3. **Expose to the model** via profile policy:
+   - User-toggleable → `HOME_MODE.allowedTools` and/or client `allowedTools`.
+   - Always on → `HOME_MODE.globalTools` or `WORKSPACE_MODE.globalTools` (merged in `agent.routes.ts`).
+4. **System prompt** — per-tool guardrails are injected from `guidance` in `buildSystemPrompt()`. Add policy in `system-prompt.ts` only when it is cross-tool behavior.
 5. **UI** — tool lifecycle events (`tool.started` / `completed` / `failed`) are generic in `chat-store.ts`; no change needed unless you add new event types.
 6. **Validate** — `npx nx run @org/agent-core:typecheck` and `@org/api:typecheck`.
 
@@ -234,7 +234,7 @@ External HTTP for tools belongs in core modules (e.g. `web_search_api.ts`), not 
 
 | Symptom                                | Things to check                                                                                         |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| No tools / wrong tools                 | Request body `allowedTools`; server merge with `RESEARCH_MODE.globalTools`; `createToolRegistry` filter |
+| No tools / wrong tools                 | Request body `allowedTools`; server merge with profile `globalTools`; `createToolRegistry` filter |
 | `web_search` fails                     | Keyless Firecrawl/Tavily 429 (shared caps); or `OLLAMA_API_KEY` path — curl tests above                 |
 | `web_fetch` fails                      | Valid full URL; provider rate limit; page blocked or huge (content truncated at 4k chars in harness)    |
 | Run stuck “running”                    | SSE disconnect; `run.completed` / `run.error`; cancel endpoint                                          |
@@ -259,7 +259,7 @@ agenticbot/
 ├── packages/
 │   └── agent/
 │       ├── core/     # @org/agent-core — loop, tools, model
-│       └── models/   # @org/agent-models — types, RESEARCH_MODE
+│       └── models/   # @org/agent-models — types, HOME_MODE / WORKSPACE_MODE
 
 ├── docker/           # Compose docs
 ├── docker-compose.yml

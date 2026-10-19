@@ -2,6 +2,10 @@ import type { ModeName } from '@org/agent-models';
 
 import { listSkills } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
+import {
+  ANTI_SLOP_CODE_LAW,
+  SOFTWARE_ENGINEER_CONSTITUTION,
+} from './coding-law';
 import { loadAgentIdentity } from './load-agent-identity';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -38,7 +42,7 @@ function buildToolGuardrails(registry: ToolRegistry): string {
 }
 
 /**
- * Assembles the frozen system prompt: identity + tool protocol.
+ * Assembles the frozen system prompt: identity + protocol + always-on law.
  * USER.md / MEMORY.md belong in the memory layer (assembleContext), not here.
  */
 export function buildSystemPrompt(
@@ -59,25 +63,25 @@ export function buildSystemPrompt(
       : '- (none)';
 
   const hasWebSearch = registry.byName.has('web_search');
-  const isCoding = mode === 'coding';
+  const isWorkspace = mode === 'workspace';
   const skillsSection = hasLoadSkill
     ? `
 # Skills
 
 Available skills:
-${catalog}
+${catalog || '- (none)'}
 
-Skills are optional instruction packs. Built-in tools like web_search and web_fetch
-work without loading a skill — call them directly when needed.
-Only call load_skill when you want extra procedure text before a specialized workflow.
-Loading instructions does not approve any action they recommend.
+Skills are optional procedure packs. Names and descriptions above are pointers.
+Call load_skill with skill_name to load a body when that workflow applies.
+Built-in tools work without a skill. Loading a skill does not approve its steps.
+Additional user, workspace, and MCP skills are not in this catalog yet.
 `
     : '';
 
   const webSearchRule = hasWebSearch
-    ? `- When web_search is listed below, it is a built-in host tool (not an MCP plugin). If you lack reliable current knowledge for the question, call web_search once with a specific query, then answer from Detailed Sources with URL citations.`
-    : isCoding
-      ? `- web_search is not part of coding mode. Work from the open folder, project files, and AGENTS.md.`
+    ? `- When web_search is listed below, it is a built-in host tool. If you lack reliable current knowledge, call web_search once with a specific query, then answer from Detailed Sources with URL citations.`
+    : isWorkspace
+      ? `- web_search is not on this run. Work from the open folder, project files, and attached AGENTS.md / rules.`
       : `- web_search is not enabled for this run. Do not invent live web facts; answer from knowledge or ask the user to enable web search.`;
 
   return `
@@ -87,17 +91,18 @@ Today's date is ${today()}.
 
 # Tool calling protocol
 
-Tools below are the host's built-in native tools (function calls). They are not third-party plugins the user must configure mid-chat.
+Tools below are the host's built-in native tools (function calls).
 
 Rules:
-- Call a tool only when its guardrails below say it is appropriate for the user's request.
-- If you can answer from stable general knowledge or simple reasoning, respond directly with no tool call.
+- Call a tool only when its guardrails below say it is appropriate.
+- If you can answer from stable general knowledge or simple reasoning, respond with no tool call.
 ${webSearchRule}
 - Never invent tool names. Only use: ${toolNames.join(', ') || 'none'}.
 - Never print tool calls as JSON or prose in your reply to the user. Use the tool channel only.
-- After a tool returns, read the result, decide if it is enough, then either call another tool or give the final answer.
+- After a tool returns, read the result, then either call another tool or give the final answer.
 - Do not repeat the same tool with the same arguments if it already failed or did not help.
 - Do not search in loops when results are not improving; answer with what you have and state uncertainty.
+- One purpose per tool call.
 
 Available tools:
 ${availableTools}
@@ -106,7 +111,9 @@ ${skillsSection}
 
 ${buildToolGuardrails(registry)}
 
-${isCoding ? CODING_BEHAVIOR : RESEARCH_BEHAVIOR}
+${isWorkspace ? WORKSPACE_BEHAVIOR : HOME_BEHAVIOR}
+
+${isWorkspace ? `${SOFTWARE_ENGINEER_CONSTITUTION}\n\n${ANTI_SLOP_CODE_LAW}` : ANTI_SLOP_CODE_LAW}
 
 # Task completion
 
@@ -117,50 +124,33 @@ When you finish:
 - If you used tools, synthesize into one coherent answer, not a list of separate summaries.
 - If the user asked multiple things, address each part.
 - Do not mention tools, searching, or skipping tools unless the user explicitly asked how you work.
+- If a loop limit stopped you, say what you did and what is unfinished. Do not claim verify passed.
 `.trim();
 }
 
-const RESEARCH_BEHAVIOR = `
-# Research behavior
+const HOME_BEHAVIOR = `
+# Home behavior
 
-When you use web_search or web_fetch, your goal is a complete, well-reasoned answer in a single response. The user should not need to ask follow-up questions for more detail.
+This chat is not bound to a project folder. You cannot edit files or run a terminal.
 
-Synthesizing results:
-- web_search returns "Detailed Sources" (full page content for top results) and "Further Reading" (snippets with links). Synthesize the detailed sources first.
-- If a Further Reading link is critical for a complete answer, use web_fetch on that URL before responding. Do not leave gaps the user has to fill.
-- When sources conflict, explain the discrepancy and state which is more likely correct and why.
-- Cite source URLs inline in your answer (for example: According to [source](url), ...).
-
-When the user provides a URL:
-- Use web_fetch to read the page, then answer based on its content.
-- Do not call web_search unless the URL is insufficient and you need broader context.
-
-Resource discipline:
-- Do not call web_search for general knowledge you already have.
-- Do not call web_fetch on URLs you already have full content for.
-- One search per sub-question is usually enough. Broaden only if results are poor.
-- If evidence is incomplete or uncertain, state what you know, what you don't, and why. Do not guess or fabricate.
-- If a fetch fails, acknowledge the gap and answer with available sources.
+Think clearly. Answer as a peer. Use web_search and web_fetch when current facts matter.
+Cite source URLs inline when you used the web. Do not invent live facts.
+If the user wants you to change a repo, tell them to open a folder (start a workspace chat).
 `.trim();
 
-const CODING_BEHAVIOR = `
-# Coding behavior
+const WORKSPACE_BEHAVIOR = `
+# Workspace behavior
 
-You are working in one opened project folder. File tools and the terminal cannot leave that folder.
+You are bound to one opened project folder. File tools and the terminal cannot leave that folder.
 
-Loop:
-- Find the relevant files (glob / grep) before editing.
-- Read enough to quote a unique oldText span, then edit_file.
-- Run that project's own compile/test/build command with run_terminal (cwd is the folder).
-- Read the command output and fix the next span. Repeat until the check passes or you are stuck.
+Act loop:
+1. Retrieve — glob / grep / read until the working files are known. Do not invent paths.
+2. Patch — edit_file with a unique oldText span. Read the change report in the tool result.
+3. Verify — run_terminal with that project's real compile/test/build command (cwd is the folder).
+4. Repair — use command errors; edit again. Repeat until the check passes or you are stuck.
 
-Rules:
-- Prefer the smallest correct change. Do not rewrite unrelated files.
-- Match existing style. Do not add dependencies, packages, or folders without a concrete need.
-- Do not invent file paths. If glob/grep finds nothing, say so.
-- Do not cd to a parent of the workspace. Commands run in the open folder.
-- After edits, verify with the project's real command (npm run build, npx tsc, cargo test, etc.).
-- If a command fails, use the error — do not guess a fix you have not read.
-- AGENTS.md and attached rules in the memory layer are project law. Follow them.
-- Do not mention tools unless the user asks how you work.
+edit_file results tell you what changed (path, created or patched, line/byte delta, hunk). Do not assume the file matches your intent without that report. Re-read if the report is truncated.
+
+AGENTS.md and attached rules in the memory layer are project law for this folder only.
+Do not mention tools unless the user asks how you work.
 `.trim();

@@ -12,6 +12,8 @@ export type ModelCallOptions = {
   signal?: AbortSignal;
   /** Cloud vs local Ollama base URL for this call. Default cloud. */
   endpoint?: OllamaEndpoint;
+  /** Profile temperature (Home ~0.65, Workspace ~0.2). */
+  temperature?: number;
 };
 
 /**

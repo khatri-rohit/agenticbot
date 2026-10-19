@@ -13,6 +13,8 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   envelopeToChatMessage,
   envelopeToUiMessage,
+  isWorkspaceKind,
+  normalizeThreadKind,
   type ChatMessage,
   type LedgerEnvelope,
   type LedgerRecord,
@@ -61,7 +63,7 @@ export class ThreadStore {
       .all() as CatalogThreadRow[];
     const threads = rows.map(rowToThread);
     return threads.filter((thread) => {
-      if (filter?.kind && (thread.kind ?? 'research') !== filter.kind) {
+      if (filter?.kind && (thread.kind ?? 'home') !== filter.kind) {
         return false;
       }
       if (
@@ -92,9 +94,9 @@ export class ThreadStore {
     const id = randomUUID();
     const now = new Date().toISOString();
     const dir = this.threadDir(id);
-    const kind: ThreadKind = options?.kind === 'coding' ? 'coding' : 'research';
+    const kind: ThreadKind = normalizeThreadKind(options?.kind);
     const workspaceRoot =
-      kind === 'coding' && options?.workspaceRoot
+      isWorkspaceKind(kind) && options?.workspaceRoot
         ? options.workspaceRoot
         : null;
     await mkdir(path.join(dir, 'blobs'), { recursive: true });
@@ -136,7 +138,9 @@ export class ThreadStore {
     const model = changes.model ?? current.model;
     const pinned =
       changes.pinned !== undefined ? (changes.pinned ? 1 : 0) : current.pinned ? 1 : 0;
-    const kind: ThreadKind = changes.kind ?? current.kind ?? 'research';
+    const kind: ThreadKind = normalizeThreadKind(
+      changes.kind ?? current.kind ?? 'home',
+    );
     const workspaceRoot =
       changes.workspaceRoot === undefined
         ? (current.workspaceRoot ?? null)
@@ -454,7 +458,7 @@ type CatalogThreadRow = {
 };
 
 function rowToThread(row: CatalogThreadRow): Thread {
-  const kind: ThreadKind = row.kind === 'coding' ? 'coding' : 'research';
+  const kind: ThreadKind = normalizeThreadKind(row.kind);
   return {
     id: row.id,
     title: row.title,
@@ -505,7 +509,11 @@ export async function openThreadStore(home: string): Promise<ThreadStore> {
       last_seq INTEGER NOT NULL DEFAULT 0
     );
   `);
-  ensureColumn(db, 'threads', 'kind', `kind TEXT NOT NULL DEFAULT 'research'`);
+  ensureColumn(db, 'threads', 'kind', `kind TEXT NOT NULL DEFAULT 'home'`);
   ensureColumn(db, 'threads', 'workspace_root', `workspace_root TEXT`);
+  db.exec(`
+    UPDATE threads SET kind = 'home' WHERE kind IN ('research', '');
+    UPDATE threads SET kind = 'workspace' WHERE kind = 'coding';
+  `);
   return new ThreadStore(home, db);
 }

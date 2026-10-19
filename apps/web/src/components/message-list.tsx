@@ -31,14 +31,14 @@ export function MessageList({
   messages,
   chatState,
   isRunning,
-  threadKind = 'research',
+  threadKind = 'home',
   onRetryLastResponse,
   onEditLastUserMessage,
 }: {
   messages: Message[] | undefined;
   chatState: ChatState;
   isRunning: boolean;
-  threadKind?: 'research' | 'coding';
+  threadKind?: 'home' | 'workspace';
   onRetryLastResponse: () => void | Promise<void>;
   onEditLastUserMessage: (
     messageId: string,

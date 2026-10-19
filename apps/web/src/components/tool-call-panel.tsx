@@ -147,23 +147,23 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
   return <Check className="size-3.5 shrink-0 text-muted-foreground/70" />;
 }
 
-/** Render one tools step from the turn timeline (coding chips or research group). */
+/** Render one tools step from the turn timeline (workspace chips or home group). */
 export function ToolStepList({
   rows,
-  variant = 'research',
+  variant = 'home',
 }: {
   rows: ToolCallRow[];
-  variant?: 'research' | 'coding';
+  variant?: 'home' | 'workspace';
 }) {
   if (rows.length === 0) return null;
 
-  if (variant === 'coding') {
-    return <CodingToolTrail rows={rows} />;
+  if (variant === 'workspace') {
+    return <WorkspaceToolTrail rows={rows} />;
   }
-  return <ResearchToolTrail rows={rows} />;
+  return <HomeToolTrail rows={rows} />;
 }
 
-function CodingToolTrail({ rows }: { rows: ToolCallRow[] }) {
+function WorkspaceToolTrail({ rows }: { rows: ToolCallRow[] }) {
   return (
     <section
       className="flex min-w-0 max-w-full flex-col gap-1.5"
@@ -178,7 +178,7 @@ function CodingToolTrail({ rows }: { rows: ToolCallRow[] }) {
   );
 }
 
-function ResearchToolTrail({ rows }: { rows: ToolCallRow[] }) {
+function HomeToolTrail({ rows }: { rows: ToolCallRow[] }) {
   const [expanded, setExpanded] = useState(true);
   const runningCount = rows.filter((row) => row.status === 'running').length;
   const failedCount = rows.filter((row) => row.status === 'failed').length;

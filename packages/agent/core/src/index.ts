@@ -2,7 +2,8 @@
 // Pure library: no HTTP, no DOM, no database.
 // Domain types live in @org/agent-models — import them from there.
 
-export { RESEARCH_MODE, CODING_MODE, modeForKind } from '@org/agent-models';
+export { HOME_MODE, WORKSPACE_MODE, modeForKind } from '@org/agent-models';
+export { listSkills } from './lib/tools/skills';
 
 // Model layer
 export {
@@ -46,6 +47,8 @@ export {
   globMatch,
 } from './lib/tools/workspace-path';
 export { assembleContext } from './lib/context/assemble-context';
+export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
+export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export type {
   AssembleContextInput,
   AssembleContextResult,

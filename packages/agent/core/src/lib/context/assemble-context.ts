@@ -23,7 +23,7 @@ export type AssembleContextInput = {
   snapshot: Snapshot | null;
   /** Hydrated ledger (blob bodies inlined). Assembler never reads disk. */
   envelopes: LedgerEnvelope[];
-  /** Drives coding vs research system-prompt behavior. */
+  /** Drives home vs workspace system-prompt behavior. */
   mode?: ModeName;
 };
 

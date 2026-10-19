@@ -12,7 +12,13 @@ import type {
   Thread,
   ThreadKind,
 } from '@org/agent-models';
-import { DEFAULT_CONTEXT_BUDGET, DEFAULT_MEMORY_CAPS } from '@org/agent-models';
+import {
+  DEFAULT_CONTEXT_BUDGET,
+  DEFAULT_MEMORY_CAPS,
+  HOME_MODE,
+  isWorkspaceKind,
+  normalizeThreadKind,
+} from '@org/agent-models';
 import {
   ALL_TOOLS,
   RunManager,
@@ -25,13 +31,12 @@ import {
   createToolRegistry,
   getOllamaModelConfig,
   listOllamaModels,
+  loadWorkspaceRules,
   modeForKind,
-  RESEARCH_MODE,
   resolveReasoningEffort,
   type ToolRegistry,
 } from '@org/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
-import { loadWorkspaceRules } from '../../lib/load-workspace-rules';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
 
@@ -61,7 +66,14 @@ async function resolveWorkspaceDir(
 }
 
 function parseThreadKind(value: unknown): ThreadKind | undefined {
-  if (value === 'coding' || value === 'research') return value;
+  if (
+    value === 'home' ||
+    value === 'workspace' ||
+    value === 'research' ||
+    value === 'coding'
+  ) {
+    return normalizeThreadKind(value);
+  }
   return undefined;
 }
 
@@ -102,9 +114,9 @@ async function prepareRun(input: {
 }> {
   const memory = getMemoryStore();
   const files = await memory.read();
-  const kind = input.thread?.kind ?? 'research';
+  const kind = normalizeThreadKind(input.thread?.kind);
   const mode = modeForKind(kind);
-  if (kind === 'coding' && input.thread?.workspaceRoot) {
+  if (isWorkspaceKind(kind) && input.thread?.workspaceRoot) {
     const rules = await loadWorkspaceRules(input.thread.workspaceRoot);
     files.agentsMd = rules.agentsMd;
     files.project = rules.project;
@@ -130,7 +142,7 @@ async function prepareRun(input: {
         }),
       }),
     ],
-    toolAllowList(mode, kind === 'coding' ? false : input.webSearch),
+    toolAllowList(mode, isWorkspaceKind(kind) ? false : input.webSearch),
   );
 
   let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
@@ -266,20 +278,20 @@ router.post('/threads', async (req: Request, res: Response) => {
   const model =
     typeof req.body?.model === 'string' && req.body.model.trim()
       ? req.body.model.trim()
-      : RESEARCH_MODE.model;
+      : HOME_MODE.model;
   const title =
     typeof req.body?.title === 'string' && req.body.title.trim()
       ? req.body.title.trim()
       : 'New Chat';
-  const kind = parseThreadKind(req.body?.kind) ?? 'research';
+  const kind = parseThreadKind(req.body?.kind) ?? 'home';
   let workspaceRoot: string | undefined;
-  if (kind === 'coding') {
+  if (isWorkspaceKind(kind)) {
     const raw =
       typeof req.body?.workspaceRoot === 'string' ? req.body.workspaceRoot : '';
     if (!raw.trim()) {
       return res
         .status(400)
-        .json({ error: 'workspaceRoot is required for coding threads' });
+        .json({ error: 'workspaceRoot is required for workspace threads' });
     }
     const resolved = await resolveWorkspaceDir(raw);
     if (!resolved.ok) return res.status(400).json({ error: resolved.error });
@@ -371,10 +383,10 @@ router.post('/run', async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Thread not found' });
   }
 
-  if (thread.kind === 'coding' && !thread.workspaceRoot) {
+  if (isWorkspaceKind(thread.kind) && !thread.workspaceRoot) {
     return res
       .status(400)
-      .json({ error: 'coding thread has no workspaceRoot' });
+      .json({ error: 'workspace thread has no workspaceRoot' });
   }
 
   if (runManager.hasActiveRun(threadId)) {
@@ -407,7 +419,7 @@ router.post('/run', async (req: Request, res: Response) => {
   }
 
   const useStreaming = streaming ?? true;
-  const useModel = model ?? thread.model ?? RESEARCH_MODE.model;
+  const useModel = model ?? thread.model ?? HOME_MODE.model;
   const endpoint = endpointFromLocal(local);
 
   if (envelopes.some((envelope) => (envelope.attachments?.length ?? 0) > 0)) {
@@ -442,7 +454,12 @@ router.post('/run', async (req: Request, res: Response) => {
     },
   });
 
-  const callOptions = await resolveCallOptions(useModel, thinking, endpoint);
+  const callOptions = await resolveCallOptions(
+    useModel,
+    thinking,
+    endpoint,
+    prepared.mode.temperature,
+  );
   const modelCall = useStreaming
     ? createStreamModelCall(callOptions)
     : createInvokeModelCall(callOptions);
@@ -531,7 +548,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
   }
 
   const estimateThread = id === 'draft' ? undefined : store.getThread(id);
-  const useModel = model ?? estimateThread?.model ?? RESEARCH_MODE.model;
+  const useModel = model ?? estimateThread?.model ?? HOME_MODE.model;
   const { report } = await prepareRun({
     threadId: id,
     thread: estimateThread,
@@ -708,9 +725,11 @@ async function resolveCallOptions(
   model: string,
   thinking: unknown,
   endpoint: OllamaEndpoint,
+  temperature: number,
 ): Promise<{
   reasoningEffort?: string;
   endpoint: OllamaEndpoint;
+  temperature: number;
 }> {
   const requested: ThinkingValue | undefined =
     typeof thinking === 'boolean' ||
@@ -723,11 +742,12 @@ async function resolveCallOptions(
     const reasoningEffort = resolveReasoningEffort(config, requested);
     return {
       endpoint,
+      temperature,
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
     };
   } catch {
     // /api/show unavailable — omit effort; still route to the chosen endpoint
-    return { endpoint };
+    return { endpoint, temperature };
   }
 }
 

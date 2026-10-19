@@ -31,6 +31,8 @@ export {
   CHAT_TITLE_MIN_WORDS,
   CHAT_TITLE_MAX_WORDS,
   clampChatTitle,
+  normalizeThreadKind,
+  isWorkspaceKind,
 } from './lib/thread.js';
 
 export type {
@@ -58,7 +60,7 @@ export {
 } from './lib/token-estimate.js';
 
 export type { ModeName, ModeConfig } from './lib/mode.js';
-export { RESEARCH_MODE, CODING_MODE, modeForKind } from './lib/mode.js';
+export { HOME_MODE, WORKSPACE_MODE, modeForKind } from './lib/mode.js';
 
 export type {
   OllamaEndpoint,

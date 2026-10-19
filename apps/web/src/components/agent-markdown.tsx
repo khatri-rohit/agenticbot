@@ -44,7 +44,7 @@ const STREAM_ANIMATION = {
 
 /**
  * Streamdown enables link-safety by default (full-screen confirm modal).
- * Research citations should open normally in a new tab.
+ * Source citations should open normally in a new tab.
  * @see https://streamdown.ai/docs — `linkSafety`
  */
 const linkSafety = { enabled: false };
