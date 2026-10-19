@@ -4,6 +4,7 @@ import { use, useEffect, useRef } from 'react';
 import { ChatHeader } from '../../../components/chat-header';
 import { MessageList } from '../../../components/message-list';
 import { ChatInput } from '../../../components/chat-input';
+import { ThreadPlanCard } from '../../../components/thread-plan-card';
 import { ChatShell } from '../../../components/chat-shell';
 import {
   useMessages,
@@ -69,27 +70,32 @@ export default function ChatThreadPage({
     <ChatShell
       header={<ChatHeader threadId={threadId} />}
       footer={
-        <ChatInput
-          key={threadId}
-          draftScope={threadId}
-          threadId={threadId}
-          onSend={sendMessage}
-          isRunning={isRunning}
-          queuedMessage={queuedMessage}
-          onSendQueuedNow={() => void sendQueuedNow()}
-          onEditQueued={editQueuedMessage}
-          composerOptions={composerOptions}
-          showPostureChips={threadKind === 'workspace'}
-          runPosture={chatState.activeRun?.posture}
-          onComposerOptionsChange={setComposerOptions}
-          onStop={() => void stopGeneration()}
-          occupiedTokens={chatState.activeRun?.occupiedTokens}
-          occupiedCoversStream={chatState.activeRun?.occupiedCoversStream}
-          estimatedPromptTokens={chatState.activeRun?.estimatedPromptTokens}
-          contextReport={chatState.activeRun?.contextReport}
-          streamingContent={chatState.activeRun?.streamingMessage?.content}
-          runModel={chatState.activeRun?.model}
-        />
+        <div className="flex min-w-0 flex-col">
+          <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
+            <ThreadPlanCard plan={chatState.plan} />
+          </div>
+          <ChatInput
+            key={threadId}
+            draftScope={threadId}
+            threadId={threadId}
+            onSend={sendMessage}
+            isRunning={isRunning}
+            queuedMessage={queuedMessage}
+            onSendQueuedNow={() => void sendQueuedNow()}
+            onEditQueued={editQueuedMessage}
+            composerOptions={composerOptions}
+            showPostureChips={threadKind === 'workspace'}
+            runPosture={chatState.activeRun?.posture}
+            onComposerOptionsChange={setComposerOptions}
+            onStop={() => void stopGeneration()}
+            occupiedTokens={chatState.activeRun?.occupiedTokens}
+            occupiedCoversStream={chatState.activeRun?.occupiedCoversStream}
+            estimatedPromptTokens={chatState.activeRun?.estimatedPromptTokens}
+            contextReport={chatState.activeRun?.contextReport}
+            streamingContent={chatState.activeRun?.streamingMessage?.content}
+            runModel={chatState.activeRun?.model}
+          />
+        </div>
       }
     >
       <MessageList

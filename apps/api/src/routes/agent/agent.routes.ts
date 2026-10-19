@@ -11,6 +11,7 @@ import type {
   ThinkingValue,
   Thread,
   ThreadKind,
+  ThreadPlan,
 } from '@org/agent-models';
 import {
   DEFAULT_CONTEXT_BUDGET,
@@ -33,6 +34,7 @@ import {
   chooseCompactThroughSeq,
   createInvokeModelCall,
   createMemoryTool,
+  createPlanTools,
   createStreamModelCall,
   createToolRegistry,
   getOllamaModelConfig,
@@ -152,6 +154,10 @@ type MemoryUpdatedPayload = {
   action: 'add' | 'patch' | 'remove';
 };
 
+type PlanUpdatedPayload = {
+  plan: ThreadPlan;
+};
+
 async function prepareRun(input: {
   threadId: string;
   thread?: Thread;
@@ -162,6 +168,7 @@ async function prepareRun(input: {
   model: string;
   endpoint?: OllamaEndpoint;
   onMemoryUpdated?: (payload: MemoryUpdatedPayload) => void;
+  onPlanUpdated?: (payload: PlanUpdatedPayload) => void;
 }): Promise<{
   tools: ToolRegistry;
   messages: ReturnType<typeof assembleContext>['messages'];
@@ -183,9 +190,27 @@ async function prepareRun(input: {
     files.agentsMd = rules.agentsMd;
     files.project = rules.project;
   }
+  const store = await getThreadStore();
+  const plan =
+    input.threadId === 'draft'
+      ? null
+      : await store.readPlan(input.threadId);
+  const planTools =
+    input.threadId === 'draft'
+      ? []
+      : createPlanTools({
+          read: () => store.readPlan(input.threadId),
+          write: async (next) => {
+            const saved = await store.writePlan(input.threadId, next);
+            input.onPlanUpdated?.({ plan: saved });
+            return saved;
+          },
+        });
+
   const tools = createToolRegistry(
     [
       ...ALL_TOOLS,
+      ...planTools,
       createMemoryTool({
         read: () => memory.read(workspaceRoot),
         apply: async (op) => {
@@ -219,7 +244,6 @@ async function prepareRun(input: {
     // Keep the default window when /api/show is unavailable.
   }
 
-  const store = await getThreadStore();
   const snapshot =
     input.threadId === 'draft'
       ? null
@@ -240,6 +264,7 @@ async function prepareRun(input: {
       mode: mode.name,
       posture,
       mentionedThreads,
+      ...(plan ? { plan } : {}),
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
@@ -425,7 +450,8 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
   const lastSeq = envelopes.at(-1)?.seq ?? 0;
   const lastUserSeq = store.lastUserSeq(envelopes);
   const snapshot = await store.readSnapshot(req.params.id);
-  return res.json({ messages, lastSeq, lastUserSeq, snapshot });
+  const plan = await store.readPlan(req.params.id);
+  return res.json({ messages, lastSeq, lastUserSeq, snapshot, plan });
 });
 
 /**
@@ -528,6 +554,15 @@ router.post('/run', async (req: Request, res: Response) => {
         type: 'memory.updated',
         runId: assignedRunId,
         ...payload,
+      });
+    },
+    onPlanUpdated: (payload) => {
+      const handle = runManager.get(assignedRunId);
+      handle?.emitter.emit({
+        type: 'plan.updated',
+        runId: assignedRunId,
+        threadId,
+        plan: payload.plan,
       });
     },
   });

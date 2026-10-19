@@ -4,6 +4,7 @@ import {
   type ContextReport,
   type RunPosture,
   type Snapshot,
+  type ThreadPlan,
 } from '@org/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
 
@@ -73,10 +74,17 @@ export type ChatState = {
   compactionNotice: CompactionNotice | null;
   /** Last limit.hit / incomplete finish, until the next run. */
   limitNotice: LimitNotice | null;
+  /** Thread-scoped plan journal + todos. Survives run.settled. */
+  plan: ThreadPlan | null;
 };
 
 export function initialChatState(): ChatState {
-  return { activeRun: null, compactionNotice: null, limitNotice: null };
+  return {
+    activeRun: null,
+    compactionNotice: null,
+    limitNotice: null,
+    plan: null,
+  };
 }
 
 export function noticeFromSnapshot(
@@ -122,6 +130,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         },
         compactionNotice: state.compactionNotice,
         limitNotice: null,
+        plan: state.plan,
       };
     }
 
@@ -244,6 +253,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           createdAt: state.compactionNotice?.createdAt ?? '',
         },
         limitNotice: state.limitNotice,
+        plan: state.plan,
       };
     }
 
@@ -262,6 +272,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           createdAt: event.createdAt,
         },
         limitNotice: state.limitNotice,
+        plan: state.plan,
       };
     }
 
@@ -285,6 +296,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         activeRun: null,
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
+        plan: state.plan,
       };
     }
 
@@ -293,6 +305,17 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         activeRun: null,
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
+        plan: state.plan,
+      };
+    }
+
+    case 'plan.updated': {
+      return {
+        ...state,
+        plan: event.plan,
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
       };
     }
 

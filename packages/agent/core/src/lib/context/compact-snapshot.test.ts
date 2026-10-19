@@ -146,4 +146,33 @@ describe('compact snapshot', () => {
     const mentionLayer = report.layers.find((layer) => layer.id === 'mentions');
     expect(mentionLayer?.tokens).toBeGreaterThan(0);
   });
+
+  it('assembleContext injects a non-empty thread plan as a system layer', () => {
+    const tools = createToolRegistry([]);
+    const { messages, report } = assembleContext({
+      tools,
+      memory: { user: '', notes: '' },
+      snapshot: null,
+      envelopes: [envelope(1, 'user', 'implement the plan')],
+      plan: {
+        threadId: 't1',
+        goal: 'Add plan journal',
+        notes: [],
+        decisions: [{ id: 'd1', at: '2026-01-01T00:00:00.000Z', text: 'Thread-scoped' }],
+        final: 'Write plan.json and inject it every run.',
+        todos: [
+          { id: 't1', content: 'Types', status: 'completed' },
+          { id: 't2', content: 'UI card', status: 'in_progress' },
+        ],
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+    const blob = JSON.stringify(messages);
+    expect(blob).toContain('Thread plan');
+    expect(blob).toContain('Add plan journal');
+    expect(blob).toContain('Write plan.json');
+    expect(blob).toContain('UI card');
+    const planLayer = report.layers.find((layer) => layer.id === 'plan');
+    expect(planLayer?.tokens).toBeGreaterThan(0);
+  });
 });

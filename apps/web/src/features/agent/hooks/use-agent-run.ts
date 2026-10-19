@@ -118,10 +118,13 @@ export function useAgentRun(threadId: string | null) {
     });
     void fetchLedger(threadId)
       .then((ledger) => {
-        if (cancelled || !ledger.snapshot) return;
+        if (cancelled) return;
         setChatState((prev) => ({
           ...prev,
-          compactionNotice: noticeFromSnapshot(ledger.snapshot!),
+          ...(ledger.snapshot
+            ? { compactionNotice: noticeFromSnapshot(ledger.snapshot) }
+            : {}),
+          plan: ledger.plan ?? prev.plan,
         }));
       })
       .catch(() => {
@@ -166,6 +169,7 @@ export function useAgentRun(threadId: string | null) {
           : {
               ...initialChatState(),
               compactionNotice: prior.compactionNotice,
+              plan: prior.plan,
             };
       const fromSeq = currentState.activeRun?.lastSeq ?? 0;
       let eventChain = Promise.resolve();
@@ -193,20 +197,24 @@ export function useAgentRun(threadId: string | null) {
               void fetchLedger(threadId)
                 .then((ledger) => {
                   setChatState((prev) => {
+                    const withPlan = {
+                      ...prev,
+                      plan: ledger.plan ?? prev.plan,
+                    };
                     if (ledger.snapshot) {
                       const fromDisk = noticeFromSnapshot(ledger.snapshot);
                       if (
                         prev.compactionNotice &&
                         prev.compactionNotice.throughSeq > fromDisk.throughSeq
                       ) {
-                        return prev;
+                        return withPlan;
                       }
-                      return { ...prev, compactionNotice: fromDisk };
+                      return { ...withPlan, compactionNotice: fromDisk };
                     }
                     if (prev.compactionNotice?.runId === event.runId) {
-                      return prev;
+                      return withPlan;
                     }
-                    return { ...prev, compactionNotice: null };
+                    return { ...withPlan, compactionNotice: null };
                   });
                 })
                 .catch(() => {

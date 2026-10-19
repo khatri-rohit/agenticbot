@@ -17,6 +17,7 @@ export type {
   ApprovalRequested,
   ApprovalResolved,
   MemoryUpdated,
+  PlanUpdated,
   ContextCompacting,
   ContextCompacted,
   TurnCompleted,
@@ -112,6 +113,31 @@ export type {
   MemoryGateResult,
 } from './lib/memory.js';
 export { DEFAULT_MEMORY_CAPS } from './lib/memory.js';
+
+export type {
+  PlanAction,
+  PlanDecision,
+  PlanNote,
+  PlanNoteKind,
+  PlanTodo,
+  PlanTodoCounts,
+  PlanTodoStatus,
+  ThreadPlan,
+} from './lib/plan.js';
+export {
+  MAX_PLAN_DECISIONS,
+  MAX_PLAN_FINAL_CHARS,
+  MAX_PLAN_GOAL_CHARS,
+  MAX_PLAN_NOTE_CHARS,
+  MAX_PLAN_NOTES,
+  MAX_PLAN_TODO_CHARS,
+  MAX_PLAN_TODOS,
+  emptyThreadPlan,
+  formatThreadPlanForPrompt,
+  isThreadPlanEmpty,
+  parseThreadPlan,
+  planTodoCounts,
+} from './lib/plan.js';
 
 export type {
   ContextBudget,

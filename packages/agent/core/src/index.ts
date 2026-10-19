@@ -63,6 +63,13 @@ export { toLedgerRecord } from './lib/loop/to-ledger-record';
 export { webSearchTool, webFetchTool } from './lib/tools/web-search';
 export { createMemoryTool } from './lib/tools/memory';
 export type { MemoryToolStore } from './lib/tools/memory';
+export {
+  applyPlanAction,
+  applyTodoUpdate,
+  createInMemoryPlanStore,
+  createPlanTools,
+} from './lib/tools/plan';
+export type { PlanStore } from './lib/tools/plan';
 export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
 // Events / trace

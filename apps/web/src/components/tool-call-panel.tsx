@@ -123,6 +123,21 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
         title: asString(args.url) || 'fetch',
         action: 'Fetch',
       };
+    case 'plan': {
+      const action = asString(args.action) || 'plan';
+      const text = asString(args.text);
+      return {
+        kind: 'other',
+        title: text || action,
+        action: action === 'set_goal' ? 'Goal' : 'Plan',
+      };
+    }
+    case 'todo':
+      return {
+        kind: 'other',
+        title: 'checklist',
+        action: 'Todos',
+      };
     default:
       return { kind: 'other', title: row.toolName, action: row.toolName };
   }

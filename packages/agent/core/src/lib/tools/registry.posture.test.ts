@@ -25,6 +25,8 @@ describe('Ask posture tool pack', () => {
       'run_terminal',
       'load_skill',
       'memory',
+      'plan',
+      'todo',
     ];
     expect(applyPostureToTools(names, 'agent')).toEqual(names);
     expect(applyPostureToTools(names, 'ask')).toEqual([
@@ -33,6 +35,8 @@ describe('Ask posture tool pack', () => {
       'read_file',
       'load_skill',
       'memory',
+      'plan',
+      'todo',
     ]);
   });
 

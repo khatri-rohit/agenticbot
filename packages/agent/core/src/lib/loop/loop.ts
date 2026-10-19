@@ -45,6 +45,29 @@ function toolArgsPreview(toolName: string, args: unknown): string {
     const intent = oldText.length > 0 ? 'patch' : 'create';
     return preview({ path, intent }, 200);
   }
+  if (
+    (toolName === 'plan' || toolName === 'todo') &&
+    args &&
+    typeof args === 'object' &&
+    !Array.isArray(args)
+  ) {
+    const record = args as Record<string, unknown>;
+    if (toolName === 'plan') {
+      return preview(
+        {
+          action: record.action,
+          kind: record.kind,
+          text:
+            typeof record.text === 'string'
+              ? record.text.slice(0, 80)
+              : undefined,
+        },
+        200,
+      );
+    }
+    const todos = Array.isArray(record.todos) ? record.todos.length : 0;
+    return preview({ merge: record.merge, todos }, 200);
+  }
   return preview(args, 200);
 }
 

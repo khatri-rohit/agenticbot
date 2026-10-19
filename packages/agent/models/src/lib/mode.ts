@@ -28,7 +28,7 @@ export const HOME_MODE: ModeConfig = {
   model: 'glm-5.2:cloud',
   temperature: 0.65,
   allowedTools: ['web_search'],
-  globalTools: ['web_fetch', 'load_skill', 'memory'],
+  globalTools: ['web_fetch', 'load_skill', 'memory', 'plan', 'todo'],
   limits: {
     maxIterations: 40,
     maxToolCalls: 60,
@@ -51,6 +51,8 @@ export const WORKSPACE_MODE: ModeConfig = {
     'run_terminal',
     'load_skill',
     'memory',
+    'plan',
+    'todo',
   ],
   limits: {
     maxIterations: 100,

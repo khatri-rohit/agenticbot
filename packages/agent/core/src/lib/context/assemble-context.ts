@@ -7,11 +7,14 @@ import type {
   ModeName,
   RunPosture,
   Snapshot,
+  ThreadPlan,
 } from '@org/agent-models';
 import {
   CHARS_PER_TOKEN,
   DEFAULT_CONTEXT_BUDGET,
   envelopeToChatMessage,
+  formatThreadPlanForPrompt,
+  isThreadPlanEmpty,
 } from '@org/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
@@ -40,6 +43,8 @@ export type AssembleContextInput = {
    * Packed by the host; not ledger rows of this thread.
    */
   mentionedThreads?: MentionedThreadContext[];
+  /** Thread-scoped plan journal + todos. Injected when non-empty. */
+  plan?: ThreadPlan | null;
 };
 
 export type AssembleContextResult = {
@@ -172,6 +177,13 @@ export function assembleContext(
     content: memoryText,
   };
 
+  const plan = input.plan ?? null;
+  const planText =
+    plan && !isThreadPlanEmpty(plan) ? formatThreadPlanForPrompt(plan) : '';
+  const planMessage: ChatCompletionMessageParam | null = planText
+    ? { role: 'system', content: planText }
+    : null;
+
   const afterSeq = input.snapshot?.throughSeq ?? 0;
   const live = input.envelopes.filter((envelope) => envelope.seq > afterSeq);
 
@@ -238,6 +250,7 @@ export function assembleContext(
   const messages: ChatCompletionMessageParam[] = [
     systemMessage,
     memoryMessage,
+    ...(planMessage ? [planMessage] : []),
     ...(mentionsMessage ? [mentionsMessage] : []),
     ...(briefMessage ? [briefMessage] : []),
     ...tailMessages,
@@ -254,6 +267,11 @@ export function assembleContext(
       id: 'memory',
       label: 'Memory',
       tokens: charsToTokens(memoryText.length) + 4,
+    },
+    {
+      id: 'plan',
+      label: 'Plan',
+      tokens: planText ? charsToTokens(planText.length) + 4 : 0,
     },
     {
       id: 'mentions',

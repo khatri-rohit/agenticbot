@@ -1,5 +1,6 @@
 import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
+import type { ThreadPlan } from './plan.js';
 import type { RunPosture, TokenUsage } from './run.js';
 import type { ToolRisk } from './tool-context.js';
 
@@ -31,6 +32,7 @@ export type AgentEvent =
   | ApprovalRequested
   | ApprovalResolved
   | MemoryUpdated
+  | PlanUpdated
   | ContextCompacting
   | ContextCompacted
   | TurnCompleted
@@ -179,6 +181,15 @@ export interface MemoryUpdated {
   opId: string;
   target: MemoryTarget;
   action: 'add' | 'patch' | 'remove' | 'revert';
+}
+
+/** Thread plan journal or todos changed. UI replaces the live plan card. */
+export interface PlanUpdated {
+  seq: number;
+  type: 'plan.updated';
+  runId: string;
+  threadId: string;
+  plan: ThreadPlan;
 }
 
 /** Host started M4 compaction after the model loop (still before run.settled). */

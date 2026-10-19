@@ -15,6 +15,8 @@ import {
   createToolRegistry,
   ALL_TOOLS,
   consoleTrace,
+  createInMemoryPlanStore,
+  createPlanTools,
   loadWorkspaceRules,
   type ModelCallFn,
   modeForKind,
@@ -86,7 +88,13 @@ async function main() {
       [...new Set([...mode.allowedTools, ...mode.globalTools])],
       posture,
     );
-    const tools = createToolRegistry(ALL_TOOLS, toolNames, posture);
+    const planStore = createInMemoryPlanStore('cli');
+    const tools = createToolRegistry(
+      [...ALL_TOOLS, ...createPlanTools(planStore)],
+      toolNames,
+      posture,
+    );
+    const plan = await planStore.read();
     const rules = workspaceRoot
       ? await loadWorkspaceRules(workspaceRoot)
       : { agentsMd: '', project: '' };
@@ -99,6 +107,7 @@ async function main() {
         ...(rules.project ? { project: rules.project } : {}),
       },
       snapshot: null,
+      plan,
       envelopes: [
         {
           v: 1,

@@ -11,10 +11,12 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
+  emptyThreadPlan,
   envelopeToChatMessage,
   envelopeToUiMessage,
   isWorkspaceKind,
   normalizeThreadKind,
+  parseThreadPlan,
   sameWorkspaceRoot,
   type ChatMessage,
   type LedgerEnvelope,
@@ -24,6 +26,7 @@ import {
   type Snapshot,
   type Thread,
   type ThreadKind,
+  type ThreadPlan,
 } from '@org/agent-models';
 
 const BLOB_INLINE_MAX = 8 * 1024;
@@ -410,6 +413,32 @@ export class ThreadStore {
     await rm(this.snapshotPath(threadId), { force: true });
   }
 
+  async readPlan(threadId: string): Promise<ThreadPlan> {
+    try {
+      const raw = await readFile(this.planPath(threadId), 'utf8');
+      return parseThreadPlan(JSON.parse(raw), threadId);
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') return emptyThreadPlan(threadId);
+      if (error instanceof SyntaxError) return emptyThreadPlan(threadId);
+      throw error;
+    }
+  }
+
+  async writePlan(threadId: string, plan: ThreadPlan): Promise<ThreadPlan> {
+    const next: ThreadPlan = {
+      ...plan,
+      threadId,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeFile(
+      this.planPath(threadId),
+      `${JSON.stringify(next, null, 2)}\n`,
+      'utf8',
+    );
+    return next;
+  }
+
   private async invalidateSnapshot(
     threadId: string,
     keepThroughSeq: number,
@@ -444,6 +473,10 @@ export class ThreadStore {
 
   private snapshotPath(threadId: string): string {
     return path.join(this.threadDir(threadId), 'snapshot.json');
+  }
+
+  private planPath(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'plan.json');
   }
 }
 
