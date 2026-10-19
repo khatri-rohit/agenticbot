@@ -14,10 +14,12 @@ import {
   emptyThreadPlan,
   envelopeToChatMessage,
   envelopeToUiMessage,
+  isThreadPlanEmpty,
   isWorkspaceKind,
   normalizeThreadKind,
   parseThreadPlan,
   sameWorkspaceRoot,
+  selectPlanForRewind,
   type ChatMessage,
   type LedgerEnvelope,
   type LedgerRecord,
@@ -30,6 +32,7 @@ import {
 } from '@org/agent-models';
 
 const BLOB_INLINE_MAX = 8 * 1024;
+const MAX_PLAN_REVISIONS = 50;
 
 export type AppendInput = {
   threadId: string;
@@ -387,6 +390,7 @@ export class ThreadStore {
       )
       .run(lastSeq, now, threadId);
     await this.invalidateSnapshot(threadId, keepThroughSeq);
+    await this.restorePlanAfterRewind(threadId, keepThroughSeq);
   }
 
   async readSnapshot(threadId: string): Promise<Snapshot | null> {
@@ -426,17 +430,85 @@ export class ThreadStore {
   }
 
   async writePlan(threadId: string, plan: ThreadPlan): Promise<ThreadPlan> {
+    return this.serialize(threadId, () => this.writePlanUnlocked(threadId, plan));
+  }
+
+  private async writePlanUnlocked(
+    threadId: string,
+    plan: ThreadPlan,
+  ): Promise<ThreadPlan> {
+    const ledgerSeq = this.seqs.get(threadId) ?? 0;
     const next: ThreadPlan = {
       ...plan,
       threadId,
       updatedAt: new Date().toISOString(),
+      ledgerSeq,
     };
-    await writeFile(
-      this.planPath(threadId),
-      `${JSON.stringify(next, null, 2)}\n`,
-      'utf8',
+    const revisions = await this.readPlanLog(threadId);
+    if (revisions.length === 0) {
+      const existing = await this.readPlan(threadId);
+      if (!isThreadPlanEmpty(existing)) {
+        revisions.push({
+          ...existing,
+          ledgerSeq: existing.ledgerSeq ?? 0,
+        });
+      }
+    }
+    revisions.push(next);
+    await this.writePlanFiles(
+      threadId,
+      next,
+      revisions.slice(-MAX_PLAN_REVISIONS),
     );
     return next;
+  }
+
+  private async restorePlanAfterRewind(
+    threadId: string,
+    keepThroughSeq: number,
+  ): Promise<void> {
+    const revisions = await this.readPlanLog(threadId);
+    if (revisions.length === 0) return;
+    const restored = selectPlanForRewind(
+      revisions,
+      keepThroughSeq,
+      threadId,
+    );
+    const kept = revisions.filter(
+      (revision) => (revision.ledgerSeq ?? 0) <= keepThroughSeq,
+    );
+    await this.writePlanFiles(threadId, restored, kept);
+  }
+
+  private async readPlanLog(threadId: string): Promise<ThreadPlan[]> {
+    try {
+      const raw = await readFile(this.planLogPath(threadId), 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((item) => parseThreadPlan(item, threadId));
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') return [];
+      if (error instanceof SyntaxError) return [];
+      throw error;
+    }
+  }
+
+  private async writePlanFiles(
+    threadId: string,
+    plan: ThreadPlan,
+    revisions: ThreadPlan[],
+  ): Promise<void> {
+    await writeFile(
+      this.planPath(threadId),
+      `${JSON.stringify(plan, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      this.planLogPath(threadId),
+      `${JSON.stringify(revisions, null, 2)}\n`,
+      'utf8',
+    );
   }
 
   private async invalidateSnapshot(
@@ -477,6 +549,10 @@ export class ThreadStore {
 
   private planPath(threadId: string): string {
     return path.join(this.threadDir(threadId), 'plan.json');
+  }
+
+  private planLogPath(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'plan-log.json');
   }
 }
 

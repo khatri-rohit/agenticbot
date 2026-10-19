@@ -115,6 +115,44 @@ function stubToolContent(envelope: LedgerEnvelope): string {
   return `(stub) tool ${envelope.record.tool_call_id} omitted (${n} chars)`;
 }
 
+/**
+ * In-loop sibling of assembleContext stubbing. Mutates live Chat Completions
+ * messages so a long tool turn does not keep every result at full size.
+ * Ledger rows stay full; the next assembleContext pass stubs from seq.
+ */
+export function stubLiveToolResults(
+  messages: ChatCompletionMessageParam[],
+  budget: ContextBudget = DEFAULT_CONTEXT_BUDGET,
+): number {
+  const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
+  const userIndexes: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i]?.role === 'user') userIndexes.push(i);
+  }
+  const keepFromIndex =
+    userIndexes.length <= budget.keepToolResultsForTurns
+      ? 0
+      : (userIndexes[userIndexes.length - budget.keepToolResultsForTurns] ?? 0);
+
+  let stubbed = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    if (!message || message.role !== 'tool') continue;
+    const content = typeof message.content === 'string' ? message.content : '';
+    if (content.startsWith('(stub)')) continue;
+    const old = i < keepFromIndex;
+    const overCap = content.length > maxToolChars;
+    if (!old && !overCap) continue;
+    messages[i] = {
+      role: 'tool',
+      tool_call_id: message.tool_call_id,
+      content: `(stub) tool ${message.tool_call_id} omitted (${content.length} chars)`,
+    };
+    stubbed++;
+  }
+  return stubbed;
+}
+
 function toParam(
   envelope: LedgerEnvelope,
   stub: boolean,

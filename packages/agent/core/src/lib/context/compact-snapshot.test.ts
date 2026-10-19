@@ -5,7 +5,7 @@ import {
   buildExtractiveSnapshot,
   chooseCompactThroughSeq,
 } from './compact-snapshot';
-import { assembleContext } from './assemble-context';
+import { assembleContext, stubLiveToolResults } from './assemble-context';
 import { createToolRegistry } from '../tools/registry';
 
 function envelope(
@@ -172,7 +172,29 @@ describe('compact snapshot', () => {
     expect(blob).toContain('Add plan journal');
     expect(blob).toContain('Write plan.json');
     expect(blob).toContain('UI card');
+    expect(blob).not.toContain('Thread-scoped');
     const planLayer = report.layers.find((layer) => layer.id === 'plan');
     expect(planLayer?.tokens).toBeGreaterThan(0);
+  });
+
+  it('stubLiveToolResults caps oversized tool rows in the live prompt', () => {
+    const huge = 'x'.repeat(20_000);
+    const messages = [
+      { role: 'system' as const, content: 'sys' },
+      { role: 'user' as const, content: 'go' },
+      {
+        role: 'tool' as const,
+        tool_call_id: 'c1',
+        content: huge,
+      },
+    ];
+    const stubbed = stubLiveToolResults(messages);
+    expect(stubbed).toBe(1);
+    const tool = messages[2];
+    expect(tool?.role).toBe('tool');
+    if (tool?.role === 'tool') {
+      expect(tool.content).toMatch(/^\(stub\)/);
+      expect(tool.content.length).toBeLessThan(huge.length);
+    }
   });
 });

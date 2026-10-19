@@ -2,6 +2,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import type {
   AgentEventWithoutSeq,
+  ContextBudget,
   ContextReport,
   LedgerRecord,
   RunPosture,
@@ -57,6 +58,13 @@ export type RunLoopConfig = {
    * Not used for SSE preview deltas. Host owns append (ledger in M1).
    */
   onMessage?: (record: LedgerRecord) => void | Promise<void>;
+  /**
+   * Host reads the live plan. When a Final plan still has open todos,
+   * the loop nudges once, then finishes incomplete instead of a clean stop.
+   */
+  hasOpenPlanWork?: () => boolean | Promise<boolean>;
+  /** Budget for mid-turn tool-result stubbing. Defaults to DEFAULT_CONTEXT_BUDGET. */
+  contextBudget?: ContextBudget;
 };
 
 export type RunLoopResult = {

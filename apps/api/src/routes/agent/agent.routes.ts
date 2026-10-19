@@ -23,6 +23,7 @@ import {
   isWorkspaceKind,
   normalizeRunPosture,
   normalizeThreadKind,
+  planHasOpenWork,
   threadMentions,
   type RunPosture,
 } from '@org/agent-models';
@@ -594,6 +595,8 @@ router.post('/run', async (req: Request, res: Response) => {
       if (record.role === 'system') return;
       await store.append({ threadId, runId: assignedRunId, record });
     },
+    hasOpenPlanWork: async () =>
+      planHasOpenWork(await store.readPlan(threadId)),
     onFinished: () =>
       maybeCompactThread({
         threadId,
@@ -602,6 +605,14 @@ router.post('/run', async (req: Request, res: Response) => {
         webSearch,
         endpoint,
       }),
+  });
+
+  const started = runManager.get(assignedRunId);
+  started?.emitter.emit({
+    type: 'plan.updated',
+    runId: assignedRunId,
+    threadId,
+    plan: await store.readPlan(threadId),
   });
 
   // First turn: title via the same chat model (runs in parallel with the agent).

@@ -5,17 +5,28 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import {
+  DEFAULT_CONTEXT_BUDGET,
   isAskStrippedTool,
   type TokenUsage,
   type ToolContext,
 } from '@org/agent-models';
 
+import { stubLiveToolResults } from '../context/assemble-context';
 import { consoleTrace, type TraceEvent } from '../events/trace';
 import { DEFAULT_LIMITS } from './limits';
 import type { ModelTurn } from '../model/types';
-import type { ToolRegistry } from '../tools/type';
+import type { Tool, ToolRegistry } from '../tools/type';
 import { toLedgerRecord } from './to-ledger-record';
 import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
+
+const OPEN_PLAN_WORK_NUDGE =
+  'Open todos remain on the Final plan. Update todo status or finish those items before ending the turn. Do not claim the work is done.';
+
+function isParallelSafeTool(tool: Tool | undefined): boolean {
+  if (!tool) return false;
+  const risk = tool.risk ?? 'read';
+  return risk === 'read' || risk === 'network';
+}
 
 export type {
   ModelCallFn,
@@ -169,7 +180,9 @@ export async function runLoop(
 
   let iterations = 0;
   let totalToolCalls = 0;
+  let planWorkNudges = 0;
   const repeatedCalls = new Map<string, number>();
+  const contextBudget = config.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
 
   async function appendDurable(
     message: ChatCompletionMessageParam,
@@ -212,6 +225,355 @@ export async function runLoop(
       iteration,
       ...(usage ? { usage } : {}),
     });
+  }
+
+  type ReadyToolCall = {
+    toolCall: ChatCompletionMessageToolCall;
+    toolName: string;
+    tool: Tool;
+    args: Record<string, unknown>;
+  };
+
+  type AdmitResult =
+    | { kind: 'ready'; call: ReadyToolCall }
+    | { kind: 'filled' }
+    | {
+        kind: 'halt';
+        reason: 'limit' | 'repeat';
+        toolCall: ChatCompletionMessageToolCall;
+      };
+
+  async function admitToolCall(
+    toolCall: ChatCompletionMessageToolCall,
+  ): Promise<AdmitResult> {
+    if (toolCall.type !== 'function') {
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: 'Unsupported tool call type.',
+      });
+      return { kind: 'filled' };
+    }
+
+    totalToolCalls++;
+
+    if (totalToolCalls > limits.maxToolCalls) {
+      trace({
+        type: 'limit',
+        runId,
+        iteration: iterations,
+        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
+      });
+      emit?.({
+        type: 'limit.hit',
+        runId,
+        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
+      });
+      return { kind: 'halt', reason: 'limit', toolCall };
+    }
+
+    const toolName = toolCall.function.name;
+    const tool = tools.byName.get(toolName);
+
+    if (!tool) {
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: `Tool "${toolName}" does not exist.`,
+      });
+      return { kind: 'filled' };
+    }
+
+    if (posture === 'ask' && isAskStrippedTool(toolName)) {
+      const blocked =
+        'Blocked: this run is Ask (read-only). Switch the composer to Agent to edit files or run commands.';
+      emit?.({
+        type: 'tool.started',
+        runId,
+        toolCallId: toolCall.id,
+        toolName,
+        argsPreview: toolArgsPreview(toolName, {}),
+      });
+      emit?.({
+        type: 'tool.completed',
+        runId,
+        toolCallId: toolCall.id,
+        toolName,
+        durationMs: 0,
+        resultPreview: preview(blocked, 200),
+      });
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: blocked,
+      });
+      return { kind: 'filled' };
+    }
+
+    let args: Record<string, unknown>;
+    try {
+      args = JSON.parse(toolCall.function.arguments);
+    } catch {
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: 'Invalid tool arguments. Expected valid JSON.',
+      });
+      return { kind: 'filled' };
+    }
+
+    const callKey = toolCallKey(toolName, args);
+    const repeatCount = (repeatedCalls.get(callKey) ?? 0) + 1;
+    repeatedCalls.set(callKey, repeatCount);
+
+    if (repeatCount > limits.maxRepeatedToolCalls) {
+      trace({
+        type: 'limit',
+        runId,
+        iteration: iterations,
+        reason: `repeated tool call blocked: ${toolName}`,
+      });
+      emit?.({
+        type: 'limit.hit',
+        runId,
+        reason: `repeated tool call blocked: ${toolName}`,
+      });
+      return { kind: 'halt', reason: 'repeat', toolCall };
+    }
+
+    return {
+      kind: 'ready',
+      call: { toolCall, toolName, tool, args },
+    };
+  }
+
+  async function finishHalt(
+    halt: Extract<AdmitResult, { kind: 'halt' }>,
+    fromIndex: number,
+    toolCalls: ChatCompletionMessageToolCall[],
+  ): Promise<RunLoopResult> {
+    if (halt.reason === 'repeat') {
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: halt.toolCall.id,
+        content:
+          'This exact tool call has already been attempted multiple times. Do not repeat it.',
+      });
+      await skipToolCalls(
+        toolCalls.slice(fromIndex + 1),
+        'Skipped: tool call limit reached.',
+      );
+    } else {
+      await skipToolCalls(
+        toolCalls.slice(fromIndex),
+        'Skipped: tool call limit reached.',
+      );
+    }
+    return completeAfterLimit();
+  }
+
+  async function executeReadyCall(
+    call: ReadyToolCall,
+    remainingOnAbort: ChatCompletionMessageToolCall[],
+  ): Promise<'ok' | 'halt'> {
+    const { toolCall, toolName, tool, args } = call;
+    trace({
+      type: 'tool_start',
+      runId,
+      iteration: iterations,
+      toolName,
+      args,
+    });
+    emit?.({
+      type: 'tool.started',
+      runId,
+      toolCallId: toolCall.id,
+      toolName,
+      argsPreview: toolArgsPreview(toolName, args),
+    });
+
+    const startedAt = Date.now();
+    const toolCtx = buildToolContext();
+
+    try {
+      const result = await withTimeout(
+        tool.execute(args, toolCtx),
+        limits.toolTimeoutMs,
+        signal,
+      );
+      const durationMs = Date.now() - startedAt;
+      trace({
+        type: 'tool_complete',
+        runId,
+        iteration: iterations,
+        toolName,
+        durationMs,
+        resultPreview: preview(result),
+      });
+      emit?.({
+        type: 'tool.completed',
+        runId,
+        toolCallId: toolCall.id,
+        toolName,
+        durationMs,
+        resultPreview: preview(result, 200),
+      });
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: result,
+      });
+      return 'ok';
+    } catch (error) {
+      if (signal?.aborted) {
+        await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
+        throwIfAborted(signal);
+      }
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      trace({
+        type: 'tool_error',
+        runId,
+        iteration: iterations,
+        toolName,
+        error: errorMessage,
+      });
+      emit?.({
+        type: 'tool.failed',
+        runId,
+        toolCallId: toolCall.id,
+        error: errorMessage,
+      });
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: `Tool execution failed: ${errorMessage}`,
+      });
+      return 'ok';
+    }
+  }
+
+  async function executeReadyBatch(
+    batch: ReadyToolCall[],
+    remainingAfter: ChatCompletionMessageToolCall[],
+  ): Promise<void> {
+    if (batch.length === 1) {
+      const only = batch[0];
+      if (only) {
+        await executeReadyCall(only, [only.toolCall, ...remainingAfter]);
+      }
+      return;
+    }
+
+    const toolCtx = buildToolContext();
+    for (const call of batch) {
+      trace({
+        type: 'tool_start',
+        runId,
+        iteration: iterations,
+        toolName: call.toolName,
+        args: call.args,
+      });
+      emit?.({
+        type: 'tool.started',
+        runId,
+        toolCallId: call.toolCall.id,
+        toolName: call.toolName,
+        argsPreview: toolArgsPreview(call.toolName, call.args),
+      });
+    }
+
+    const settled = await Promise.all(
+      batch.map(async (call) => {
+        const started = Date.now();
+        try {
+          const result = await withTimeout(
+            call.tool.execute(call.args, toolCtx),
+            limits.toolTimeoutMs,
+            signal,
+          );
+          return { call, ok: true as const, result, durationMs: Date.now() - started };
+        } catch (error) {
+          return {
+            call,
+            ok: false as const,
+            error,
+            durationMs: Date.now() - started,
+          };
+        }
+      }),
+    );
+
+    if (signal?.aborted) {
+      await skipToolCalls(
+        [...batch.map((call) => call.toolCall), ...remainingAfter],
+        'Skipped: run cancelled.',
+      );
+      throwIfAborted(signal);
+    }
+
+    for (const item of settled) {
+      const { call, durationMs } = item;
+      if (item.ok) {
+        trace({
+          type: 'tool_complete',
+          runId,
+          iteration: iterations,
+          toolName: call.toolName,
+          durationMs,
+          resultPreview: preview(item.result),
+        });
+        emit?.({
+          type: 'tool.completed',
+          runId,
+          toolCallId: call.toolCall.id,
+          toolName: call.toolName,
+          durationMs,
+          resultPreview: preview(item.result, 200),
+        });
+        await appendDurable({
+          role: 'tool',
+          tool_call_id: call.toolCall.id,
+          content: item.result,
+        });
+        continue;
+      }
+
+      if (signal?.aborted) {
+        await skipToolCalls(
+          [
+            call.toolCall,
+            ...settled
+              .slice(settled.indexOf(item) + 1)
+              .map((entry) => entry.call.toolCall),
+            ...remainingAfter,
+          ],
+          'Skipped: run cancelled.',
+        );
+        throwIfAborted(signal);
+      }
+
+      const errorMessage =
+        item.error instanceof Error ? item.error.message : String(item.error);
+      trace({
+        type: 'tool_error',
+        runId,
+        iteration: iterations,
+        toolName: call.toolName,
+        error: errorMessage,
+      });
+      emit?.({
+        type: 'tool.failed',
+        runId,
+        toolCallId: call.toolCall.id,
+        error: errorMessage,
+      });
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: call.toolCall.id,
+        content: `Tool execution failed: ${errorMessage}`,
+      });
+    }
   }
 
   /** Fresh message lifecycle for limit finalization (never reuse the tool-turn id). */
@@ -358,7 +720,8 @@ export async function runLoop(
           content: turn.content,
         });
 
-        for (const [index, toolCall] of turn.toolCalls.entries()) {
+        let index = 0;
+        while (index < turn.toolCalls.length) {
           // The assistant tool_calls row above is already durable. On abort,
           // every remaining call still needs a tool row or ledger replay breaks.
           if (signal?.aborted) {
@@ -369,199 +732,69 @@ export async function runLoop(
             throwIfAborted(signal);
           }
 
-          if (toolCall.type !== 'function') {
+          const toolCall = turn.toolCalls[index];
+          if (!toolCall || toolCall.type !== 'function') {
+            index += 1;
             continue;
           }
 
-          totalToolCalls++;
-
-          if (totalToolCalls > limits.maxToolCalls) {
-            trace({
-              type: 'limit',
-              runId,
-              iteration: iterations,
-              reason: `max tool calls exceeded (${limits.maxToolCalls})`,
-            });
-            emit?.({
-              type: 'limit.hit',
-              runId,
-              reason: `max tool calls exceeded (${limits.maxToolCalls})`,
-            });
-
-            await skipToolCalls(
-              turn.toolCalls.slice(index),
-              'Skipped: tool call limit reached.',
-            );
-
-            return completeAfterLimit();
+          const admitted = await admitToolCall(toolCall);
+          if (admitted.kind === 'halt') {
+            return finishHalt(admitted, index, turn.toolCalls);
           }
-
-          const toolName = toolCall.function.name;
-          const tool = tools.byName.get(toolName);
-
-          if (!tool) {
-            await appendDurable({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: `Tool "${toolName}" does not exist.`,
-            });
+          if (admitted.kind === 'filled') {
+            index += 1;
             continue;
           }
 
-          if (posture === 'ask' && isAskStrippedTool(toolName)) {
-            const blocked =
-              'Blocked: this run is Ask (read-only). Switch the composer to Agent to edit files or run commands.';
-            emit?.({
-              type: 'tool.started',
-              runId,
-              toolCallId: toolCall.id,
-              toolName,
-              argsPreview: toolArgsPreview(toolName, {}),
-            });
-            emit?.({
-              type: 'tool.completed',
-              runId,
-              toolCallId: toolCall.id,
-              toolName,
-              durationMs: 0,
-              resultPreview: preview(blocked, 200),
-            });
-            await appendDurable({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: blocked,
-            });
-            continue;
-          }
-
-          let args: Record<string, unknown>;
-          try {
-            args = JSON.parse(toolCall.function.arguments);
-          } catch {
-            await appendDurable({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: 'Invalid tool arguments. Expected valid JSON.',
-            });
-            continue;
-          }
-
-          const callKey = toolCallKey(toolName, args);
-          const repeatCount = (repeatedCalls.get(callKey) ?? 0) + 1;
-          repeatedCalls.set(callKey, repeatCount);
-
-          if (repeatCount > limits.maxRepeatedToolCalls) {
-            trace({
-              type: 'limit',
-              runId,
-              iteration: iterations,
-              reason: `repeated tool call blocked: ${toolName}`,
-            });
-            emit?.({
-              type: 'limit.hit',
-              runId,
-              reason: `repeated tool call blocked: ${toolName}`,
-            });
-
-            await appendDurable({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content:
-                'This exact tool call has already been attempted multiple times. Do not repeat it.',
-            });
-
-            await skipToolCalls(
-              turn.toolCalls.slice(index + 1),
-              'Skipped: tool call limit reached.',
-            );
-
-            return completeAfterLimit();
-          }
-
-          trace({
-            type: 'tool_start',
-            runId,
-            iteration: iterations,
-            toolName,
-            args,
-          });
-          emit?.({
-            type: 'tool.started',
-            runId,
-            toolCallId: toolCall.id,
-            toolName,
-            argsPreview: toolArgsPreview(toolName, args),
-          });
-
-          const startedAt = Date.now();
-          const toolCtx = buildToolContext();
-
-          try {
-            const result = await withTimeout(
-              tool.execute(args, toolCtx),
-              limits.toolTimeoutMs,
-              signal,
-            );
-
-            trace({
-              type: 'tool_complete',
-              runId,
-              iteration: iterations,
-              toolName,
-              durationMs: Date.now() - startedAt,
-              resultPreview: preview(result),
-            });
-            emit?.({
-              type: 'tool.completed',
-              runId,
-              toolCallId: toolCall.id,
-              toolName,
-              durationMs: Date.now() - startedAt,
-              resultPreview: preview(result, 200),
-            });
-
-            await appendDurable({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: result,
-            });
-          } catch (error) {
-            if (signal?.aborted) {
-              // Cancel mid-tool: the assistant tool_calls row is already durable,
-              // so every unanswered call of this turn needs a tool row to keep
-              // the ledger replay-valid.
-              await skipToolCalls(
-                turn.toolCalls.slice(index),
-                'Skipped: run cancelled.',
-              );
-              throwIfAborted(signal);
+          if (isParallelSafeTool(admitted.call.tool)) {
+            const batch = [admitted.call];
+            let next = index + 1;
+            while (next < turn.toolCalls.length) {
+              const upcoming = turn.toolCalls[next];
+              if (!upcoming || upcoming.type !== 'function') break;
+              const upcomingTool = tools.byName.get(upcoming.function.name);
+              if (!isParallelSafeTool(upcomingTool)) break;
+              if (posture === 'ask' && isAskStrippedTool(upcoming.function.name)) {
+                break;
+              }
+              try {
+                JSON.parse(upcoming.function.arguments);
+              } catch {
+                break;
+              }
+              const nextAdmitted = await admitToolCall(upcoming);
+              if (nextAdmitted.kind === 'halt') {
+                await executeReadyBatch(batch, []);
+                return finishHalt(nextAdmitted, next, turn.toolCalls);
+              }
+              if (nextAdmitted.kind === 'filled') {
+                await executeReadyBatch(
+                  batch,
+                  turn.toolCalls.slice(next + 1),
+                );
+                index = next + 1;
+                batch.length = 0;
+                break;
+              }
+              batch.push(nextAdmitted.call);
+              next += 1;
             }
-
-            const errorMessage =
-              error instanceof Error ? error.message : String(error);
-
-            trace({
-              type: 'tool_error',
-              runId,
-              iteration: iterations,
-              toolName,
-              error: errorMessage,
-            });
-            emit?.({
-              type: 'tool.failed',
-              runId,
-              toolCallId: toolCall.id,
-              error: errorMessage,
-            });
-
-            await appendDurable({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: `Tool execution failed: ${errorMessage}`,
-            });
+            if (batch.length > 0) {
+              await executeReadyBatch(batch, turn.toolCalls.slice(next));
+              index = next;
+            }
+            continue;
           }
+
+          await executeReadyCall(
+            admitted.call,
+            turn.toolCalls.slice(index),
+          );
+          index += 1;
         }
 
+        stubLiveToolResults(messages, contextBudget);
         emitTurnCompleted(iterations, turn.usage);
         continue;
       }
@@ -581,6 +814,49 @@ export async function runLoop(
 
       if (turn.finishReason === 'stop') {
         const result = turn.content ?? '';
+        const openPlanWork = config.hasOpenPlanWork
+          ? await config.hasOpenPlanWork()
+          : false;
+
+        if (openPlanWork && planWorkNudges < 1) {
+          planWorkNudges += 1;
+          messages.push({
+            role: 'user',
+            content: OPEN_PLAN_WORK_NUDGE,
+          });
+          emitTurnCompleted(iterations, turn.usage);
+          continue;
+        }
+
+        if (openPlanWork) {
+          const reason = 'Open plan todos remain';
+          trace({
+            type: 'limit',
+            runId,
+            iteration: iterations,
+            reason,
+          });
+          emit?.({
+            type: 'limit.hit',
+            runId,
+            reason,
+          });
+          emitTurnCompleted(iterations, turn.usage);
+          emit?.({
+            type: 'run.completed',
+            runId,
+            iterations,
+            toolCalls: totalToolCalls,
+            incomplete: true,
+          });
+          return {
+            runId,
+            content: result,
+            iterations,
+            toolCalls: totalToolCalls,
+            status: 'incomplete',
+          };
+        }
 
         trace({
           type: 'run_finish',

@@ -496,8 +496,12 @@ export const editFileTool: Tool = {
       return 'oldText is required to patch an existing file (must match exactly once)';
     }
     const count = existing.split(oldText).length - 1;
-    if (count === 0) return 'oldText span not found';
-    if (count > 1) return 'oldText span is not unique';
+    if (count === 0) {
+      return `oldText span not found in ${relPath}. Re-read the file and copy an exact unique span.`;
+    }
+    if (count > 1) {
+      return `oldText span matches ${count} times in ${relPath}. Re-read the file and use a longer unique span.`;
+    }
     const next = replaceOnce(existing, oldText, newText);
     await writeFile(resolved.abs, next, 'utf8');
     return formatEditReport({

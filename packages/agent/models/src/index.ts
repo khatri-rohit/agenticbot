@@ -132,11 +132,14 @@ export {
   MAX_PLAN_NOTES,
   MAX_PLAN_TODO_CHARS,
   MAX_PLAN_TODOS,
+  MAX_PLAN_PROMPT_NOTES,
   emptyThreadPlan,
   formatThreadPlanForPrompt,
   isThreadPlanEmpty,
   parseThreadPlan,
+  planHasOpenWork,
   planTodoCounts,
+  selectPlanForRewind,
 } from './lib/plan.js';
 
 export type {

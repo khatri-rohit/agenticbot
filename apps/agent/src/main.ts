@@ -6,6 +6,7 @@ import {
   applyPostureToTools,
   normalizeRunPosture,
   normalizeThreadKind,
+  planHasOpenWork,
 } from '@org/agent-models';
 import {
   runLoop,
@@ -142,6 +143,7 @@ async function main() {
       mode: mode.name,
       posture,
       limits: mode.limits,
+      hasOpenPlanWork: async () => planHasOpenWork(await planStore.read()),
       ...(workspaceRoot ? { workspaceRoot } : {}),
       trace: consoleTrace,
       emit: (event) => {

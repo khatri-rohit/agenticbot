@@ -277,6 +277,7 @@ export function useAgentRun(threadId: string | null) {
       setChatState((prev) => ({
         ...initialChatState(),
         compactionNotice: prev.compactionNotice,
+        plan: prev.plan,
       }));
       bumpLedger();
       // Server writes a model-generated title on first turn before /run returns.
@@ -305,6 +306,7 @@ export function useAgentRun(threadId: string | null) {
     setChatState((prev) => ({
       ...initialChatState(),
       compactionNotice: prev.compactionNotice,
+      plan: prev.plan,
     }));
   }, [disconnect]);
 
@@ -396,6 +398,7 @@ export function useAgentRun(threadId: string | null) {
     setChatState((prev) => ({
       ...initialChatState(),
       compactionNotice: prev.compactionNotice,
+      plan: prev.plan,
     }));
     bumpLedger();
     subscribeToRun(runId);
@@ -439,6 +442,7 @@ export function useAgentRun(threadId: string | null) {
       setChatState((prev) => ({
         ...initialChatState(),
         compactionNotice: prev.compactionNotice,
+        plan: prev.plan,
       }));
       bumpLedger();
       subscribeToRun(runId);

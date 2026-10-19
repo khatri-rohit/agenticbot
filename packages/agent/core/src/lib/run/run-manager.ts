@@ -73,6 +73,8 @@ export class RunManager {
       origin: opts.origin,
       workspaceRoot: opts.workspaceRoot,
       onMessage: opts.onMessage,
+      hasOpenPlanWork: opts.hasOpenPlanWork,
+      contextBudget: opts.contextBudget,
       emit: (event) => {
         if (handle.cancelled) return;
         handle.emitter.emit(event);

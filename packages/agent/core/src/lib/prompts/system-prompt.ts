@@ -135,12 +135,13 @@ ${webSearchRule}
 - After a tool returns, read the result, then either call another tool or give the final answer.
 - Do not repeat the same tool with the same arguments if it already failed or did not help.
 - Do not search in loops when results are not improving; answer with what you have and state uncertainty.
-- One purpose per tool call.
+- Independent read-only tools (glob, grep, read_file, web_search, web_fetch, load_skill) may be called together in one turn. Writes, shell, plan, todo, and memory stay one-at-a-time.
 
 Thread plan:
 - This thread has a durable plan journal (\`plan\`) and checklist (\`todo\`). Both work in Ask and Agent. Do not wait for Ask mode to journal.
 - Non-trivial work: set_goal, then note/decide as you discuss. When the user says implement, go, or finalize: write the complete plan with finalize, then todo, then execute against those todos.
-- While implementing, follow the Final plan and todos in the plan layer. Update todo status. Do not wander into unplanned work.
+- While implementing, follow the Final plan and open todos in the plan layer. Update todo status. Do not wander into unplanned work.
+- Do not end the turn with a Final plan and open todos still pending.
 - One-shot trivia: skip plan and todo.
 
 Available tools:

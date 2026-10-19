@@ -12,6 +12,8 @@ export const MAX_PLAN_GOAL_CHARS = 400;
 export const MAX_PLAN_NOTE_CHARS = 800;
 export const MAX_PLAN_FINAL_CHARS = 8_000;
 export const MAX_PLAN_TODO_CHARS = 240;
+/** Journal lines kept in the prompt while still planning. Locked plans omit the journal. */
+export const MAX_PLAN_PROMPT_NOTES = 8;
 
 export type PlanNoteKind = 'note' | 'approach' | 'constraint';
 export type PlanTodoStatus = 'pending' | 'in_progress' | 'completed';
@@ -51,6 +53,8 @@ export type ThreadPlan = {
   final: string | null;
   todos: PlanTodo[];
   updatedAt: string;
+  /** Ledger seq at the last plan write. Used to restore plan on rewind. */
+  ledgerSeq?: number;
 };
 
 export type PlanTodoCounts = {
@@ -68,6 +72,7 @@ export function emptyThreadPlan(threadId: string): ThreadPlan {
     final: null,
     todos: [],
     updatedAt: new Date().toISOString(),
+    ledgerSeq: 0,
   };
 }
 
@@ -96,31 +101,62 @@ export function planTodoCounts(plan: ThreadPlan): PlanTodoCounts {
   return counts;
 }
 
+/** True when a locked plan still has pending or in-progress todos. */
+export function planHasOpenWork(
+  plan: ThreadPlan | null | undefined,
+): boolean {
+  if (!plan?.final?.trim()) return false;
+  const counts = planTodoCounts(plan);
+  return counts.pending + counts.in_progress > 0;
+}
+
+/**
+ * Latest plan written at or before keepThroughSeq. Empty if every revision
+ * is newer than the rewind point.
+ */
+export function selectPlanForRewind(
+  revisions: ThreadPlan[],
+  keepThroughSeq: number,
+  threadId: string,
+): ThreadPlan {
+  let selected: ThreadPlan | null = null;
+  for (const revision of revisions) {
+    if ((revision.ledgerSeq ?? 0) <= keepThroughSeq) {
+      selected = revision;
+    }
+  }
+  return selected ?? emptyThreadPlan(threadId);
+}
+
 export function formatThreadPlanForPrompt(plan: ThreadPlan): string {
   const parts: string[] = [
     '# Thread plan',
-    'Live plan for THIS thread. Journal is discussion. Decisions are locked unless the user changes them.',
-    'Final plan is what to build. Todos are remaining work. Do not wander off this block while implementing.',
+    'Brief for THIS thread. Final plan is what to build. Open todos are remaining work.',
   ];
 
   if (plan.goal.trim()) {
     parts.push('', '## Goal', plan.goal.trim());
   }
-  if (plan.decisions.length > 0) {
-    parts.push('', '## Decisions');
-    for (const decision of plan.decisions) {
-      parts.push(`- ${decision.text}`);
+
+  const locked = Boolean(plan.final?.trim());
+  if (locked) {
+    parts.push('', '## Final plan', plan.final?.trim() ?? '');
+  } else {
+    if (plan.decisions.length > 0) {
+      parts.push('', '## Decisions');
+      for (const decision of plan.decisions) {
+        parts.push(`- ${decision.text}`);
+      }
+    }
+    const notes = plan.notes.slice(-MAX_PLAN_PROMPT_NOTES);
+    if (notes.length > 0) {
+      parts.push('', '## Journal');
+      for (const note of notes) {
+        parts.push(`- [${note.kind}] ${note.text}`);
+      }
     }
   }
-  if (plan.notes.length > 0) {
-    parts.push('', '## Journal');
-    for (const note of plan.notes) {
-      parts.push(`- [${note.kind}] ${note.text}`);
-    }
-  }
-  if (plan.final?.trim()) {
-    parts.push('', '## Final plan', plan.final.trim());
-  }
+
   if (plan.todos.length > 0) {
     parts.push('', '## Todos');
     for (const todo of plan.todos) {
@@ -228,5 +264,9 @@ export function parseThreadPlan(raw: unknown, threadId: string): ThreadPlan {
     todos: parseTodos(rec.todos),
     updatedAt:
       typeof rec.updatedAt === 'string' ? rec.updatedAt : empty.updatedAt,
+    ledgerSeq:
+      typeof rec.ledgerSeq === 'number' && Number.isFinite(rec.ledgerSeq)
+        ? rec.ledgerSeq
+        : 0,
   };
 }

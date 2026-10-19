@@ -46,7 +46,10 @@ export {
   isPathInside,
   globMatch,
 } from './lib/tools/workspace-path';
-export { assembleContext } from './lib/context/assemble-context';
+export {
+  assembleContext,
+  stubLiveToolResults,
+} from './lib/context/assemble-context';
 export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
 export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export type {

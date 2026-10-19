@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { emptyThreadPlan } from '@org/agent-models';
+import {
+  emptyThreadPlan,
+  formatThreadPlanForPrompt,
+  planHasOpenWork,
+  selectPlanForRewind,
+} from '@org/agent-models';
 
 import {
   applyPlanAction,
@@ -111,5 +116,57 @@ describe('thread plan mutations', () => {
     expect(result).toMatch(/Ship the journal/);
     const saved = await store.read();
     expect(saved.goal).toBe('Ship the journal');
+  });
+
+  it('omits the journal from the prompt once a final plan exists', () => {
+    const plan = emptyThreadPlan('t1');
+    plan.goal = 'Add plan journal';
+    plan.notes = [
+      {
+        id: 'n1',
+        at: '2026-01-01T00:00:00.000Z',
+        kind: 'approach',
+        text: 'Do not dump forty notes',
+      },
+    ];
+    plan.decisions = [
+      {
+        id: 'd1',
+        at: '2026-01-01T00:00:00.000Z',
+        text: 'Thread-scoped artifact',
+      },
+    ];
+    plan.final = 'Write plan.json and inject a slim brief.';
+    plan.todos = [
+      { id: 'a', content: 'Types', status: 'completed' },
+      { id: 'b', content: 'UI card', status: 'in_progress' },
+    ];
+    const text = formatThreadPlanForPrompt(plan);
+    expect(text).toContain('Write plan.json');
+    expect(text).toContain('UI card');
+    expect(text).not.toContain('Do not dump forty notes');
+    expect(text).not.toContain('Thread-scoped artifact');
+  });
+
+  it('treats a locked plan with open todos as unfinished work', () => {
+    const plan = emptyThreadPlan('t1');
+    expect(planHasOpenWork(plan)).toBe(false);
+    plan.final = 'Ship it';
+    plan.todos = [{ id: 'a', content: 'Types', status: 'pending' }];
+    expect(planHasOpenWork(plan)).toBe(true);
+    plan.todos = [{ id: 'a', content: 'Types', status: 'completed' }];
+    expect(planHasOpenWork(plan)).toBe(false);
+  });
+
+  it('restores the last plan written at or before the rewind seq', () => {
+    const first = emptyThreadPlan('t1');
+    first.goal = 'v1';
+    first.ledgerSeq = 4;
+    const second = emptyThreadPlan('t1');
+    second.goal = 'v2';
+    second.ledgerSeq = 12;
+    expect(selectPlanForRewind([first, second], 10, 't1').goal).toBe('v1');
+    expect(selectPlanForRewind([first, second], 12, 't1').goal).toBe('v2');
+    expect(selectPlanForRewind([first, second], 2, 't1').goal).toBe('');
   });
 });

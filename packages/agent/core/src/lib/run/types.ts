@@ -1,6 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import type {
+  ContextBudget,
   ContextReport,
   LedgerRecord,
   RunPosture,
@@ -45,4 +46,6 @@ export type StartRunOptions = {
   onMessage?: (record: LedgerRecord) => void | Promise<void>;
   /** After the loop returns (success or error). Used for M4 compaction. */
   onFinished?: (result: RunLoopResult) => void | Promise<void>;
+  hasOpenPlanWork?: () => boolean | Promise<boolean>;
+  contextBudget?: ContextBudget;
 };
