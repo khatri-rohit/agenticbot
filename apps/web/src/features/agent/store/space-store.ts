@@ -1,20 +1,21 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import type { ThreadKind } from '@org/agent-models';
-
-export type AgentSpace = ThreadKind;
+import {
+  normalizeWorkspaceRoot,
+  sameWorkspaceRoot,
+  workspaceRootKey,
+} from '@org/agent-models';
 
 export type SpaceState = {
-  space: AgentSpace;
+  /** Composer binding for new chats. Null = Home (no folder). */
   workspaceRoot: string | null;
-  /** Recently opened coding folders (absolute paths). */
+  /** Recently opened workspace folders (absolute paths). */
   recentFolders: string[];
   /** Folder paths the user collapsed in the sidebar. */
   collapsedFolders: string[];
 };
 
-const SPACE_KEY = 'agenticbot:space';
 const ROOT_KEY = 'agenticbot:workspaceRoot';
 const FOLDERS_KEY = 'agenticbot:recentFolders';
 const COLLAPSED_KEY = 'agenticbot:collapsedFolders';
@@ -41,11 +42,11 @@ function readJsonArray(key: string): string[] {
 }
 
 function normalizeRoot(root: string): string {
-  return root.replace(/[\\/]+$/, '');
+  return normalizeWorkspaceRoot(root);
 }
 
 function folderKey(root: string): string {
-  return normalizeRoot(root).toLowerCase();
+  return workspaceRootKey(root);
 }
 
 function upsertFolder(list: string[], root: string): string[] {
@@ -57,20 +58,17 @@ function upsertFolder(list: string[], root: string): string[] {
 
 function readStored(): SpaceState {
   try {
-    const space = localStorage.getItem(SPACE_KEY);
     const workspaceRoot = localStorage.getItem(ROOT_KEY);
     const recentFolders = readJsonArray(FOLDERS_KEY);
     const collapsedFolders = readJsonArray(COLLAPSED_KEY);
     const root = workspaceRoot?.trim() ? workspaceRoot : null;
     return {
-      space: space === 'coding' ? 'coding' : 'research',
       workspaceRoot: root,
       recentFolders: root ? upsertFolder(recentFolders, root) : recentFolders,
       collapsedFolders,
     };
   } catch {
     return {
-      space: 'research',
       workspaceRoot: null,
       recentFolders: [],
       collapsedFolders: [],
@@ -79,7 +77,6 @@ function readStored(): SpaceState {
 }
 
 const SERVER_SNAPSHOT: SpaceState = {
-  space: 'research',
   workspaceRoot: null,
   recentFolders: [],
   collapsedFolders: [],
@@ -118,18 +115,6 @@ export function subscribeSpace(listener: Listener): () => void {
   return () => {
     listeners.delete(listener);
   };
-}
-
-export function setAgentSpace(space: AgentSpace): void {
-  hydrate();
-  if (state.space === space) return;
-  state = { ...state, space };
-  try {
-    localStorage.setItem(SPACE_KEY, space);
-  } catch {
-    /* private mode */
-  }
-  emit();
 }
 
 export function setWorkspaceRoot(workspaceRoot: string | null): void {
@@ -211,13 +196,7 @@ export function folderNameFromRoot(root: string | null): string {
   return parts.at(-1) ?? trimmed;
 }
 
-export function sameWorkspaceRoot(
-  left: string | null | undefined,
-  right: string | null | undefined,
-): boolean {
-  if (!left || !right) return false;
-  return folderKey(left) === folderKey(right);
-}
+export { sameWorkspaceRoot };
 
 export function useAgentSpace(): SpaceState {
   return useSyncExternalStore(

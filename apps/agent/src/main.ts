@@ -1,15 +1,24 @@
 import 'dotenv/config';
 import path from 'node:path';
 
-import type { AgentEvent } from '@org/agent-models';
+import type { AgentEvent, ModeName, RunPosture } from '@org/agent-models';
+import {
+  applyPostureToTools,
+  normalizeRunPosture,
+  normalizeThreadKind,
+  planHasOpenWork,
+} from '@org/agent-models';
 import {
   runLoop,
   invokeModelTurn,
   streamModelTurn,
-  getContext,
+  assembleContext,
   createToolRegistry,
   ALL_TOOLS,
   consoleTrace,
+  createInMemoryPlanStore,
+  createPlanTools,
+  loadWorkspaceRules,
   type ModelCallFn,
   modeForKind,
 } from '@org/agent-core';
@@ -17,57 +26,114 @@ import {
 const STREAMING = process.env.STREAMING === '1';
 
 function parseHarnessArgs(argv: string[]): {
-  mode: 'research' | 'coding';
+  mode: ModeName;
   workspace?: string;
+  posture: RunPosture;
   query: string;
 } {
-  let mode: 'research' | 'coding' = 'research';
+  let mode: ModeName = 'home';
   let workspace: string | undefined;
+  let posture: RunPosture = 'agent';
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--mode') {
       const value = argv[++i];
-      if (value === 'coding' || value === 'research') mode = value;
+      if (
+        value === 'home' ||
+        value === 'workspace' ||
+        value === 'research' ||
+        value === 'coding'
+      ) {
+        mode = normalizeThreadKind(value);
+      }
       continue;
     }
     if (arg === '--workspace') {
       workspace = argv[++i];
+      mode = 'workspace';
+      continue;
+    }
+    if (arg === '--ask') {
+      posture = 'ask';
       continue;
     }
     rest.push(arg);
   }
-  return { mode, workspace, query: rest.join(' ').trim() };
+  return { mode, workspace, posture, query: rest.join(' ').trim() };
 }
 
 async function main() {
   try {
     const parsed = parseHarnessArgs(process.argv.slice(2));
-    const mode = modeForKind(parsed.mode);
+    const kind = normalizeThreadKind(parsed.mode);
+    const mode = modeForKind(kind);
     const workspaceRoot = parsed.workspace
       ? path.resolve(parsed.workspace)
       : undefined;
-    if (parsed.mode === 'coding' && !workspaceRoot) {
-      throw new Error('coding mode requires --workspace <path>');
+    if (kind === 'workspace' && !workspaceRoot) {
+      throw new Error('workspace profile requires --workspace <path>');
     }
+    const posture =
+      kind === 'workspace' ? normalizeRunPosture(parsed.posture) : 'agent';
 
     const query =
       parsed.query ||
-      (parsed.mode === 'coding'
-        ? 'List the files in this workspace and say what the project appears to be.'
+      (kind === 'workspace'
+        ? posture === 'ask'
+          ? 'List the files in this workspace and say what the project appears to be. Do not edit.'
+          : 'List the files in this workspace and say what the project appears to be.'
         : 'What is value of PI in 3 decimal places?');
 
-    const tools = createToolRegistry(ALL_TOOLS, [
-      ...new Set([...mode.allowedTools, ...mode.globalTools]),
-    ]);
-    const messages = getContext(query, tools, mode.name);
+    const toolNames = applyPostureToTools(
+      [...new Set([...mode.allowedTools, ...mode.globalTools])],
+      posture,
+    );
+    const planStore = createInMemoryPlanStore('cli');
+    const tools = createToolRegistry(
+      [...ALL_TOOLS, ...createPlanTools(planStore)],
+      toolNames,
+      posture,
+    );
+    const plan = await planStore.read();
+    const rules = workspaceRoot
+      ? await loadWorkspaceRules(workspaceRoot)
+      : { agentsMd: '', project: '' };
+    const { messages } = assembleContext({
+      tools,
+      memory: {
+        user: '',
+        notes: '',
+        ...(rules.agentsMd ? { agentsMd: rules.agentsMd } : {}),
+        ...(rules.project ? { project: rules.project } : {}),
+      },
+      snapshot: null,
+      plan,
+      envelopes: [
+        {
+          v: 1,
+          seq: 1,
+          ts: new Date().toISOString(),
+          threadId: 'cli',
+          runId: null,
+          record: { role: 'user', content: query },
+        },
+      ],
+      mode: mode.name,
+      posture,
+    });
 
     const events: AgentEvent[] = [];
+    const callOptions = { temperature: mode.temperature };
     const modelCall: ModelCallFn = STREAMING
-      ? (model, msgs, t, onDelta) => streamModelTurn(model, msgs, t, onDelta)
-      : (model, msgs, t, onDelta) => invokeModelTurn(model, msgs, t, onDelta);
+      ? (model, msgs, t, onDelta) =>
+          streamModelTurn(model, msgs, t, onDelta, callOptions)
+      : (model, msgs, t, onDelta) =>
+          invokeModelTurn(model, msgs, t, onDelta, callOptions);
 
-    console.log(`Mode: ${mode.name} (${STREAMING ? 'streaming' : 'non-streaming'})`);
+    console.log(
+      `Profile: ${mode.name} / ${posture} (${STREAMING ? 'streaming' : 'non-streaming'})`,
+    );
     if (workspaceRoot) console.log(`Workspace: ${workspaceRoot}`);
     console.log('================================================');
 
@@ -75,8 +141,25 @@ async function main() {
       model: mode.model,
       streaming: STREAMING,
       mode: mode.name,
+      posture,
       limits: mode.limits,
+      hasOpenPlanWork: async () => planHasOpenWork(await planStore.read()),
       ...(workspaceRoot ? { workspaceRoot } : {}),
+      approve: async (request) => {
+        const first = request.options?.[0];
+        if (first) {
+          console.log(`[auto-approve] ${request.toolName}: ${request.summary} → ${first.label}`);
+          return { optionId: first.id };
+        }
+        console.log(`[auto-approve] ${request.toolName}: ${request.summary}`);
+        return {};
+      },
+      offerChoice: async (request) => {
+        const first = request.options[0];
+        if (!first) return { optionIds: [] };
+        console.log(`[auto-choice] ${request.question} → ${first.label}`);
+        return { optionIds: [first.id] };
+      },
       trace: consoleTrace,
       emit: (event) => {
         events.push({ seq: 0, ...event } as AgentEvent);
@@ -91,14 +174,12 @@ async function main() {
     } else {
       console.log('');
     }
-    console.log('Iterations:', result.iterations);
-    console.log('Tool calls:', result.toolCalls);
-    console.log('Events emitted:', events.length);
     console.log('================================================');
-  } catch (error) {
-    console.error('Something went wrong:', error);
+    console.log('Status:', result.status, '| iterations:', result.iterations);
+  } catch (err) {
+    console.error(err);
     process.exitCode = 1;
   }
 }
 
-main();
+void main();

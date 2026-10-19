@@ -74,10 +74,21 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
       const path = asString(args.path);
       const oldText = asString(args.oldText);
       const newText = asString(args.newText);
+      const intent = asString(args.intent);
+      const resultLine = (row.result ?? '').split('\n')[0] ?? '';
+      let action = 'Writing';
+      if (resultLine.startsWith('Created ')) action = 'Create';
+      else if (resultLine.startsWith('Patched ')) action = 'Edit';
+      else if (intent === 'create') action = 'Create';
+      else if (intent === 'patch') action = 'Edit';
+      else if (oldText) action = 'Edit';
+      else if (row.status !== 'running' && 'newText' in args && !oldText) {
+        action = 'Create';
+      }
       return {
         kind: 'file',
         title: fileNameFromPath(path) || path || 'file',
-        action: oldText ? 'Edit' : 'Create',
+        action,
         plus: newText ? countLines(newText) : undefined,
         minus: oldText ? countLines(oldText) : undefined,
       };
@@ -111,6 +122,33 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
         kind: 'other',
         title: asString(args.url) || 'fetch',
         action: 'Fetch',
+      };
+    case 'plan': {
+      const action = asString(args.action) || 'plan';
+      const text = asString(args.text);
+      return {
+        kind: 'other',
+        title: text || action,
+        action: action === 'set_goal' ? 'Goal' : 'Plan',
+      };
+    }
+    case 'todo':
+      return {
+        kind: 'other',
+        title: 'checklist',
+        action: 'Todos',
+      };
+    case 'ask_user':
+      return {
+        kind: 'other',
+        title: asString(args.question) || 'question',
+        action: 'Ask',
+      };
+    case 'offer_choice':
+      return {
+        kind: 'other',
+        title: asString(args.question) || 'choice',
+        action: 'Choice',
       };
     default:
       return { kind: 'other', title: row.toolName, action: row.toolName };
@@ -147,23 +185,23 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
   return <Check className="size-3.5 shrink-0 text-muted-foreground/70" />;
 }
 
-/** Render one tools step from the turn timeline (coding chips or research group). */
+/** Render one tools step from the turn timeline (workspace chips or home group). */
 export function ToolStepList({
   rows,
-  variant = 'research',
+  variant = 'home',
 }: {
   rows: ToolCallRow[];
-  variant?: 'research' | 'coding';
+  variant?: 'home' | 'workspace';
 }) {
   if (rows.length === 0) return null;
 
-  if (variant === 'coding') {
-    return <CodingToolTrail rows={rows} />;
+  if (variant === 'workspace') {
+    return <WorkspaceToolTrail rows={rows} />;
   }
-  return <ResearchToolTrail rows={rows} />;
+  return <HomeToolTrail rows={rows} />;
 }
 
-function CodingToolTrail({ rows }: { rows: ToolCallRow[] }) {
+function WorkspaceToolTrail({ rows }: { rows: ToolCallRow[] }) {
   return (
     <section
       className="flex min-w-0 max-w-full flex-col gap-1.5"
@@ -178,7 +216,7 @@ function CodingToolTrail({ rows }: { rows: ToolCallRow[] }) {
   );
 }
 
-function ResearchToolTrail({ rows }: { rows: ToolCallRow[] }) {
+function HomeToolTrail({ rows }: { rows: ToolCallRow[] }) {
   const [expanded, setExpanded] = useState(true);
   const runningCount = rows.filter((row) => row.status === 'running').length;
   const failedCount = rows.filter((row) => row.status === 'failed').length;

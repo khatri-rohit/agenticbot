@@ -51,7 +51,7 @@ export function ConversationRail({
 
   return (
     <div
-      className="pointer-events-none absolute inset-y-0 left-5 z-20 hidden w-18 sm:block"
+      className="pointer-events-none absolute inset-y-0 left-5 z-20 hidden w-20 sm:block cursor-pointer"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -69,7 +69,7 @@ export function ConversationRail({
           className={cn(
             'relative rounded-md border border-transparent transition-colors',
             hovered &&
-              'border-border/50 bg-popover/98 px-2 py-2 shadow-sm backdrop-blur-md',
+              'border-border/50 px-2 py-2 shadow-sm backdrop-blur-md bg-card',
           )}
         >
           {hovered ? (
@@ -78,13 +78,16 @@ export function ConversationRail({
                 <li key={anchor.id}>
                   <button
                     type="button"
-                    onClick={() => scrollToAnchor(anchor.id)}
+                    onClick={() => {
+                      scrollToAnchor(anchor.id);
+                      setHovered(false);
+                    }}
                     className={cn(
                       'flex w-full items-center rounded-sm px-2 py-1.5 text-left text-xs leading-snug transition-colors',
                       TURN_ROW_MIN_H,
                       activeId === anchor.id
                         ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground cursor-pointer',
+                        : 'text-muted-foreground hover:bg-sidebar/60 hover:text-foreground cursor-pointer',
                     )}
                     title={anchor.label.slice(0, 100) + '...'}
                   >

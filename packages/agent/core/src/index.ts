@@ -2,7 +2,8 @@
 // Pure library: no HTTP, no DOM, no database.
 // Domain types live in @org/agent-models — import them from there.
 
-export { RESEARCH_MODE, CODING_MODE, modeForKind } from '@org/agent-models';
+export { HOME_MODE, WORKSPACE_MODE, modeForKind } from '@org/agent-models';
+export { listSkills } from './lib/tools/skills';
 
 // Model layer
 export {
@@ -38,6 +39,8 @@ export {
 
 // Tools
 export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
+export { ask_user } from './lib/tools/ask-user';
+export { offer_choice } from './lib/tools/offer-choice';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
 export { WORKSPACE_TOOLS } from './lib/tools/workspace';
 export {
@@ -45,19 +48,33 @@ export {
   isPathInside,
   globMatch,
 } from './lib/tools/workspace-path';
-export { assembleContext } from './lib/context/assemble-context';
+export {
+  assembleContext,
+  stubLiveToolResults,
+} from './lib/context/assemble-context';
+export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
+export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export type {
   AssembleContextInput,
   AssembleContextResult,
+  MentionedThreadContext,
 } from './lib/context/assemble-context';
 export {
   chooseCompactThroughSeq,
   buildExtractiveSnapshot,
+  packMentionedThread,
 } from './lib/context/compact-snapshot';
 export { toLedgerRecord } from './lib/loop/to-ledger-record';
 export { webSearchTool, webFetchTool } from './lib/tools/web-search';
 export { createMemoryTool } from './lib/tools/memory';
 export type { MemoryToolStore } from './lib/tools/memory';
+export {
+  applyPlanAction,
+  applyTodoUpdate,
+  createInMemoryPlanStore,
+  createPlanTools,
+} from './lib/tools/plan';
+export type { PlanStore } from './lib/tools/plan';
 export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
 // Events / trace
@@ -69,6 +86,8 @@ export type { EventSubscriber } from './lib/events/types';
 // Run manager
 export { RunManager } from './lib/run/run-manager';
 export type {
+  ResolveApprovalResult,
+  ResolveChoiceResult,
   RunHandle,
   RunHandleStatus,
   StartRunOptions,

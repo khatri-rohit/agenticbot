@@ -1,8 +1,13 @@
 import {
   occupiedFromUsage,
   type AgentEvent,
+  type ApprovalOption,
+  type ChoiceOption,
   type ContextReport,
+  type RunPosture,
   type Snapshot,
+  type ThreadPlan,
+  type ToolRisk,
 } from '@org/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
 
@@ -16,6 +21,8 @@ export type ToolActivity = {
   toolCallId: string;
   toolName: string;
   status: 'running' | 'done' | 'failed';
+  /** Event seq — orders live tools against settled assistant snippets. */
+  seq: number;
   durationMs?: number;
   argsPreview?: unknown;
   resultPreview?: unknown;
@@ -32,12 +39,23 @@ export type CompactionNotice = {
   createdAt: string;
 };
 
+export type AssistantSnippet = {
+  messageId: string;
+  content: string;
+  /** Event seq — orders snippets against live tool activity. */
+  seq: number;
+};
+
 export type ChatRunState = {
   runId: string;
   status: 'running' | 'completed' | 'error';
   model: string;
+  /** Host-applied posture for this run (from run.started). */
+  posture: RunPosture;
   streamingMessage: { id: string; content: string } | null;
   toolActivity: ToolActivity[];
+  /** Assistant messages settled mid-run (assistant.completed), in event order. */
+  assistantSnippets: AssistantSnippet[];
   lastSeq: number;
   /** Heuristic from run.started until provider usage arrives. */
   estimatedPromptTokens?: number;
@@ -48,14 +66,50 @@ export type ChatRunState = {
   occupiedCoversStream?: boolean;
 };
 
+export type LimitNotice = {
+  runId: string;
+  reason: string;
+};
+
+export type PendingApproval = {
+  approvalId: string;
+  runId: string;
+  toolName: string;
+  summary: string;
+  risk: ToolRisk;
+  options?: ApprovalOption[];
+  argsPreview?: unknown;
+};
+
+export type PendingChoice = {
+  choiceId: string;
+  runId: string;
+  question: string;
+  options: ChoiceOption[];
+};
+
 export type ChatState = {
   activeRun: ChatRunState | null;
   /** Survives run.completed so the compaction card can render after the turn. */
   compactionNotice: CompactionNotice | null;
+  /** Last limit.hit / incomplete finish, until the next run. */
+  limitNotice: LimitNotice | null;
+  /** Thread-scoped plan journal + todos. Survives run.settled. */
+  plan: ThreadPlan | null;
+  /** Live pauses; cleared on resolve / run end. */
+  pendingApprovals: PendingApproval[];
+  pendingChoices: PendingChoice[];
 };
 
 export function initialChatState(): ChatState {
-  return { activeRun: null, compactionNotice: null };
+  return {
+    activeRun: null,
+    compactionNotice: null,
+    limitNotice: null,
+    plan: null,
+    pendingApprovals: [],
+    pendingChoices: [],
+  };
 }
 
 export function noticeFromSnapshot(
@@ -87,8 +141,10 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           runId: event.runId,
           status: 'running',
           model: event.model,
+          posture: event.posture === 'ask' ? 'ask' : 'agent',
           streamingMessage: null,
           toolActivity: [],
+          assistantSnippets: [],
           lastSeq,
           ...(event.estimatedPromptTokens !== undefined
             ? { estimatedPromptTokens: event.estimatedPromptTokens }
@@ -98,6 +154,10 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             : {}),
         },
         compactionNotice: state.compactionNotice,
+        limitNotice: null,
+        plan: state.plan,
+        pendingApprovals: [],
+        pendingChoices: [],
       };
     }
 
@@ -131,11 +191,19 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'assistant.completed': {
       if (!state.activeRun) return state;
+      // Tool-only turns emit completed with empty content; nothing to settle.
+      const snippet =
+        event.content && event.content.trim().length > 0
+          ? { messageId: event.messageId, content: event.content, seq: event.seq }
+          : null;
       return {
         ...state,
         activeRun: {
           ...state.activeRun,
           streamingMessage: null,
+          ...(snippet
+            ? { assistantSnippets: [...state.activeRun.assistantSnippets, snippet] }
+            : {}),
           lastSeq,
         },
       };
@@ -153,6 +221,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
               toolCallId: event.toolCallId,
               toolName: event.toolName,
               status: 'running',
+              seq: event.seq,
               argsPreview: event.argsPreview,
             },
           ],
@@ -163,20 +232,36 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'tool.completed': {
       if (!state.activeRun) return state;
-      return {
-        ...state,
-        activeRun: {
-          ...state.activeRun,
-          toolActivity: state.activeRun.toolActivity.map((t) =>
+      const existing = state.activeRun.toolActivity.some(
+        (t) => t.toolCallId === event.toolCallId,
+      );
+      const toolActivity = existing
+        ? state.activeRun.toolActivity.map((t) =>
             t.toolCallId === event.toolCallId
               ? {
                   ...t,
-                  status: 'done',
+                  status: 'done' as const,
                   durationMs: event.durationMs,
                   resultPreview: event.resultPreview,
                 }
               : t,
-          ),
+          )
+        : [
+            ...state.activeRun.toolActivity,
+            {
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              status: 'done' as const,
+              seq: event.seq,
+              durationMs: event.durationMs,
+              resultPreview: event.resultPreview,
+            },
+          ];
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          toolActivity,
           lastSeq,
         },
       };
@@ -210,6 +295,10 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           summary: state.compactionNotice?.summary ?? '',
           createdAt: state.compactionNotice?.createdAt ?? '',
         },
+        limitNotice: state.limitNotice,
+        plan: state.plan,
+        pendingApprovals: state.pendingApprovals,
+        pendingChoices: state.pendingChoices,
       };
     }
 
@@ -227,6 +316,10 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           summary: event.summary,
           createdAt: event.createdAt,
         },
+        limitNotice: state.limitNotice,
+        plan: state.plan,
+        pendingApprovals: state.pendingApprovals,
+        pendingChoices: state.pendingChoices,
       };
     }
 
@@ -249,6 +342,10 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       return {
         activeRun: null,
         compactionNotice: state.compactionNotice,
+        limitNotice: state.limitNotice,
+        plan: state.plan,
+        pendingApprovals: [],
+        pendingChoices: [],
       };
     }
 
@@ -256,6 +353,20 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       return {
         activeRun: null,
         compactionNotice: state.compactionNotice,
+        limitNotice: state.limitNotice,
+        plan: state.plan,
+        pendingApprovals: [],
+        pendingChoices: [],
+      };
+    }
+
+    case 'plan.updated': {
+      return {
+        ...state,
+        plan: event.plan,
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
       };
     }
 
@@ -280,10 +391,95 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       };
     }
 
+    case 'limit.hit': {
+      if (!state.activeRun) {
+        return {
+          ...state,
+          limitNotice: { runId: event.runId, reason: event.reason },
+        };
+      }
+      return {
+        ...state,
+        limitNotice: { runId: event.runId, reason: event.reason },
+        activeRun: {
+          ...state.activeRun,
+          lastSeq,
+        },
+      };
+    }
+
+    case 'approval.requested': {
+      const next: PendingApproval = {
+        approvalId: event.approvalId,
+        runId: event.runId,
+        toolName: event.toolName,
+        summary: event.summary,
+        risk: event.risk,
+        ...(event.options ? { options: event.options } : {}),
+        ...(event.argsPreview !== undefined
+          ? { argsPreview: event.argsPreview }
+          : {}),
+      };
+      return {
+        ...state,
+        pendingApprovals: [
+          ...state.pendingApprovals.filter(
+            (item) => item.approvalId !== event.approvalId,
+          ),
+          next,
+        ],
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+      };
+    }
+
+    case 'approval.resolved': {
+      return {
+        ...state,
+        pendingApprovals: state.pendingApprovals.filter(
+          (item) => item.approvalId !== event.approvalId,
+        ),
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+      };
+    }
+
+    case 'choice.requested': {
+      const next: PendingChoice = {
+        choiceId: event.choiceId,
+        runId: event.runId,
+        question: event.question,
+        options: event.options,
+      };
+      return {
+        ...state,
+        pendingChoices: [
+          ...state.pendingChoices.filter(
+            (item) => item.choiceId !== event.choiceId,
+          ),
+          next,
+        ],
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+      };
+    }
+
+    case 'choice.resolved': {
+      return {
+        ...state,
+        pendingChoices: state.pendingChoices.filter(
+          (item) => item.choiceId !== event.choiceId,
+        ),
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+      };
+    }
+
     case 'turn.started':
-    case 'limit.hit':
-    case 'approval.requested':
-    case 'approval.resolved':
     case 'memory.updated': {
       if (!state.activeRun) return state;
       return {

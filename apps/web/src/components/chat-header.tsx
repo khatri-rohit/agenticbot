@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Thread } from '@org/agent-models';
+import { isWorkspaceKind, type Thread } from '@org/agent-models';
 import { clampChatTitle } from '@/lib/thread-title';
 import { fetchThread } from '../features/agent/api/thread-client';
 import {
@@ -36,15 +36,15 @@ export function ChatHeader({ threadId }: { threadId: string }) {
   const title = thread?.title ?? 'New Chat';
   const isPending = title === 'New Chat';
   const display = isPending ? title : clampChatTitle(title);
-  const coding = thread?.kind === 'coding';
+  const workspace = isWorkspaceKind(thread?.kind);
   const folder = folderNameFromRoot(thread?.workspaceRoot ?? null);
 
   return (
     <header className="shrink-0 border-b border-border/40 px-5 py-2.5">
       <p className="type-caption mb-0.5 truncate tracking-wide text-muted-foreground/80 uppercase">
-        {coding ? `Coding · ${folder || 'folder'}` : 'Research'}
+        {workspace ? `Workspace · ${folder || 'folder'}` : 'Home'}
       </p>
-      {coding && thread?.workspaceRoot ? (
+      {workspace && thread?.workspaceRoot ? (
         <p className="type-caption mb-1 truncate font-mono text-muted-foreground/70">
           {thread.workspaceRoot}
         </p>

@@ -13,14 +13,14 @@ import {
   Pin,
   Pencil,
   Plus,
+  Search,
   Trash2,
 } from 'lucide-react';
-import type { Thread } from '@org/agent-models';
+import { isWorkspaceKind, type Thread } from '@org/agent-models';
 import {
   folderNameFromRoot,
   removeRecentFolder,
   sameWorkspaceRoot,
-  setAgentSpace,
   setWorkspaceRoot,
   toggleFolderCollapsed,
   useAgentSpace,
@@ -70,20 +70,16 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   const threads = useThreads();
   const pathname = usePathname();
   const router = useRouter();
-  const { space, workspaceRoot, recentFolders, collapsedFolders } =
-    useAgentSpace();
+  const { workspaceRoot, recentFolders, collapsedFolders } = useAgentSpace();
 
-  const researchThreads = useMemo(
-    () =>
-      (threads ?? []).filter(
-        (thread) => (thread.kind ?? 'research') === 'research',
-      ),
+  const homeThreads = useMemo(
+    () => (threads ?? []).filter((thread) => !isWorkspaceKind(thread.kind)),
     [threads],
   );
 
-  const codingGroups = useMemo(() => {
-    const codingThreads = (threads ?? []).filter(
-      (thread) => thread.kind === 'coding' && thread.workspaceRoot,
+  const workspaceGroups = useMemo(() => {
+    const workspaceThreads = (threads ?? []).filter(
+      (thread) => isWorkspaceKind(thread.kind) && thread.workspaceRoot,
     );
     const byKey = new Map<string, FolderGroup>();
 
@@ -102,7 +98,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
     };
 
     for (const root of recentFolders) ensure(root);
-    for (const thread of codingThreads) {
+    for (const thread of workspaceThreads) {
       if (!thread.workspaceRoot) continue;
       ensure(thread.workspaceRoot).threads.push(thread);
     }
@@ -129,8 +125,12 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   const railBtn =
     'flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
 
+  const openBlankHome = () => {
+    setWorkspaceRoot(null);
+    router.push('/');
+  };
+
   const openBlankForFolder = (root: string) => {
-    setAgentSpace('coding');
     setWorkspaceRoot(root);
     router.push('/');
   };
@@ -144,7 +144,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
     >
       {collapsed ? (
         <>
-          <div className="flex w-12 shrink-0 flex-col items-center gap-1 pt-2">
+          <div className="flex w-full shrink-0 flex-col items-center gap-1 pt-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -160,7 +160,12 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Link href="/" aria-label="New chat" className={railBtn}>
+                <Link
+                  href="/"
+                  aria-label="New chat"
+                  className={railBtn}
+                  onClick={() => setWorkspaceRoot(null)}
+                >
                   <Plus className="size-4" strokeWidth={2} />
                 </Link>
               </TooltipTrigger>
@@ -168,7 +173,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
             </Tooltip>
           </div>
           <div className="min-h-0 flex-1" aria-hidden />
-          <footer className="flex w-12 shrink-0 flex-col items-center pb-2">
+          <footer className="flex w-full shrink-0 flex-col items-center pb-2">
             <SidebarSettings collapsed />
           </footer>
         </>
@@ -198,179 +203,213 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                 <TooltipContent side="bottom">Close sidebar</TooltipContent>
               </Tooltip>
             </header>
-            <SpaceToggle />
-            {space === 'research' ? (
+            <div className="mb-2 flex items-center gap-1">
               <Link
                 href="/"
-                className="type-ui mb-2 inline-flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground"
+                onClick={() => setWorkspaceRoot(null)}
+                className="type-ui inline-flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground"
               >
                 <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/45 bg-background/40 text-foreground">
                   <Plus className="size-4 opacity-90" strokeWidth={2} />
                 </span>
                 <span>New chat</span>
               </Link>
-            ) : (
-              <OpenFolderButton className="mb-2" />
-            )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    aria-label="Search coming soon"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/50"
+                  >
+                    <Search className="size-4" strokeWidth={1.75} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  Search coming soon
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <OpenFolderButton className="mb-2" />
           </div>
 
           <ScrollArea className="min-h-0 flex-1 px-2">
-            {space === 'coding' ? (
-              codingGroups.length === 0 ? (
-                <p className="type-ui px-2 py-6 text-center text-muted-foreground">
-                  Open a folder to start coding chats
-                </p>
-              ) : (
-                <div className="space-y-2 pb-2">
-                  {codingGroups.map((group) => {
-                    const collapsedFolder = collapsedFolders.some((item) =>
-                      sameWorkspaceRoot(item, group.root),
-                    );
-                    const activeFolder = sameWorkspaceRoot(
-                      group.root,
-                      workspaceRoot,
-                    );
-                    return (
-                      <div key={group.root} className="min-w-0">
-                        <div
-                          className={cn(
-                            'group/folder flex w-full min-w-0 items-center gap-0.5 rounded-md px-1 py-1.5',
-                            activeFolder
-                              ? 'bg-accent/70 text-foreground'
-                              : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
-                          )}
-                        >
-                          <button
-                            type="button"
-                            className="flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-accent/80"
-                            aria-label={
-                              collapsedFolder
-                                ? `Expand ${group.name}`
-                                : `Collapse ${group.name}`
-                            }
-                            onClick={() => toggleFolderCollapsed(group.root)}
-                          >
-                            {collapsedFolder ? (
-                              <ChevronRight className="size-3.5" />
-                            ) : (
-                              <ChevronDown className="size-3.5" />
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            className="type-ui flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-base! font-medium"
-                            title={group.root}
-                            onClick={() => {
-                              setWorkspaceRoot(group.root);
-                              if (collapsedFolder) {
-                                toggleFolderCollapsed(group.root);
-                              }
-                            }}
-                          >
-                            <FolderOpen
-                              className="size-3.5 shrink-0 opacity-80"
-                              strokeWidth={1.75}
-                            />
-                            <span className="truncate">{group.name}</span>
-                          </button>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-80 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100"
-                                aria-label={`New chat in ${group.name}`}
-                                onClick={() => openBlankForFolder(group.root)}
-                              >
-                                <Plus className="size-3.5" strokeWidth={2} />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="right">
-                              New chat in {group.name}
-                            </TooltipContent>
-                          </Tooltip>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100 data-[state=open]:opacity-100"
-                                aria-label={`${group.name} options`}
-                              >
-                                <MoreHorizontal className="size-3.5" />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem
-                                onSelect={() => openBlankForFolder(group.root)}
-                              >
-                                <Plus className="size-4" />
-                                New chat
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => setWorkspaceRoot(group.root)}
-                              >
-                                <FolderOpen className="size-4" />
-                                Use this folder
-                              </DropdownMenuItem>
-                              {group.threads.length === 0 ? (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    variant="destructive"
-                                    onSelect={() =>
-                                      removeRecentFolder(group.root)
-                                    }
-                                  >
-                                    <Trash2 className="size-4" />
-                                    Remove from list
-                                  </DropdownMenuItem>
-                                </>
-                              ) : null}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                        {!collapsedFolder ? (
-                          group.threads.length === 0 ? (
-                            <p className="type-ui px-3 py-2 pl-8 text-[11px] text-muted-foreground/80">
-                              No chats yet
-                            </p>
-                          ) : (
-                            <ul className="mt-0.5 w-full min-w-0 space-y-0.5 pl-3">
-                              {group.threads.map((thread) => (
-                                <ThreadItem
-                                  key={thread.id}
-                                  thread={thread}
-                                  active={pathname === `/chat/${thread.id}`}
-                                  dense
-                                />
-                              ))}
-                            </ul>
-                          )
-                        ) : null}
-                      </div>
-                    );
-                  })}
+            <div className="space-y-4 pb-2">
+              <section>
+                <div className="mb-1 flex items-center justify-between gap-1 px-2">
+                  <p className="type-ui text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
+                    Home
+                  </p>
+                  <button
+                    type="button"
+                    className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+                    aria-label="New home chat"
+                    onClick={openBlankHome}
+                  >
+                    <Plus className="size-3.5" strokeWidth={2} />
+                  </button>
                 </div>
-              )
-            ) : researchThreads.length === 0 ? (
-              <p className="type-ui px-2 py-6 text-center text-muted-foreground">
-                No conversations yet
-              </p>
-            ) : (
-              <div className="pb-2">
+                {homeThreads.length === 0 ? (
+                  <p className="type-ui px-2 py-3 text-center text-muted-foreground">
+                    No conversations yet
+                  </p>
+                ) : (
+                  <ul className="w-full min-w-0 space-y-0.5">
+                    {homeThreads.map((thread) => (
+                      <ThreadItem
+                        key={thread.id}
+                        thread={thread}
+                        active={pathname === `/chat/${thread.id}`}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section>
                 <p className="type-ui mb-1 px-2 text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
-                  Recent
+                  Workspaces
                 </p>
-                <ul className="w-full min-w-0 space-y-0.5">
-                  {researchThreads.map((thread) => (
-                    <ThreadItem
-                      key={thread.id}
-                      thread={thread}
-                      active={pathname === `/chat/${thread.id}`}
-                    />
-                  ))}
-                </ul>
-              </div>
-            )}
+                {workspaceGroups.length === 0 ? (
+                  <p className="type-ui px-2 py-3 text-center text-muted-foreground">
+                    Open a folder to start project chats
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {workspaceGroups.map((group) => {
+                      const collapsedFolder = collapsedFolders.some((item) =>
+                        sameWorkspaceRoot(item, group.root),
+                      );
+                      const activeFolder = sameWorkspaceRoot(
+                        group.root,
+                        workspaceRoot,
+                      );
+                      return (
+                        <div key={group.root} className="min-w-0">
+                          <div
+                            className={cn(
+                              'group/folder flex w-full min-w-0 items-center gap-0.5 rounded-md px-1 py-1.5',
+                              activeFolder
+                                ? 'bg-accent/70 text-foreground'
+                                : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                            )}
+                          >
+                            <button
+                              type="button"
+                              className="flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-accent/80"
+                              aria-label={
+                                collapsedFolder
+                                  ? `Expand ${group.name}`
+                                  : `Collapse ${group.name}`
+                              }
+                              onClick={() => toggleFolderCollapsed(group.root)}
+                            >
+                              {collapsedFolder ? (
+                                <ChevronRight className="size-3.5" />
+                              ) : (
+                                <ChevronDown className="size-3.5" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className="type-ui flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-base! font-medium"
+                              title={group.root}
+                              onClick={() => {
+                                setWorkspaceRoot(group.root);
+                                if (collapsedFolder) {
+                                  toggleFolderCollapsed(group.root);
+                                }
+                              }}
+                            >
+                              <FolderOpen
+                                className="size-3.5 shrink-0 opacity-80"
+                                strokeWidth={1.75}
+                              />
+                              <span className="truncate">{group.name}</span>
+                            </button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100"
+                                  aria-label={`New chat in ${group.name}`}
+                                  onClick={() => openBlankForFolder(group.root)}
+                                >
+                                  <Plus className="size-3.5" strokeWidth={2} />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="right">
+                                New chat in {group.name}
+                              </TooltipContent>
+                            </Tooltip>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100 data-[state=open]:opacity-100"
+                                  aria-label={`${group.name} options`}
+                                >
+                                  <MoreHorizontal className="size-3.5" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    openBlankForFolder(group.root)
+                                  }
+                                >
+                                  <Plus className="size-4" />
+                                  New chat
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() => setWorkspaceRoot(group.root)}
+                                >
+                                  <FolderOpen className="size-4" />
+                                  Use this folder
+                                </DropdownMenuItem>
+                                {group.threads.length === 0 ? (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      variant="destructive"
+                                      onSelect={() =>
+                                        removeRecentFolder(group.root)
+                                      }
+                                    >
+                                      <Trash2 className="size-4" />
+                                      Remove from list
+                                    </DropdownMenuItem>
+                                  </>
+                                ) : null}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                          {!collapsedFolder ? (
+                            group.threads.length === 0 ? (
+                              <p className="type-ui px-3 py-2 pl-8 text-[11px] text-muted-foreground/80">
+                                No chats yet
+                              </p>
+                            ) : (
+                              <ul className="mt-0.5 w-full min-w-0 space-y-0.5 pl-3">
+                                {group.threads.map((thread) => (
+                                  <ThreadItem
+                                    key={thread.id}
+                                    thread={thread}
+                                    active={pathname === `/chat/${thread.id}`}
+                                    dense
+                                  />
+                                ))}
+                              </ul>
+                            )
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </div>
           </ScrollArea>
 
           <Separator className="shrink-0 bg-border/40" />
@@ -380,38 +419,6 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
         </>
       )}
     </aside>
-  );
-}
-
-function SpaceToggle() {
-  const { space } = useAgentSpace();
-  return (
-    <div className="mb-2 grid grid-cols-2 gap-0.5 rounded-md bg-muted/55 p-0.5">
-      <button
-        type="button"
-        className={cn(
-          'type-ui rounded-[5px] px-2 py-1.5 text-xs font-medium transition-colors',
-          space === 'research'
-            ? 'bg-background text-foreground shadow-[0_1px_2px_oklch(0_0_0/0.18)] ring-1 ring-border/35'
-            : 'text-muted-foreground hover:text-foreground',
-        )}
-        onClick={() => setAgentSpace('research')}
-      >
-        Research
-      </button>
-      <button
-        type="button"
-        className={cn(
-          'type-ui rounded-[5px] px-2 py-1.5 text-xs font-medium transition-colors',
-          space === 'coding'
-            ? 'bg-background text-foreground shadow-[0_1px_2px_oklch(0_0_0/0.18)] ring-1 ring-border/35'
-            : 'text-muted-foreground hover:text-foreground',
-        )}
-        onClick={() => setAgentSpace('coding')}
-      >
-        Coding
-      </button>
-    </div>
   );
 }
 
@@ -427,7 +434,6 @@ function OpenFolderButton({ className }: { className?: string }) {
       const selected = await pickWorkspaceFolder(workspaceRoot);
       if (!selected) return;
       setWorkspaceRoot(selected);
-      setAgentSpace('coding');
       router.push('/');
     } catch (error) {
       toastError(
@@ -521,9 +527,8 @@ function ThreadItem({
           )}
           title={displayTitle || undefined}
           onClick={() => {
-            if (thread.kind === 'coding' && thread.workspaceRoot) {
+            if (isWorkspaceKind(thread.kind) && thread.workspaceRoot) {
               setWorkspaceRoot(thread.workspaceRoot);
-              setAgentSpace('coding');
             }
           }}
         >

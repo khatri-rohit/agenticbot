@@ -13,8 +13,39 @@ export function clampChatTitle(title: string, fallback = 'New Chat'): string {
   return words.slice(0, CHAT_TITLE_MAX_WORDS).join(' ');
 }
 
-/** Two product spaces. Default for existing catalog rows is research. */
-export type ThreadKind = 'research' | 'coding';
+/**
+ * Binding, not a product mode. Home = no folder. Workspace = bound to a folder.
+ * Legacy catalog values `research` / `coding` normalize to these.
+ */
+export type ThreadKind = 'home' | 'workspace';
+
+/** Accept stored or client values, including pre-rename research/coding. */
+export function normalizeThreadKind(value: unknown): ThreadKind {
+  if (value === 'workspace' || value === 'coding') return 'workspace';
+  return 'home';
+}
+
+export function isWorkspaceKind(kind: ThreadKind | undefined): boolean {
+  return kind === 'workspace';
+}
+
+/** Strip trailing slashes and unify separators. Display form, not a compare key. */
+export function normalizeWorkspaceRoot(root: string): string {
+  return root.trim().replace(/[\\/]+$/, '').replace(/\\/g, '/');
+}
+
+/** Case-insensitive identity for grouping and memory files. */
+export function workspaceRootKey(root: string): string {
+  return normalizeWorkspaceRoot(root).toLowerCase();
+}
+
+export function sameWorkspaceRoot(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  if (!left || !right) return false;
+  return workspaceRootKey(left) === workspaceRootKey(right);
+}
 
 export interface Thread {
   id: string;
@@ -24,8 +55,8 @@ export interface Thread {
   updatedAt: string;
   /** Pinned threads stay at the top of the sidebar (by updatedAt among pins). */
   pinned?: boolean;
-  /** Research vs coding space. Omitted/legacy rows are research. */
+  /** Home vs workspace. Omitted/legacy rows normalize to home. */
   kind?: ThreadKind;
-  /** Absolute workspace folder when kind is coding. */
+  /** Absolute workspace folder when kind is workspace. */
   workspaceRoot?: string;
 }

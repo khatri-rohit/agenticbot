@@ -5,11 +5,14 @@ import {
   useEffect,
   useSyncExternalStore,
 } from 'react';
-import type {
-  AgentEvent,
-  Message,
-  MessageAttachment,
-  ThreadKind,
+import {
+  isWorkspaceKind,
+  normalizeRunPosture,
+  type AgentEvent,
+  type ApprovalDecision,
+  type Message,
+  type MessageAttachment,
+  type ThreadKind,
 } from '@org/agent-models';
 import { toastError } from '@/hooks/use-toast';
 import {
@@ -31,6 +34,8 @@ import {
   startRun,
   subscribeRun,
   cancelRun,
+  resolveApproval,
+  resolveChoice,
   type ComposerOptions,
 } from '../api/agent-client';
 import {
@@ -45,7 +50,8 @@ import {
   refreshThreads,
   subscribeThreads,
 } from '../store/thread-cache';
-import { setAgentSpace, setWorkspaceRoot } from '../store/space-store';
+import { setWorkspaceRoot } from '../store/space-store';
+import { observeRunEvent } from '../lib/run-alerts';
 
 export type QueuedMessage = {
   content: string;
@@ -60,6 +66,7 @@ const defaultComposerOptions = (): ComposerOptions => {
     webSearch: true,
     local,
     model: readStoredComposerModel(local),
+    posture: 'agent',
   };
 };
 
@@ -78,11 +85,16 @@ export function useAgentRun(threadId: string | null) {
   );
 
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const subscribeToRunRef = useRef<(runId: string) => void>(() => {
+    /* filled after subscribeToRun is defined */
+  });
   const chatStateRef = useRef(chatState);
   chatStateRef.current = chatState;
+  const threadIdRef = useRef(threadId);
+  threadIdRef.current = threadId;
   const wasRunningRef = useRef(false);
   const syncedThreadModelRef = useRef<string | null>(null);
-  const [threadKind, setThreadKind] = useState<ThreadKind>('research');
+  const [threadKind, setThreadKind] = useState<ThreadKind>('home');
   const [ledgerEpoch, setLedgerEpoch] = useState(0);
   const bumpLedger = useCallback(() => {
     setLedgerEpoch((n) => n + 1);
@@ -96,13 +108,12 @@ export function useAgentRun(threadId: string | null) {
       if (cancelled || !thread) return;
       if (syncedThreadModelRef.current === thread.id) return;
       syncedThreadModelRef.current = thread.id;
-      const coding = thread.kind === 'coding';
-      setThreadKind(coding ? 'coding' : 'research');
-      if (coding) {
-        setAgentSpace('coding');
-        if (thread.workspaceRoot) setWorkspaceRoot(thread.workspaceRoot);
+      const workspace = isWorkspaceKind(thread.kind);
+      setThreadKind(workspace ? 'workspace' : 'home');
+      if (workspace && thread.workspaceRoot) {
+        setWorkspaceRoot(thread.workspaceRoot);
       } else {
-        setAgentSpace('research');
+        setWorkspaceRoot(null);
       }
       setComposerOptions((prev) => {
         const local = prev.local === true;
@@ -110,23 +121,31 @@ export function useAgentRun(threadId: string | null) {
         return {
           ...prev,
           model,
-          webSearch: coding ? false : prev.webSearch,
+          webSearch: prev.webSearch,
         };
       });
     });
     void fetchLedger(threadId)
       .then((ledger) => {
-        if (cancelled || !ledger.snapshot) return;
+        if (cancelled) return;
         setChatState((prev) => ({
           ...prev,
-          compactionNotice: noticeFromSnapshot(ledger.snapshot!),
+          ...(ledger.snapshot
+            ? { compactionNotice: noticeFromSnapshot(ledger.snapshot) }
+            : {}),
+          plan: ledger.plan ?? prev.plan,
         }));
+        if (ledger.activeRunId && !chatStateRef.current.activeRun) {
+          subscribeToRunRef.current(ledger.activeRunId);
+        }
       })
       .catch(() => {
         /* ledger hydrate is best-effort for the compaction card */
       });
     return () => {
       cancelled = true;
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
     };
   }, [threadId]);
 
@@ -164,6 +183,7 @@ export function useAgentRun(threadId: string | null) {
           : {
               ...initialChatState(),
               compactionNotice: prior.compactionNotice,
+              plan: prior.plan,
             };
       const fromSeq = currentState.activeRun?.lastSeq ?? 0;
       let eventChain = Promise.resolve();
@@ -173,11 +193,19 @@ export function useAgentRun(threadId: string | null) {
         fromSeq,
         (event: AgentEvent) => {
           eventChain = eventChain.then(async () => {
+            if (threadIdRef.current !== threadId) return;
             const prev = currentState;
             const next = applyChatEvent(prev, event);
             await persistChatEffects(prev, event, threadId);
+            if (threadIdRef.current !== threadId) return;
             currentState = next;
             setChatState(next);
+            observeRunEvent({
+              event,
+              subscribedRunId: runId,
+              subscribedThreadId: threadId,
+              liveThreadId: threadIdRef.current,
+            });
             if (
               event.type === 'run.settled' ||
               event.type === 'run.error' ||
@@ -191,20 +219,24 @@ export function useAgentRun(threadId: string | null) {
               void fetchLedger(threadId)
                 .then((ledger) => {
                   setChatState((prev) => {
+                    const withPlan = {
+                      ...prev,
+                      plan: ledger.plan ?? prev.plan,
+                    };
                     if (ledger.snapshot) {
                       const fromDisk = noticeFromSnapshot(ledger.snapshot);
                       if (
                         prev.compactionNotice &&
                         prev.compactionNotice.throughSeq > fromDisk.throughSeq
                       ) {
-                        return prev;
+                        return withPlan;
                       }
-                      return { ...prev, compactionNotice: fromDisk };
+                      return { ...withPlan, compactionNotice: fromDisk };
                     }
                     if (prev.compactionNotice?.runId === event.runId) {
-                      return prev;
+                      return withPlan;
                     }
-                    return { ...prev, compactionNotice: null };
+                    return { ...withPlan, compactionNotice: null };
                   });
                 })
                 .catch(() => {
@@ -220,6 +252,7 @@ export function useAgentRun(threadId: string | null) {
     },
     [threadId, disconnect, bumpLedger],
   );
+  subscribeToRunRef.current = subscribeToRun;
 
   const startRunForMessages = useCallback(
     async (
@@ -261,11 +294,13 @@ export function useAgentRun(threadId: string | null) {
         model: resolveOllamaModel(options.model, local),
         local,
         thinking: options.thinking,
+        posture: normalizeRunPosture(options.posture),
       });
 
       setChatState((prev) => ({
         ...initialChatState(),
         compactionNotice: prev.compactionNotice,
+        plan: prev.plan,
       }));
       bumpLedger();
       // Server writes a model-generated title on first turn before /run returns.
@@ -276,24 +311,82 @@ export function useAgentRun(threadId: string | null) {
     [threadId, subscribeToRun, bumpLedger],
   );
 
+  const resolvePendingApproval = useCallback(
+    async (
+      approvalId: string,
+      decision: ApprovalDecision,
+      optionId?: string,
+    ) => {
+      const runId = chatStateRef.current.activeRun?.runId;
+      if (!runId) return;
+      try {
+        await resolveApproval(runId, {
+          approvalId,
+          decision,
+          ...(optionId ? { optionId } : {}),
+        });
+      } catch (err) {
+        toastError(
+          err instanceof Error ? err.message : 'Could not send decision',
+          'Approval failed',
+        );
+        throw err;
+      }
+    },
+    [],
+  );
+
+  const resolvePendingChoice = useCallback(
+    async (
+      choiceId: string,
+      body: { skipped: true } | { optionIds: string[]; text?: string },
+    ) => {
+      const runId = chatStateRef.current.activeRun?.runId;
+      if (!runId) return;
+      try {
+        await resolveChoice(
+          runId,
+          'skipped' in body
+            ? { choiceId, skipped: true }
+            : {
+                choiceId,
+                optionIds: body.optionIds,
+                ...(body.text ? { text: body.text } : {}),
+              },
+        );
+      } catch (err) {
+        toastError(
+          err instanceof Error ? err.message : 'Could not send choice',
+          'Choice failed',
+        );
+        throw err;
+      }
+    },
+    [],
+  );
+
   const interruptActiveRun = useCallback(async () => {
     const state = chatStateRef.current;
     const run = state.activeRun;
     if (!run) return;
 
-    disconnect();
-
     if (run.status === 'running') {
       try {
         await cancelRun(run.runId);
       } catch (err) {
-        console.error('Cancel run failed:', err);
+        toastError(
+          err instanceof Error ? err.message : 'Could not stop the run',
+          'Stop failed',
+        );
+        return;
       }
     }
 
+    disconnect();
     setChatState((prev) => ({
       ...initialChatState(),
       compactionNotice: prev.compactionNotice,
+      plan: prev.plan,
     }));
   }, [disconnect]);
 
@@ -313,6 +406,9 @@ export function useAgentRun(threadId: string | null) {
           local,
         ),
         thinking: options.thinking ?? composerOptions.thinking,
+        posture: normalizeRunPosture(
+          options.posture ?? composerOptions.posture,
+        ),
       };
 
       if (chatStateRef.current.activeRun) {
@@ -328,13 +424,23 @@ export function useAgentRun(threadId: string | null) {
   const sendQueuedNow = useCallback(async () => {
     if (!queuedMessage) return;
     const { content, options, attachments } = queuedMessage;
+    // Live chip wins over posture frozen at enqueue.
+    const flushOptions: ComposerOptions = {
+      ...options,
+      posture: normalizeRunPosture(composerOptions.posture),
+    };
     setQueuedMessage(null);
     await interruptActiveRun();
-    await startRunForMessages(content, options, {
+    await startRunForMessages(content, flushOptions, {
       skipQueue: true,
       attachments,
     });
-  }, [queuedMessage, interruptActiveRun, startRunForMessages]);
+  }, [
+    queuedMessage,
+    composerOptions.posture,
+    interruptActiveRun,
+    startRunForMessages,
+  ]);
 
   const editQueuedMessage = useCallback((): {
     content: string;
@@ -366,11 +472,16 @@ export function useAgentRun(threadId: string | null) {
       model: resolveOllamaModel(composerOptions.model, local),
       local,
       thinking: composerOptions.thinking,
+      posture: normalizeRunPosture(composerOptions.posture),
     });
 
+    const restored = await fetchLedger(threadId);
     setChatState((prev) => ({
       ...initialChatState(),
-      compactionNotice: prev.compactionNotice,
+      compactionNotice: restored.snapshot
+        ? noticeFromSnapshot(restored.snapshot)
+        : prev.compactionNotice,
+      plan: restored.plan ?? null,
     }));
     bumpLedger();
     subscribeToRun(runId);
@@ -408,11 +519,16 @@ export function useAgentRun(threadId: string | null) {
         model: resolveOllamaModel(composerOptions.model, local),
         local,
         thinking: composerOptions.thinking,
+        posture: normalizeRunPosture(composerOptions.posture),
       });
 
+      const restored = await fetchLedger(threadId);
       setChatState((prev) => ({
         ...initialChatState(),
-        compactionNotice: prev.compactionNotice,
+        compactionNotice: restored.snapshot
+          ? noticeFromSnapshot(restored.snapshot)
+          : prev.compactionNotice,
+        plan: restored.plan ?? null,
       }));
       bumpLedger();
       subscribeToRun(runId);
@@ -425,14 +541,24 @@ export function useAgentRun(threadId: string | null) {
     const busy = chatState.activeRun !== null;
     if (wasRunningRef.current && !busy && queuedMessage) {
       const { content, options, attachments } = queuedMessage;
+      // Live chip wins over posture frozen at enqueue.
+      const flushOptions: ComposerOptions = {
+        ...options,
+        posture: normalizeRunPosture(composerOptions.posture),
+      };
       setQueuedMessage(null);
-      void startRunForMessages(content, options, {
+      void startRunForMessages(content, flushOptions, {
         skipQueue: true,
         attachments,
       });
     }
     wasRunningRef.current = busy;
-  }, [chatState.activeRun, queuedMessage, startRunForMessages]);
+  }, [
+    chatState.activeRun,
+    queuedMessage,
+    composerOptions.posture,
+    startRunForMessages,
+  ]);
 
   return {
     chatState,
@@ -447,6 +573,8 @@ export function useAgentRun(threadId: string | null) {
     editLastUserMessage,
     disconnect,
     stopGeneration: interruptActiveRun,
+    resolvePendingApproval,
+    resolvePendingChoice,
     // Busy through post-loop compaction until run.settled clears activeRun.
     isRunning: chatState.activeRun !== null,
     ledgerEpoch,

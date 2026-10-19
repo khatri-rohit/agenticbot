@@ -1,12 +1,33 @@
 import { randomUUID } from 'node:crypto';
 
-import type { AgentEvent } from '@org/agent-models';
+import {
+  ApprovalDenied,
+  ChoiceSkipped,
+  MAX_CHOICE_TEXT_CHARS,
+  type AgentEvent,
+  type ApprovalDecision,
+  type ApprovalRequest,
+  type ApprovalResult,
+  type ChoiceRequest,
+  type ChoiceResult,
+} from '@org/agent-models';
 import { runLoop } from '../loop/loop';
 import { EventEmitter } from '../events/emitter';
 import type { EventSubscriber } from '../events/types';
-import type { RunHandle, StartRunOptions } from './types';
+import type {
+  ResolveApprovalResult,
+  ResolveChoiceResult,
+  RunHandle,
+  StartRunOptions,
+} from './types';
 
-export type { RunHandle, RunHandleStatus, StartRunOptions } from './types';
+export type {
+  ResolveApprovalResult,
+  ResolveChoiceResult,
+  RunHandle,
+  RunHandleStatus,
+  StartRunOptions,
+} from './types';
 
 /**
  * In-memory run manager. Holds live run state and event emitters.
@@ -33,6 +54,9 @@ export class RunManager {
       abortController,
       emitter,
       result: null,
+      pendingApprovals: new Map(),
+      pendingChoices: new Map(),
+      grantedTools: new Set(),
     };
 
     this.runs.set(runId, handle);
@@ -65,13 +89,25 @@ export class RunManager {
       model: opts.model,
       streaming: opts.streaming,
       mode: opts.mode,
+      posture: opts.posture ?? 'agent',
       limits: opts.limits,
       estimatedPromptTokens: opts.estimatedPromptTokens,
       contextReport: opts.contextReport,
       signal: handle.abortController.signal,
       origin: opts.origin,
       workspaceRoot: opts.workspaceRoot,
+      /*
+       * IMPORTANT: Allow/Deny exec-approval wire. Temporarily commented so
+       * file and command tools run without a pause, as they did before this
+       * card. Do not delete this line — it must stay in the tree, commented,
+       * until the Allow/Deny system is restored.
+       *
+       * approve: (request) => this.requestApproval(runId, request),
+       */
+      offerChoice: (request) => this.requestChoice(runId, request),
       onMessage: opts.onMessage,
+      hasOpenPlanWork: opts.hasOpenPlanWork,
+      contextBudget: opts.contextBudget,
       emit: (event) => {
         if (handle.cancelled) return;
         handle.emitter.emit(event);
@@ -98,6 +134,226 @@ export class RunManager {
         runId,
       });
     }
+  }
+
+  /**
+   * Pause until the client resolves this request. Session grants skip the
+   * wait for the same tool name on later calls in this run (not ask_user).
+   */
+  requestApproval(
+    runId: string,
+    request: ApprovalRequest,
+  ): Promise<ApprovalResult> {
+    const handle = this.runs.get(runId);
+    if (!handle || handle.status !== 'running' || handle.cancelled) {
+      return Promise.reject(new Error('Run cancelled'));
+    }
+
+    const hasOptions = (request.options?.length ?? 0) > 0;
+    if (!hasOptions && handle.grantedTools.has(request.toolName)) {
+      return Promise.resolve({});
+    }
+
+    const approvalId = randomUUID();
+    const signal = handle.abortController.signal;
+
+    handle.emitter.emit({
+      type: 'approval.requested',
+      runId,
+      approvalId,
+      toolName: request.toolName,
+      summary: request.summary,
+      risk: request.risk,
+      ...(request.options ? { options: request.options } : {}),
+      ...(request.argsPreview !== undefined
+        ? { argsPreview: request.argsPreview }
+        : {}),
+    });
+
+    return new Promise<ApprovalResult>((resolve, reject) => {
+      const onAbort = () => {
+        handle.pendingApprovals.delete(approvalId);
+        reject(
+          signal.reason instanceof Error
+            ? signal.reason
+            : new Error('Run cancelled'),
+        );
+      };
+
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+
+      signal.addEventListener('abort', onAbort, { once: true });
+      handle.pendingApprovals.set(approvalId, {
+        toolName: request.toolName,
+        options: request.options,
+        resolve: (result) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(result);
+        },
+        reject: (error) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+      });
+    });
+  }
+
+  /** Apply a human decision to a pending approval. */
+  resolveApproval(
+    runId: string,
+    approvalId: string,
+    decision: ApprovalDecision,
+    optionId?: string,
+  ): ResolveApprovalResult {
+    const handle = this.runs.get(runId);
+    if (!handle || handle.status !== 'running' || handle.cancelled) {
+      return 'not_found';
+    }
+    const pending = handle.pendingApprovals.get(approvalId);
+    if (!pending) return 'not_found';
+
+    const options = pending.options ?? [];
+    if (decision !== 'denied' && options.length > 0) {
+      if (!optionId || !options.some((option) => option.id === optionId)) {
+        return 'invalid_option';
+      }
+    }
+
+    handle.pendingApprovals.delete(approvalId);
+    if (decision === 'approved_for_run' && options.length === 0) {
+      handle.grantedTools.add(pending.toolName);
+    }
+
+    handle.emitter.emit({
+      type: 'approval.resolved',
+      runId,
+      approvalId,
+      decision,
+      ...(optionId ? { optionId } : {}),
+    });
+
+    if (decision === 'denied') {
+      pending.reject(new ApprovalDenied());
+    } else {
+      pending.resolve({ ...(optionId ? { optionId } : {}) });
+    }
+    return 'ok';
+  }
+
+  requestChoice(runId: string, request: ChoiceRequest): Promise<ChoiceResult> {
+    const handle = this.runs.get(runId);
+    if (!handle || handle.status !== 'running' || handle.cancelled) {
+      return Promise.reject(new Error('Run cancelled'));
+    }
+
+    const choiceId = randomUUID();
+    const signal = handle.abortController.signal;
+
+    handle.emitter.emit({
+      type: 'choice.requested',
+      runId,
+      choiceId,
+      question: request.question,
+      options: request.options,
+    });
+
+    return new Promise<ChoiceResult>((resolve, reject) => {
+      const onAbort = () => {
+        handle.pendingChoices.delete(choiceId);
+        reject(
+          signal.reason instanceof Error
+            ? signal.reason
+            : new Error('Run cancelled'),
+        );
+      };
+
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+
+      signal.addEventListener('abort', onAbort, { once: true });
+      handle.pendingChoices.set(choiceId, {
+        options: request.options,
+        resolve: (result) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(result);
+        },
+        reject: (error) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+      });
+    });
+  }
+
+  resolveChoice(
+    runId: string,
+    choiceId: string,
+    body:
+      | { skipped: true }
+      | { skipped?: false; optionIds: string[]; text?: string },
+  ): ResolveChoiceResult {
+    const handle = this.runs.get(runId);
+    if (!handle || handle.status !== 'running' || handle.cancelled) {
+      return 'not_found';
+    }
+    const pending = handle.pendingChoices.get(choiceId);
+    if (!pending) return 'not_found';
+
+    if (body.skipped === true) {
+      handle.pendingChoices.delete(choiceId);
+      handle.emitter.emit({
+        type: 'choice.resolved',
+        runId,
+        choiceId,
+        skipped: true,
+      });
+      pending.reject(new ChoiceSkipped());
+      return 'ok';
+    }
+
+    const allowed = new Set(pending.options.map((option) => option.id));
+    const optionIds: string[] = [];
+    const seen = new Set<string>();
+    for (const id of body.optionIds) {
+      if (!allowed.has(id)) return 'invalid';
+      if (seen.has(id)) continue;
+      seen.add(id);
+      optionIds.push(id);
+    }
+    const text = body.text?.trim() || undefined;
+    if (text && text.length > MAX_CHOICE_TEXT_CHARS) {
+      return 'invalid';
+    }
+    if (optionIds.length === 0 && !text) {
+      return 'invalid';
+    }
+
+    handle.pendingChoices.delete(choiceId);
+    handle.emitter.emit({
+      type: 'choice.resolved',
+      runId,
+      choiceId,
+      skipped: false,
+      ...(optionIds.length > 0 ? { optionIds } : {}),
+      ...(text ? { text } : {}),
+    });
+    pending.resolve({ optionIds, ...(text ? { text } : {}) });
+    return 'ok';
+  }
+
+  /** Live run for this thread, if any. Used so the client can reattach after reload. */
+  activeRunIdForThread(threadId: string): string | undefined {
+    for (const handle of this.runs.values()) {
+      if (handle.threadId === threadId && handle.status === 'running') {
+        return handle.runId;
+      }
+    }
+    return undefined;
   }
 
   /** Abort in-flight model/tool work and stop SSE for this run. */

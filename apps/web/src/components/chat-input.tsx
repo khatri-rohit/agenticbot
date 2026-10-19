@@ -1,6 +1,13 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+} from 'react';
 import {
   ArrowUp,
   ImagePlus,
@@ -11,7 +18,17 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import type { ContextReport, MessageAttachment } from '@org/agent-models';
+import type {
+  ContextReport,
+  MessageAttachment,
+  RunPosture,
+} from '@org/agent-models';
+import {
+  MAX_THREAD_MENTIONS,
+  imageAttachments,
+  isThreadMention,
+  threadMentions,
+} from '@org/agent-models';
 import {
   fetchLocalOllamaModels,
   type ComposerOptions,
@@ -36,6 +53,7 @@ import {
   type OllamaModel,
 } from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
+import { WorkspacePicker } from '@/components/workspace-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
 import { VoiceModePill } from '@/components/voice-mode-pill';
@@ -59,11 +77,37 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { useThreads } from '@/features/agent/hooks/use-agent-run';
+import { useAgentSpace } from '@/features/agent/store/space-store';
+import {
+  ThreadMentionChip,
+  ThreadMentionPicker,
+  mentionQueryAtCaret,
+  rankMentionThreads,
+  threadToMention,
+} from '@/components/thread-mention-picker';
 
 type ComposerDraft = {
   content: string;
   attachments: MessageAttachment[];
 };
+
+function isPersistedAttachment(value: unknown): value is MessageAttachment {
+  if (!value || typeof value !== 'object') return false;
+  const rec = value as MessageAttachment;
+  if (isThreadMention(rec)) {
+    return (
+      typeof rec.id === 'string' &&
+      typeof rec.threadId === 'string' &&
+      typeof rec.title === 'string'
+    );
+  }
+  return (
+    typeof rec.id === 'string' &&
+    typeof rec.mimeType === 'string' &&
+    typeof rec.dataUrl === 'string'
+  );
+}
 
 function draftStorageKey(scope: string): string {
   return `agenticbot:composerDraft:${scope}`;
@@ -79,14 +123,7 @@ function loadComposerDraft(scope: string): ComposerDraft | null {
     };
     const content = typeof parsed.content === 'string' ? parsed.content : '';
     const attachments = Array.isArray(parsed.attachments)
-      ? parsed.attachments.filter(
-          (a): a is MessageAttachment =>
-            !!a &&
-            typeof a === 'object' &&
-            typeof (a as MessageAttachment).id === 'string' &&
-            typeof (a as MessageAttachment).mimeType === 'string' &&
-            typeof (a as MessageAttachment).dataUrl === 'string',
-        )
+      ? parsed.attachments.filter(isPersistedAttachment)
       : [];
     if (!content.trim() && attachments.length === 0) return null;
     return { content, attachments };
@@ -160,6 +197,9 @@ export function ChatInput({
   /** localStorage draft scope — thread id or home key; remount via `key` when it changes. */
   draftScope,
   hideWebSearch = false,
+  showWorkspacePicker = false,
+  showPostureChips = false,
+  runPosture,
 }: {
   onSend: (
     content: string,
@@ -187,6 +227,11 @@ export function ChatInput({
   runModel?: string;
   draftScope: string;
   hideWebSearch?: boolean;
+  showWorkspacePicker?: boolean;
+  /** Workspace-only Ask | Agent. Home stays chip-less. */
+  showPostureChips?: boolean;
+  /** Host-applied posture for the in-flight run (from run.started). */
+  runPosture?: RunPosture;
 }) {
   const [input, setInput] = useState(
     () => loadComposerDraft(draftScope)?.content ?? '',
@@ -194,8 +239,20 @@ export function ChatInput({
   const [pendingAttachments, setPendingAttachments] = useState<
     MessageAttachment[]
   >(() => loadComposerDraft(draftScope)?.attachments ?? []);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionActive, setMentionActive] = useState(0);
+  const [selectedMentionId, setSelectedMentionId] = useState<string | null>(
+    null,
+  );
+  const catalog = useThreads() ?? [];
+  const { workspaceRoot } = useAgentSpace();
+  const mentionCandidates = rankMentionThreads(
+    catalog,
+    threadId,
+    workspaceRoot,
+  );
   const [dragOver, setDragOver] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerOptionsRef = useRef(composerOptions);
@@ -295,22 +352,15 @@ export function ChatInput({
     return () => registerComposerFocus(null);
   }, []);
 
-  // Grow the textarea and flip to the bottom-toolbar layout once content
-  // needs more than one line (measured height), not a fixed clip-only pill.
-  useEffect(() => {
+  // Size the textarea to its content, before paint. The composer is always in
+  // the two-row layout, so there is no expand decision to oscillate.
+  useLayoutEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = 'auto';
     const maxHeight = variant === 'hero' ? 200 : 160;
-    const scrollHeight = ta.scrollHeight;
-    ta.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
-    const singleLineHeight = variant === 'hero' ? 40 : 36;
-    setIsExpanded(
-      scrollHeight > singleLineHeight + 2 ||
-        input.includes('\n') ||
-        pendingAttachments.length > 0,
-    );
-  }, [input, variant, pendingAttachments.length]);
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, maxHeight)}px`;
+  }, [input, variant]);
 
   // Persist draft per thread / home; cleared on send.
   useEffect(() => {
@@ -352,7 +402,7 @@ export function ChatInput({
   const addFiles = useCallback(
     async (files: File[]) => {
       if (voiceLocked || files.length === 0) return;
-      let count = pendingAttachments.length;
+      let count = imageAttachments(pendingAttachments).length;
       const next: MessageAttachment[] = [];
       for (const file of files) {
         if (count >= MAX_IMAGE_ATTACHMENTS) {
@@ -374,9 +424,14 @@ export function ChatInput({
         count += 1;
       }
       if (next.length > 0) {
-        setPendingAttachments((prev) =>
-          [...prev, ...next].slice(0, MAX_IMAGE_ATTACHMENTS),
-        );
+        setPendingAttachments((prev) => {
+          const mentions = threadMentions(prev);
+          const images = [...imageAttachments(prev), ...next].slice(
+            0,
+            MAX_IMAGE_ATTACHMENTS,
+          );
+          return [...mentions, ...images];
+        });
       }
     },
     [pendingAttachments.length, voiceLocked],
@@ -386,6 +441,7 @@ export function ChatInput({
     (id: string) => {
       if (voiceLocked) return;
       setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
+      setSelectedMentionId((current) => (current === id ? null : current));
     },
     [voiceLocked],
   );
@@ -421,7 +477,7 @@ export function ChatInput({
       }
     }
 
-    if (pendingAttachments.length > 0 && !visionOk) {
+    if (imageAttachments(pendingAttachments).length > 0 && !visionOk) {
       toastError(
         'This model does not support images. Pick a vision model.',
         'Vision not supported',
@@ -438,14 +494,10 @@ export function ChatInput({
       pendingAttachments.length > 0 ? pendingAttachments : undefined;
     setInput('');
     setPendingAttachments([]);
+    setMentionOpen(false);
+    setSelectedMentionId(null);
     clearComposerDraft(draftScope);
-    onSend(
-      content,
-      hideWebSearch
-        ? { ...composerOptions, webSearch: false }
-        : composerOptions,
-      attachments,
-    );
+    onSend(content, composerOptions, attachments);
   }, [
     input,
     pendingAttachments,
@@ -457,25 +509,134 @@ export function ChatInput({
     voice.active,
     voice.transcribing,
     voice.stop,
-    hideWebSearch,
     onSend,
     composerOptions,
     draftScope,
   ]);
 
+  const visibleMentions = useMemo(() => {
+    const needle = mentionQuery.trim().toLowerCase();
+    if (!needle) return mentionCandidates;
+    return mentionCandidates.filter((thread) => {
+      const title = thread.title.toLowerCase();
+      const folder = thread.workspaceRoot
+        ? thread.workspaceRoot.toLowerCase()
+        : 'home';
+      return title.includes(needle) || folder.includes(needle);
+    });
+  }, [mentionCandidates, mentionQuery]);
+
+  const pickMention = useCallback(
+    (threadIdToAdd: string) => {
+      const thread = mentionCandidates.find((item) => item.id === threadIdToAdd);
+      if (!thread) return;
+      const existing = threadMentions(pendingAttachments);
+      if (existing.some((item) => item.threadId === thread.id)) {
+        setMentionOpen(false);
+        return;
+      }
+      if (existing.length >= MAX_THREAD_MENTIONS) {
+        toastError(
+          `You can attach up to ${MAX_THREAD_MENTIONS} threads.`,
+          'Thread limit',
+        );
+        return;
+      }
+      const mention = threadToMention(thread);
+      const ta = textareaRef.current;
+      const caret = ta?.selectionStart ?? input.length;
+      const found = mentionQueryAtCaret(input, caret);
+      const nextText = found
+        ? `${input.slice(0, found.start)}${input.slice(caret)}`
+        : input;
+      setInput(nextText);
+      setPendingAttachments((prev) => [...prev, mention]);
+      setMentionOpen(false);
+      setMentionQuery('');
+      setSelectedMentionId(mention.id);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        const pos = found ? found.start : nextText.length;
+        el.setSelectionRange(pos, pos);
+      });
+    },
+    [input, mentionCandidates, pendingAttachments],
+  );
+
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (mentionOpen && visibleMentions.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setMentionActive((index) =>
+            Math.min(index + 1, visibleMentions.length - 1),
+          );
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setMentionActive((index) => Math.max(index - 1, 0));
+          return;
+        }
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const thread = visibleMentions[mentionActive];
+          if (thread) pickMention(thread.id);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setMentionOpen(false);
+          return;
+        }
+      }
+
+      if (e.key === 'Backspace') {
+        const caret = e.currentTarget.selectionStart ?? 0;
+        const end = e.currentTarget.selectionEnd ?? 0;
+        if (selectedMentionId) {
+          e.preventDefault();
+          setPendingAttachments((prev) =>
+            prev.filter((item) => item.id !== selectedMentionId),
+          );
+          setSelectedMentionId(null);
+          return;
+        }
+        if (caret === 0 && end === 0 && !input) {
+          const mentions = threadMentions(pendingAttachments);
+          const last = mentions.at(-1);
+          if (last) {
+            e.preventDefault();
+            setPendingAttachments((prev) =>
+              prev.filter((item) => item.id !== last.id),
+            );
+            return;
+          }
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSend();
         return;
       }
-      // Keep the field read-only while dictating; Enter above still sends.
       if (voiceLocked) {
         e.preventDefault();
       }
     },
-    [voiceLocked, handleSend],
+    [
+      mentionOpen,
+      visibleMentions,
+      mentionActive,
+      pickMention,
+      selectedMentionId,
+      input,
+      pendingAttachments,
+      voiceLocked,
+      handleSend,
+    ],
   );
 
   const handlePaste = useCallback(
@@ -653,8 +814,60 @@ export function ChatInput({
     </>
   );
 
+  const posture: RunPosture = composerOptions.posture ?? 'agent';
+  // Chip is always editable: next/queued send uses the live selection.
+  // Host run posture is shown separately via run.started.
+
+  const postureChips = showPostureChips ? (
+    <div className="flex min-w-0 items-center gap-1">
+      <div
+        className="flex h-7 items-center rounded-md border border-border/60 p-0.5"
+        role="group"
+        aria-label="Workspace posture"
+      >
+        {(
+          [
+            { id: 'ask', label: 'Ask' },
+            { id: 'agent', label: 'Agent' },
+          ] as const
+        ).map((option) => {
+          const selected = posture === option.id;
+          return (
+            <Button
+              key={option.id}
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-pressed={selected}
+              className={cn(
+                'h-6 px-2 text-xs font-normal',
+                selected
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              onClick={() =>
+                onComposerOptionsChange({
+                  ...composerOptions,
+                  posture: option.id,
+                })
+              }
+            >
+              {option.label}
+            </Button>
+          );
+        })}
+      </div>
+      {isRunning && runPosture ? (
+        <span className="type-caption shrink-0 text-muted-foreground">
+          This run: {runPosture === 'ask' ? 'Ask' : 'Agent'}
+        </span>
+      ) : null}
+    </div>
+  ) : null;
+
   const modelControls = (
     <>
+      {postureChips}
       <ModelPicker
         value={composerOptions.model}
         onChange={(model) =>
@@ -749,7 +962,18 @@ export function ChatInput({
       value={input}
       onChange={(e) => {
         if (voiceLocked) return;
-        setInput(e.target.value);
+        const value = e.target.value;
+        setInput(value);
+        const caret = e.target.selectionStart ?? value.length;
+        const found = mentionQueryAtCaret(value, caret);
+        if (found) {
+          setMentionOpen(true);
+          setMentionQuery(found.query);
+          setMentionActive(0);
+        } else {
+          setMentionOpen(false);
+          setMentionQuery('');
+        }
       }}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
@@ -793,7 +1017,7 @@ export function ChatInput({
           >
             <CardHeader className="border-b border-border/40 pb-2">
               <Badge variant="secondary" className="font-normal">
-                1 queued
+                1 queued as {posture === 'ask' ? 'Ask' : 'Agent'}
               </Badge>
               <CardAction className="flex gap-1">
                 <Button
@@ -821,14 +1045,19 @@ export function ChatInput({
               {queuedMessage.attachments &&
               queuedMessage.attachments.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {queuedMessage.attachments.map((attachment) => (
-                    <img
-                      key={attachment.id}
-                      src={attachment.dataUrl}
-                      alt={attachment.name ?? 'Queued attachment'}
-                      className="size-10 rounded-md object-cover ring-1 ring-border/50"
-                    />
+                  {threadMentions(queuedMessage.attachments).map((mention) => (
+                    <ThreadMentionChip key={mention.id} mention={mention} />
                   ))}
+                  {imageAttachments(queuedMessage.attachments).map(
+                    (attachment) => (
+                      <img
+                        key={attachment.id}
+                        src={attachment.dataUrl}
+                        alt={attachment.name ?? 'Queued attachment'}
+                        className="size-10 rounded-md object-cover ring-1 ring-border/50"
+                      />
+                    ),
+                  )}
                 </div>
               ) : null}
               {queuedMessage.content ? (
@@ -837,9 +1066,11 @@ export function ChatInput({
                 </p>
               ) : queuedMessage.attachments?.length ? (
                 <p className="text-sm text-muted-foreground">
-                  {queuedMessage.attachments.length === 1
-                    ? '1 image'
-                    : `${queuedMessage.attachments.length} images`}
+                  {threadMentions(queuedMessage.attachments).length > 0
+                    ? `${threadMentions(queuedMessage.attachments).length} thread${threadMentions(queuedMessage.attachments).length === 1 ? '' : 's'}`
+                    : imageAttachments(queuedMessage.attachments).length === 1
+                      ? '1 image'
+                      : `${imageAttachments(queuedMessage.attachments).length} images`}
                 </p>
               ) : null}
             </CardContent>
@@ -849,17 +1080,34 @@ export function ChatInput({
         <Card
           className={cn(
             'min-w-0 gap-0 overflow-hidden border-0 bg-card/95 py-0 shadow-[0_4px_24px_oklch(0_0_0/0.12)] ring-1 ring-border/40 backdrop-blur-sm transition-[box-shadow,ring-color] focus-within:ring-border/65',
-            isHero || isExpanded ? 'rounded-[1.35rem]' : 'rounded-full',
+            'rounded-[1.35rem]',
             dragOver && 'ring-2 ring-ring/25',
           )}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          <CardContent className="min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <CardContent className="relative min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
             {pendingAttachments.length > 0 ? (
-              <div className="mb-1.5 flex flex-wrap gap-2 px-1 pt-0.5">
-                {pendingAttachments.map((attachment) => (
+              <div className="mb-1.5 flex flex-wrap items-center gap-2 px-1 pt-0.5">
+                {threadMentions(pendingAttachments).map((mention) => (
+                  <ThreadMentionChip
+                    key={mention.id}
+                    mention={mention}
+                    selected={selectedMentionId === mention.id}
+                    onSelect={() =>
+                      setSelectedMentionId((current) =>
+                        current === mention.id ? null : mention.id,
+                      )
+                    }
+                    onRemove={
+                      voiceLocked
+                        ? undefined
+                        : () => removeAttachment(mention.id)
+                    }
+                  />
+                ))}
+                {imageAttachments(pendingAttachments).map((attachment) => (
                   <div
                     key={attachment.id}
                     className="group relative size-16 overflow-hidden rounded-md ring-1 ring-border/50"
@@ -885,26 +1133,37 @@ export function ChatInput({
               </div>
             ) : null}
 
+            {mentionOpen ? (
+              <ThreadMentionPicker
+                threads={mentionCandidates}
+                query={mentionQuery}
+                activeIndex={mentionActive}
+                onActiveIndexChange={setMentionActive}
+                selectedIds={
+                  new Set(
+                    threadMentions(pendingAttachments).map(
+                      (mention) => mention.threadId,
+                    ),
+                  )
+                }
+                onPick={(thread) => pickMention(thread.id)}
+              />
+            ) : null}
+
             {/*
-              Smart composer: one-line keeps controls inline; multi-line gives
-              the textarea full width and docks the same controls on a bottom row.
-              Grid areas keep the textarea mounted across the layout flip.
+              Composer: textarea on top, controls on a bottom row. One layout,
+              no expand/collapse flip, so nothing can oscillate while typing.
             */}
-            <div
-              className={cn(
-                'grid min-w-0 gap-1',
-                isExpanded
-                  ? 'grid-cols-[minmax(0,1fr)_auto] [grid-template-areas:"text_text"_"left_right"]'
-                  : 'grid-cols-[auto_minmax(0,1fr)_auto] items-center [grid-template-areas:"left_text_right"]',
-              )}
-            >
+            <div className="grid min-w-0 gap-1 [grid-template-areas:'text_text'_'left_right'] grid-cols-[minmax(0,1fr)_auto]">
               <div className="flex min-w-0 items-center gap-0.5 [grid-area:left]">
                 {attachMenu}
-                {isExpanded ? modelControls : null}
+                {showWorkspacePicker ? (
+                  <WorkspacePicker disabled={isRunning} />
+                ) : null}
+                {modelControls}
               </div>
               <div className="min-w-0 [grid-area:text]">{composerTextarea}</div>
               <div className="flex shrink-0 items-center gap-0.5 [grid-area:right]">
-                {isExpanded ? null : modelControls}
                 {actionControls}
               </div>
             </div>

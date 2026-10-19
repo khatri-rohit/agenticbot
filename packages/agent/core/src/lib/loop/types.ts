@@ -2,8 +2,14 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import type {
   AgentEventWithoutSeq,
+  ApprovalRequest,
+  ApprovalResult,
+  ChoiceRequest,
+  ChoiceResult,
+  ContextBudget,
   ContextReport,
   LedgerRecord,
+  RunPosture,
   ToolOrigin,
 } from '@org/agent-models';
 import type { TraceEvent } from '../events/trace-types';
@@ -12,7 +18,7 @@ import type { ToolRegistry } from '../tools/type';
 import type { AgentLimits } from './limits';
 
 /** Terminal status returned by runLoop (in-memory run summary, not persisted Run). */
-export type RunLoopStatus = 'completed' | 'error';
+export type RunLoopStatus = 'completed' | 'error' | 'incomplete';
 
 /**
  * Transport-agnostic model invocation. The loop supplies onTextDelta so it can
@@ -32,8 +38,10 @@ export type RunLoopConfig = {
   threadId?: string;
   model: string;
   streaming: boolean;
-  /** Mode name for run.started (e.g. RESEARCH_MODE.name). */
+  /** Mode name for run.started (e.g. HOME_MODE.name). */
   mode: string;
+  /** Host-applied Ask | Agent. Loop refuses write/exec when ask. */
+  posture?: RunPosture;
   limits?: Partial<AgentLimits>;
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
@@ -45,6 +53,13 @@ export type RunLoopConfig = {
   origin?: ToolOrigin;
   /** Bound workspace for file tools. */
   workspaceRoot?: string;
+  /**
+   * Host approval seam. Chat wires RunManager; CLI/eval may auto-resolve.
+   * The wait must not sit inside toolTimeoutMs.
+   */
+  approve?: (request: ApprovalRequest) => Promise<ApprovalResult>;
+  /** Mid-turn direction picker. Skip must stop the run, not invent a path. */
+  offerChoice?: (request: ChoiceRequest) => Promise<ChoiceResult>;
   /** Legacy trace callback (eval harness). Kept for backward compat. */
   trace?: (event: TraceEvent) => void;
   /** If provided, emits AgentEvents for SSE / UI consumers. */
@@ -54,6 +69,13 @@ export type RunLoopConfig = {
    * Not used for SSE preview deltas. Host owns append (ledger in M1).
    */
   onMessage?: (record: LedgerRecord) => void | Promise<void>;
+  /**
+   * Host reads the live plan. When a Final plan still has open todos,
+   * the loop nudges once, then finishes incomplete instead of a clean stop.
+   */
+  hasOpenPlanWork?: () => boolean | Promise<boolean>;
+  /** Budget for mid-turn tool-result stubbing. Defaults to DEFAULT_CONTEXT_BUDGET. */
+  contextBudget?: ContextBudget;
 };
 
 export type RunLoopResult = {

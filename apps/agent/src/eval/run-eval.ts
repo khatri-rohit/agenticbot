@@ -1,7 +1,8 @@
+import { HOME_MODE } from '@org/agent-models';
 import {
   runLoop,
   createInvokeModelCall,
-  getContext,
+  assembleContext,
   createToolRegistry,
   ALL_TOOLS,
   type TraceEvent,
@@ -34,21 +35,41 @@ async function runScenario(
   query: string,
 ): Promise<ScenarioRunInput & { answer: string }> {
   const tools = createToolRegistry(ALL_TOOLS);
-  const messages = getContext(query, tools);
+  const { messages } = assembleContext({
+    tools,
+    memory: { user: '', notes: '' },
+    snapshot: null,
+    envelopes: [
+      {
+        v: 1,
+        seq: 1,
+        ts: new Date().toISOString(),
+        threadId: 'eval',
+        runId: null,
+        record: { role: 'user', content: query },
+      },
+    ],
+    mode: 'home',
+  });
   const stats: RunStats = { toolCalls: 0, iterations: 0, toolNames: [] };
 
-  const result = await runLoop(createInvokeModelCall(), messages, tools, {
-    model,
-    streaming: false,
-    mode: 'research',
-    trace: createTraceCollector(stats),
-    limits: {
-      maxIterations: 8,
-      maxToolCalls: 12,
-      maxRepeatedToolCalls: 2,
-      toolTimeoutMs: 30_000,
+  const result = await runLoop(
+    createInvokeModelCall({ temperature: HOME_MODE.temperature }),
+    messages,
+    tools,
+    {
+      model,
+      streaming: false,
+      mode: 'home',
+      trace: createTraceCollector(stats),
+      limits: {
+        maxIterations: 8,
+        maxToolCalls: 12,
+        maxRepeatedToolCalls: 2,
+        toolTimeoutMs: 30_000,
+      },
     },
-  });
+  );
 
   return {
     scenarioId,

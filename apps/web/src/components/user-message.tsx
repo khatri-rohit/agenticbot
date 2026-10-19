@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Message } from '@org/agent-models';
+import { imageAttachments, threadMentions } from '@org/agent-models';
+import { ThreadMentionChip } from '@/components/thread-mention-picker';
 import { MessageActions } from '@/components/message-actions';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { formatMessageTime } from '@/lib/format-relative-time';
 
 export function UserMessage({
   message,
@@ -48,6 +51,7 @@ export function UserMessage({
 
   const hasAttachments = (message.attachments?.length ?? 0) > 0;
   const canResend = Boolean(draft.trim()) || hasAttachments;
+  const sentAt = formatMessageTime(message.createdAt);
 
   const runSubmit = useCallback(async () => {
     const trimmed = draft.trim();
@@ -90,7 +94,7 @@ export function UserMessage({
     <div
       ref={(el) => registerAnchor(message.id, el)}
       id={`conversation-anchor-${message.id}`}
-      className="group/msg min-w-0 max-w-full scroll-mt-6"
+      className="min-w-0 max-w-full scroll-mt-6"
     >
       {isEditing ? (
         <div
@@ -100,7 +104,10 @@ export function UserMessage({
         >
           {message.attachments && message.attachments.length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-1.5 px-0.5">
-              {message.attachments.map((attachment) => (
+              {threadMentions(message.attachments).map((mention) => (
+                <ThreadMentionChip key={mention.id} mention={mention} />
+              ))}
+              {imageAttachments(message.attachments).map((attachment) => (
                 <img
                   key={attachment.id}
                   src={attachment.dataUrl}
@@ -190,7 +197,10 @@ export function UserMessage({
           >
             {message.attachments && message.attachments.length > 0 ? (
               <div className="mb-2.5 flex flex-wrap gap-1.5">
-                {message.attachments.map((attachment) => (
+                {threadMentions(message.attachments).map((mention) => (
+                  <ThreadMentionChip key={mention.id} mention={mention} />
+                ))}
+                {imageAttachments(message.attachments).map((attachment) => (
                   <button
                     key={attachment.id}
                     type="button"
@@ -232,13 +242,24 @@ export function UserMessage({
               </p>
             ) : null}
           </div>
-          <MessageActions
-            content={message.content}
-            align="start"
-            showEdit={canEdit}
-            onEdit={startEdit}
-            className="opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100"
-          />
+          <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+            {sentAt ? (
+              <time
+                dateTime={message.createdAt}
+                className="type-caption text-muted-foreground/55 tabular-nums"
+              >
+                {sentAt}
+              </time>
+            ) : null}
+            <div className="flex min-w-0 items-center">
+              <MessageActions
+                content={message.content}
+                align="start"
+                showEdit={canEdit}
+                onEdit={startEdit}
+              />
+            </div>
+          </div>
         </>
       )}
     </div>

@@ -16,7 +16,10 @@ export type {
   ToolFailed,
   ApprovalRequested,
   ApprovalResolved,
+  ChoiceRequested,
+  ChoiceResolved,
   MemoryUpdated,
+  PlanUpdated,
   ContextCompacting,
   ContextCompacted,
   TurnCompleted,
@@ -31,6 +34,11 @@ export {
   CHAT_TITLE_MIN_WORDS,
   CHAT_TITLE_MAX_WORDS,
   clampChatTitle,
+  normalizeThreadKind,
+  isWorkspaceKind,
+  normalizeWorkspaceRoot,
+  workspaceRootKey,
+  sameWorkspaceRoot,
 } from './lib/thread.js';
 
 export type {
@@ -38,7 +46,16 @@ export type {
   MessageRole,
   MessageStatus,
   MessageAttachment,
+  ImageAttachment,
+  ThreadMentionAttachment,
   PendingToolCall,
+} from './lib/message.js';
+export {
+  MAX_THREAD_MENTIONS,
+  isThreadMention,
+  isImageAttachment,
+  imageAttachments,
+  threadMentions,
 } from './lib/message.js';
 
 export type {
@@ -49,6 +66,13 @@ export type {
   ChatMessage,
   ChatContentPart,
   StartRunRequest,
+  RunPosture,
+} from './lib/run.js';
+export {
+  ASK_STRIPPED_TOOLS,
+  normalizeRunPosture,
+  applyPostureToTools,
+  isAskStrippedTool,
 } from './lib/run.js';
 
 export {
@@ -58,7 +82,7 @@ export {
 } from './lib/token-estimate.js';
 
 export type { ModeName, ModeConfig } from './lib/mode.js';
-export { RESEARCH_MODE, CODING_MODE, modeForKind } from './lib/mode.js';
+export { HOME_MODE, WORKSPACE_MODE, modeForKind } from './lib/mode.js';
 
 export type {
   OllamaEndpoint,
@@ -79,7 +103,27 @@ export type {
 } from './lib/ledger.js';
 export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
 
-export type { ToolRisk, ToolOrigin, ToolContext } from './lib/tool-context.js';
+export type {
+  ToolRisk,
+  ToolOrigin,
+  ToolContext,
+  ApprovalDecision,
+  ApprovalOption,
+  ApprovalRequest,
+  ApprovalResult,
+} from './lib/tool-context.js';
+export { ApprovalDenied } from './lib/tool-context.js';
+
+export type {
+  ChoiceOption,
+  ChoiceRequest,
+  ChoiceResult,
+} from './lib/choice.js';
+export {
+  MAX_CHOICE_OPTIONS,
+  MAX_CHOICE_TEXT_CHARS,
+  ChoiceSkipped,
+} from './lib/choice.js';
 
 export type {
   MemoryTarget,
@@ -91,6 +135,34 @@ export type {
   MemoryGateResult,
 } from './lib/memory.js';
 export { DEFAULT_MEMORY_CAPS } from './lib/memory.js';
+
+export type {
+  PlanAction,
+  PlanDecision,
+  PlanNote,
+  PlanNoteKind,
+  PlanTodo,
+  PlanTodoCounts,
+  PlanTodoStatus,
+  ThreadPlan,
+} from './lib/plan.js';
+export {
+  MAX_PLAN_DECISIONS,
+  MAX_PLAN_FINAL_CHARS,
+  MAX_PLAN_GOAL_CHARS,
+  MAX_PLAN_NOTE_CHARS,
+  MAX_PLAN_NOTES,
+  MAX_PLAN_TODO_CHARS,
+  MAX_PLAN_TODOS,
+  MAX_PLAN_PROMPT_NOTES,
+  emptyThreadPlan,
+  formatThreadPlanForPrompt,
+  isThreadPlanEmpty,
+  parseThreadPlan,
+  planHasOpenWork,
+  planTodoCounts,
+  selectPlanForRewind,
+} from './lib/plan.js';
 
 export type {
   ContextBudget,

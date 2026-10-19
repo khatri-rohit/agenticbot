@@ -17,10 +17,8 @@ import {
   removeRecentThread,
   touchRecentThread,
 } from '@/features/agent/store/recent-threads-store';
-import {
-  setAgentSpace,
-  setWorkspaceRoot,
-} from '@/features/agent/store/space-store';
+import { setWorkspaceRoot } from '@/features/agent/store/space-store';
+import { isWorkspaceKind } from '@org/agent-models';
 
 type SwitcherEntry = {
   id: string;
@@ -85,9 +83,10 @@ function buildEntries(): SwitcherEntry[] {
 
 function syncSpaceForThread(threadId: string): void {
   const thread = getThreadsSnapshot().find((t) => t.id === threadId);
-  if (thread?.kind === 'coding' && thread.workspaceRoot) {
+  if (thread && isWorkspaceKind(thread.kind) && thread.workspaceRoot) {
     setWorkspaceRoot(thread.workspaceRoot);
-    setAgentSpace('coding');
+  } else {
+    setWorkspaceRoot(null);
   }
 }
 

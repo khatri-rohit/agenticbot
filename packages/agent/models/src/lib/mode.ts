@@ -1,16 +1,17 @@
 import type { ThreadKind } from './thread.js';
+import { isWorkspaceKind } from './thread.js';
 
 /**
- * A mode is a policy bundle: model, temperature, system prompt, allowed tools,
- * and loop limits. Research and coding ship as separate spaces; thinking is reserved.
+ * A profile is a policy bundle: model, temperature, tools, and loop limits.
+ * Home vs workspace is binding; thinking is reserved.
  */
-export type ModeName = 'research' | 'coding' | 'thinking';
+export type ModeName = 'home' | 'workspace' | 'thinking';
 
 export interface ModeConfig {
   name: ModeName;
   model: string;
   temperature: number;
-  /** Mode-optional tools (e.g. web_search); gated by client webSearch flag. */
+  /** Profile-optional tools (e.g. web_search); gated by client webSearch flag. */
   allowedTools: string[];
   /** Always-on tools. Server includes these regardless of webSearch. */
   globalTools: string[];
@@ -22,27 +23,34 @@ export interface ModeConfig {
   };
 }
 
-export const RESEARCH_MODE: ModeConfig = {
-  name: 'research',
+export const HOME_MODE: ModeConfig = {
+  name: 'home',
   model: 'glm-5.2:cloud',
-  // model: 'llama3.1:8b',
-  temperature: 0.7,
+  temperature: 0.65,
   allowedTools: ['web_search'],
-  globalTools: ['web_fetch', 'load_skill', 'memory'],
+  globalTools: [
+    'web_fetch',
+    'load_skill',
+    'memory',
+    'plan',
+    'todo',
+    'ask_user',
+    'offer_choice',
+  ],
   limits: {
-    maxIterations: 16,
-    maxToolCalls: 24,
+    maxIterations: 40,
+    maxToolCalls: 60,
     maxRepeatedToolCalls: 2,
-    toolTimeoutMs: 30_000,
+    toolTimeoutMs: 45_000,
   },
 };
 
-/** Project-bound coding space. No default web search. Builds may exceed 30s. */
-export const CODING_MODE: ModeConfig = {
-  name: 'coding',
-  model: RESEARCH_MODE.model,
+/** Folder-bound coding profile. Web search is optional (composer flag). */
+export const WORKSPACE_MODE: ModeConfig = {
+  name: 'workspace',
+  model: 'glm-5.3:cloud',
   temperature: 0.2,
-  allowedTools: [],
+  allowedTools: ['web_search', 'web_fetch'],
   globalTools: [
     'glob',
     'grep',
@@ -51,15 +59,19 @@ export const CODING_MODE: ModeConfig = {
     'run_terminal',
     'load_skill',
     'memory',
+    'plan',
+    'todo',
+    'ask_user',
+    'offer_choice',
   ],
   limits: {
-    maxIterations: 50,
-    maxToolCalls: 100,
-    maxRepeatedToolCalls: 5,
-    toolTimeoutMs: 100_000,
+    maxIterations: 100,
+    maxToolCalls: 200,
+    maxRepeatedToolCalls: 4,
+    toolTimeoutMs: 120_000,
   },
 };
 
 export function modeForKind(kind: ThreadKind | undefined): ModeConfig {
-  return kind === 'coding' ? CODING_MODE : RESEARCH_MODE;
+  return isWorkspaceKind(kind) ? WORKSPACE_MODE : HOME_MODE;
 }

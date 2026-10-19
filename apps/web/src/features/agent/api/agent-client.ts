@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  ApprovalDecision,
   ContextReport,
   MemoryCaps,
   MemoryFiles,
@@ -8,9 +9,11 @@ import type {
   OllamaEndpoint,
   OllamaListedModel,
   OllamaModelConfig,
+  RunPosture,
   StartRunRequest,
   ThinkingValue,
 } from '@org/agent-models';
+import { normalizeRunPosture } from '@org/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
@@ -26,6 +29,8 @@ export type ComposerOptions = {
   local?: boolean;
   /** Model-specific thinking: false / true / effort name from `/api/show`. */
   thinking?: ThinkingValue;
+  /** Workspace-only Ask | Agent. Default agent. Ignored on Home. */
+  posture?: RunPosture;
 };
 
 export type PendingMessage = {
@@ -35,6 +40,7 @@ export type PendingMessage = {
   model?: string;
   local?: boolean;
   thinking?: ThinkingValue;
+  posture?: RunPosture;
   attachments?: MessageAttachment[];
 };
 
@@ -72,6 +78,7 @@ export async function startRun(
     local?: boolean;
     webSearch?: boolean;
     thinking?: ThinkingValue;
+    posture?: RunPosture;
   } = {},
 ): Promise<string> {
   const body: StartRunRequest = {
@@ -83,6 +90,7 @@ export async function startRun(
     local: options.local,
     webSearch: options.webSearch,
     thinking: options.thinking,
+    posture: normalizeRunPosture(options.posture),
   };
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
@@ -112,29 +120,59 @@ export function subscribeRun(
   onEvent: (event: AgentEvent) => void,
   onError?: (error: Error) => void,
 ): () => void {
-  const url = `${API_BASE}/api/agent/run/${runId}/events?fromSeq=${fromSeq}`;
-  const es = new EventSource(url);
+  let closed = false;
+  let cursor = fromSeq;
+  let retries = 0;
+  let source: EventSource | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  es.onmessage = (e) => {
-    try {
-      const event = JSON.parse(e.data) as AgentEvent;
-      onEvent(event);
-    } catch (err) {
-      onError?.(err instanceof Error ? err : new Error(String(err)));
-    }
+  const connect = () => {
+    if (closed) return;
+    const url = `${API_BASE}/api/agent/run/${runId}/events?fromSeq=${cursor}`;
+    const es = new EventSource(url);
+    source = es;
+
+    es.onmessage = (e) => {
+      retries = 0;
+      try {
+        const event = JSON.parse(e.data) as AgentEvent;
+        if (typeof event.seq === 'number') {
+          cursor = Math.max(cursor, event.seq);
+        }
+        onEvent(event);
+        if (event.type === 'run.settled' || event.type === 'run.error') {
+          closed = true;
+          es.close();
+        }
+      } catch (err) {
+        onError?.(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    es.addEventListener('done', () => {
+      closed = true;
+      es.close();
+    });
+
+    es.onerror = () => {
+      es.close();
+      if (closed) return;
+      retries += 1;
+      if (retries > 8) {
+        onError?.(new Error('SSE connection lost'));
+        return;
+      }
+      const delay = Math.min(1000 * 2 ** (retries - 1), 8000);
+      reconnectTimer = setTimeout(connect, delay);
+    };
   };
 
-  es.addEventListener('done', () => {
-    es.close();
-  });
-
-  es.onerror = () => {
-    onError?.(new Error('SSE connection lost'));
-    es.close();
-  };
+  connect();
 
   return () => {
-    es.close();
+    closed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    source?.close();
   };
 }
 
@@ -183,6 +221,7 @@ export async function fetchContextEstimate(options: {
   model?: string;
   local?: boolean;
   webSearch?: boolean;
+  posture?: RunPosture;
 }): Promise<ContextEstimateResponse> {
   const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
     method: 'POST',
@@ -194,6 +233,7 @@ export async function fetchContextEstimate(options: {
       model: options.model,
       local: options.local,
       webSearch: options.webSearch,
+      posture: normalizeRunPosture(options.posture),
     }),
   });
   if (!res.ok) {
@@ -256,5 +296,45 @@ export async function cancelRun(runId: string): Promise<void> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Failed to cancel run: ${res.status}`);
+  }
+}
+
+export async function resolveApproval(
+  runId: string,
+  body: {
+    approvalId: string;
+    decision: ApprovalDecision;
+    optionId?: string;
+  },
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/agent/run/${runId}/approval`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(
+      payload.error ?? `Failed to resolve approval: ${res.status}`,
+    );
+  }
+}
+
+export async function resolveChoice(
+  runId: string,
+  body:
+    | { choiceId: string; skipped: true }
+    | { choiceId: string; optionIds: string[]; text?: string },
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/agent/run/${runId}/choice`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(
+      payload.error ?? `Failed to resolve choice: ${res.status}`,
+    );
   }
 }

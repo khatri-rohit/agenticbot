@@ -62,14 +62,10 @@ export function ChatShell({
           minSize={14}
           maxSize={30}
           collapsible
-          collapsedSize={3}
+          collapsedSize={4}
           onCollapse={() => setSidebarCollapsed(true)}
           onExpand={() => setSidebarCollapsed(false)}
-          className={cn(
-            'flex min-h-0 flex-col bg-sidebar',
-            // Pin a fixed ~3rem rail; percent collapsedSize alone drifts with viewport.
-            sidebarCollapsed && '!min-w-12 !max-w-12',
-          )}
+          className="flex min-h-0 flex-col bg-sidebar"
         >
           <Sidebar
             collapsed={sidebarCollapsed}

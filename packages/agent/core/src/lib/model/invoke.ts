@@ -31,6 +31,9 @@ export async function invokeModelTurn(
     model,
     messages,
     tools: tools.definitions,
+    ...(options?.temperature !== undefined
+      ? { temperature: options.temperature }
+      : {}),
     ...(options?.reasoningEffort !== undefined
       ? { reasoning_effort: options.reasoningEffort }
       : {}),

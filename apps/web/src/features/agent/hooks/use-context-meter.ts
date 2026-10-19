@@ -119,6 +119,7 @@ export function useContextMeter(options: {
         model: composerOptions.model,
         local: composerOptions.local,
         webSearch: composerOptions.webSearch,
+        posture: composerOptions.posture,
       })
         .then((res) => {
           if (!cancelled) {
@@ -148,6 +149,7 @@ export function useContextMeter(options: {
     composerOptions.model,
     composerOptions.local,
     composerOptions.webSearch,
+    composerOptions.posture,
   ]);
 
   const limit =

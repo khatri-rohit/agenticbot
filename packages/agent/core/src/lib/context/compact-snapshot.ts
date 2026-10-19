@@ -60,6 +60,15 @@ export function buildExtractiveSnapshot(input: {
       ...prior.map((envelope) => `- ${clip(recordText(envelope), 160)}`),
     );
   }
+  const facts = collectToolFacts(compacted);
+  if (facts.files.length > 0) {
+    briefParts.push(`Files: ${facts.files.join(', ')}`);
+  }
+  if (facts.commands.length > 0) {
+    briefParts.push(
+      `Commands: ${facts.commands.map((command) => clip(command, 80)).join(' | ')}`,
+    );
+  }
   const brief = clip(briefParts.join('\n'), BRIEF_MAX);
 
   const summaryLines: string[] = [];
@@ -84,4 +93,91 @@ export function buildExtractiveSnapshot(input: {
     summary: clip(summaryLines.join('\n\n'), SUMMARY_MAX),
     createdAt: new Date().toISOString(),
   };
+}
+
+const MENTION_MAX_CHARS = 4_000;
+
+function collectToolFacts(envelopes: LedgerEnvelope[]): {
+  files: string[];
+  commands: string[];
+} {
+  const files: string[] = [];
+  const seenFiles = new Set<string>();
+  const commands: string[] = [];
+  for (const envelope of envelopes) {
+    if (envelope.record.role !== 'assistant') continue;
+    for (const call of envelope.record.tool_calls ?? []) {
+      let args: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(call.function.arguments) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          args = parsed as Record<string, unknown>;
+        }
+      } catch {
+        continue;
+      }
+      if (typeof args.path === 'string' && args.path.trim()) {
+        const filePath = args.path.trim();
+        if (!seenFiles.has(filePath)) {
+          seenFiles.add(filePath);
+          files.push(filePath);
+        }
+      }
+      if (
+        call.function.name === 'run_terminal' &&
+        typeof args.command === 'string' &&
+        args.command.trim()
+      ) {
+        commands.push(args.command.trim());
+      }
+    }
+  }
+  return { files: files.slice(-8), commands: commands.slice(-4) };
+}
+
+/** Budgeted extract of another thread for the mentions layer. Re-extracted at run time. */
+export function packMentionedThread(input: {
+  title: string;
+  sourceLabel: string;
+  envelopes: LedgerEnvelope[];
+  snapshot: Snapshot | null;
+}): string {
+  const throughSeq =
+    chooseCompactThroughSeq(input.envelopes, 2) ??
+    (input.envelopes.at(-1)?.seq ?? 0);
+  const snapshot =
+    input.snapshot && input.snapshot.throughSeq > 0
+      ? input.snapshot
+      : throughSeq > 0
+        ? buildExtractiveSnapshot({
+            threadId: 'mention',
+            model: '',
+            envelopes: input.envelopes,
+            throughSeq,
+          })
+        : null;
+  const live = input.envelopes.filter(
+    (envelope) => envelope.seq > (snapshot?.throughSeq ?? 0),
+  );
+  const liveLines: string[] = [];
+  for (const envelope of live) {
+    if (
+      envelope.record.role !== 'user' &&
+      envelope.record.role !== 'assistant'
+    ) {
+      continue;
+    }
+    const text = recordText(envelope);
+    if (!text) continue;
+    const label = envelope.record.role === 'user' ? 'User' : 'Assistant';
+    liveLines.push(`${label}: ${clip(text, 280)}`);
+  }
+  const parts = [
+    `Thread: ${input.title}`,
+    `Source: ${input.sourceLabel}`,
+    snapshot?.brief ? `Brief:\n${snapshot.brief}` : '',
+    snapshot?.summary ? `Earlier:\n${clip(snapshot.summary, 2_000)}` : '',
+    liveLines.length > 0 ? `Recent:\n${liveLines.join('\n')}` : '',
+  ].filter(Boolean);
+  return clip(parts.join('\n\n'), MENTION_MAX_CHARS);
 }

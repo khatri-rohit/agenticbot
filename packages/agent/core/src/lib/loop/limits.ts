@@ -1,14 +1,13 @@
 /**
  * Loop execution limits. These bound the agent's autonomy per run.
  *
- * Defaults are tuned for local 8B models doing research tasks.
- * Override per-run via RunConfig.limits.
+ * Defaults are the Home profile. Workspace runs override via ModeConfig.limits.
  */
 export const DEFAULT_LIMITS = {
-  maxIterations: 12,
-  maxToolCalls: 20,
-  maxRepeatedToolCalls: 4,
-  toolTimeoutMs: 30_000,
+  maxIterations: 20,
+  maxToolCalls: 32,
+  maxRepeatedToolCalls: 2,
+  toolTimeoutMs: 45_000,
 };
 
 export type AgentLimits = {

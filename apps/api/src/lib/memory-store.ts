@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { MemoryFiles, MemoryOp, ProposedMemoryOp } from '@org/agent-models';
+import { workspaceRootKey } from '@org/agent-models';
 import { applyMemoryText, gateMemoryOps } from '@org/agent-core';
 
 export class MemoryStore {
@@ -21,8 +22,13 @@ export class MemoryStore {
     return path.join(this.dir(), 'USER.md');
   }
 
-  private notesPath(): string {
-    return path.join(this.dir(), 'MEMORY.md');
+  private notesPath(workspaceRoot?: string): string {
+    if (!workspaceRoot) return path.join(this.dir(), 'MEMORY.md');
+    const key = createHash('sha256')
+      .update(workspaceRootKey(workspaceRoot))
+      .digest('hex')
+      .slice(0, 24);
+    return path.join(this.dir(), 'workspaces', key, 'MEMORY.md');
   }
 
   private opsPath(): string {
@@ -38,19 +44,24 @@ export class MemoryStore {
     return run;
   }
 
-  async ensure(): Promise<void> {
+  async ensure(workspaceRoot?: string): Promise<void> {
     await mkdir(this.dir(), { recursive: true });
     await mkdir(path.join(this.dir(), 'pending'), { recursive: true });
     await this.ensureFile(this.userPath());
     await this.ensureFile(this.notesPath());
     await this.ensureFile(this.opsPath());
+    if (workspaceRoot) {
+      const notes = this.notesPath(workspaceRoot);
+      await mkdir(path.dirname(notes), { recursive: true });
+      await this.ensureFile(notes);
+    }
   }
 
-  async read(): Promise<MemoryFiles> {
-    await this.ensure();
+  async read(workspaceRoot?: string): Promise<MemoryFiles> {
+    await this.ensure(workspaceRoot);
     const [user, notes] = await Promise.all([
       readFile(this.userPath(), 'utf8'),
-      readFile(this.notesPath(), 'utf8'),
+      readFile(this.notesPath(workspaceRoot), 'utf8'),
     ]);
     return { user, notes };
   }
@@ -66,13 +77,19 @@ export class MemoryStore {
     return ops;
   }
 
-  apply(proposed: ProposedMemoryOp): Promise<MemoryOp> {
-    return this.serialize(() => this.applyUnlocked(proposed));
+  apply(
+    proposed: ProposedMemoryOp,
+    workspaceRoot?: string,
+  ): Promise<MemoryOp> {
+    return this.serialize(() => this.applyUnlocked(proposed, workspaceRoot));
   }
 
-  stage(proposed: ProposedMemoryOp): Promise<MemoryOp> {
+  stage(
+    proposed: ProposedMemoryOp,
+    workspaceRoot?: string,
+  ): Promise<MemoryOp> {
     return this.serialize(async () => {
-      await this.ensure();
+      await this.ensure(workspaceRoot);
       const op = this.toOp(proposed, 'staged');
       await this.appendOp(op);
       return op;
@@ -122,7 +139,7 @@ export class MemoryStore {
     });
   }
 
-  revert(opId: string): Promise<MemoryOp> {
+  revert(opId: string, workspaceRoot?: string): Promise<MemoryOp> {
     return this.serialize(async () => {
       const ops = await this.listOps();
       const original = ops.find((op) => op.id === opId);
@@ -159,12 +176,17 @@ export class MemoryStore {
         evidence: original.evidence,
       };
 
-      return this.applyUnlocked(inverse);
+      return this.applyUnlocked(inverse, workspaceRoot);
     });
   }
 
-  private async applyUnlocked(proposed: ProposedMemoryOp): Promise<MemoryOp> {
-    const files = await this.read();
+  private async applyUnlocked(
+    proposed: ProposedMemoryOp,
+    workspaceRoot?: string,
+  ): Promise<MemoryOp> {
+    const files = await this.read(
+      proposed.target === 'notes' ? workspaceRoot : undefined,
+    );
     const [gated] = gateMemoryOps(files, [proposed]);
     if (!gated || gated.verdict !== 'apply') {
       throw new Error(gated?.why ?? 'rejected');
@@ -189,7 +211,7 @@ export class MemoryStore {
     if (proposed.target === 'user') {
       await writeFile(this.userPath(), next, 'utf8');
     } else if (proposed.target === 'notes') {
-      await writeFile(this.notesPath(), next, 'utf8');
+      await writeFile(this.notesPath(workspaceRoot), next, 'utf8');
     }
     await this.appendOp(op);
     return op;

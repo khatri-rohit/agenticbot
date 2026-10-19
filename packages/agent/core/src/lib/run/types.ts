@@ -1,6 +1,16 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import type { ContextReport, LedgerRecord, ToolOrigin } from '@org/agent-models';
+import type {
+  ApprovalOption,
+  ApprovalResult,
+  ChoiceOption,
+  ChoiceResult,
+  ContextBudget,
+  ContextReport,
+  LedgerRecord,
+  RunPosture,
+  ToolOrigin,
+} from '@org/agent-models';
 
 import type { EventEmitter } from '../events/emitter';
 import type { AgentLimits } from '../loop/limits';
@@ -10,6 +20,23 @@ import type { ToolRegistry } from '../tools/type';
 /** In-memory run handle status (RunManager; narrower than domain RunStatus). */
 export type RunHandleStatus = 'running' | 'completed' | 'error';
 
+export type PendingApprovalWaiter = {
+  toolName: string;
+  options?: ApprovalOption[];
+  resolve: (result: ApprovalResult) => void;
+  reject: (error: Error) => void;
+};
+
+export type ResolveApprovalResult = 'ok' | 'not_found' | 'invalid_option';
+
+export type PendingChoiceWaiter = {
+  options: ChoiceOption[];
+  resolve: (result: ChoiceResult) => void;
+  reject: (error: Error) => void;
+};
+
+export type ResolveChoiceResult = 'ok' | 'not_found' | 'invalid';
+
 export type RunHandle = {
   runId: string;
   threadId: string;
@@ -18,14 +45,18 @@ export type RunHandle = {
   abortController: AbortController;
   emitter: EventEmitter;
   result: RunLoopResult | null;
+  pendingApprovals: Map<string, PendingApprovalWaiter>;
+  pendingChoices: Map<string, PendingChoiceWaiter>;
+  grantedTools: Set<string>;
 };
 
 export type StartRunOptions = {
   threadId: string;
   model: string;
   streaming: boolean;
-  /** Mode name for run.started (e.g. RESEARCH_MODE.name). */
+  /** Mode name for run.started (e.g. HOME_MODE.name). */
   mode: string;
+  posture?: RunPosture;
   messages: ChatCompletionMessageParam[];
   tools: ToolRegistry;
   modelCall: ModelCallFn;
@@ -39,4 +70,6 @@ export type StartRunOptions = {
   onMessage?: (record: LedgerRecord) => void | Promise<void>;
   /** After the loop returns (success or error). Used for M4 compaction. */
   onFinished?: (result: RunLoopResult) => void | Promise<void>;
+  hasOpenPlanWork?: () => boolean | Promise<boolean>;
+  contextBudget?: ContextBudget;
 };

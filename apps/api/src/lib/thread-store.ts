@@ -11,8 +11,15 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
+  emptyThreadPlan,
   envelopeToChatMessage,
   envelopeToUiMessage,
+  isThreadPlanEmpty,
+  isWorkspaceKind,
+  normalizeThreadKind,
+  parseThreadPlan,
+  sameWorkspaceRoot,
+  selectPlanForRewind,
   type ChatMessage,
   type LedgerEnvelope,
   type LedgerRecord,
@@ -21,6 +28,7 @@ import {
   type Snapshot,
   type Thread,
   type ThreadKind,
+  type ThreadPlan,
 } from '@org/agent-models';
 
 const BLOB_INLINE_MAX = 8 * 1024;
@@ -61,12 +69,12 @@ export class ThreadStore {
       .all() as CatalogThreadRow[];
     const threads = rows.map(rowToThread);
     return threads.filter((thread) => {
-      if (filter?.kind && (thread.kind ?? 'research') !== filter.kind) {
+      if (filter?.kind && (thread.kind ?? 'home') !== filter.kind) {
         return false;
       }
       if (
         filter?.workspaceRoot &&
-        thread.workspaceRoot !== filter.workspaceRoot
+        !sameWorkspaceRoot(thread.workspaceRoot, filter.workspaceRoot)
       ) {
         return false;
       }
@@ -92,9 +100,9 @@ export class ThreadStore {
     const id = randomUUID();
     const now = new Date().toISOString();
     const dir = this.threadDir(id);
-    const kind: ThreadKind = options?.kind === 'coding' ? 'coding' : 'research';
+    const kind: ThreadKind = normalizeThreadKind(options?.kind);
     const workspaceRoot =
-      kind === 'coding' && options?.workspaceRoot
+      isWorkspaceKind(kind) && options?.workspaceRoot
         ? options.workspaceRoot
         : null;
     await mkdir(path.join(dir, 'blobs'), { recursive: true });
@@ -136,7 +144,9 @@ export class ThreadStore {
     const model = changes.model ?? current.model;
     const pinned =
       changes.pinned !== undefined ? (changes.pinned ? 1 : 0) : current.pinned ? 1 : 0;
-    const kind: ThreadKind = changes.kind ?? current.kind ?? 'research';
+    const kind: ThreadKind = normalizeThreadKind(
+      changes.kind ?? current.kind ?? 'home',
+    );
     const workspaceRoot =
       changes.workspaceRoot === undefined
         ? (current.workspaceRoot ?? null)
@@ -379,6 +389,7 @@ export class ThreadStore {
       )
       .run(lastSeq, now, threadId);
     await this.invalidateSnapshot(threadId, keepThroughSeq);
+    await this.restorePlanAfterRewind(threadId, keepThroughSeq);
   }
 
   async readSnapshot(threadId: string): Promise<Snapshot | null> {
@@ -403,6 +414,103 @@ export class ThreadStore {
 
   async deleteSnapshot(threadId: string): Promise<void> {
     await rm(this.snapshotPath(threadId), { force: true });
+  }
+
+  async readPlan(threadId: string): Promise<ThreadPlan> {
+    try {
+      const raw = await readFile(this.planPath(threadId), 'utf8');
+      return parseThreadPlan(JSON.parse(raw), threadId);
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') return emptyThreadPlan(threadId);
+      if (error instanceof SyntaxError) return emptyThreadPlan(threadId);
+      throw error;
+    }
+  }
+
+  async writePlan(threadId: string, plan: ThreadPlan): Promise<ThreadPlan> {
+    return this.serialize(threadId, () => this.writePlanUnlocked(threadId, plan));
+  }
+
+  private async writePlanUnlocked(
+    threadId: string,
+    plan: ThreadPlan,
+  ): Promise<ThreadPlan> {
+    await this.ensureSeq(threadId);
+    // Next ledger seq is the tool row that will be appended after execute.
+    const ledgerSeq = (this.seqs.get(threadId) ?? 0) + 1;
+    const next: ThreadPlan = {
+      ...plan,
+      threadId,
+      updatedAt: new Date().toISOString(),
+      ledgerSeq,
+    };
+    const revisions = await this.readPlanLog(threadId);
+    if (revisions.length === 0) {
+      const existing = await this.readPlan(threadId);
+      if (!isThreadPlanEmpty(existing)) {
+        revisions.push({
+          ...existing,
+          ledgerSeq: existing.ledgerSeq ?? 0,
+        });
+      }
+    }
+    revisions.push(next);
+    const oldestLedgerSeq =
+      (await this.loadLedger(threadId)).envelopes[0]?.seq ?? 0;
+    const kept = revisions.filter(
+      (revision) => (revision.ledgerSeq ?? 0) >= oldestLedgerSeq,
+    );
+    await this.writePlanFiles(threadId, next, kept);
+    return next;
+  }
+
+  private async restorePlanAfterRewind(
+    threadId: string,
+    keepThroughSeq: number,
+  ): Promise<void> {
+    const revisions = await this.readPlanLog(threadId);
+    if (revisions.length === 0) return;
+    const restored = selectPlanForRewind(
+      revisions,
+      keepThroughSeq,
+      threadId,
+    );
+    const kept = revisions.filter(
+      (revision) => (revision.ledgerSeq ?? 0) <= keepThroughSeq,
+    );
+    await this.writePlanFiles(threadId, restored, kept);
+  }
+
+  private async readPlanLog(threadId: string): Promise<ThreadPlan[]> {
+    try {
+      const raw = await readFile(this.planLogPath(threadId), 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((item) => parseThreadPlan(item, threadId));
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') return [];
+      if (error instanceof SyntaxError) return [];
+      throw error;
+    }
+  }
+
+  private async writePlanFiles(
+    threadId: string,
+    plan: ThreadPlan,
+    revisions: ThreadPlan[],
+  ): Promise<void> {
+    await writeFile(
+      this.planPath(threadId),
+      `${JSON.stringify(plan, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      this.planLogPath(threadId),
+      `${JSON.stringify(revisions, null, 2)}\n`,
+      'utf8',
+    );
   }
 
   private async invalidateSnapshot(
@@ -440,6 +548,14 @@ export class ThreadStore {
   private snapshotPath(threadId: string): string {
     return path.join(this.threadDir(threadId), 'snapshot.json');
   }
+
+  private planPath(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'plan.json');
+  }
+
+  private planLogPath(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'plan-log.json');
+  }
 }
 
 type CatalogThreadRow = {
@@ -454,7 +570,7 @@ type CatalogThreadRow = {
 };
 
 function rowToThread(row: CatalogThreadRow): Thread {
-  const kind: ThreadKind = row.kind === 'coding' ? 'coding' : 'research';
+  const kind: ThreadKind = normalizeThreadKind(row.kind);
   return {
     id: row.id,
     title: row.title,
@@ -505,7 +621,11 @@ export async function openThreadStore(home: string): Promise<ThreadStore> {
       last_seq INTEGER NOT NULL DEFAULT 0
     );
   `);
-  ensureColumn(db, 'threads', 'kind', `kind TEXT NOT NULL DEFAULT 'research'`);
+  ensureColumn(db, 'threads', 'kind', `kind TEXT NOT NULL DEFAULT 'home'`);
   ensureColumn(db, 'threads', 'workspace_root', `workspace_root TEXT`);
+  db.exec(`
+    UPDATE threads SET kind = 'home' WHERE kind IN ('research', '');
+    UPDATE threads SET kind = 'workspace' WHERE kind = 'coding';
+  `);
   return new ThreadStore(home, db);
 }

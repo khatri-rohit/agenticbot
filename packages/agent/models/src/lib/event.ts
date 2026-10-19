@@ -1,7 +1,13 @@
+import type { ChoiceOption } from './choice.js';
 import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
-import type { TokenUsage } from './run.js';
-import type { ToolRisk } from './tool-context.js';
+import type { ThreadPlan } from './plan.js';
+import type { RunPosture, TokenUsage } from './run.js';
+import type {
+  ApprovalDecision,
+  ApprovalOption,
+  ToolRisk,
+} from './tool-context.js';
 
 /**
  * AgentEvent — the server's streaming protocol to the client.
@@ -12,6 +18,9 @@ import type { ToolRisk } from './tool-context.js';
  * - Events are provider-agnostic. The UI never sees OpenAI chunk shapes.
  * - `assistant.delta` events (streaming mode only) carry text fragments.
  *   In non-streaming mode the client receives `assistant.completed` directly.
+ * - Every assistant message ends with `assistant.completed` — tool-call turns
+ *   included, emitted after the ledger append and before tool execution, so
+ *   clients can settle each assistant message mid-run, not just at run end.
  * - Tool results in events carry a *preview* only (size-capped). The full
  *   payload is appended to the host ledger (blobs/ when large).
  */
@@ -27,7 +36,10 @@ export type AgentEvent =
   | ToolFailed
   | ApprovalRequested
   | ApprovalResolved
+  | ChoiceRequested
+  | ChoiceResolved
   | MemoryUpdated
+  | PlanUpdated
   | ContextCompacting
   | ContextCompacted
   | TurnCompleted
@@ -44,6 +56,8 @@ export interface RunStarted {
   mode: string;
   streaming: boolean;
   model: string;
+  /** Host-applied Ask | Agent for this run. Composer chips are not this field. */
+  posture: RunPosture;
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
   /** Per-layer breakdown from assembleContext (M2). */
@@ -126,6 +140,8 @@ export interface RunCompleted {
   runId: string;
   iterations: number;
   toolCalls: number;
+  /** True when the loop stopped on a limit, not a clean model stop. */
+  incomplete?: boolean;
 }
 
 export interface RunError {
@@ -142,7 +158,7 @@ export interface LimitHit {
   reason: string;
 }
 
-/** Host needs the user (or a pre-approved profile) before a privileged tool runs. */
+/** Run is paused until the client POSTs a decision for this approvalId. */
 export interface ApprovalRequested {
   seq: number;
   type: 'approval.requested';
@@ -151,6 +167,8 @@ export interface ApprovalRequested {
   toolName: string;
   summary: string;
   risk: ToolRisk;
+  options?: ApprovalOption[];
+  argsPreview?: unknown;
 }
 
 export interface ApprovalResolved {
@@ -158,7 +176,28 @@ export interface ApprovalResolved {
   type: 'approval.resolved';
   runId: string;
   approvalId: string;
-  decision: 'approved' | 'denied';
+  decision: ApprovalDecision;
+  optionId?: string;
+}
+
+/** Run is paused until the client Continues or Skips this choice. */
+export interface ChoiceRequested {
+  seq: number;
+  type: 'choice.requested';
+  runId: string;
+  choiceId: string;
+  question: string;
+  options: ChoiceOption[];
+}
+
+export interface ChoiceResolved {
+  seq: number;
+  type: 'choice.resolved';
+  runId: string;
+  choiceId: string;
+  skipped: boolean;
+  optionIds?: string[];
+  text?: string;
 }
 
 /** Curated memory changed (applied or reverted). UI refetches files. */
@@ -169,6 +208,15 @@ export interface MemoryUpdated {
   opId: string;
   target: MemoryTarget;
   action: 'add' | 'patch' | 'remove' | 'revert';
+}
+
+/** Thread plan journal or todos changed. UI replaces the live plan card. */
+export interface PlanUpdated {
+  seq: number;
+  type: 'plan.updated';
+  runId: string;
+  threadId: string;
+  plan: ThreadPlan;
 }
 
 /** Host started M4 compaction after the model loop (still before run.settled). */

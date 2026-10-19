@@ -11,8 +11,23 @@ import type {
   ThinkingValue,
   Thread,
   ThreadKind,
+  ThreadPlan,
 } from '@org/agent-models';
-import { DEFAULT_CONTEXT_BUDGET, DEFAULT_MEMORY_CAPS } from '@org/agent-models';
+import {
+  DEFAULT_CONTEXT_BUDGET,
+  DEFAULT_MEMORY_CAPS,
+  HOME_MODE,
+  MAX_THREAD_MENTIONS,
+  applyPostureToTools,
+  imageAttachments,
+  isWorkspaceKind,
+  normalizeRunPosture,
+  normalizeThreadKind,
+  planHasOpenWork,
+  threadMentions,
+  type ApprovalDecision,
+  type RunPosture,
+} from '@org/agent-models';
 import {
   ALL_TOOLS,
   RunManager,
@@ -21,28 +36,36 @@ import {
   chooseCompactThroughSeq,
   createInvokeModelCall,
   createMemoryTool,
+  createPlanTools,
   createStreamModelCall,
   createToolRegistry,
   getOllamaModelConfig,
   listOllamaModels,
+  loadWorkspaceRules,
   modeForKind,
-  RESEARCH_MODE,
+  packMentionedThread,
   resolveReasoningEffort,
+  type MentionedThreadContext,
   type ToolRegistry,
 } from '@org/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
-import { loadWorkspaceRules } from '../../lib/load-workspace-rules';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
+import type { ThreadStore } from '../../lib/thread-store';
 
 const router = Router();
 const runManager = new RunManager();
 
-function toolAllowList(mode: ModeConfig, webSearch?: boolean): string[] {
-  return [
+function toolAllowList(
+  mode: ModeConfig,
+  webSearch?: boolean,
+  posture: RunPosture = 'agent',
+): string[] {
+  const names = [
     ...mode.globalTools,
     ...(webSearch !== false ? mode.allowedTools : []),
   ];
+  return applyPostureToTools(names, posture);
 }
 
 async function resolveWorkspaceDir(
@@ -57,16 +80,64 @@ async function resolveWorkspaceDir(
   } catch {
     return { ok: false, error: `workspaceRoot does not exist: ${root}` };
   }
-  return { ok: true, root };
+  return { ok: true, root: path.normalize(root) };
 }
 
 function parseThreadKind(value: unknown): ThreadKind | undefined {
-  if (value === 'coding' || value === 'research') return value;
+  if (
+    value === 'home' ||
+    value === 'workspace' ||
+    value === 'research' ||
+    value === 'coding'
+  ) {
+    return normalizeThreadKind(value);
+  }
   return undefined;
 }
 
 function endpointFromLocal(local: boolean | undefined): OllamaEndpoint {
   return local === true ? 'local' : 'cloud';
+}
+
+async function loadMentionedThreads(
+  store: ThreadStore,
+  envelopes: LedgerEnvelope[],
+  currentThreadId: string,
+): Promise<MentionedThreadContext[]> {
+  const lastUser = [...envelopes]
+    .reverse()
+    .find((envelope) => envelope.record.role === 'user');
+  const mentions = threadMentions(lastUser?.attachments).slice(
+    0,
+    MAX_THREAD_MENTIONS,
+  );
+  const segments: MentionedThreadContext[] = [];
+  const seen = new Set<string>();
+  for (const mention of mentions) {
+    if (mention.threadId === currentThreadId || seen.has(mention.threadId)) {
+      continue;
+    }
+    seen.add(mention.threadId);
+    const thread = store.getThread(mention.threadId);
+    if (!thread) continue;
+    const other = await store.hydrateEnvelopes(mention.threadId);
+    const snapshot = await store.readSnapshot(mention.threadId);
+    const sourceLabel = isWorkspaceKind(thread.kind)
+      ? thread.workspaceRoot ?? 'Workspace'
+      : 'Home';
+    segments.push({
+      threadId: thread.id,
+      title: thread.title || mention.title,
+      sourceLabel,
+      text: packMentionedThread({
+        title: thread.title || mention.title,
+        sourceLabel,
+        envelopes: other,
+        snapshot,
+      }),
+    });
+  }
+  return segments;
 }
 
 /** Returns null when the query is present but not a known endpoint. */
@@ -85,37 +156,67 @@ type MemoryUpdatedPayload = {
   action: 'add' | 'patch' | 'remove';
 };
 
+type PlanUpdatedPayload = {
+  plan: ThreadPlan;
+};
+
 async function prepareRun(input: {
   threadId: string;
   thread?: Thread;
   webSearch?: boolean;
+  posture?: RunPosture;
   lastUserSeq: number;
   envelopes: LedgerEnvelope[];
   model: string;
   endpoint?: OllamaEndpoint;
   onMemoryUpdated?: (payload: MemoryUpdatedPayload) => void;
+  onPlanUpdated?: (payload: PlanUpdatedPayload) => void;
 }): Promise<{
   tools: ToolRegistry;
   messages: ReturnType<typeof assembleContext>['messages'];
   report: ReturnType<typeof assembleContext>['report'];
   mode: ModeConfig;
+  posture: RunPosture;
 }> {
   const memory = getMemoryStore();
-  const files = await memory.read();
-  const kind = input.thread?.kind ?? 'research';
+  const kind = normalizeThreadKind(input.thread?.kind);
   const mode = modeForKind(kind);
-  if (kind === 'coding' && input.thread?.workspaceRoot) {
-    const rules = await loadWorkspaceRules(input.thread.workspaceRoot);
+  const workspace = isWorkspaceKind(kind);
+  const workspaceRoot = workspace ? input.thread?.workspaceRoot : undefined;
+  const files = await memory.read(workspaceRoot);
+  const posture = workspace
+    ? normalizeRunPosture(input.posture)
+    : ('agent' as const);
+  if (workspace && workspaceRoot) {
+    const rules = await loadWorkspaceRules(workspaceRoot);
     files.agentsMd = rules.agentsMd;
     files.project = rules.project;
   }
+  const store = await getThreadStore();
+  const plan =
+    input.threadId === 'draft'
+      ? null
+      : await store.readPlan(input.threadId);
+  const planTools =
+    input.threadId === 'draft'
+      ? []
+      : createPlanTools({
+          read: () => store.readPlan(input.threadId),
+          write: async (next) => {
+            const saved = await store.writePlan(input.threadId, next);
+            input.onPlanUpdated?.({ plan: saved });
+            return saved;
+          },
+        });
+
   const tools = createToolRegistry(
     [
       ...ALL_TOOLS,
+      ...planTools,
       createMemoryTool({
-        read: () => memory.read(),
+        read: () => memory.read(workspaceRoot),
         apply: async (op) => {
-          const applied = await memory.apply(op);
+          const applied = await memory.apply(op, workspaceRoot);
           input.onMemoryUpdated?.({
             opId: applied.id,
             target: applied.target,
@@ -123,14 +224,15 @@ async function prepareRun(input: {
           });
           return applied;
         },
-        stage: (op) => memory.stage(op),
+        stage: (op) => memory.stage(op, workspaceRoot),
         source: () => ({
           threadId: input.threadId,
           seq: input.lastUserSeq,
         }),
       }),
     ],
-    toolAllowList(mode, kind === 'coding' ? false : input.webSearch),
+    toolAllowList(mode, input.webSearch, posture),
+    posture,
   );
 
   let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
@@ -144,11 +246,16 @@ async function prepareRun(input: {
     // Keep the default window when /api/show is unavailable.
   }
 
-  const store = await getThreadStore();
   const snapshot =
     input.threadId === 'draft'
       ? null
       : await store.readSnapshot(input.threadId);
+
+  const mentionedThreads = await loadMentionedThreads(
+    store,
+    input.envelopes,
+    input.threadId,
+  );
 
   const { messages, report } = assembleContext(
     {
@@ -157,11 +264,14 @@ async function prepareRun(input: {
       snapshot,
       envelopes: input.envelopes,
       mode: mode.name,
+      posture,
+      mentionedThreads,
+      ...(plan ? { plan } : {}),
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
 
-  return { tools, messages, report, mode };
+  return { tools, messages, report, mode, posture };
 }
 
 async function maybeCompactThread(input: {
@@ -266,20 +376,20 @@ router.post('/threads', async (req: Request, res: Response) => {
   const model =
     typeof req.body?.model === 'string' && req.body.model.trim()
       ? req.body.model.trim()
-      : RESEARCH_MODE.model;
+      : HOME_MODE.model;
   const title =
     typeof req.body?.title === 'string' && req.body.title.trim()
       ? req.body.title.trim()
       : 'New Chat';
-  const kind = parseThreadKind(req.body?.kind) ?? 'research';
+  const kind = parseThreadKind(req.body?.kind) ?? 'home';
   let workspaceRoot: string | undefined;
-  if (kind === 'coding') {
+  if (isWorkspaceKind(kind)) {
     const raw =
       typeof req.body?.workspaceRoot === 'string' ? req.body.workspaceRoot : '';
     if (!raw.trim()) {
       return res
         .status(400)
-        .json({ error: 'workspaceRoot is required for coding threads' });
+        .json({ error: 'workspaceRoot is required for workspace threads' });
     }
     const resolved = await resolveWorkspaceDir(raw);
     if (!resolved.ok) return res.status(400).json({ error: resolved.error });
@@ -342,7 +452,16 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
   const lastSeq = envelopes.at(-1)?.seq ?? 0;
   const lastUserSeq = store.lastUserSeq(envelopes);
   const snapshot = await store.readSnapshot(req.params.id);
-  return res.json({ messages, lastSeq, lastUserSeq, snapshot });
+  const plan = await store.readPlan(req.params.id);
+  const activeRunId = runManager.activeRunIdForThread(req.params.id);
+  return res.json({
+    messages,
+    lastSeq,
+    lastUserSeq,
+    snapshot,
+    plan,
+    ...(activeRunId ? { activeRunId } : {}),
+  });
 });
 
 /**
@@ -359,7 +478,9 @@ router.post('/run', async (req: Request, res: Response) => {
     local,
     webSearch,
     thinking,
+    posture: rawPosture,
   } = req.body as StartRunRequest;
+  const posture = normalizeRunPosture(rawPosture);
 
   if (!threadId) {
     return res.status(400).json({ error: 'threadId is required' });
@@ -371,15 +492,16 @@ router.post('/run', async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Thread not found' });
   }
 
-  if (thread.kind === 'coding' && !thread.workspaceRoot) {
+  if (isWorkspaceKind(thread.kind) && !thread.workspaceRoot) {
     return res
       .status(400)
-      .json({ error: 'coding thread has no workspaceRoot' });
+      .json({ error: 'workspace thread has no workspaceRoot' });
   }
 
   if (runManager.hasActiveRun(threadId)) {
     return res.status(409).json({
       error: 'A run is already active for this thread',
+      runId: runManager.activeRunIdForThread(threadId),
     });
   }
 
@@ -407,10 +529,14 @@ router.post('/run', async (req: Request, res: Response) => {
   }
 
   const useStreaming = streaming ?? true;
-  const useModel = model ?? thread.model ?? RESEARCH_MODE.model;
+  const useModel = model ?? thread.model ?? HOME_MODE.model;
   const endpoint = endpointFromLocal(local);
 
-  if (envelopes.some((envelope) => (envelope.attachments?.length ?? 0) > 0)) {
+  if (
+    envelopes.some(
+      (envelope) => imageAttachments(envelope.attachments).length > 0,
+    )
+  ) {
     try {
       const config = await getOllamaModelConfig(useModel, endpoint);
       if (!config.supportsVision) {
@@ -428,6 +554,7 @@ router.post('/run', async (req: Request, res: Response) => {
     threadId,
     thread,
     webSearch,
+    posture,
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
     model: useModel,
@@ -440,9 +567,23 @@ router.post('/run', async (req: Request, res: Response) => {
         ...payload,
       });
     },
+    onPlanUpdated: (payload) => {
+      const handle = runManager.get(assignedRunId);
+      handle?.emitter.emit({
+        type: 'plan.updated',
+        runId: assignedRunId,
+        threadId,
+        plan: payload.plan,
+      });
+    },
   });
 
-  const callOptions = await resolveCallOptions(useModel, thinking, endpoint);
+  const callOptions = await resolveCallOptions(
+    useModel,
+    thinking,
+    endpoint,
+    prepared.mode.temperature,
+  );
   const modelCall = useStreaming
     ? createStreamModelCall(callOptions)
     : createInvokeModelCall(callOptions);
@@ -456,13 +597,17 @@ router.post('/run', async (req: Request, res: Response) => {
     modelCall,
     limits: prepared.mode.limits,
     mode: prepared.mode.name,
+    posture: prepared.posture,
     estimatedPromptTokens: prepared.report.occupiedTokens,
     contextReport: prepared.report,
+    contextBudget: prepared.report.budget,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     onMessage: async (record) => {
       if (record.role === 'system') return;
       await store.append({ threadId, runId: assignedRunId, record });
     },
+    hasOpenPlanWork: async () =>
+      planHasOpenWork(await store.readPlan(threadId)),
     onFinished: () =>
       maybeCompactThread({
         threadId,
@@ -471,6 +616,14 @@ router.post('/run', async (req: Request, res: Response) => {
         webSearch,
         endpoint,
       }),
+  });
+
+  const started = runManager.get(assignedRunId);
+  started?.emitter.emit({
+    type: 'plan.updated',
+    runId: assignedRunId,
+    threadId,
+    plan: await store.readPlan(threadId),
   });
 
   // First turn: title via the same chat model (runs in parallel with the agent).
@@ -492,7 +645,7 @@ router.post('/run', async (req: Request, res: Response) => {
  * Same assembler as /run: host ledger + memory files + optional draft.
  */
 router.post('/context/estimate', async (req: Request, res: Response) => {
-  const { threadId, draft, attachments, model, webSearch, local } =
+  const { threadId, draft, attachments, model, webSearch, local, posture } =
     req.body as {
       threadId?: string;
       draft?: string;
@@ -500,6 +653,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
       model?: string;
       webSearch?: boolean;
       local?: boolean;
+      posture?: RunPosture;
     };
 
   const store = await getThreadStore();
@@ -531,11 +685,12 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
   }
 
   const estimateThread = id === 'draft' ? undefined : store.getThread(id);
-  const useModel = model ?? estimateThread?.model ?? RESEARCH_MODE.model;
+  const useModel = model ?? estimateThread?.model ?? HOME_MODE.model;
   const { report } = await prepareRun({
     threadId: id,
     thread: estimateThread,
     webSearch,
+    posture: normalizeRunPosture(posture),
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
     model: useModel,
@@ -550,9 +705,17 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
   });
 });
 
-router.get('/memory', async (_req: Request, res: Response) => {
+router.get('/memory', async (req: Request, res: Response) => {
   const memory = getMemoryStore();
-  const [files, ops] = await Promise.all([memory.read(), memory.listOps()]);
+  const workspaceRoot =
+    typeof req.query.workspaceRoot === 'string' &&
+    req.query.workspaceRoot.trim()
+      ? req.query.workspaceRoot.trim()
+      : undefined;
+  const [files, ops] = await Promise.all([
+    memory.read(workspaceRoot),
+    memory.listOps(),
+  ]);
   const reverted = new Set(
     ops
       .filter((op) => op.reason.startsWith('revert '))
@@ -658,6 +821,116 @@ router.post('/run/:runId/cancel', (req: Request, res: Response) => {
   return res.json({ ok: true });
 });
 
+function parseApprovalDecision(value: unknown): ApprovalDecision | null {
+  if (
+    value === 'approved' ||
+    value === 'denied' ||
+    value === 'approved_for_run'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+/**
+ * POST /api/agent/run/:runId/approval
+ * Resolve a paused approval. The run stays running until the loop continues.
+ */
+router.post('/run/:runId/approval', (req: Request, res: Response) => {
+  const { runId } = req.params;
+  const body = req.body as {
+    approvalId?: unknown;
+    decision?: unknown;
+    optionId?: unknown;
+  };
+  const approvalId =
+    typeof body.approvalId === 'string' ? body.approvalId.trim() : '';
+  const decision = parseApprovalDecision(body.decision);
+  const optionId =
+    typeof body.optionId === 'string' ? body.optionId.trim() : undefined;
+  if (!approvalId || !decision) {
+    return res.status(400).json({
+      error: 'approvalId and decision (approved | denied | approved_for_run) are required',
+    });
+  }
+  const result = runManager.resolveApproval(
+    runId,
+    approvalId,
+    decision,
+    optionId || undefined,
+  );
+  if (result === 'invalid_option') {
+    return res.status(400).json({ error: 'optionId is required and must match' });
+  }
+  if (result !== 'ok') {
+    return res.status(404).json({
+      error: 'Approval not found or already resolved',
+    });
+  }
+  return res.json({ ok: true });
+});
+
+function parseChoiceOptionIds(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || !item.trim()) return null;
+    ids.push(item.trim());
+  }
+  return ids;
+}
+
+/**
+ * POST /api/agent/run/:runId/choice
+ * Continue with selected options + extra text, or skip (run ends incomplete).
+ */
+router.post('/run/:runId/choice', (req: Request, res: Response) => {
+  const { runId } = req.params;
+  const body = req.body as {
+    choiceId?: unknown;
+    skipped?: unknown;
+    optionIds?: unknown;
+    text?: unknown;
+  };
+  const choiceId =
+    typeof body.choiceId === 'string' ? body.choiceId.trim() : '';
+  if (!choiceId) {
+    return res.status(400).json({ error: 'choiceId is required' });
+  }
+
+  if (body.skipped === true) {
+    const skipped = runManager.resolveChoice(runId, choiceId, { skipped: true });
+    if (skipped !== 'ok') {
+      return res.status(404).json({
+        error: 'Choice not found or already resolved',
+      });
+    }
+    return res.json({ ok: true });
+  }
+
+  const optionIds = parseChoiceOptionIds(body.optionIds);
+  if (optionIds === null) {
+    return res.status(400).json({ error: 'optionIds must be a string array' });
+  }
+  const result = runManager.resolveChoice(runId, choiceId, {
+    optionIds,
+    ...(typeof body.text === 'string' ? { text: body.text } : {}),
+  });
+
+  if (result === 'invalid') {
+    return res.status(400).json({
+      error: 'Select at least one option or enter text, with matching option ids',
+    });
+  }
+  if (result !== 'ok') {
+    return res.status(404).json({
+      error: 'Choice not found or already resolved',
+    });
+  }
+  return res.json({ ok: true });
+});
+
 /**
  * GET /api/agent/run/:runId/events?fromSeq=N
  * SSE stream of AgentEvents for a run.
@@ -708,9 +981,11 @@ async function resolveCallOptions(
   model: string,
   thinking: unknown,
   endpoint: OllamaEndpoint,
+  temperature: number,
 ): Promise<{
   reasoningEffort?: string;
   endpoint: OllamaEndpoint;
+  temperature: number;
 }> {
   const requested: ThinkingValue | undefined =
     typeof thinking === 'boolean' ||
@@ -723,11 +998,12 @@ async function resolveCallOptions(
     const reasoningEffort = resolveReasoningEffort(config, requested);
     return {
       endpoint,
+      temperature,
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
     };
   } catch {
     // /api/show unavailable — omit effort; still route to the chosen endpoint
-    return { endpoint };
+    return { endpoint, temperature };
   }
 }
 

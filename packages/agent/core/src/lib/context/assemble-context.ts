@@ -5,17 +5,28 @@ import type {
   LedgerEnvelope,
   MemoryFiles,
   ModeName,
+  RunPosture,
   Snapshot,
+  ThreadPlan,
 } from '@org/agent-models';
 import {
   CHARS_PER_TOKEN,
   DEFAULT_CONTEXT_BUDGET,
   envelopeToChatMessage,
+  formatThreadPlanForPrompt,
+  isThreadPlanEmpty,
 } from '@org/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
 import type { ToolRegistry } from '../tools/type';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+
+export type MentionedThreadContext = {
+  threadId: string;
+  title: string;
+  sourceLabel: string;
+  text: string;
+};
 
 export type AssembleContextInput = {
   tools: ToolRegistry;
@@ -23,8 +34,17 @@ export type AssembleContextInput = {
   snapshot: Snapshot | null;
   /** Hydrated ledger (blob bodies inlined). Assembler never reads disk. */
   envelopes: LedgerEnvelope[];
-  /** Drives coding vs research system-prompt behavior. */
+  /** Drives home vs workspace system-prompt behavior. */
   mode?: ModeName;
+  /** Workspace Ask vs Agent; ignored for Home. Default agent. */
+  posture?: RunPosture;
+  /**
+   * Other threads the user attached to the current turn.
+   * Packed by the host; not ledger rows of this thread.
+   */
+  mentionedThreads?: MentionedThreadContext[];
+  /** Thread-scoped plan journal + todos. Injected when non-empty. */
+  plan?: ThreadPlan | null;
 };
 
 export type AssembleContextResult = {
@@ -64,7 +84,11 @@ function buildMemoryPrompt(memory: MemoryFiles): string {
   }
 
   if (notes) {
-    parts.push(['# Agent notes (MEMORY.md)', notes].join('\n'));
+    const notesTitle =
+      memory.agentsMd || memory.project
+        ? '# Workspace notes (this folder)'
+        : '# Agent notes (MEMORY.md)';
+    parts.push([notesTitle, notes].join('\n'));
   }
   if (agents) {
     parts.push(['# Project instructions (AGENTS.md)', agents].join('\n'));
@@ -89,6 +113,44 @@ function stubToolContent(envelope: LedgerEnvelope): string {
   }
   const n = envelope.record.content.length;
   return `(stub) tool ${envelope.record.tool_call_id} omitted (${n} chars)`;
+}
+
+/**
+ * In-loop sibling of assembleContext stubbing. Mutates live Chat Completions
+ * messages so a long tool turn does not keep every result at full size.
+ * Ledger rows stay full; the next assembleContext pass stubs from seq.
+ */
+export function stubLiveToolResults(
+  messages: ChatCompletionMessageParam[],
+  budget: ContextBudget = DEFAULT_CONTEXT_BUDGET,
+): number {
+  const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
+  const userIndexes: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i]?.role === 'user') userIndexes.push(i);
+  }
+  const keepFromIndex =
+    userIndexes.length <= budget.keepToolResultsForTurns
+      ? 0
+      : (userIndexes[userIndexes.length - budget.keepToolResultsForTurns] ?? 0);
+
+  let stubbed = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    if (!message || message.role !== 'tool') continue;
+    const content = typeof message.content === 'string' ? message.content : '';
+    if (content.startsWith('(stub)')) continue;
+    const old = i < keepFromIndex;
+    const overCap = content.length > maxToolChars;
+    if (!old && !overCap) continue;
+    messages[i] = {
+      role: 'tool',
+      tool_call_id: message.tool_call_id,
+      content: `(stub) tool ${message.tool_call_id} omitted (${content.length} chars)`,
+    };
+    stubbed++;
+  }
+  return stubbed;
 }
 
 function toParam(
@@ -137,7 +199,11 @@ export function assembleContext(
   input: AssembleContextInput,
   budget: ContextBudget = DEFAULT_CONTEXT_BUDGET,
 ): AssembleContextResult {
-  const systemText = buildSystemPrompt(input.tools, input.mode);
+  const systemText = buildSystemPrompt(
+    input.tools,
+    input.mode,
+    input.posture ?? 'agent',
+  );
   const systemMessage: ChatCompletionMessageParam = {
     role: 'system',
     content: systemText,
@@ -148,6 +214,13 @@ export function assembleContext(
     role: 'system',
     content: memoryText,
   };
+
+  const plan = input.plan ?? null;
+  const planText =
+    plan && !isThreadPlanEmpty(plan) ? formatThreadPlanForPrompt(plan) : '';
+  const planMessage: ChatCompletionMessageParam | null = planText
+    ? { role: 'system', content: planText }
+    : null;
 
   const afterSeq = input.snapshot?.throughSeq ?? 0;
   const live = input.envelopes.filter((envelope) => envelope.seq > afterSeq);
@@ -162,6 +235,26 @@ export function assembleContext(
   const briefMessage: ChatCompletionMessageParam | null = briefParts.length
     ? { role: 'system', content: briefParts.join('\n\n') }
     : null;
+
+  const mentionParts = (input.mentionedThreads ?? [])
+    .filter((mention) => mention.text.trim().length > 0)
+    .map(
+      (mention) =>
+        `## ${mention.title}\nSource: ${mention.sourceLabel}\n\n${mention.text.trim()}`,
+    );
+  const mentionsMessage: ChatCompletionMessageParam | null =
+    mentionParts.length > 0
+      ? {
+          role: 'system',
+          content: [
+            '# Attached threads',
+            'Other conversations the user attached to this turn. Use them as background.',
+            'They are not this thread\'s ledger. Do not treat them as files you edited here.',
+            '',
+            mentionParts.join('\n\n'),
+          ].join('\n'),
+        }
+      : null;
 
   const users = userSeqs(live);
   const keepFrom =
@@ -195,6 +288,8 @@ export function assembleContext(
   const messages: ChatCompletionMessageParam[] = [
     systemMessage,
     memoryMessage,
+    ...(planMessage ? [planMessage] : []),
+    ...(mentionsMessage ? [mentionsMessage] : []),
     ...(briefMessage ? [briefMessage] : []),
     ...tailMessages,
     ...turnMessages,
@@ -210,6 +305,18 @@ export function assembleContext(
       id: 'memory',
       label: 'Memory',
       tokens: charsToTokens(memoryText.length) + 4,
+    },
+    {
+      id: 'plan',
+      label: 'Plan',
+      tokens: planText ? charsToTokens(planText.length) + 4 : 0,
+    },
+    {
+      id: 'mentions',
+      label: 'Attached threads',
+      tokens: mentionsMessage
+        ? charsToTokens(String(mentionsMessage.content).length) + 4
+        : 0,
     },
     {
       id: 'brief',

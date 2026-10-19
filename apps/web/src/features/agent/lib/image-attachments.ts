@@ -1,7 +1,7 @@
 import type { MessageAttachment } from '@org/agent-models';
 
-/** Max images on one composer send (matches common chat UX). */
-export const MAX_IMAGE_ATTACHMENTS = 4;
+/** Max images on one composer send. */
+export const MAX_IMAGE_ATTACHMENTS = 20;
 
 /** Max decoded image size before attach (~wire size grows with base64). */
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
@@ -130,6 +130,7 @@ export async function fileToAttachment(
     return {
       ok: true,
       attachment: {
+        type: 'image',
         id: crypto.randomUUID(),
         mimeType: resized.mimeType,
         dataUrl: resized.dataUrl,

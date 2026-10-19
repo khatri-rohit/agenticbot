@@ -22,7 +22,7 @@ const mono = JetBrains_Mono({
 
 export const metadata = {
   title: 'AgenticBot',
-  description: 'Research agent',
+  description: 'Home and workspace agent',
 };
 
 /**

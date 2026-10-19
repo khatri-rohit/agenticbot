@@ -53,6 +53,9 @@ export async function streamModelTurn(
     tools: tools.definitions,
     stream: true,
     stream_options: { include_usage: true },
+    ...(options?.temperature !== undefined
+      ? { temperature: options.temperature }
+      : {}),
     ...(options?.reasoningEffort !== undefined
       ? { reasoning_effort: options.reasoningEffort }
       : {}),
