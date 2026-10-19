@@ -25,6 +25,7 @@ import {
   normalizeThreadKind,
   planHasOpenWork,
   threadMentions,
+  type ApprovalDecision,
   type RunPosture,
 } from '@org/agent-models';
 import {
@@ -452,7 +453,15 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
   const lastUserSeq = store.lastUserSeq(envelopes);
   const snapshot = await store.readSnapshot(req.params.id);
   const plan = await store.readPlan(req.params.id);
-  return res.json({ messages, lastSeq, lastUserSeq, snapshot, plan });
+  const activeRunId = runManager.activeRunIdForThread(req.params.id);
+  return res.json({
+    messages,
+    lastSeq,
+    lastUserSeq,
+    snapshot,
+    plan,
+    ...(activeRunId ? { activeRunId } : {}),
+  });
 });
 
 /**
@@ -492,6 +501,7 @@ router.post('/run', async (req: Request, res: Response) => {
   if (runManager.hasActiveRun(threadId)) {
     return res.status(409).json({
       error: 'A run is already active for this thread',
+      runId: runManager.activeRunIdForThread(threadId),
     });
   }
 
@@ -590,6 +600,7 @@ router.post('/run', async (req: Request, res: Response) => {
     posture: prepared.posture,
     estimatedPromptTokens: prepared.report.occupiedTokens,
     contextReport: prepared.report,
+    contextBudget: prepared.report.budget,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     onMessage: async (record) => {
       if (record.role === 'system') return;
@@ -806,6 +817,116 @@ router.post('/run/:runId/cancel', (req: Request, res: Response) => {
   const ok = runManager.cancel(runId);
   if (!ok) {
     return res.status(404).json({ error: 'Run not found or not active' });
+  }
+  return res.json({ ok: true });
+});
+
+function parseApprovalDecision(value: unknown): ApprovalDecision | null {
+  if (
+    value === 'approved' ||
+    value === 'denied' ||
+    value === 'approved_for_run'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+/**
+ * POST /api/agent/run/:runId/approval
+ * Resolve a paused approval. The run stays running until the loop continues.
+ */
+router.post('/run/:runId/approval', (req: Request, res: Response) => {
+  const { runId } = req.params;
+  const body = req.body as {
+    approvalId?: unknown;
+    decision?: unknown;
+    optionId?: unknown;
+  };
+  const approvalId =
+    typeof body.approvalId === 'string' ? body.approvalId.trim() : '';
+  const decision = parseApprovalDecision(body.decision);
+  const optionId =
+    typeof body.optionId === 'string' ? body.optionId.trim() : undefined;
+  if (!approvalId || !decision) {
+    return res.status(400).json({
+      error: 'approvalId and decision (approved | denied | approved_for_run) are required',
+    });
+  }
+  const result = runManager.resolveApproval(
+    runId,
+    approvalId,
+    decision,
+    optionId || undefined,
+  );
+  if (result === 'invalid_option') {
+    return res.status(400).json({ error: 'optionId is required and must match' });
+  }
+  if (result !== 'ok') {
+    return res.status(404).json({
+      error: 'Approval not found or already resolved',
+    });
+  }
+  return res.json({ ok: true });
+});
+
+function parseChoiceOptionIds(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || !item.trim()) return null;
+    ids.push(item.trim());
+  }
+  return ids;
+}
+
+/**
+ * POST /api/agent/run/:runId/choice
+ * Continue with selected options + extra text, or skip (run ends incomplete).
+ */
+router.post('/run/:runId/choice', (req: Request, res: Response) => {
+  const { runId } = req.params;
+  const body = req.body as {
+    choiceId?: unknown;
+    skipped?: unknown;
+    optionIds?: unknown;
+    text?: unknown;
+  };
+  const choiceId =
+    typeof body.choiceId === 'string' ? body.choiceId.trim() : '';
+  if (!choiceId) {
+    return res.status(400).json({ error: 'choiceId is required' });
+  }
+
+  if (body.skipped === true) {
+    const skipped = runManager.resolveChoice(runId, choiceId, { skipped: true });
+    if (skipped !== 'ok') {
+      return res.status(404).json({
+        error: 'Choice not found or already resolved',
+      });
+    }
+    return res.json({ ok: true });
+  }
+
+  const optionIds = parseChoiceOptionIds(body.optionIds);
+  if (optionIds === null) {
+    return res.status(400).json({ error: 'optionIds must be a string array' });
+  }
+  const result = runManager.resolveChoice(runId, choiceId, {
+    optionIds,
+    ...(typeof body.text === 'string' ? { text: body.text } : {}),
+  });
+
+  if (result === 'invalid') {
+    return res.status(400).json({
+      error: 'Select at least one option or enter text, with matching option ids',
+    });
+  }
+  if (result !== 'ok') {
+    return res.status(404).json({
+      error: 'Choice not found or already resolved',
+    });
   }
   return res.json({ ok: true });
 });

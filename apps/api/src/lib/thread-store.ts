@@ -32,7 +32,6 @@ import {
 } from '@org/agent-models';
 
 const BLOB_INLINE_MAX = 8 * 1024;
-const MAX_PLAN_REVISIONS = 50;
 
 export type AppendInput = {
   threadId: string;
@@ -437,7 +436,9 @@ export class ThreadStore {
     threadId: string,
     plan: ThreadPlan,
   ): Promise<ThreadPlan> {
-    const ledgerSeq = this.seqs.get(threadId) ?? 0;
+    await this.ensureSeq(threadId);
+    // Next ledger seq is the tool row that will be appended after execute.
+    const ledgerSeq = (this.seqs.get(threadId) ?? 0) + 1;
     const next: ThreadPlan = {
       ...plan,
       threadId,
@@ -455,11 +456,12 @@ export class ThreadStore {
       }
     }
     revisions.push(next);
-    await this.writePlanFiles(
-      threadId,
-      next,
-      revisions.slice(-MAX_PLAN_REVISIONS),
+    const oldestLedgerSeq =
+      (await this.loadLedger(threadId)).envelopes[0]?.seq ?? 0;
+    const kept = revisions.filter(
+      (revision) => (revision.ledgerSeq ?? 0) >= oldestLedgerSeq,
     );
+    await this.writePlanFiles(threadId, next, kept);
     return next;
   }
 

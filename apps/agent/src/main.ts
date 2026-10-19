@@ -145,6 +145,21 @@ async function main() {
       limits: mode.limits,
       hasOpenPlanWork: async () => planHasOpenWork(await planStore.read()),
       ...(workspaceRoot ? { workspaceRoot } : {}),
+      approve: async (request) => {
+        const first = request.options?.[0];
+        if (first) {
+          console.log(`[auto-approve] ${request.toolName}: ${request.summary} → ${first.label}`);
+          return { optionId: first.id };
+        }
+        console.log(`[auto-approve] ${request.toolName}: ${request.summary}`);
+        return {};
+      },
+      offerChoice: async (request) => {
+        const first = request.options[0];
+        if (!first) return { optionIds: [] };
+        console.log(`[auto-choice] ${request.question} → ${first.label}`);
+        return { optionIds: [first.id] };
+      },
       trace: consoleTrace,
       emit: (event) => {
         events.push({ seq: 0, ...event } as AgentEvent);

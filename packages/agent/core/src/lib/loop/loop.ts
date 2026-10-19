@@ -5,6 +5,8 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import {
+  ApprovalDenied,
+  ChoiceSkipped,
   DEFAULT_CONTEXT_BUDGET,
   isAskStrippedTool,
   type TokenUsage,
@@ -21,6 +23,15 @@ import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
 const OPEN_PLAN_WORK_NUDGE =
   'Open todos remain on the Final plan. Update todo status or finish those items before ending the turn. Do not claim the work is done.';
+
+/** Write/exec the human must confirm. Plan/todo/memory stay unpaused. */
+const LOOP_APPROVAL_TOOLS = new Set(['edit_file', 'run_terminal']);
+
+const USER_DENIED =
+  'Denied by the user. Do not retry this exact call unless they ask again.';
+
+const USER_SKIPPED_CHOICE =
+  'User skipped this choice. Stop. Do not assume a path or keep editing.';
 
 function isParallelSafeTool(tool: Tool | undefined): boolean {
   if (!tool) return false;
@@ -55,6 +66,23 @@ function toolArgsPreview(toolName: string, args: unknown): string {
     const oldText = typeof record.oldText === 'string' ? record.oldText : '';
     const intent = oldText.length > 0 ? 'patch' : 'create';
     return preview({ path, intent }, 200);
+  }
+  if (
+    (toolName === 'ask_user' || toolName === 'offer_choice') &&
+    args &&
+    typeof args === 'object' &&
+    !Array.isArray(args)
+  ) {
+    const record = args as Record<string, unknown>;
+    return preview(
+      {
+        question:
+          typeof record.question === 'string'
+            ? record.question.slice(0, 120)
+            : '',
+      },
+      200,
+    );
   }
   if (
     (toolName === 'plan' || toolName === 'todo') &&
@@ -107,6 +135,23 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
     : new Error('Run cancelled');
 }
 
+function approvalSummary(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
+  if (toolName === 'edit_file') {
+    const filePath = typeof args.path === 'string' ? args.path : '';
+    const oldText = typeof args.oldText === 'string' ? args.oldText : '';
+    const intent = oldText.length > 0 ? 'patch' : 'create';
+    return `${intent} ${filePath}`.trim();
+  }
+  if (toolName === 'run_terminal') {
+    const command = typeof args.command === 'string' ? args.command : '';
+    return command.length > 200 ? `${command.slice(0, 200)}…` : command;
+  }
+  return toolName;
+}
+
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -118,6 +163,30 @@ function withTimeout<T>(
         ? signal.reason
         : new Error('Run cancelled'),
     );
+  }
+
+  if (timeoutMs <= 0) {
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error('Run cancelled'),
+        );
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      promise.then(
+        (value) => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve(value);
+        },
+        (error) => {
+          signal?.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+      );
+    });
   }
 
   return new Promise<T>((resolve, reject) => {
@@ -215,6 +284,8 @@ export async function runLoop(
       ...(config.workspaceRoot !== undefined
         ? { workspaceRoot: config.workspaceRoot }
         : {}),
+      ...(config.approve ? { approve: config.approve } : {}),
+      ...(config.offerChoice ? { offerChoice: config.offerChoice } : {}),
     };
   }
 
@@ -372,11 +443,77 @@ export async function runLoop(
     return completeAfterLimit();
   }
 
+  async function completeAsDenied(call: ReadyToolCall): Promise<'ok'> {
+    emit?.({
+      type: 'tool.completed',
+      runId,
+      toolCallId: call.toolCall.id,
+      toolName: call.toolName,
+      durationMs: 0,
+      resultPreview: preview(USER_DENIED, 200),
+    });
+    await appendDurable({
+      role: 'tool',
+      tool_call_id: call.toolCall.id,
+      content: USER_DENIED,
+    });
+    return 'ok';
+  }
+
+  function lastAssistantContent(): string {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message?.role !== 'assistant') continue;
+      return typeof message.content === 'string' ? message.content : '';
+    }
+    return '';
+  }
+
+  function finishChoiceSkipped(): RunLoopResult {
+    emitTurnCompleted(iterations);
+    emit?.({
+      type: 'run.completed',
+      runId,
+      iterations,
+      toolCalls: totalToolCalls,
+      incomplete: true,
+    });
+    return {
+      runId,
+      content: lastAssistantContent(),
+      iterations,
+      toolCalls: totalToolCalls,
+      status: 'incomplete',
+    };
+  }
+
   async function executeReadyCall(
     call: ReadyToolCall,
     remainingOnAbort: ChatCompletionMessageToolCall[],
-  ): Promise<'ok' | 'halt'> {
+  ): Promise<'ok' | 'deferred'> {
     const { toolCall, toolName, tool, args } = call;
+    const toolCtx = buildToolContext();
+
+    if (LOOP_APPROVAL_TOOLS.has(toolName) && config.approve) {
+      try {
+        await config.approve({
+          toolName,
+          summary: approvalSummary(toolName, args),
+          risk: tool.risk ?? 'write',
+          argsPreview: toolArgsPreview(toolName, args),
+        });
+      } catch (error) {
+        if (signal?.aborted) {
+          await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
+          throwIfAborted(signal);
+        }
+        if (error instanceof ApprovalDenied) {
+          return completeAsDenied(call);
+        }
+        throw error;
+      }
+    }
+
     trace({
       type: 'tool_start',
       runId,
@@ -393,12 +530,13 @@ export async function runLoop(
     });
 
     const startedAt = Date.now();
-    const toolCtx = buildToolContext();
 
     try {
       const result = await withTimeout(
         tool.execute(args, toolCtx),
-        limits.toolTimeoutMs,
+        toolName === 'ask_user' || toolName === 'offer_choice'
+          ? 0
+          : limits.toolTimeoutMs,
         signal,
       );
       const durationMs = Date.now() - startedAt;
@@ -429,6 +567,29 @@ export async function runLoop(
         await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
         throwIfAborted(signal);
       }
+      if (error instanceof ApprovalDenied) {
+        return completeAsDenied(call);
+      }
+      if (error instanceof ChoiceSkipped) {
+        emit?.({
+          type: 'tool.completed',
+          runId,
+          toolCallId: toolCall.id,
+          toolName,
+          durationMs: Date.now() - startedAt,
+          resultPreview: preview(USER_SKIPPED_CHOICE, 200),
+        });
+        await appendDurable({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: USER_SKIPPED_CHOICE,
+        });
+        await skipToolCalls(
+          remainingOnAbort.slice(1),
+          'Skipped: user deferred this choice.',
+        );
+        return 'deferred';
+      }
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       trace({
@@ -456,13 +617,25 @@ export async function runLoop(
   async function executeReadyBatch(
     batch: ReadyToolCall[],
     remainingAfter: ChatCompletionMessageToolCall[],
-  ): Promise<void> {
-    if (batch.length === 1) {
-      const only = batch[0];
-      if (only) {
-        await executeReadyCall(only, [only.toolCall, ...remainingAfter]);
+  ): Promise<'ok' | 'deferred'> {
+    if (
+      batch.length === 1 ||
+      batch.some(
+        (call) =>
+          LOOP_APPROVAL_TOOLS.has(call.toolName) ||
+          call.toolName === 'offer_choice',
+      )
+    ) {
+      for (let i = 0; i < batch.length; i++) {
+        const call = batch[i];
+        if (!call) continue;
+        const outcome = await executeReadyCall(call, [
+          ...batch.slice(i).map((item) => item.toolCall),
+          ...remainingAfter,
+        ]);
+        if (outcome === 'deferred') return 'deferred';
       }
-      return;
+      return 'ok';
     }
 
     const toolCtx = buildToolContext();
@@ -489,7 +662,9 @@ export async function runLoop(
         try {
           const result = await withTimeout(
             call.tool.execute(call.args, toolCtx),
-            limits.toolTimeoutMs,
+            call.toolName === 'ask_user' || call.toolName === 'offer_choice'
+              ? 0
+              : limits.toolTimeoutMs,
             signal,
           );
           return { call, ok: true as const, result, durationMs: Date.now() - started };
@@ -553,6 +728,37 @@ export async function runLoop(
         throwIfAborted(signal);
       }
 
+      if (item.error instanceof ApprovalDenied) {
+        await completeAsDenied(call);
+        continue;
+      }
+
+      if (item.error instanceof ChoiceSkipped) {
+        emit?.({
+          type: 'tool.completed',
+          runId,
+          toolCallId: call.toolCall.id,
+          toolName: call.toolName,
+          durationMs,
+          resultPreview: preview(USER_SKIPPED_CHOICE, 200),
+        });
+        await appendDurable({
+          role: 'tool',
+          tool_call_id: call.toolCall.id,
+          content: USER_SKIPPED_CHOICE,
+        });
+        await skipToolCalls(
+          [
+            ...settled
+              .slice(settled.indexOf(item) + 1)
+              .map((entry) => entry.call.toolCall),
+            ...remainingAfter,
+          ],
+          'Skipped: user deferred this choice.',
+        );
+        return 'deferred';
+      }
+
       const errorMessage =
         item.error instanceof Error ? item.error.message : String(item.error);
       trace({
@@ -574,6 +780,7 @@ export async function runLoop(
         content: `Tool execution failed: ${errorMessage}`,
       });
     }
+    return 'ok';
   }
 
   /** Fresh message lifecycle for limit finalization (never reuse the tool-turn id). */
@@ -622,6 +829,7 @@ export async function runLoop(
   }
 
   async function completeAfterLimit(): Promise<RunLoopResult> {
+    stubLiveToolResults(messages, contextBudget);
     const final = await finalizeAnswer();
     trace({
       type: 'run_finish',
@@ -765,14 +973,20 @@ export async function runLoop(
               }
               const nextAdmitted = await admitToolCall(upcoming);
               if (nextAdmitted.kind === 'halt') {
-                await executeReadyBatch(batch, []);
+                if ((await executeReadyBatch(batch, [])) === 'deferred') {
+                  return finishChoiceSkipped();
+                }
                 return finishHalt(nextAdmitted, next, turn.toolCalls);
               }
               if (nextAdmitted.kind === 'filled') {
-                await executeReadyBatch(
-                  batch,
-                  turn.toolCalls.slice(next + 1),
-                );
+                if (
+                  (await executeReadyBatch(
+                    batch,
+                    turn.toolCalls.slice(next + 1),
+                  )) === 'deferred'
+                ) {
+                  return finishChoiceSkipped();
+                }
                 index = next + 1;
                 batch.length = 0;
                 break;
@@ -781,16 +995,27 @@ export async function runLoop(
               next += 1;
             }
             if (batch.length > 0) {
-              await executeReadyBatch(batch, turn.toolCalls.slice(next));
+              if (
+                (await executeReadyBatch(
+                  batch,
+                  turn.toolCalls.slice(next),
+                )) === 'deferred'
+              ) {
+                return finishChoiceSkipped();
+              }
               index = next;
             }
             continue;
           }
 
-          await executeReadyCall(
-            admitted.call,
-            turn.toolCalls.slice(index),
-          );
+          if (
+            (await executeReadyCall(
+              admitted.call,
+              turn.toolCalls.slice(index),
+            )) === 'deferred'
+          ) {
+            return finishChoiceSkipped();
+          }
           index += 1;
         }
 

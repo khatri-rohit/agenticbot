@@ -138,6 +138,18 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
         title: 'checklist',
         action: 'Todos',
       };
+    case 'ask_user':
+      return {
+        kind: 'other',
+        title: asString(args.question) || 'question',
+        action: 'Ask',
+      };
+    case 'offer_choice':
+      return {
+        kind: 'other',
+        title: asString(args.question) || 'choice',
+        action: 'Choice',
+      };
     default:
       return { kind: 'other', title: row.toolName, action: row.toolName };
   }

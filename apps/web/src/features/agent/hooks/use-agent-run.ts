@@ -9,6 +9,7 @@ import {
   isWorkspaceKind,
   normalizeRunPosture,
   type AgentEvent,
+  type ApprovalDecision,
   type Message,
   type MessageAttachment,
   type ThreadKind,
@@ -33,6 +34,8 @@ import {
   startRun,
   subscribeRun,
   cancelRun,
+  resolveApproval,
+  resolveChoice,
   type ComposerOptions,
 } from '../api/agent-client';
 import {
@@ -81,6 +84,9 @@ export function useAgentRun(threadId: string | null) {
   );
 
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const subscribeToRunRef = useRef<(runId: string) => void>(() => {
+    /* filled after subscribeToRun is defined */
+  });
   const chatStateRef = useRef(chatState);
   chatStateRef.current = chatState;
   const wasRunningRef = useRef(false);
@@ -126,6 +132,9 @@ export function useAgentRun(threadId: string | null) {
             : {}),
           plan: ledger.plan ?? prev.plan,
         }));
+        if (ledger.activeRunId && !chatStateRef.current.activeRun) {
+          subscribeToRunRef.current(ledger.activeRunId);
+        }
       })
       .catch(() => {
         /* ledger hydrate is best-effort for the compaction card */
@@ -230,6 +239,7 @@ export function useAgentRun(threadId: string | null) {
     },
     [threadId, disconnect, bumpLedger],
   );
+  subscribeToRunRef.current = subscribeToRun;
 
   const startRunForMessages = useCallback(
     async (
@@ -288,21 +298,78 @@ export function useAgentRun(threadId: string | null) {
     [threadId, subscribeToRun, bumpLedger],
   );
 
+  const resolvePendingApproval = useCallback(
+    async (
+      approvalId: string,
+      decision: ApprovalDecision,
+      optionId?: string,
+    ) => {
+      const runId = chatStateRef.current.activeRun?.runId;
+      if (!runId) return;
+      try {
+        await resolveApproval(runId, {
+          approvalId,
+          decision,
+          ...(optionId ? { optionId } : {}),
+        });
+      } catch (err) {
+        toastError(
+          err instanceof Error ? err.message : 'Could not send decision',
+          'Approval failed',
+        );
+        throw err;
+      }
+    },
+    [],
+  );
+
+  const resolvePendingChoice = useCallback(
+    async (
+      choiceId: string,
+      body: { skipped: true } | { optionIds: string[]; text?: string },
+    ) => {
+      const runId = chatStateRef.current.activeRun?.runId;
+      if (!runId) return;
+      try {
+        await resolveChoice(
+          runId,
+          'skipped' in body
+            ? { choiceId, skipped: true }
+            : {
+                choiceId,
+                optionIds: body.optionIds,
+                ...(body.text ? { text: body.text } : {}),
+              },
+        );
+      } catch (err) {
+        toastError(
+          err instanceof Error ? err.message : 'Could not send choice',
+          'Choice failed',
+        );
+        throw err;
+      }
+    },
+    [],
+  );
+
   const interruptActiveRun = useCallback(async () => {
     const state = chatStateRef.current;
     const run = state.activeRun;
     if (!run) return;
 
-    disconnect();
-
     if (run.status === 'running') {
       try {
         await cancelRun(run.runId);
       } catch (err) {
-        console.error('Cancel run failed:', err);
+        toastError(
+          err instanceof Error ? err.message : 'Could not stop the run',
+          'Stop failed',
+        );
+        return;
       }
     }
 
+    disconnect();
     setChatState((prev) => ({
       ...initialChatState(),
       compactionNotice: prev.compactionNotice,
@@ -395,10 +462,13 @@ export function useAgentRun(threadId: string | null) {
       posture: normalizeRunPosture(composerOptions.posture),
     });
 
+    const restored = await fetchLedger(threadId);
     setChatState((prev) => ({
       ...initialChatState(),
-      compactionNotice: prev.compactionNotice,
-      plan: prev.plan,
+      compactionNotice: restored.snapshot
+        ? noticeFromSnapshot(restored.snapshot)
+        : prev.compactionNotice,
+      plan: restored.plan ?? null,
     }));
     bumpLedger();
     subscribeToRun(runId);
@@ -439,10 +509,13 @@ export function useAgentRun(threadId: string | null) {
         posture: normalizeRunPosture(composerOptions.posture),
       });
 
+      const restored = await fetchLedger(threadId);
       setChatState((prev) => ({
         ...initialChatState(),
-        compactionNotice: prev.compactionNotice,
-        plan: prev.plan,
+        compactionNotice: restored.snapshot
+          ? noticeFromSnapshot(restored.snapshot)
+          : prev.compactionNotice,
+        plan: restored.plan ?? null,
       }));
       bumpLedger();
       subscribeToRun(runId);
@@ -487,6 +560,8 @@ export function useAgentRun(threadId: string | null) {
     editLastUserMessage,
     disconnect,
     stopGeneration: interruptActiveRun,
+    resolvePendingApproval,
+    resolvePendingChoice,
     // Busy through post-loop compaction until run.settled clears activeRun.
     isRunning: chatState.activeRun !== null,
     ledgerEpoch,

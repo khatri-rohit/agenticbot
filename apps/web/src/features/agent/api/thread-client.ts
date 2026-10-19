@@ -133,6 +133,8 @@ export type LedgerResponse = {
   snapshot?: Snapshot | null;
   /** Thread-scoped plan journal + todos. */
   plan?: ThreadPlan | null;
+  /** Live run to reattach after reload (approval pause, in-flight turn). */
+  activeRunId?: string;
 };
 
 export async function fetchLedger(threadId: string): Promise<LedgerResponse> {

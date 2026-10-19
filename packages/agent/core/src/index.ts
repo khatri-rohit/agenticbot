@@ -39,6 +39,8 @@ export {
 
 // Tools
 export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
+export { ask_user } from './lib/tools/ask-user';
+export { offer_choice } from './lib/tools/offer-choice';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
 export { WORKSPACE_TOOLS } from './lib/tools/workspace';
 export {
@@ -84,6 +86,8 @@ export type { EventSubscriber } from './lib/events/types';
 // Run manager
 export { RunManager } from './lib/run/run-manager';
 export type {
+  ResolveApprovalResult,
+  ResolveChoiceResult,
   RunHandle,
   RunHandleStatus,
   StartRunOptions,

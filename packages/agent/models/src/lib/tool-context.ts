@@ -1,3 +1,5 @@
+import type { ChoiceRequest, ChoiceResult } from './choice.js';
+
 /**
  * Risk class for a tool. Host policy (approvals, cron profiles) keys off this.
  */
@@ -5,6 +7,34 @@ export type ToolRisk = 'read' | 'write' | 'exec' | 'network' | 'external';
 
 /** Where the run originated — chat today; cron/channels later. */
 export type ToolOrigin = 'chat' | 'cron' | 'channel' | 'eval';
+
+/** Human decision on a paused tool. `approved_for_run` is a session grant. */
+export type ApprovalDecision = 'approved' | 'denied' | 'approved_for_run';
+
+export type ApprovalOption = {
+  id: string;
+  label: string;
+};
+
+export type ApprovalRequest = {
+  toolName: string;
+  summary: string;
+  risk: ToolRisk;
+  options?: ApprovalOption[];
+  argsPreview?: unknown;
+};
+
+export type ApprovalResult = {
+  optionId?: string;
+};
+
+/** Thrown when the human denies (not a tool crash). */
+export class ApprovalDenied extends Error {
+  override readonly name = 'ApprovalDenied';
+  constructor(message = 'Denied by the user') {
+    super(message);
+  }
+}
 
 /**
  * Injected into every tool `execute(args, ctx)`.
@@ -25,12 +55,13 @@ export type ToolContext = {
     length?: number,
   ) => Promise<string>;
   /**
-   * Request host approval before a privileged side effect.
-   * Resolves when approved; rejects when denied or the run is cancelled.
+   * Pause the run until the host resolves. Resolves with the decision payload;
+   * rejects with ApprovalDenied or a cancel error.
    */
-  approve?: (request: {
-    toolName: string;
-    summary: string;
-    risk: ToolRisk;
-  }) => Promise<void>;
+  approve?: (request: ApprovalRequest) => Promise<ApprovalResult>;
+  /**
+   * Pause for a mid-turn direction (checkboxes + optional text).
+   * Resolves on Continue; rejects with ChoiceSkipped on Skip, or cancel.
+   */
+  offerChoice?: (request: ChoiceRequest) => Promise<ChoiceResult>;
 };

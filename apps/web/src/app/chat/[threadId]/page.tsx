@@ -5,6 +5,8 @@ import { ChatHeader } from '../../../components/chat-header';
 import { MessageList } from '../../../components/message-list';
 import { ChatInput } from '../../../components/chat-input';
 import { ThreadPlanCard } from '../../../components/thread-plan-card';
+import { ApprovalCard } from '../../../components/approval-card';
+import { ChoiceCard } from '../../../components/choice-card';
 import { ChatShell } from '../../../components/chat-shell';
 import {
   useMessages,
@@ -29,6 +31,8 @@ export default function ChatThreadPage({
     setComposerOptions,
     isRunning,
     stopGeneration,
+    resolvePendingApproval,
+    resolvePendingChoice,
     retryLastResponse,
     editLastUserMessage,
     ledgerEpoch,
@@ -73,6 +77,22 @@ export default function ChatThreadPage({
         <div className="flex min-w-0 flex-col">
           <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
             <ThreadPlanCard plan={chatState.plan} />
+            <ChoiceCard
+              choice={
+                chatState.pendingChoices[
+                  chatState.pendingChoices.length - 1
+                ] ?? null
+              }
+              onResolve={resolvePendingChoice}
+            />
+            <ApprovalCard
+              approval={
+                chatState.pendingApprovals[
+                  chatState.pendingApprovals.length - 1
+                ] ?? null
+              }
+              onResolve={resolvePendingApproval}
+            />
           </div>
           <ChatInput
             key={threadId}

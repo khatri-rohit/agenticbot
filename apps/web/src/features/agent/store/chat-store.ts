@@ -1,10 +1,13 @@
 import {
   occupiedFromUsage,
   type AgentEvent,
+  type ApprovalOption,
+  type ChoiceOption,
   type ContextReport,
   type RunPosture,
   type Snapshot,
   type ThreadPlan,
+  type ToolRisk,
 } from '@org/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
 
@@ -68,6 +71,23 @@ export type LimitNotice = {
   reason: string;
 };
 
+export type PendingApproval = {
+  approvalId: string;
+  runId: string;
+  toolName: string;
+  summary: string;
+  risk: ToolRisk;
+  options?: ApprovalOption[];
+  argsPreview?: unknown;
+};
+
+export type PendingChoice = {
+  choiceId: string;
+  runId: string;
+  question: string;
+  options: ChoiceOption[];
+};
+
 export type ChatState = {
   activeRun: ChatRunState | null;
   /** Survives run.completed so the compaction card can render after the turn. */
@@ -76,6 +96,9 @@ export type ChatState = {
   limitNotice: LimitNotice | null;
   /** Thread-scoped plan journal + todos. Survives run.settled. */
   plan: ThreadPlan | null;
+  /** Live pauses; cleared on resolve / run end. */
+  pendingApprovals: PendingApproval[];
+  pendingChoices: PendingChoice[];
 };
 
 export function initialChatState(): ChatState {
@@ -84,6 +107,8 @@ export function initialChatState(): ChatState {
     compactionNotice: null,
     limitNotice: null,
     plan: null,
+    pendingApprovals: [],
+    pendingChoices: [],
   };
 }
 
@@ -131,6 +156,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         compactionNotice: state.compactionNotice,
         limitNotice: null,
         plan: state.plan,
+        pendingApprovals: [],
+        pendingChoices: [],
       };
     }
 
@@ -205,20 +232,36 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'tool.completed': {
       if (!state.activeRun) return state;
-      return {
-        ...state,
-        activeRun: {
-          ...state.activeRun,
-          toolActivity: state.activeRun.toolActivity.map((t) =>
+      const existing = state.activeRun.toolActivity.some(
+        (t) => t.toolCallId === event.toolCallId,
+      );
+      const toolActivity = existing
+        ? state.activeRun.toolActivity.map((t) =>
             t.toolCallId === event.toolCallId
               ? {
                   ...t,
-                  status: 'done',
+                  status: 'done' as const,
                   durationMs: event.durationMs,
                   resultPreview: event.resultPreview,
                 }
               : t,
-          ),
+          )
+        : [
+            ...state.activeRun.toolActivity,
+            {
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              status: 'done' as const,
+              seq: event.seq,
+              durationMs: event.durationMs,
+              resultPreview: event.resultPreview,
+            },
+          ];
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          toolActivity,
           lastSeq,
         },
       };
@@ -254,6 +297,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         },
         limitNotice: state.limitNotice,
         plan: state.plan,
+        pendingApprovals: state.pendingApprovals,
+        pendingChoices: state.pendingChoices,
       };
     }
 
@@ -273,6 +318,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         },
         limitNotice: state.limitNotice,
         plan: state.plan,
+        pendingApprovals: state.pendingApprovals,
+        pendingChoices: state.pendingChoices,
       };
     }
 
@@ -297,6 +344,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         plan: state.plan,
+        pendingApprovals: [],
+        pendingChoices: [],
       };
     }
 
@@ -306,6 +355,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         plan: state.plan,
+        pendingApprovals: [],
+        pendingChoices: [],
       };
     }
 
@@ -357,9 +408,78 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       };
     }
 
+    case 'approval.requested': {
+      const next: PendingApproval = {
+        approvalId: event.approvalId,
+        runId: event.runId,
+        toolName: event.toolName,
+        summary: event.summary,
+        risk: event.risk,
+        ...(event.options ? { options: event.options } : {}),
+        ...(event.argsPreview !== undefined
+          ? { argsPreview: event.argsPreview }
+          : {}),
+      };
+      return {
+        ...state,
+        pendingApprovals: [
+          ...state.pendingApprovals.filter(
+            (item) => item.approvalId !== event.approvalId,
+          ),
+          next,
+        ],
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+      };
+    }
+
+    case 'approval.resolved': {
+      return {
+        ...state,
+        pendingApprovals: state.pendingApprovals.filter(
+          (item) => item.approvalId !== event.approvalId,
+        ),
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+      };
+    }
+
+    case 'choice.requested': {
+      const next: PendingChoice = {
+        choiceId: event.choiceId,
+        runId: event.runId,
+        question: event.question,
+        options: event.options,
+      };
+      return {
+        ...state,
+        pendingChoices: [
+          ...state.pendingChoices.filter(
+            (item) => item.choiceId !== event.choiceId,
+          ),
+          next,
+        ],
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+      };
+    }
+
+    case 'choice.resolved': {
+      return {
+        ...state,
+        pendingChoices: state.pendingChoices.filter(
+          (item) => item.choiceId !== event.choiceId,
+        ),
+        activeRun: state.activeRun
+          ? { ...state.activeRun, lastSeq }
+          : state.activeRun,
+      };
+    }
+
     case 'turn.started':
-    case 'approval.requested':
-    case 'approval.resolved':
     case 'memory.updated': {
       if (!state.activeRun) return state;
       return {

@@ -1,6 +1,10 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import type {
+  ApprovalOption,
+  ApprovalResult,
+  ChoiceOption,
+  ChoiceResult,
   ContextBudget,
   ContextReport,
   LedgerRecord,
@@ -16,6 +20,23 @@ import type { ToolRegistry } from '../tools/type';
 /** In-memory run handle status (RunManager; narrower than domain RunStatus). */
 export type RunHandleStatus = 'running' | 'completed' | 'error';
 
+export type PendingApprovalWaiter = {
+  toolName: string;
+  options?: ApprovalOption[];
+  resolve: (result: ApprovalResult) => void;
+  reject: (error: Error) => void;
+};
+
+export type ResolveApprovalResult = 'ok' | 'not_found' | 'invalid_option';
+
+export type PendingChoiceWaiter = {
+  options: ChoiceOption[];
+  resolve: (result: ChoiceResult) => void;
+  reject: (error: Error) => void;
+};
+
+export type ResolveChoiceResult = 'ok' | 'not_found' | 'invalid';
+
 export type RunHandle = {
   runId: string;
   threadId: string;
@@ -24,6 +45,9 @@ export type RunHandle = {
   abortController: AbortController;
   emitter: EventEmitter;
   result: RunLoopResult | null;
+  pendingApprovals: Map<string, PendingApprovalWaiter>;
+  pendingChoices: Map<string, PendingChoiceWaiter>;
+  grantedTools: Set<string>;
 };
 
 export type StartRunOptions = {

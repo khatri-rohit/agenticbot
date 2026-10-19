@@ -16,6 +16,8 @@ export type {
   ToolFailed,
   ApprovalRequested,
   ApprovalResolved,
+  ChoiceRequested,
+  ChoiceResolved,
   MemoryUpdated,
   PlanUpdated,
   ContextCompacting,
@@ -101,7 +103,27 @@ export type {
 } from './lib/ledger.js';
 export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
 
-export type { ToolRisk, ToolOrigin, ToolContext } from './lib/tool-context.js';
+export type {
+  ToolRisk,
+  ToolOrigin,
+  ToolContext,
+  ApprovalDecision,
+  ApprovalOption,
+  ApprovalRequest,
+  ApprovalResult,
+} from './lib/tool-context.js';
+export { ApprovalDenied } from './lib/tool-context.js';
+
+export type {
+  ChoiceOption,
+  ChoiceRequest,
+  ChoiceResult,
+} from './lib/choice.js';
+export {
+  MAX_CHOICE_OPTIONS,
+  MAX_CHOICE_TEXT_CHARS,
+  ChoiceSkipped,
+} from './lib/choice.js';
 
 export type {
   MemoryTarget,

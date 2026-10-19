@@ -2,6 +2,10 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import type {
   AgentEventWithoutSeq,
+  ApprovalRequest,
+  ApprovalResult,
+  ChoiceRequest,
+  ChoiceResult,
   ContextBudget,
   ContextReport,
   LedgerRecord,
@@ -49,6 +53,13 @@ export type RunLoopConfig = {
   origin?: ToolOrigin;
   /** Bound workspace for file tools. */
   workspaceRoot?: string;
+  /**
+   * Host approval seam. Chat wires RunManager; CLI/eval may auto-resolve.
+   * The wait must not sit inside toolTimeoutMs.
+   */
+  approve?: (request: ApprovalRequest) => Promise<ApprovalResult>;
+  /** Mid-turn direction picker. Skip must stop the run, not invent a path. */
+  offerChoice?: (request: ChoiceRequest) => Promise<ChoiceResult>;
   /** Legacy trace callback (eval harness). Kept for backward compat. */
   trace?: (event: TraceEvent) => void;
   /** If provided, emits AgentEvents for SSE / UI consumers. */

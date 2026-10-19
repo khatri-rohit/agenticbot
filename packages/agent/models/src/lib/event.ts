@@ -1,8 +1,13 @@
+import type { ChoiceOption } from './choice.js';
 import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
 import type { ThreadPlan } from './plan.js';
 import type { RunPosture, TokenUsage } from './run.js';
-import type { ToolRisk } from './tool-context.js';
+import type {
+  ApprovalDecision,
+  ApprovalOption,
+  ToolRisk,
+} from './tool-context.js';
 
 /**
  * AgentEvent — the server's streaming protocol to the client.
@@ -31,6 +36,8 @@ export type AgentEvent =
   | ToolFailed
   | ApprovalRequested
   | ApprovalResolved
+  | ChoiceRequested
+  | ChoiceResolved
   | MemoryUpdated
   | PlanUpdated
   | ContextCompacting
@@ -151,10 +158,7 @@ export interface LimitHit {
   reason: string;
 }
 
-/**
- * Reserved for a future exec gate. This personal host does not emit these:
- * Ask posture + workspace jail are the live policy.
- */
+/** Run is paused until the client POSTs a decision for this approvalId. */
 export interface ApprovalRequested {
   seq: number;
   type: 'approval.requested';
@@ -163,6 +167,8 @@ export interface ApprovalRequested {
   toolName: string;
   summary: string;
   risk: ToolRisk;
+  options?: ApprovalOption[];
+  argsPreview?: unknown;
 }
 
 export interface ApprovalResolved {
@@ -170,7 +176,28 @@ export interface ApprovalResolved {
   type: 'approval.resolved';
   runId: string;
   approvalId: string;
-  decision: 'approved' | 'denied';
+  decision: ApprovalDecision;
+  optionId?: string;
+}
+
+/** Run is paused until the client Continues or Skips this choice. */
+export interface ChoiceRequested {
+  seq: number;
+  type: 'choice.requested';
+  runId: string;
+  choiceId: string;
+  question: string;
+  options: ChoiceOption[];
+}
+
+export interface ChoiceResolved {
+  seq: number;
+  type: 'choice.resolved';
+  runId: string;
+  choiceId: string;
+  skipped: boolean;
+  optionIds?: string[];
+  text?: string;
 }
 
 /** Curated memory changed (applied or reverted). UI refetches files. */

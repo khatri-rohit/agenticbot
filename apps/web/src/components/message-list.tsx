@@ -303,6 +303,12 @@ export function MessageList({
                       toolActivity={toolActivity}
                       hasStreamingText={Boolean(streaming?.content)}
                       compacting={compactionNotice?.status === 'running'}
+                      waitingForApproval={
+                        chatState.pendingApprovals.length > 0
+                      }
+                      waitingForChoice={
+                        chatState.pendingChoices.length > 0
+                      }
                     />
                   ) : null}
                 </section>
@@ -342,16 +348,24 @@ function TurnStatusLine({
   toolActivity,
   hasStreamingText,
   compacting,
+  waitingForApproval,
+  waitingForChoice,
 }: {
   toolActivity: ToolActivity[];
   hasStreamingText: boolean;
   compacting?: boolean;
+  waitingForApproval?: boolean;
+  waitingForChoice?: boolean;
 }) {
   const running = toolActivity.find((t) => t.status === 'running');
   let label: string | null = null;
 
   if (compacting) {
     label = 'Compacting context…';
+  } else if (waitingForChoice) {
+    label = 'Waiting for a choice…';
+  } else if (waitingForApproval) {
+    label = 'Waiting for approval…';
   } else if (running) {
     label = `${running.toolName}…`;
   } else if (toolActivity.length > 0 && !hasStreamingText) {
