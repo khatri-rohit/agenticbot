@@ -13,7 +13,7 @@ import type { ToolRegistry } from '../tools/type';
 import type { AgentLimits } from './limits';
 
 /** Terminal status returned by runLoop (in-memory run summary, not persisted Run). */
-export type RunLoopStatus = 'completed' | 'error';
+export type RunLoopStatus = 'completed' | 'error' | 'incomplete';
 
 /**
  * Transport-agnostic model invocation. The loop supplies onTextDelta so it can

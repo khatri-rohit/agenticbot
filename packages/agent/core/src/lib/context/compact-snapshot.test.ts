@@ -36,6 +36,49 @@ describe('compact snapshot', () => {
     expect(chooseCompactThroughSeq(envelopes, 5)).toBeNull();
   });
 
+  it('records files and commands from assistant tool calls in the brief', () => {
+    const envelopes: LedgerEnvelope[] = [
+      envelope(1, 'user', 'fix the build'),
+      {
+        v: 1,
+        seq: 2,
+        ts: '2026-01-01T00:00:00.000Z',
+        threadId: 't1',
+        runId: null,
+        record: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'c1',
+              type: 'function',
+              function: {
+                name: 'edit_file',
+                arguments: '{"path":"src/main.ts","oldText":"a","newText":"b"}',
+              },
+            },
+            {
+              id: 'c2',
+              type: 'function',
+              function: {
+                name: 'run_terminal',
+                arguments: '{"command":"npx tsc --noEmit"}',
+              },
+            },
+          ],
+        },
+      },
+    ];
+    const snapshot = buildExtractiveSnapshot({
+      threadId: 't1',
+      model: 'test',
+      envelopes,
+      throughSeq: 2,
+    });
+    expect(snapshot.brief).toMatch(/src\/main\.ts/);
+    expect(snapshot.brief).toMatch(/npx tsc --noEmit/);
+  });
+
   it('builds a brief and summary from compacted user/assistant turns', () => {
     const envelopes = [
       envelope(1, 'user', 'fix the build'),
@@ -78,5 +121,29 @@ describe('compact snapshot', () => {
     expect(blob).toContain('new question');
     expect(blob).not.toContain('old answer');
     expect(blob).toContain('Goal: old question');
+  });
+
+  it('assembleContext injects mentioned threads as a system layer', () => {
+    const tools = createToolRegistry([]);
+    const { messages, report } = assembleContext({
+      tools,
+      memory: { user: '', notes: '' },
+      snapshot: null,
+      envelopes: [envelope(1, 'user', 'continue from that chat')],
+      mentionedThreads: [
+        {
+          threadId: 'other',
+          title: 'Fix login',
+          sourceLabel: 'agenticbot',
+          text: 'User asked to fix auth.',
+        },
+      ],
+    });
+    const blob = JSON.stringify(messages);
+    expect(blob).toContain('Attached threads');
+    expect(blob).toContain('Fix login');
+    expect(blob).toContain('User asked to fix auth');
+    const mentionLayer = report.layers.find((layer) => layer.id === 'mentions');
+    expect(mentionLayer?.tokens).toBeGreaterThan(0);
   });
 });

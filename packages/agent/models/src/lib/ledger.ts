@@ -4,6 +4,7 @@ import type {
   MessageAttachment,
   PendingToolCall,
 } from './message.js';
+import { isImageAttachment } from './message.js';
 
 /**
  * One durable turn for the thread ledger.
@@ -72,12 +73,15 @@ export function envelopeToChatMessage(
       const trimmed = record.content.trim();
       if (trimmed) parts.push({ type: 'text', text: trimmed });
       for (const attachment of attachments) {
+        if (!isImageAttachment(attachment)) continue;
         parts.push({
           type: 'image_url',
           image_url: { url: attachment.dataUrl },
         });
       }
-      return { role: 'user', content: parts };
+      if (parts.some((part) => part.type === 'image_url')) {
+        return { role: 'user', content: parts };
+      }
     }
     return { role: 'user', content: record.content };
   }

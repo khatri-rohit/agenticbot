@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Message } from '@org/agent-models';
+import { imageAttachments, threadMentions } from '@org/agent-models';
+import { ThreadMentionChip } from '@/components/thread-mention-picker';
 import { MessageActions } from '@/components/message-actions';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -102,7 +104,10 @@ export function UserMessage({
         >
           {message.attachments && message.attachments.length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-1.5 px-0.5">
-              {message.attachments.map((attachment) => (
+              {threadMentions(message.attachments).map((mention) => (
+                <ThreadMentionChip key={mention.id} mention={mention} />
+              ))}
+              {imageAttachments(message.attachments).map((attachment) => (
                 <img
                   key={attachment.id}
                   src={attachment.dataUrl}
@@ -192,7 +197,10 @@ export function UserMessage({
           >
             {message.attachments && message.attachments.length > 0 ? (
               <div className="mb-2.5 flex flex-wrap gap-1.5">
-                {message.attachments.map((attachment) => (
+                {threadMentions(message.attachments).map((mention) => (
+                  <ThreadMentionChip key={mention.id} mention={mention} />
+                ))}
+                {imageAttachments(message.attachments).map((attachment) => (
                   <button
                     key={attachment.id}
                     type="button"

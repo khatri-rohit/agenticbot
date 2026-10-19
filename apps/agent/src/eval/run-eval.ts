@@ -2,7 +2,7 @@ import { HOME_MODE } from '@org/agent-models';
 import {
   runLoop,
   createInvokeModelCall,
-  getContext,
+  assembleContext,
   createToolRegistry,
   ALL_TOOLS,
   type TraceEvent,
@@ -35,7 +35,22 @@ async function runScenario(
   query: string,
 ): Promise<ScenarioRunInput & { answer: string }> {
   const tools = createToolRegistry(ALL_TOOLS);
-  const messages = getContext(query, tools, 'home');
+  const { messages } = assembleContext({
+    tools,
+    memory: { user: '', notes: '' },
+    snapshot: null,
+    envelopes: [
+      {
+        v: 1,
+        seq: 1,
+        ts: new Date().toISOString(),
+        threadId: 'eval',
+        runId: null,
+        record: { role: 'user', content: query },
+      },
+    ],
+    mode: 'home',
+  });
   const stats: RunStats = { toolCalls: 0, iterations: 0, toolNames: [] };
 
   const result = await runLoop(

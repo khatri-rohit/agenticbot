@@ -310,6 +310,12 @@ export function MessageList({
             })}
           </div>
 
+          {chatState.limitNotice ? (
+            <p className="type-caption px-1 text-muted-foreground" role="status">
+              Run stopped early: {chatState.limitNotice.reason}
+            </p>
+          ) : null}
+
           <div ref={endRef} className="h-6" />
         </div>
       </div>

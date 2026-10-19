@@ -112,7 +112,7 @@ export function useAgentRun(threadId: string | null) {
         return {
           ...prev,
           model,
-          webSearch: !workspace,
+          webSearch: prev.webSearch,
         };
       });
     });

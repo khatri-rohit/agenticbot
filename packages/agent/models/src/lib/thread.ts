@@ -29,6 +29,24 @@ export function isWorkspaceKind(kind: ThreadKind | undefined): boolean {
   return kind === 'workspace';
 }
 
+/** Strip trailing slashes and unify separators. Display form, not a compare key. */
+export function normalizeWorkspaceRoot(root: string): string {
+  return root.trim().replace(/[\\/]+$/, '').replace(/\\/g, '/');
+}
+
+/** Case-insensitive identity for grouping and memory files. */
+export function workspaceRootKey(root: string): string {
+  return normalizeWorkspaceRoot(root).toLowerCase();
+}
+
+export function sameWorkspaceRoot(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  if (!left || !right) return false;
+  return workspaceRootKey(left) === workspaceRootKey(right);
+}
+
 export interface Thread {
   id: string;
   title: string;

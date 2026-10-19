@@ -14,7 +14,23 @@ function formatList(items: string[]): string {
   return items.map((item) => `- ${item}`).join('\n');
 }
 
-function buildToolGuardrails(registry: ToolRegistry): string {
+function buildToolGuardrails(
+  registry: ToolRegistry,
+  compact: boolean,
+): string {
+  if (compact) {
+    return Array.from(registry.byName.values())
+      .map((tool) => {
+        const name = tool.definition.function.name;
+        const use = tool.guidance.whenToUse[0] ?? '';
+        const avoid = tool.guidance.whenNotToUse[0];
+        return avoid
+          ? `- ${name}: ${use} Do not: ${avoid}`
+          : `- ${name}: ${use}`;
+      })
+      .join('\n');
+  }
+
   const sections: string[] = [];
 
   for (const tool of registry.byName.values()) {
@@ -82,7 +98,9 @@ Additional user, workspace, and MCP skills are not in this catalog yet.
     : '';
 
   const webSearchRule = hasWebSearch
-    ? `- When web_search is listed below, it is a built-in host tool. If you lack reliable current knowledge, call web_search once with a specific query, then answer from Detailed Sources with URL citations.`
+    ? isWorkspace
+      ? `- web_search is on this run. Use the open folder first. If files, AGENTS.md, and attached threads do not contain the current API, version, or docs you need, call web_search (then web_fetch if the page is required). Cite URLs. Do not invent live library shape from memory.`
+      : `- When web_search is listed below, it is a built-in host tool. If you lack reliable current knowledge, call web_search once with a specific query, then answer from Detailed Sources with URL citations.`
     : isWorkspace
       ? `- web_search is not on this run. Work from the open folder, project files, and attached AGENTS.md / rules.`
       : `- web_search is not enabled for this run. Do not invent live web facts; answer from knowledge or ask the user to enable web search.`;
@@ -90,8 +108,8 @@ Additional user, workspace, and MCP skills are not in this catalog yet.
   const modeBehavior = !isWorkspace
     ? HOME_BEHAVIOR
     : isAsk
-      ? WORKSPACE_ASK_BEHAVIOR
-      : WORKSPACE_BEHAVIOR;
+      ? workspaceAskBehavior(hasWebSearch)
+      : workspaceAgentBehavior(hasWebSearch);
 
   const lawBand = isWorkspace
     ? isAsk
@@ -100,7 +118,7 @@ Additional user, workspace, and MCP skills are not in this catalog yet.
     : ANTI_SLOP_CODE_LAW;
 
   return `
-${loadAgentIdentity()}
+${loadAgentIdentity(mode)}
 
 Today's date is ${today()}.
 
@@ -124,7 +142,7 @@ ${availableTools}
 ${skillsSection}
 # Per-tool guardrails
 
-${buildToolGuardrails(registry)}
+${buildToolGuardrails(registry, isWorkspace)}
 
 ${modeBehavior}
 
@@ -153,7 +171,12 @@ Cite source URLs inline when you used the web. Do not invent live facts.
 If the user wants you to change a repo, tell them to open a folder (start a workspace chat).
 `.trim();
 
-const WORKSPACE_BEHAVIOR = `
+function workspaceAgentBehavior(hasWebSearch: boolean): string {
+  const docsStep = hasWebSearch
+    ? `
+5. Docs — if the folder and rules lack current library or API docs, web_search (then web_fetch if needed). Prefer project files first.`
+    : '';
+  return `
 # Workspace behavior
 
 You are bound to one opened project folder. File tools and the terminal cannot leave that folder.
@@ -163,23 +186,29 @@ Act loop:
    Never use run_terminal to read or search files.
 2. Patch — edit_file with a unique oldText span. Read the change report in the tool result.
 3. Verify — run_terminal with that project's real compile/test/build command (cwd is the folder).
-4. Repair — use command errors; edit again. Repeat until the check passes or you are stuck.
+4. Repair — use command errors; edit again. Repeat until the check passes or you are stuck.${docsStep}
 
 edit_file results tell you what changed (path, created or patched, line/byte delta, hunk). Do not assume the file matches your intent without that report. Re-read if the report is truncated.
 
 AGENTS.md and attached rules in the memory layer are project law for this folder only.
 Do not mention tools unless the user asks how you work.
 `.trim();
+}
 
-const WORKSPACE_ASK_BEHAVIOR = `
+function workspaceAskBehavior(hasWebSearch: boolean): string {
+  const docs = hasWebSearch
+    ? ' If the folder lacks current library docs, web_search rather than guessing.'
+    : '';
+  return `
 # Workspace Ask behavior
 
 You are bound to one opened project folder in read-only Ask posture.
 You can glob, grep, and read_file. You cannot edit files or run the terminal.
 
-Explain, locate, and reason from the open folder. If the user wants edits, tests, or
+Explain, locate, and reason from the open folder.${docs} If the user wants edits, tests, or
 commands, tell them to switch the composer to Agent.
 Do not claim you changed files. Do not invent tool names for write or exec.
 AGENTS.md and attached rules in the memory layer are project law for this folder only.
 Do not mention tools unless the user asks how you work.
 `.trim();
+}

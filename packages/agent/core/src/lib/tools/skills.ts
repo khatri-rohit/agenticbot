@@ -130,7 +130,7 @@ export const load_skill: Tool = {
     function: {
       name: 'load_skill',
       description:
-        'Load the body of a global skill by name. Use the catalog in the system prompt.',
+        'Load the body of a named skill (patch-and-verify, diagnose-bug, home-research, anti-slop-examples). Optional. Built-in tools work without a skill.',
       parameters: {
         type: 'object',
         properties: {

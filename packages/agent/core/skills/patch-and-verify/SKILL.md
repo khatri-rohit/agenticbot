@@ -11,6 +11,7 @@ Use this when the user asked you to change code in the open folder.
    - glob / grep for symbols and filenames in the request.
    - read_file the hits. Quote a unique oldText span from the real file.
    - If nothing matches, stop and say so. Do not invent paths.
+   - If the folder lacks current library/API docs, web_search (then web_fetch). Prefer project files first.
 
 2. Patch
    - edit_file with path + unique oldText + newText.

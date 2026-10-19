@@ -62,14 +62,21 @@ export type ChatRunState = {
   occupiedCoversStream?: boolean;
 };
 
+export type LimitNotice = {
+  runId: string;
+  reason: string;
+};
+
 export type ChatState = {
   activeRun: ChatRunState | null;
   /** Survives run.completed so the compaction card can render after the turn. */
   compactionNotice: CompactionNotice | null;
+  /** Last limit.hit / incomplete finish, until the next run. */
+  limitNotice: LimitNotice | null;
 };
 
 export function initialChatState(): ChatState {
-  return { activeRun: null, compactionNotice: null };
+  return { activeRun: null, compactionNotice: null, limitNotice: null };
 }
 
 export function noticeFromSnapshot(
@@ -114,6 +121,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             : {}),
         },
         compactionNotice: state.compactionNotice,
+        limitNotice: null,
       };
     }
 
@@ -235,6 +243,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           summary: state.compactionNotice?.summary ?? '',
           createdAt: state.compactionNotice?.createdAt ?? '',
         },
+        limitNotice: state.limitNotice,
       };
     }
 
@@ -252,6 +261,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           summary: event.summary,
           createdAt: event.createdAt,
         },
+        limitNotice: state.limitNotice,
       };
     }
 
@@ -274,6 +284,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       return {
         activeRun: null,
         compactionNotice: state.compactionNotice,
+        limitNotice: state.limitNotice,
       };
     }
 
@@ -281,6 +292,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       return {
         activeRun: null,
         compactionNotice: state.compactionNotice,
+        limitNotice: state.limitNotice,
       };
     }
 
@@ -305,8 +317,24 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       };
     }
 
+    case 'limit.hit': {
+      if (!state.activeRun) {
+        return {
+          ...state,
+          limitNotice: { runId: event.runId, reason: event.reason },
+        };
+      }
+      return {
+        ...state,
+        limitNotice: { runId: event.runId, reason: event.reason },
+        activeRun: {
+          ...state.activeRun,
+          lastSeq,
+        },
+      };
+    }
+
     case 'turn.started':
-    case 'limit.hit':
     case 'approval.requested':
     case 'approval.resolved':
     case 'memory.updated': {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { MessageAttachment } from '@org/agent-models';
 import { ChatInput } from '../components/chat-input';
@@ -66,13 +66,6 @@ export default function HomePage() {
     defaultOptions(true),
   );
 
-  useEffect(() => {
-    setComposerOptions((prev) => ({
-      ...prev,
-      webSearch: !bound,
-    }));
-  }, [bound]);
-
   return (
     <ChatShell layout="home">
       <div className="flex w-full max-w-2xl flex-col gap-9">
@@ -93,7 +86,6 @@ export default function HomePage() {
           draftScope={HOME_DRAFT_SCOPE}
           variant="hero"
           showWorkspacePicker
-          hideWebSearch={bound}
           showPostureChips={bound}
           onSend={async (content, options, attachments) => {
             setPendingContent(true);
@@ -109,7 +101,7 @@ export default function HomePage() {
               const stashed = stashPendingMessage({
                 content,
                 streaming: options.streaming,
-                webSearch: bound ? false : options.webSearch,
+                webSearch: options.webSearch,
                 model: options.model,
                 local: options.local,
                 thinking: options.thinking,

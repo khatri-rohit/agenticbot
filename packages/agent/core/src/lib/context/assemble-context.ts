@@ -18,6 +18,13 @@ import { buildSystemPrompt } from '../prompts/system-prompt';
 import type { ToolRegistry } from '../tools/type';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 
+export type MentionedThreadContext = {
+  threadId: string;
+  title: string;
+  sourceLabel: string;
+  text: string;
+};
+
 export type AssembleContextInput = {
   tools: ToolRegistry;
   memory: MemoryFiles;
@@ -28,6 +35,11 @@ export type AssembleContextInput = {
   mode?: ModeName;
   /** Workspace Ask vs Agent; ignored for Home. Default agent. */
   posture?: RunPosture;
+  /**
+   * Other threads the user attached to the current turn.
+   * Packed by the host; not ledger rows of this thread.
+   */
+  mentionedThreads?: MentionedThreadContext[];
 };
 
 export type AssembleContextResult = {
@@ -67,7 +79,11 @@ function buildMemoryPrompt(memory: MemoryFiles): string {
   }
 
   if (notes) {
-    parts.push(['# Agent notes (MEMORY.md)', notes].join('\n'));
+    const notesTitle =
+      memory.agentsMd || memory.project
+        ? '# Workspace notes (this folder)'
+        : '# Agent notes (MEMORY.md)';
+    parts.push([notesTitle, notes].join('\n'));
   }
   if (agents) {
     parts.push(['# Project instructions (AGENTS.md)', agents].join('\n'));
@@ -170,6 +186,26 @@ export function assembleContext(
     ? { role: 'system', content: briefParts.join('\n\n') }
     : null;
 
+  const mentionParts = (input.mentionedThreads ?? [])
+    .filter((mention) => mention.text.trim().length > 0)
+    .map(
+      (mention) =>
+        `## ${mention.title}\nSource: ${mention.sourceLabel}\n\n${mention.text.trim()}`,
+    );
+  const mentionsMessage: ChatCompletionMessageParam | null =
+    mentionParts.length > 0
+      ? {
+          role: 'system',
+          content: [
+            '# Attached threads',
+            'Other conversations the user attached to this turn. Use them as background.',
+            'They are not this thread\'s ledger. Do not treat them as files you edited here.',
+            '',
+            mentionParts.join('\n\n'),
+          ].join('\n'),
+        }
+      : null;
+
   const users = userSeqs(live);
   const keepFrom =
     users.length <= budget.keepToolResultsForTurns
@@ -202,6 +238,7 @@ export function assembleContext(
   const messages: ChatCompletionMessageParam[] = [
     systemMessage,
     memoryMessage,
+    ...(mentionsMessage ? [mentionsMessage] : []),
     ...(briefMessage ? [briefMessage] : []),
     ...tailMessages,
     ...turnMessages,
@@ -217,6 +254,13 @@ export function assembleContext(
       id: 'memory',
       label: 'Memory',
       tokens: charsToTokens(memoryText.length) + 4,
+    },
+    {
+      id: 'mentions',
+      label: 'Attached threads',
+      tokens: mentionsMessage
+        ? charsToTokens(String(mentionsMessage.content).length) + 4
+        : 0,
     },
     {
       id: 'brief',

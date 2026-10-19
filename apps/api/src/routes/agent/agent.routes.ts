@@ -16,10 +16,13 @@ import {
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_MEMORY_CAPS,
   HOME_MODE,
+  MAX_THREAD_MENTIONS,
   applyPostureToTools,
+  imageAttachments,
   isWorkspaceKind,
   normalizeRunPosture,
   normalizeThreadKind,
+  threadMentions,
   type RunPosture,
 } from '@org/agent-models';
 import {
@@ -36,12 +39,15 @@ import {
   listOllamaModels,
   loadWorkspaceRules,
   modeForKind,
+  packMentionedThread,
   resolveReasoningEffort,
+  type MentionedThreadContext,
   type ToolRegistry,
 } from '@org/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
+import type { ThreadStore } from '../../lib/thread-store';
 
 const router = Router();
 const runManager = new RunManager();
@@ -70,7 +76,7 @@ async function resolveWorkspaceDir(
   } catch {
     return { ok: false, error: `workspaceRoot does not exist: ${root}` };
   }
-  return { ok: true, root };
+  return { ok: true, root: path.normalize(root) };
 }
 
 function parseThreadKind(value: unknown): ThreadKind | undefined {
@@ -87,6 +93,47 @@ function parseThreadKind(value: unknown): ThreadKind | undefined {
 
 function endpointFromLocal(local: boolean | undefined): OllamaEndpoint {
   return local === true ? 'local' : 'cloud';
+}
+
+async function loadMentionedThreads(
+  store: ThreadStore,
+  envelopes: LedgerEnvelope[],
+  currentThreadId: string,
+): Promise<MentionedThreadContext[]> {
+  const lastUser = [...envelopes]
+    .reverse()
+    .find((envelope) => envelope.record.role === 'user');
+  const mentions = threadMentions(lastUser?.attachments).slice(
+    0,
+    MAX_THREAD_MENTIONS,
+  );
+  const segments: MentionedThreadContext[] = [];
+  const seen = new Set<string>();
+  for (const mention of mentions) {
+    if (mention.threadId === currentThreadId || seen.has(mention.threadId)) {
+      continue;
+    }
+    seen.add(mention.threadId);
+    const thread = store.getThread(mention.threadId);
+    if (!thread) continue;
+    const other = await store.hydrateEnvelopes(mention.threadId);
+    const snapshot = await store.readSnapshot(mention.threadId);
+    const sourceLabel = isWorkspaceKind(thread.kind)
+      ? thread.workspaceRoot ?? 'Workspace'
+      : 'Home';
+    segments.push({
+      threadId: thread.id,
+      title: thread.title || mention.title,
+      sourceLabel,
+      text: packMentionedThread({
+        title: thread.title || mention.title,
+        sourceLabel,
+        envelopes: other,
+        snapshot,
+      }),
+    });
+  }
+  return segments;
 }
 
 /** Returns null when the query is present but not a known endpoint. */
@@ -123,15 +170,16 @@ async function prepareRun(input: {
   posture: RunPosture;
 }> {
   const memory = getMemoryStore();
-  const files = await memory.read();
   const kind = normalizeThreadKind(input.thread?.kind);
   const mode = modeForKind(kind);
   const workspace = isWorkspaceKind(kind);
+  const workspaceRoot = workspace ? input.thread?.workspaceRoot : undefined;
+  const files = await memory.read(workspaceRoot);
   const posture = workspace
     ? normalizeRunPosture(input.posture)
     : ('agent' as const);
-  if (workspace && input.thread?.workspaceRoot) {
-    const rules = await loadWorkspaceRules(input.thread.workspaceRoot);
+  if (workspace && workspaceRoot) {
+    const rules = await loadWorkspaceRules(workspaceRoot);
     files.agentsMd = rules.agentsMd;
     files.project = rules.project;
   }
@@ -139,9 +187,9 @@ async function prepareRun(input: {
     [
       ...ALL_TOOLS,
       createMemoryTool({
-        read: () => memory.read(),
+        read: () => memory.read(workspaceRoot),
         apply: async (op) => {
-          const applied = await memory.apply(op);
+          const applied = await memory.apply(op, workspaceRoot);
           input.onMemoryUpdated?.({
             opId: applied.id,
             target: applied.target,
@@ -149,14 +197,14 @@ async function prepareRun(input: {
           });
           return applied;
         },
-        stage: (op) => memory.stage(op),
+        stage: (op) => memory.stage(op, workspaceRoot),
         source: () => ({
           threadId: input.threadId,
           seq: input.lastUserSeq,
         }),
       }),
     ],
-    toolAllowList(mode, workspace ? false : input.webSearch, posture),
+    toolAllowList(mode, input.webSearch, posture),
     posture,
   );
 
@@ -177,6 +225,12 @@ async function prepareRun(input: {
       ? null
       : await store.readSnapshot(input.threadId);
 
+  const mentionedThreads = await loadMentionedThreads(
+    store,
+    input.envelopes,
+    input.threadId,
+  );
+
   const { messages, report } = assembleContext(
     {
       tools,
@@ -185,6 +239,7 @@ async function prepareRun(input: {
       envelopes: input.envelopes,
       mode: mode.name,
       posture,
+      mentionedThreads,
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
@@ -440,7 +495,11 @@ router.post('/run', async (req: Request, res: Response) => {
   const useModel = model ?? thread.model ?? HOME_MODE.model;
   const endpoint = endpointFromLocal(local);
 
-  if (envelopes.some((envelope) => (envelope.attachments?.length ?? 0) > 0)) {
+  if (
+    envelopes.some(
+      (envelope) => imageAttachments(envelope.attachments).length > 0,
+    )
+  ) {
     try {
       const config = await getOllamaModelConfig(useModel, endpoint);
       if (!config.supportsVision) {
@@ -589,9 +648,17 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
   });
 });
 
-router.get('/memory', async (_req: Request, res: Response) => {
+router.get('/memory', async (req: Request, res: Response) => {
   const memory = getMemoryStore();
-  const [files, ops] = await Promise.all([memory.read(), memory.listOps()]);
+  const workspaceRoot =
+    typeof req.query.workspaceRoot === 'string' &&
+    req.query.workspaceRoot.trim()
+      ? req.query.workspaceRoot.trim()
+      : undefined;
+  const [files, ops] = await Promise.all([
+    memory.read(workspaceRoot),
+    memory.listOps(),
+  ]);
   const reverted = new Set(
     ops
       .filter((op) => op.reason.startsWith('revert '))

@@ -15,6 +15,7 @@ import {
   envelopeToUiMessage,
   isWorkspaceKind,
   normalizeThreadKind,
+  sameWorkspaceRoot,
   type ChatMessage,
   type LedgerEnvelope,
   type LedgerRecord,
@@ -68,7 +69,7 @@ export class ThreadStore {
       }
       if (
         filter?.workspaceRoot &&
-        thread.workspaceRoot !== filter.workspaceRoot
+        !sameWorkspaceRoot(thread.workspaceRoot, filter.workspaceRoot)
       ) {
         return false;
       }

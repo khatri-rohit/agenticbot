@@ -131,6 +131,8 @@ export interface RunCompleted {
   runId: string;
   iterations: number;
   toolCalls: number;
+  /** True when the loop stopped on a limit, not a clean model stop. */
+  incomplete?: boolean;
 }
 
 export interface RunError {
@@ -147,7 +149,10 @@ export interface LimitHit {
   reason: string;
 }
 
-/** Host needs the user (or a pre-approved profile) before a privileged tool runs. */
+/**
+ * Reserved for a future exec gate. This personal host does not emit these:
+ * Ask posture + workspace jail are the live policy.
+ */
 export interface ApprovalRequested {
   seq: number;
   type: 'approval.requested';

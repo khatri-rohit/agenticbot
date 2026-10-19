@@ -23,7 +23,7 @@ export function createMemoryTool(store: MemoryToolStore): Tool {
       function: {
         name: 'memory',
         description:
-          'Save, patch, or remove a durable fact in USER.md (who the user is) or MEMORY.md (environment, conventions, lessons). Use when the user says remember, from now on, I prefer, or don\'t forget. One fact per call. Do not store secrets.',
+          'Save, patch, or remove a durable fact in USER.md (who the user is, global) or MEMORY.md (notes). On a workspace run, notes are this folder only — they do not leak to other folders. Use when the user says remember, from now on, I prefer, or don\'t forget. One fact per call. Do not store secrets.',
         parameters: {
           type: 'object',
           properties: {
@@ -31,7 +31,7 @@ export function createMemoryTool(store: MemoryToolStore): Tool {
               type: 'string',
               enum: ['user', 'notes'],
               description:
-                'user = USER.md profile facts. notes = MEMORY.md agent notes and lessons.',
+                'user = USER.md profile facts (all threads). notes = MEMORY.md: this folder on workspace runs, global on Home.',
             },
             action: {
               type: 'string',
@@ -59,14 +59,16 @@ export function createMemoryTool(store: MemoryToolStore): Tool {
       whenToUse: [
         'The user says remember, from now on, I prefer, don\'t forget, or states a durable profile fact.',
         'A convention or environment fact should survive this thread.',
+        'On a workspace run, a lesson that should apply the next time this folder is open.',
       ],
       whenNotToUse: [
         'Ordinary chat that is only true for this question.',
         'Secrets, API keys, passwords, or tokens.',
         'Project-file edits — that is not this tool.',
+        'Facts that belong in another folder — notes are scoped to the open workspace.',
       ],
       usage: [
-        'Call memory with target notes for lessons and environment; target user for who they are and how they like answers.',
+        'Call memory with target notes for lessons and environment (this folder on workspace); target user for who they are.',
         'One fact per call. Keep content short. Reason is one line.',
         'For patch/remove, oldText must match an exact unique span already in the file.',
       ],

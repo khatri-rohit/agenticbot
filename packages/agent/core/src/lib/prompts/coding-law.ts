@@ -16,6 +16,7 @@ Do:
 - After edits, run that project's own check via run_terminal (package scripts, Makefile, cargo test, pytest, tsc, …).
 - Trust tool results. If glob/grep finds nothing, say so.
 - Stay inside the open folder. Do not cd to a parent.
+- Prefer the open folder over the web. Search the web only when the folder and attached rules lack the current API or docs you need.
 
 Do not:
 - Use run_terminal to read, search, or dump files (no cat, type, Get-Content, head, tail, less, more, or equivalent). Use glob, grep, and read_file.

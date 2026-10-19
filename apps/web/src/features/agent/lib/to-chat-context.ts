@@ -4,6 +4,7 @@ import type {
   Message,
   MessageAttachment,
 } from '@org/agent-models';
+import { imageAttachments } from '@org/agent-models';
 
 function userContentForModel(
   text: string,
@@ -16,7 +17,7 @@ function userContentForModel(
   if (trimmed) {
     parts.push({ type: 'text', text: trimmed });
   }
-  for (const attachment of attachments) {
+  for (const attachment of imageAttachments(attachments)) {
     parts.push({
       type: 'image_url',
       image_url: { url: attachment.dataUrl },

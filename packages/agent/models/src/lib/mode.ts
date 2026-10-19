@@ -37,12 +37,12 @@ export const HOME_MODE: ModeConfig = {
   },
 };
 
-/** Folder-bound coding profile. No default web search. Builds may exceed 30s. */
+/** Folder-bound coding profile. Web search is optional (composer flag). */
 export const WORKSPACE_MODE: ModeConfig = {
   name: 'workspace',
   model: 'glm-5.3:cloud',
   temperature: 0.2,
-  allowedTools: [],
+  allowedTools: ['web_search', 'web_fetch'],
   globalTools: [
     'glob',
     'grep',

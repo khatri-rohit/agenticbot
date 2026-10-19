@@ -1,6 +1,11 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import {
+  normalizeWorkspaceRoot,
+  sameWorkspaceRoot,
+  workspaceRootKey,
+} from '@org/agent-models';
 
 export type SpaceState = {
   /** Composer binding for new chats. Null = Home (no folder). */
@@ -37,11 +42,11 @@ function readJsonArray(key: string): string[] {
 }
 
 function normalizeRoot(root: string): string {
-  return root.replace(/[\\/]+$/, '');
+  return normalizeWorkspaceRoot(root);
 }
 
 function folderKey(root: string): string {
-  return normalizeRoot(root).toLowerCase();
+  return workspaceRootKey(root);
 }
 
 function upsertFolder(list: string[], root: string): string[] {
@@ -191,13 +196,7 @@ export function folderNameFromRoot(root: string | null): string {
   return parts.at(-1) ?? trimmed;
 }
 
-export function sameWorkspaceRoot(
-  left: string | null | undefined,
-  right: string | null | undefined,
-): boolean {
-  if (!left || !right) return false;
-  return folderKey(left) === folderKey(right);
-}
+export { sameWorkspaceRoot };
 
 export function useAgentSpace(): SpaceState {
   return useSyncExternalStore(

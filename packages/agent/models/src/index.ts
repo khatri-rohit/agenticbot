@@ -33,6 +33,9 @@ export {
   clampChatTitle,
   normalizeThreadKind,
   isWorkspaceKind,
+  normalizeWorkspaceRoot,
+  workspaceRootKey,
+  sameWorkspaceRoot,
 } from './lib/thread.js';
 
 export type {
@@ -40,7 +43,16 @@ export type {
   MessageRole,
   MessageStatus,
   MessageAttachment,
+  ImageAttachment,
+  ThreadMentionAttachment,
   PendingToolCall,
+} from './lib/message.js';
+export {
+  MAX_THREAD_MENTIONS,
+  isThreadMention,
+  isImageAttachment,
+  imageAttachments,
+  threadMentions,
 } from './lib/message.js';
 
 export type {

@@ -36,7 +36,7 @@ export const webSearchTool: Tool = {
     whenNotToUse: [
       'Greetings, small talk, or casual conversation.',
       'Stable general knowledge you already know confidently (basic definitions, well-known history, simple math).',
-      'Pure reasoning or coding that does not need live external facts.',
+      'Pure reasoning, or coding that is fully answered by the open folder.',
       'The user already gave a URL to read — use web_fetch instead.',
     ],
     usage: [

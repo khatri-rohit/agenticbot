@@ -79,7 +79,6 @@ export default function ChatThreadPage({
           onSendQueuedNow={() => void sendQueuedNow()}
           onEditQueued={editQueuedMessage}
           composerOptions={composerOptions}
-          hideWebSearch={threadKind === 'workspace'}
           showPostureChips={threadKind === 'workspace'}
           runPosture={chatState.activeRun?.posture}
           onComposerOptionsChange={setComposerOptions}

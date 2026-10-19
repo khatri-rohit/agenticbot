@@ -52,10 +52,12 @@ export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export type {
   AssembleContextInput,
   AssembleContextResult,
+  MentionedThreadContext,
 } from './lib/context/assemble-context';
 export {
   chooseCompactThroughSeq,
   buildExtractiveSnapshot,
+  packMentionedThread,
 } from './lib/context/compact-snapshot';
 export { toLedgerRecord } from './lib/loop/to-ledger-record';
 export { webSearchTool, webFetchTool } from './lib/tools/web-search';

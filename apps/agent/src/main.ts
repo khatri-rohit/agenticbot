@@ -11,7 +11,7 @@ import {
   runLoop,
   invokeModelTurn,
   streamModelTurn,
-  getContext,
+  assembleContext,
   createToolRegistry,
   ALL_TOOLS,
   consoleTrace,
@@ -87,21 +87,31 @@ async function main() {
       posture,
     );
     const tools = createToolRegistry(ALL_TOOLS, toolNames, posture);
-    const messages = getContext(query, tools, mode.name, posture);
-    if (workspaceRoot) {
-      const rules = await loadWorkspaceRules(workspaceRoot);
-      const extra = [
-        rules.agentsMd
-          ? `# Project instructions (AGENTS.md)\n${rules.agentsMd}`
-          : '',
-        rules.project ? `# Project notes (PROJECT.md)\n${rules.project}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-      if (extra) {
-        messages.splice(1, 0, { role: 'system', content: extra });
-      }
-    }
+    const rules = workspaceRoot
+      ? await loadWorkspaceRules(workspaceRoot)
+      : { agentsMd: '', project: '' };
+    const { messages } = assembleContext({
+      tools,
+      memory: {
+        user: '',
+        notes: '',
+        ...(rules.agentsMd ? { agentsMd: rules.agentsMd } : {}),
+        ...(rules.project ? { project: rules.project } : {}),
+      },
+      snapshot: null,
+      envelopes: [
+        {
+          v: 1,
+          seq: 1,
+          ts: new Date().toISOString(),
+          threadId: 'cli',
+          runId: null,
+          record: { role: 'user', content: query },
+        },
+      ],
+      mode: mode.name,
+      posture,
+    });
 
     const events: AgentEvent[] = [];
     const callOptions = { temperature: mode.temperature };

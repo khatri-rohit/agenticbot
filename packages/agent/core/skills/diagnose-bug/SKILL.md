@@ -16,6 +16,7 @@ description: Disciplined bug loop — reproduce, minimize, hypothesize, fix, rec
 3. Hypothesize
    - Name one likely cause. What would you observe if it were true?
    - Do not shotgun-edit.
+   - If the failure is a library/API mismatch and the repo has no current docs, web_search that version.
 
 4. Fix
    - Smallest patch at the root cause, not a caller workaround unless the shared layer cannot change.

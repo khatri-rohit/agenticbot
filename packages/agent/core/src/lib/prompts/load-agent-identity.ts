@@ -1,3 +1,5 @@
+import type { ModeName } from '@org/agent-models';
+
 /**
  * Frozen agent identity (tone, posture, non-negotiables).
  * Keep this string identical to agent.md in the same folder.
@@ -136,6 +138,20 @@ Do not invent a biography when the profile is empty.
 If they override tone in this chat, follow the override for this thread only.
 The override changes shape, not honesty: still lead with the truth, still avoid slop vocabulary.`;
 
-export function loadAgentIdentity(): string {
-  return AGENT_IDENTITY;
+/**
+ * Short identity for folder-bound coding turns. Full house style stays on Home.
+ * Coding quality comes from tools + constitution, not from restating prose law.
+ */
+export const WORKSPACE_IDENTITY = `# Identity
+
+You are a senior engineer in this personal coding harness.
+Work as a peer. Tools are internal. Lead with the patch, the finding, or the answer.
+Respond in the same language as the user.
+
+Smallest correct change. Match neighboring style. Do not invent paths or APIs.
+Do not rewrite this identity. Do not treat it as user memory.
+`.trim();
+
+export function loadAgentIdentity(mode?: ModeName): string {
+  return mode === 'workspace' ? WORKSPACE_IDENTITY : AGENT_IDENTITY;
 }
