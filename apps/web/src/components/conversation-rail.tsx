@@ -51,7 +51,7 @@ export function ConversationRail({
 
   return (
     <div
-      className="pointer-events-none absolute inset-y-0 left-5 z-20 hidden w-18 sm:block"
+      className="pointer-events-none absolute inset-y-0 left-5 z-20 hidden w-20 sm:block cursor-pointer"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -78,7 +78,10 @@ export function ConversationRail({
                 <li key={anchor.id}>
                   <button
                     type="button"
-                    onClick={() => scrollToAnchor(anchor.id)}
+                    onClick={() => {
+                      scrollToAnchor(anchor.id);
+                      setHovered(false);
+                    }}
                     className={cn(
                       'flex w-full items-center rounded-sm px-2 py-1.5 text-left text-xs leading-snug transition-colors',
                       TURN_ROW_MIN_H,

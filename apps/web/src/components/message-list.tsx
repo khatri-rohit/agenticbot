@@ -17,6 +17,7 @@ import type {
 } from '../features/agent/store/chat-store';
 import { groupMessageTurns } from '../lib/group-message-turns';
 import { buildTurnTimeline } from '../lib/turn-timeline';
+import { formatMessageTime } from '../lib/format-relative-time';
 import { AgentMarkdown } from './agent-markdown';
 import {
   ConversationRail,
@@ -51,6 +52,8 @@ export function MessageList({
 
   const streaming = chatState.activeRun?.streamingMessage;
   const toolActivity = chatState.activeRun?.toolActivity ?? [];
+  const assistantSnippets = chatState.activeRun?.assistantSnippets ?? [];
+  const activeRunId = chatState.activeRun?.runId;
   const compactionNotice = chatState.compactionNotice;
 
   const turns = useMemo(() => groupMessageTurns(messages ?? []), [messages]);
@@ -108,6 +111,7 @@ export function MessageList({
     messages,
     streaming?.content,
     toolActivity.length,
+    assistantSnippets.length,
     compactionNotice?.status,
     compactionNotice?.throughSeq,
     followContent,
@@ -176,6 +180,7 @@ export function MessageList({
               const isLastTurn = index === lastTurnIndex;
               const liveActivity = isLastTurn ? toolActivity : [];
               const liveStreaming = isLastTurn ? streaming : null;
+              const liveSnippets = isLastTurn ? assistantSnippets : [];
               const turnCompaction = turnOwnsCompaction(
                 turn.replies,
                 compactionNotice,
@@ -186,12 +191,15 @@ export function MessageList({
               const steps = buildTurnTimeline({
                 replies: turn.replies,
                 liveActivity,
+                snippets: liveSnippets,
+                activeRunId,
                 streaming: liveStreaming,
                 compaction: turnCompaction,
               });
               const showSteps =
                 turn.replies.length > 0 ||
                 liveActivity.length > 0 ||
+                liveSnippets.length > 0 ||
                 Boolean(liveStreaming?.content) ||
                 Boolean(turnCompaction);
 
@@ -234,6 +242,24 @@ export function MessageList({
                             />
                           );
                         }
+                        if (step.type === 'snippet') {
+                          return (
+                            <div
+                              key={`snippet-${step.messageId}`}
+                              className="min-w-0 max-w-full"
+                            >
+                              <article className="chat-prose type-body min-w-0 max-w-full">
+                                <AgentMarkdown content={step.content} />
+                              </article>
+                              <MessageMetaRow>
+                                <MessageActions
+                                  content={step.content}
+                                  align="start"
+                                />
+                              </MessageMetaRow>
+                            </div>
+                          );
+                        }
                         if (step.type === 'tools') {
                           return (
                             <ToolStepList
@@ -254,16 +280,17 @@ export function MessageList({
                         return (
                           <div
                             key="stream"
-                            className="group/msg min-w-0 max-w-full"
+                            className="min-w-0 max-w-full"
                           >
                             <article className="chat-prose type-body min-w-0 max-w-full">
                               <AgentMarkdown content={step.content} streaming />
                             </article>
-                            <MessageActions
-                              content={step.content}
-                              align="start"
-                              className="opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/msg:opacity-100 sm:group-focus-within/msg:opacity-100"
-                            />
+                            <MessageMetaRow>
+                              <MessageActions
+                                content={step.content}
+                                align="start"
+                              />
+                            </MessageMetaRow>
                           </div>
                         );
                       })}
@@ -339,6 +366,38 @@ function TurnStatusLine({
   );
 }
 
+function MessageTimestamp({ iso }: { iso: string }) {
+  const text = formatMessageTime(iso);
+  if (!text) return null;
+  return (
+    <time
+      dateTime={iso}
+      className="type-caption text-muted-foreground/55 tabular-nums"
+    >
+      {text}
+    </time>
+  );
+}
+
+/**
+ * One meta row per message: timestamp left, actions right. Always visible —
+ * hover-gating hides the primary affordances on touch and during streaming.
+ */
+function MessageMetaRow({
+  iso,
+  children,
+}: {
+  iso?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+      <MessageTimestamp iso={iso ?? ''} />
+      <div className="flex min-w-0 items-center">{children}</div>
+    </div>
+  );
+}
+
 function AssistantMessage({
   message,
   showRetry,
@@ -353,18 +412,19 @@ function AssistantMessage({
   if (!message.content.trim()) return null;
 
   return (
-    <div className="group/msg min-w-0 max-w-full">
+    <div className="min-w-0 max-w-full">
       <article className="chat-prose type-body min-w-0 max-w-full">
         <AgentMarkdown content={message.content} />
       </article>
-      <MessageActions
-        content={message.content}
-        align="start"
-        showRetry={showRetry}
-        onRetry={onRetry}
-        disabled={retryDisabled}
-        className="opacity-0 transition-opacity group-hover/msg:opacity-100 group-focus-within/msg:opacity-100"
-      />
+      <MessageMetaRow iso={message.createdAt}>
+        <MessageActions
+          content={message.content}
+          align="start"
+          showRetry={showRetry}
+          onRetry={onRetry}
+          disabled={retryDisabled}
+        />
+      </MessageMetaRow>
     </div>
   );
 }

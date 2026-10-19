@@ -16,6 +16,8 @@ export type ToolActivity = {
   toolCallId: string;
   toolName: string;
   status: 'running' | 'done' | 'failed';
+  /** Event seq — orders live tools against settled assistant snippets. */
+  seq: number;
   durationMs?: number;
   argsPreview?: unknown;
   resultPreview?: unknown;
@@ -32,12 +34,21 @@ export type CompactionNotice = {
   createdAt: string;
 };
 
+export type AssistantSnippet = {
+  messageId: string;
+  content: string;
+  /** Event seq — orders snippets against live tool activity. */
+  seq: number;
+};
+
 export type ChatRunState = {
   runId: string;
   status: 'running' | 'completed' | 'error';
   model: string;
   streamingMessage: { id: string; content: string } | null;
   toolActivity: ToolActivity[];
+  /** Assistant messages settled mid-run (assistant.completed), in event order. */
+  assistantSnippets: AssistantSnippet[];
   lastSeq: number;
   /** Heuristic from run.started until provider usage arrives. */
   estimatedPromptTokens?: number;
@@ -89,6 +100,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           model: event.model,
           streamingMessage: null,
           toolActivity: [],
+          assistantSnippets: [],
           lastSeq,
           ...(event.estimatedPromptTokens !== undefined
             ? { estimatedPromptTokens: event.estimatedPromptTokens }
@@ -131,11 +143,19 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'assistant.completed': {
       if (!state.activeRun) return state;
+      // Tool-only turns emit completed with empty content; nothing to settle.
+      const snippet =
+        event.content && event.content.trim().length > 0
+          ? { messageId: event.messageId, content: event.content, seq: event.seq }
+          : null;
       return {
         ...state,
         activeRun: {
           ...state.activeRun,
           streamingMessage: null,
+          ...(snippet
+            ? { assistantSnippets: [...state.activeRun.assistantSnippets, snippet] }
+            : {}),
           lastSeq,
         },
       };
@@ -153,6 +173,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
               toolCallId: event.toolCallId,
               toolName: event.toolName,
               status: 'running',
+              seq: event.seq,
               argsPreview: event.argsPreview,
             },
           ],

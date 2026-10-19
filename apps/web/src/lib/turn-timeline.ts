@@ -1,6 +1,7 @@
 import type { Message, PendingToolCall } from '@org/agent-models';
 
 import type {
+  AssistantSnippet,
   CompactionNotice,
   ToolActivity,
 } from '../features/agent/store/chat-store';
@@ -16,6 +17,7 @@ export type ToolCallRow = {
 
 export type TimelineStep =
   | { type: 'assistant'; message: Message }
+  | { type: 'snippet'; messageId: string; content: string }
   | { type: 'tools'; key: string; rows: ToolCallRow[] }
   | { type: 'compaction'; notice: CompactionNotice }
   | { type: 'stream'; content: string };
@@ -77,10 +79,25 @@ function rowFromLive(activity: ToolActivity): ToolCallRow {
 /**
  * Ordered turn steps: assistant → tools → assistant → live tools → stream →
  * compaction (host post-loop step, same visual column as tools).
+ *
+ * Mid-run, the ledger is stale until `run.settled`, so `replies` holds only
+ * messages from prior runs. Settled assistant messages from the active run
+ * arrive as `snippets` (from `assistant.completed`), and in-flight tools
+ * arrive as `liveActivity`. We merge snippets and not-yet-ledgered live tools
+ * by event `seq` to reconstruct the true interleaved order, then append the
+ * active stream and compaction.
+ *
+ * Ledger dedup: assistant rows in `replies` whose `runId` matches the active
+ * run are skipped in the walk — snippets are the sole renderer of active-run
+ * prose during the run, so a mid-run ledger refetch (context.compacted bumps
+ * the epoch) cannot double-render. At `run.settled` the active run is nulled
+ * and the ledger takes over as the only source.
  */
 export function buildTurnTimeline(input: {
   replies: Message[];
   liveActivity: ToolActivity[];
+  snippets?: AssistantSnippet[];
+  activeRunId?: string;
   streaming?: { id: string; content: string } | null;
   compaction?: CompactionNotice | null;
 }): TimelineStep[] {
@@ -90,6 +107,7 @@ export function buildTurnTimeline(input: {
   const replies = input.replies;
   let index = 0;
   let toolsStepIndex = 0;
+  const snippets = input.snippets ?? [];
 
   while (index < replies.length) {
     const message = replies[index];
@@ -100,6 +118,13 @@ export function buildTurnTimeline(input: {
     }
 
     if (message.role !== 'assistant') {
+      index += 1;
+      continue;
+    }
+
+    // Skip assistant rows the ledger already has for the active run; they are
+    // represented by snippets below, merged in seq order with live tools.
+    if (input.activeRunId && message.runId === input.activeRunId) {
       index += 1;
       continue;
     }
@@ -136,20 +161,58 @@ export function buildTurnTimeline(input: {
     index += 1;
   }
 
+  // Merge settled snippets and not-yet-ledgered live tools by event seq, so
+  // mid-run the timeline reads assistant → tools → assistant → tools in the
+  // order events actually arrived.
+  type PendingItem =
+    | { kind: 'snippet'; seq: number; snippet: AssistantSnippet }
+    | { kind: 'tool'; seq: number; activity: ToolActivity };
+  const pending: PendingItem[] = [];
+
+  for (const snippet of snippets) {
+    pending.push({ kind: 'snippet', seq: snippet.seq, snippet });
+  }
+
   const liveOnly = input.liveActivity.filter(
     (activity) => !seenToolIds.has(activity.toolCallId),
   );
-  if (liveOnly.length > 0) {
-    steps.push({
-      type: 'tools',
-      key: `tools-live-${toolsStepIndex}`,
-      rows: liveOnly.map(rowFromLive),
-    });
+  for (const activity of liveOnly) {
+    pending.push({ kind: 'tool', seq: activity.seq, activity });
   }
 
-  const streamContent = input.streaming?.content?.trim();
+  pending.sort((a, b) => a.seq - b.seq);
+
+  // Render in seq order, merging adjacent tool items into one tools step —
+  // matching how the ledger groups a tool_calls row with its tool results.
+  let pendingTools: ToolActivity[] = [];
+  const flushTools = () => {
+    if (pendingTools.length === 0) return;
+    steps.push({
+      type: 'tools',
+      key: `tools-live-${toolsStepIndex++}`,
+      rows: pendingTools.map(rowFromLive),
+    });
+    pendingTools = [];
+  };
+  for (const item of pending) {
+    if (item.kind === 'snippet') {
+      flushTools();
+      if (item.snippet.content.trim()) {
+        steps.push({
+          type: 'snippet',
+          messageId: item.snippet.messageId,
+          content: item.snippet.content,
+        });
+      }
+    } else {
+      pendingTools.push(item.activity);
+    }
+  }
+  flushTools();
+
+  const streamContent = input.streaming?.content.trim();
   if (streamContent) {
-    steps.push({ type: 'stream', content: input.streaming!.content });
+    steps.push({ type: 'stream', content: streamContent });
   }
 
   if (input.compaction) {

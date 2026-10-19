@@ -30,8 +30,8 @@ export const HOME_MODE: ModeConfig = {
   allowedTools: ['web_search'],
   globalTools: ['web_fetch', 'load_skill', 'memory'],
   limits: {
-    maxIterations: 20,
-    maxToolCalls: 32,
+    maxIterations: 40,
+    maxToolCalls: 60,
     maxRepeatedToolCalls: 2,
     toolTimeoutMs: 45_000,
   },
@@ -40,7 +40,7 @@ export const HOME_MODE: ModeConfig = {
 /** Folder-bound coding profile. No default web search. Builds may exceed 30s. */
 export const WORKSPACE_MODE: ModeConfig = {
   name: 'workspace',
-  model: HOME_MODE.model,
+  model: 'glm-5.3:cloud',
   temperature: 0.2,
   allowedTools: [],
   globalTools: [
@@ -53,8 +53,8 @@ export const WORKSPACE_MODE: ModeConfig = {
     'memory',
   ],
   limits: {
-    maxIterations: 40,
-    maxToolCalls: 80,
+    maxIterations: 100,
+    maxToolCalls: 200,
     maxRepeatedToolCalls: 4,
     toolTimeoutMs: 120_000,
   },

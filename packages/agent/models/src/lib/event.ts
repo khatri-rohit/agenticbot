@@ -12,6 +12,9 @@ import type { ToolRisk } from './tool-context.js';
  * - Events are provider-agnostic. The UI never sees OpenAI chunk shapes.
  * - `assistant.delta` events (streaming mode only) carry text fragments.
  *   In non-streaming mode the client receives `assistant.completed` directly.
+ * - Every assistant message ends with `assistant.completed` — tool-call turns
+ *   included, emitted after the ledger append and before tool execution, so
+ *   clients can settle each assistant message mid-run, not just at run end.
  * - Tool results in events carry a *preview* only (size-capped). The full
  *   payload is appended to the host ledger (blobs/ when large).
  */

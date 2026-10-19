@@ -144,7 +144,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
     >
       {collapsed ? (
         <>
-          <div className="flex w-12 shrink-0 flex-col items-center gap-1 pt-2">
+          <div className="flex w-full shrink-0 flex-col items-center gap-1 pt-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -173,7 +173,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
             </Tooltip>
           </div>
           <div className="min-h-0 flex-1" aria-hidden />
-          <footer className="flex w-12 shrink-0 flex-col items-center pb-2">
+          <footer className="flex w-full shrink-0 flex-col items-center pb-2">
             <SidebarSettings collapsed />
           </footer>
         </>

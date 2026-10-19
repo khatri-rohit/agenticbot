@@ -288,6 +288,15 @@ export async function runLoop(
           tool_calls: turn.toolCalls,
         });
 
+        // Tool turns end like any other: the ledger row is durable, so the
+        // client can settle this assistant message before tools run.
+        emit?.({
+          type: 'assistant.completed',
+          runId,
+          messageId,
+          content: turn.content,
+        });
+
         for (const [index, toolCall] of turn.toolCalls.entries()) {
           // The assistant tool_calls row above is already durable. On abort,
           // every remaining call still needs a tool row or ledger replay breaks.
