@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import type { ApprovalDecision } from '@org/agent-models';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,12 @@ export function ApprovalCard({
   ) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const approvalId = approval?.approvalId ?? '';
+
+  useEffect(() => {
+    setBusy(null);
+  }, [approvalId]);
+
   if (!approval) return null;
 
   const options = approval.options ?? [];
@@ -78,38 +84,46 @@ export function ApprovalCard({
                 {busy === option.id ? 'Sending…' : option.label}
               </Button>
             ))
-          : (
-              <>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={Boolean(busy)}
-                  onClick={() => void act('approved')}
-                >
-                  {busy === 'approved' ? 'Allowing…' : 'Allow'}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={Boolean(busy)}
-                  onClick={() => void act('approved_for_run')}
-                >
-                  {busy === 'approved_for_run'
-                    ? 'Allowing…'
-                    : 'Allow for this run'}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  disabled={Boolean(busy)}
-                  onClick={() => void act('denied')}
-                >
-                  {busy === 'denied' ? 'Denying…' : 'Deny'}
-                </Button>
-              </>
-            )}
+          : null}
+        {/*
+          IMPORTANT: Allow/Deny exec-approval buttons. Temporarily commented
+          so file and command tools run without a pause, as they did before
+          this card. Do not delete this block — it must stay in the tree,
+          commented, until the Allow/Deny system is restored.
+
+          {isChoice ? null : (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                disabled={Boolean(busy)}
+                onClick={() => void act('approved')}
+              >
+                {busy === 'approved' ? 'Allowing…' : 'Allow'}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={Boolean(busy)}
+                onClick={() => void act('approved_for_run')}
+              >
+                {busy === 'approved_for_run'
+                  ? 'Allowing…'
+                  : 'Allow for this run'}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                disabled={Boolean(busy)}
+                onClick={() => void act('denied')}
+              >
+                {busy === 'denied' ? 'Denying…' : 'Deny'}
+              </Button>
+            </>
+          )}
+        */}
       </div>
     </section>
   );

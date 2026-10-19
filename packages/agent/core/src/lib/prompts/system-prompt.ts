@@ -180,6 +180,14 @@ If two reasonable paths would change what you do next, offer_choice with labeled
 If the user wants you to change a repo, tell them to open a folder (start a workspace chat).
 `.trim();
 
+/*
+ * IMPORTANT: Allow/Deny exec-approval prompt. Temporarily omitted from the
+ * workspace template so the model does not wait on a host pause that is
+ * currently disabled:
+ *   The host pauses edit_file and run_terminal for the human. Do not
+ *   offer_choice (or ask_user) for permission to edit or run.
+ * Do not delete this comment — restore that sentence when the gate is restored.
+ */
 function workspaceAgentBehavior(hasWebSearch: boolean): string {
   const docsStep = hasWebSearch
     ? `
@@ -201,7 +209,7 @@ Act loop:
 
 edit_file results tell you what changed (path, created or patched, line/byte delta, hunk). Do not assume the file matches your intent without that report. Re-read if the report is truncated.
 
-The host pauses edit_file and run_terminal for the human. Do not offer_choice (or ask_user) for permission to edit or run. Use offer_choice when approaches or attributes would change the work. They may check several options and type extra direction. If they skip, stop and wait.
+Do not offer_choice (or ask_user) for permission to edit or run. Use offer_choice when approaches or attributes would change the work. They may check several options and type extra direction. If they skip, stop and wait.
 
 Cite file ranges as fenced blocks whose language is start:end:path (example: 12:18:src/loop.ts). The UI turns those into chips.
 

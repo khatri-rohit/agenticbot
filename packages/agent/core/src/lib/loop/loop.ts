@@ -135,22 +135,29 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
     : new Error('Run cancelled');
 }
 
-function approvalSummary(
-  toolName: string,
-  args: Record<string, unknown>,
-): string {
-  if (toolName === 'edit_file') {
-    const filePath = typeof args.path === 'string' ? args.path : '';
-    const oldText = typeof args.oldText === 'string' ? args.oldText : '';
-    const intent = oldText.length > 0 ? 'patch' : 'create';
-    return `${intent} ${filePath}`.trim();
-  }
-  if (toolName === 'run_terminal') {
-    const command = typeof args.command === 'string' ? args.command : '';
-    return command.length > 200 ? `${command.slice(0, 200)}…` : command;
-  }
-  return toolName;
-}
+/*
+ * IMPORTANT: Allow/Deny exec-approval copy. Temporarily commented so file
+ * and command tools run without a pause, as they did before this gate.
+ * Do not delete this block — it must stay in the tree, commented, until
+ * the Allow/Deny system is restored.
+ *
+ * function approvalSummary(
+ *   toolName: string,
+ *   args: Record<string, unknown>,
+ * ): string {
+ *   if (toolName === 'edit_file') {
+ *     const filePath = typeof args.path === 'string' ? args.path : '';
+ *     const oldText = typeof args.oldText === 'string' ? args.oldText : '';
+ *     const intent = oldText.length > 0 ? 'patch' : 'create';
+ *     return `${intent} ${filePath}`.trim();
+ *   }
+ *   if (toolName === 'run_terminal') {
+ *     const command = typeof args.command === 'string' ? args.command : '';
+ *     return command.length > 200 ? `${command.slice(0, 200)}…` : command;
+ *   }
+ *   return toolName;
+ * }
+ */
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -494,25 +501,32 @@ export async function runLoop(
     const { toolCall, toolName, tool, args } = call;
     const toolCtx = buildToolContext();
 
-    if (LOOP_APPROVAL_TOOLS.has(toolName) && config.approve) {
-      try {
-        await config.approve({
-          toolName,
-          summary: approvalSummary(toolName, args),
-          risk: tool.risk ?? 'write',
-          argsPreview: toolArgsPreview(toolName, args),
-        });
-      } catch (error) {
-        if (signal?.aborted) {
-          await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
-          throwIfAborted(signal);
-        }
-        if (error instanceof ApprovalDenied) {
-          return completeAsDenied(call);
-        }
-        throw error;
-      }
-    }
+    /*
+     * IMPORTANT: Allow/Deny exec-approval gate. Temporarily commented so
+     * file and command tools run without a pause, as they did before this
+     * card. Do not delete this block — it must stay in the tree, commented,
+     * until the Allow/Deny system is restored.
+     *
+     * if (LOOP_APPROVAL_TOOLS.has(toolName) && config.approve) {
+     *   try {
+     *     await config.approve({
+     *       toolName,
+     *       summary: approvalSummary(toolName, args),
+     *       risk: tool.risk ?? 'write',
+     *       argsPreview: toolArgsPreview(toolName, args),
+     *     });
+     *   } catch (error) {
+     *     if (signal?.aborted) {
+     *       await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
+     *       throwIfAborted(signal);
+     *     }
+     *     if (error instanceof ApprovalDenied) {
+     *       return completeAsDenied(call);
+     *     }
+     *     throw error;
+     *   }
+     * }
+     */
 
     trace({
       type: 'tool_start',

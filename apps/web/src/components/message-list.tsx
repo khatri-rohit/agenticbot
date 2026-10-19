@@ -304,7 +304,16 @@ export function MessageList({
                       hasStreamingText={Boolean(streaming?.content)}
                       compacting={compactionNotice?.status === 'running'}
                       waitingForApproval={
-                        chatState.pendingApprovals.length > 0
+                        /*
+                         * IMPORTANT: Allow/Deny exec-approval status.
+                         * Temporarily forced off so file and command tools
+                         * run without a pause. Do not delete the original
+                         * check — it must stay in the tree, commented, until
+                         * the Allow/Deny system is restored.
+                         *
+                         * chatState.pendingApprovals.length > 0
+                         */
+                        false
                       }
                       waitingForChoice={
                         chatState.pendingChoices.length > 0
