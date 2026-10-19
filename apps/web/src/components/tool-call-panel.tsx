@@ -74,10 +74,21 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
       const path = asString(args.path);
       const oldText = asString(args.oldText);
       const newText = asString(args.newText);
+      const intent = asString(args.intent);
+      const resultLine = (row.result ?? '').split('\n')[0] ?? '';
+      let action = 'Writing';
+      if (resultLine.startsWith('Created ')) action = 'Create';
+      else if (resultLine.startsWith('Patched ')) action = 'Edit';
+      else if (intent === 'create') action = 'Create';
+      else if (intent === 'patch') action = 'Edit';
+      else if (oldText) action = 'Edit';
+      else if (row.status !== 'running' && 'newText' in args && !oldText) {
+        action = 'Create';
+      }
       return {
         kind: 'file',
         title: fileNameFromPath(path) || path || 'file',
-        action: oldText ? 'Edit' : 'Create',
+        action,
         plus: newText ? countLines(newText) : undefined,
         minus: oldText ? countLines(oldText) : undefined,
       };

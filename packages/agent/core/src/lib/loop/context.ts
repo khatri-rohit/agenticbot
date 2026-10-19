@@ -1,5 +1,5 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import type { ModeName } from '@org/agent-models';
+import type { ModeName, RunPosture } from '@org/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
 import type { ToolRegistry } from '../tools/type';
@@ -12,11 +12,12 @@ export function getContext(
   task: string,
   tools: ToolRegistry,
   mode?: ModeName,
+  posture: RunPosture = 'agent',
 ): ChatCompletionMessageParam[] {
   return [
     {
       role: 'system',
-      content: buildSystemPrompt(tools, mode),
+      content: buildSystemPrompt(tools, mode, posture),
     },
     {
       role: 'user',

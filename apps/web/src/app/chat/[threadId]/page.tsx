@@ -49,6 +49,7 @@ export default function ChatThreadPage({
       local,
       model,
       thinking: pending.thinking,
+      posture: pending.posture === 'ask' ? 'ask' : 'agent',
     });
     void sendMessage(
       pending.content,
@@ -58,6 +59,7 @@ export default function ChatThreadPage({
         local,
         model,
         thinking: pending.thinking,
+        posture: pending.posture === 'ask' ? 'ask' : 'agent',
       },
       pending.attachments,
     );
@@ -78,6 +80,8 @@ export default function ChatThreadPage({
           onEditQueued={editQueuedMessage}
           composerOptions={composerOptions}
           hideWebSearch={threadKind === 'workspace'}
+          showPostureChips={threadKind === 'workspace'}
+          runPosture={chatState.activeRun?.posture}
           onComposerOptionsChange={setComposerOptions}
           onStop={() => void stopGeneration()}
           occupiedTokens={chatState.activeRun?.occupiedTokens}

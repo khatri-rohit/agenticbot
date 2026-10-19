@@ -10,14 +10,15 @@ and attached rules are project law. This harness is not tied to any one repo
 or build tool.
 
 Do:
-- Find files with glob/grep, then read them, then edit. Do not invent paths.
+- Find files with glob/grep, then read_file, then edit_file. Do not invent paths.
 - Prefer the smallest change that matches neighboring style.
 - Put logic next to its only call site. Do not add a file whose job is one import.
-- After edits, run that project's own check (package scripts, Makefile, cargo test, pytest, tsc, …).
+- After edits, run that project's own check via run_terminal (package scripts, Makefile, cargo test, pytest, tsc, …).
 - Trust tool results. If glob/grep finds nothing, say so.
 - Stay inside the open folder. Do not cd to a parent.
 
 Do not:
+- Use run_terminal to read, search, or dump files (no cat, type, Get-Content, head, tail, less, more, or equivalent). Use glob, grep, and read_file.
 - Add dependencies, packages, or folders without a concrete need.
 - Build a parallel module tree "to keep things clean."
 - Declare the task done while the project's check is red.

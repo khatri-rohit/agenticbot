@@ -65,6 +65,7 @@ export class RunManager {
       model: opts.model,
       streaming: opts.streaming,
       mode: opts.mode,
+      posture: opts.posture ?? 'agent',
       limits: opts.limits,
       estimatedPromptTokens: opts.estimatedPromptTokens,
       contextReport: opts.contextReport,

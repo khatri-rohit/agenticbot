@@ -114,6 +114,19 @@ function deniedTerminalCommand(command: string): string | null {
       pattern: /\bdd\s+.*\bof\s*=\s*\/dev\//i,
       reason: 'refuses dd to a device',
     },
+    // Read/search via shell bypasses path-jailed glob/grep/read_file.
+    {
+      pattern: /(^|[;&|]\s*)(cat|head|tail|less|more)\s+/i,
+      reason: 'use read_file / grep / glob instead of shell readers',
+    },
+    {
+      pattern: /\bGet-Content\b/i,
+      reason: 'use read_file instead of Get-Content',
+    },
+    {
+      pattern: /(^|[;&|]\s*)type\s+\S+/i,
+      reason: 'use read_file instead of type',
+    },
   ];
   for (const test of tests) {
     if (test.pattern.test(compact)) return test.reason;
@@ -523,11 +536,13 @@ export const runTerminalTool: Tool = {
       'You need that project’s compile, test, build, or other scripts after an edit.',
     ],
     whenNotToUse: [
+      'Reading, searching, or dumping files — use glob, grep, and read_file instead.',
       'Commands that target a different repo or parent directory.',
     ],
     usage: [
       'cwd is the open folder. Do not cd to a parent of the workspace.',
       'Use the project’s real commands (from AGENTS.md, package scripts, Makefile, cargo, pytest, …).',
+      'Do not cat/type/Get-Content/head/tail files; those are blocked — use read_file.',
       'The result includes cwd, exit code, and capped stdout/stderr. Use that to repair.',
     ],
   },

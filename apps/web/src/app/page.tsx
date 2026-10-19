@@ -37,6 +37,7 @@ const defaultOptions = (webSearch: boolean): ComposerOptions => {
     webSearch,
     local,
     model: readStoredComposerModel(local),
+    posture: 'agent',
   };
 };
 
@@ -93,6 +94,7 @@ export default function HomePage() {
           variant="hero"
           showWorkspacePicker
           hideWebSearch={bound}
+          showPostureChips={bound}
           onSend={async (content, options, attachments) => {
             setPendingContent(true);
             try {
@@ -111,6 +113,11 @@ export default function HomePage() {
                 model: options.model,
                 local: options.local,
                 thinking: options.thinking,
+                posture: bound
+                  ? options.posture === 'ask'
+                    ? 'ask'
+                    : 'agent'
+                  : undefined,
                 attachments,
               });
               if (!stashed) {

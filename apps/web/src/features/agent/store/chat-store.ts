@@ -2,6 +2,7 @@ import {
   occupiedFromUsage,
   type AgentEvent,
   type ContextReport,
+  type RunPosture,
   type Snapshot,
 } from '@org/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
@@ -45,6 +46,8 @@ export type ChatRunState = {
   runId: string;
   status: 'running' | 'completed' | 'error';
   model: string;
+  /** Host-applied posture for this run (from run.started). */
+  posture: RunPosture;
   streamingMessage: { id: string; content: string } | null;
   toolActivity: ToolActivity[];
   /** Assistant messages settled mid-run (assistant.completed), in event order. */
@@ -98,6 +101,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           runId: event.runId,
           status: 'running',
           model: event.model,
+          posture: event.posture === 'ask' ? 'ask' : 'agent',
           streamingMessage: null,
           toolActivity: [],
           assistantSnippets: [],

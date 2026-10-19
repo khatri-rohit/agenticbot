@@ -1,4 +1,4 @@
-import type { ModeName } from '@org/agent-models';
+import type { ModeName, RunPosture } from '@org/agent-models';
 
 import { listSkills } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
@@ -44,10 +44,12 @@ function buildToolGuardrails(registry: ToolRegistry): string {
 /**
  * Assembles the frozen system prompt: identity + protocol + always-on law.
  * USER.md / MEMORY.md belong in the memory layer (assembleContext), not here.
+ * Workspace Ask uses read-only behavior; posture is a run policy, not a ModeName.
  */
 export function buildSystemPrompt(
   registry: ToolRegistry,
   mode?: ModeName,
+  posture: RunPosture = 'agent',
 ): string {
   const toolNames = Array.from(registry.byName.keys());
   const hasLoadSkill = registry.byName.has('load_skill');
@@ -64,6 +66,7 @@ export function buildSystemPrompt(
 
   const hasWebSearch = registry.byName.has('web_search');
   const isWorkspace = mode === 'workspace';
+  const isAsk = isWorkspace && posture === 'ask';
   const skillsSection = hasLoadSkill
     ? `
 # Skills
@@ -83,6 +86,18 @@ Additional user, workspace, and MCP skills are not in this catalog yet.
     : isWorkspace
       ? `- web_search is not on this run. Work from the open folder, project files, and attached AGENTS.md / rules.`
       : `- web_search is not enabled for this run. Do not invent live web facts; answer from knowledge or ask the user to enable web search.`;
+
+  const modeBehavior = !isWorkspace
+    ? HOME_BEHAVIOR
+    : isAsk
+      ? WORKSPACE_ASK_BEHAVIOR
+      : WORKSPACE_BEHAVIOR;
+
+  const lawBand = isWorkspace
+    ? isAsk
+      ? ANTI_SLOP_CODE_LAW
+      : `${SOFTWARE_ENGINEER_CONSTITUTION}\n\n${ANTI_SLOP_CODE_LAW}`
+    : ANTI_SLOP_CODE_LAW;
 
   return `
 ${loadAgentIdentity()}
@@ -111,9 +126,9 @@ ${skillsSection}
 
 ${buildToolGuardrails(registry)}
 
-${isWorkspace ? WORKSPACE_BEHAVIOR : HOME_BEHAVIOR}
+${modeBehavior}
 
-${isWorkspace ? `${SOFTWARE_ENGINEER_CONSTITUTION}\n\n${ANTI_SLOP_CODE_LAW}` : ANTI_SLOP_CODE_LAW}
+${lawBand}
 
 # Task completion
 
@@ -144,13 +159,27 @@ const WORKSPACE_BEHAVIOR = `
 You are bound to one opened project folder. File tools and the terminal cannot leave that folder.
 
 Act loop:
-1. Retrieve — glob / grep / read until the working files are known. Do not invent paths.
+1. Retrieve — glob / grep / read_file until the working files are known. Do not invent paths.
+   Never use run_terminal to read or search files.
 2. Patch — edit_file with a unique oldText span. Read the change report in the tool result.
 3. Verify — run_terminal with that project's real compile/test/build command (cwd is the folder).
 4. Repair — use command errors; edit again. Repeat until the check passes or you are stuck.
 
 edit_file results tell you what changed (path, created or patched, line/byte delta, hunk). Do not assume the file matches your intent without that report. Re-read if the report is truncated.
 
+AGENTS.md and attached rules in the memory layer are project law for this folder only.
+Do not mention tools unless the user asks how you work.
+`.trim();
+
+const WORKSPACE_ASK_BEHAVIOR = `
+# Workspace Ask behavior
+
+You are bound to one opened project folder in read-only Ask posture.
+You can glob, grep, and read_file. You cannot edit files or run the terminal.
+
+Explain, locate, and reason from the open folder. If the user wants edits, tests, or
+commands, tell them to switch the composer to Agent.
+Do not claim you changed files. Do not invent tool names for write or exec.
 AGENTS.md and attached rules in the memory layer are project law for this folder only.
 Do not mention tools unless the user asks how you work.
 `.trim();

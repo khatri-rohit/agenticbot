@@ -5,6 +5,7 @@ import type {
   LedgerEnvelope,
   MemoryFiles,
   ModeName,
+  RunPosture,
   Snapshot,
 } from '@org/agent-models';
 import {
@@ -25,6 +26,8 @@ export type AssembleContextInput = {
   envelopes: LedgerEnvelope[];
   /** Drives home vs workspace system-prompt behavior. */
   mode?: ModeName;
+  /** Workspace Ask vs Agent; ignored for Home. Default agent. */
+  posture?: RunPosture;
 };
 
 export type AssembleContextResult = {
@@ -137,7 +140,11 @@ export function assembleContext(
   input: AssembleContextInput,
   budget: ContextBudget = DEFAULT_CONTEXT_BUDGET,
 ): AssembleContextResult {
-  const systemText = buildSystemPrompt(input.tools, input.mode);
+  const systemText = buildSystemPrompt(
+    input.tools,
+    input.mode,
+    input.posture ?? 'agent',
+  );
   const systemMessage: ChatCompletionMessageParam = {
     role: 'system',
     content: systemText,

@@ -7,6 +7,7 @@ import {
 } from 'react';
 import {
   isWorkspaceKind,
+  normalizeRunPosture,
   type AgentEvent,
   type Message,
   type MessageAttachment,
@@ -61,6 +62,7 @@ const defaultComposerOptions = (): ComposerOptions => {
     webSearch: true,
     local,
     model: readStoredComposerModel(local),
+    posture: 'agent',
   };
 };
 
@@ -261,6 +263,7 @@ export function useAgentRun(threadId: string | null) {
         model: resolveOllamaModel(options.model, local),
         local,
         thinking: options.thinking,
+        posture: normalizeRunPosture(options.posture),
       });
 
       setChatState((prev) => ({
@@ -313,6 +316,9 @@ export function useAgentRun(threadId: string | null) {
           local,
         ),
         thinking: options.thinking ?? composerOptions.thinking,
+        posture: normalizeRunPosture(
+          options.posture ?? composerOptions.posture,
+        ),
       };
 
       if (chatStateRef.current.activeRun) {
@@ -328,13 +334,23 @@ export function useAgentRun(threadId: string | null) {
   const sendQueuedNow = useCallback(async () => {
     if (!queuedMessage) return;
     const { content, options, attachments } = queuedMessage;
+    // Live chip wins over posture frozen at enqueue.
+    const flushOptions: ComposerOptions = {
+      ...options,
+      posture: normalizeRunPosture(composerOptions.posture),
+    };
     setQueuedMessage(null);
     await interruptActiveRun();
-    await startRunForMessages(content, options, {
+    await startRunForMessages(content, flushOptions, {
       skipQueue: true,
       attachments,
     });
-  }, [queuedMessage, interruptActiveRun, startRunForMessages]);
+  }, [
+    queuedMessage,
+    composerOptions.posture,
+    interruptActiveRun,
+    startRunForMessages,
+  ]);
 
   const editQueuedMessage = useCallback((): {
     content: string;
@@ -366,6 +382,7 @@ export function useAgentRun(threadId: string | null) {
       model: resolveOllamaModel(composerOptions.model, local),
       local,
       thinking: composerOptions.thinking,
+      posture: normalizeRunPosture(composerOptions.posture),
     });
 
     setChatState((prev) => ({
@@ -408,6 +425,7 @@ export function useAgentRun(threadId: string | null) {
         model: resolveOllamaModel(composerOptions.model, local),
         local,
         thinking: composerOptions.thinking,
+        posture: normalizeRunPosture(composerOptions.posture),
       });
 
       setChatState((prev) => ({
@@ -425,14 +443,24 @@ export function useAgentRun(threadId: string | null) {
     const busy = chatState.activeRun !== null;
     if (wasRunningRef.current && !busy && queuedMessage) {
       const { content, options, attachments } = queuedMessage;
+      // Live chip wins over posture frozen at enqueue.
+      const flushOptions: ComposerOptions = {
+        ...options,
+        posture: normalizeRunPosture(composerOptions.posture),
+      };
       setQueuedMessage(null);
-      void startRunForMessages(content, options, {
+      void startRunForMessages(content, flushOptions, {
         skipQueue: true,
         attachments,
       });
     }
     wasRunningRef.current = busy;
-  }, [chatState.activeRun, queuedMessage, startRunForMessages]);
+  }, [
+    chatState.activeRun,
+    queuedMessage,
+    composerOptions.posture,
+    startRunForMessages,
+  ]);
 
   return {
     chatState,

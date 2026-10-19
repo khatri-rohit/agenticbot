@@ -17,7 +17,11 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import type { ContextReport, MessageAttachment } from '@org/agent-models';
+import type {
+  ContextReport,
+  MessageAttachment,
+  RunPosture,
+} from '@org/agent-models';
 import {
   fetchLocalOllamaModels,
   type ComposerOptions,
@@ -168,6 +172,8 @@ export function ChatInput({
   draftScope,
   hideWebSearch = false,
   showWorkspacePicker = false,
+  showPostureChips = false,
+  runPosture,
 }: {
   onSend: (
     content: string,
@@ -196,6 +202,10 @@ export function ChatInput({
   draftScope: string;
   hideWebSearch?: boolean;
   showWorkspacePicker?: boolean;
+  /** Workspace-only Ask | Agent. Home stays chip-less. */
+  showPostureChips?: boolean;
+  /** Host-applied posture for the in-flight run (from run.started). */
+  runPosture?: RunPosture;
 }) {
   const [input, setInput] = useState(
     () => loadComposerDraft(draftScope)?.content ?? '',
@@ -654,8 +664,60 @@ export function ChatInput({
     </>
   );
 
+  const posture: RunPosture = composerOptions.posture ?? 'agent';
+  // Chip is always editable: next/queued send uses the live selection.
+  // Host run posture is shown separately via run.started.
+
+  const postureChips = showPostureChips ? (
+    <div className="flex min-w-0 items-center gap-1">
+      <div
+        className="flex h-7 items-center rounded-md border border-border/60 p-0.5"
+        role="group"
+        aria-label="Workspace posture"
+      >
+        {(
+          [
+            { id: 'ask', label: 'Ask' },
+            { id: 'agent', label: 'Agent' },
+          ] as const
+        ).map((option) => {
+          const selected = posture === option.id;
+          return (
+            <Button
+              key={option.id}
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-pressed={selected}
+              className={cn(
+                'h-6 px-2 text-xs font-normal',
+                selected
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              onClick={() =>
+                onComposerOptionsChange({
+                  ...composerOptions,
+                  posture: option.id,
+                })
+              }
+            >
+              {option.label}
+            </Button>
+          );
+        })}
+      </div>
+      {isRunning && runPosture ? (
+        <span className="type-caption shrink-0 text-muted-foreground">
+          This run: {runPosture === 'ask' ? 'Ask' : 'Agent'}
+        </span>
+      ) : null}
+    </div>
+  ) : null;
+
   const modelControls = (
     <>
+      {postureChips}
       <ModelPicker
         value={composerOptions.model}
         onChange={(model) =>
@@ -794,7 +856,7 @@ export function ChatInput({
           >
             <CardHeader className="border-b border-border/40 pb-2">
               <Badge variant="secondary" className="font-normal">
-                1 queued
+                1 queued as {posture === 'ask' ? 'Ask' : 'Agent'}
               </Badge>
               <CardAction className="flex gap-1">
                 <Button

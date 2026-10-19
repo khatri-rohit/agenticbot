@@ -8,9 +8,11 @@ import type {
   OllamaEndpoint,
   OllamaListedModel,
   OllamaModelConfig,
+  RunPosture,
   StartRunRequest,
   ThinkingValue,
 } from '@org/agent-models';
+import { normalizeRunPosture } from '@org/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
@@ -26,6 +28,8 @@ export type ComposerOptions = {
   local?: boolean;
   /** Model-specific thinking: false / true / effort name from `/api/show`. */
   thinking?: ThinkingValue;
+  /** Workspace-only Ask | Agent. Default agent. Ignored on Home. */
+  posture?: RunPosture;
 };
 
 export type PendingMessage = {
@@ -35,6 +39,7 @@ export type PendingMessage = {
   model?: string;
   local?: boolean;
   thinking?: ThinkingValue;
+  posture?: RunPosture;
   attachments?: MessageAttachment[];
 };
 
@@ -72,6 +77,7 @@ export async function startRun(
     local?: boolean;
     webSearch?: boolean;
     thinking?: ThinkingValue;
+    posture?: RunPosture;
   } = {},
 ): Promise<string> {
   const body: StartRunRequest = {
@@ -83,6 +89,7 @@ export async function startRun(
     local: options.local,
     webSearch: options.webSearch,
     thinking: options.thinking,
+    posture: normalizeRunPosture(options.posture),
   };
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
@@ -183,6 +190,7 @@ export async function fetchContextEstimate(options: {
   model?: string;
   local?: boolean;
   webSearch?: boolean;
+  posture?: RunPosture;
 }): Promise<ContextEstimateResponse> {
   const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
     method: 'POST',
@@ -194,6 +202,7 @@ export async function fetchContextEstimate(options: {
       model: options.model,
       local: options.local,
       webSearch: options.webSearch,
+      posture: normalizeRunPosture(options.posture),
     }),
   });
   if (!res.ok) {

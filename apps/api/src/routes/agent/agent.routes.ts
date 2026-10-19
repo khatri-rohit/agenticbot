@@ -16,8 +16,11 @@ import {
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_MEMORY_CAPS,
   HOME_MODE,
+  applyPostureToTools,
   isWorkspaceKind,
+  normalizeRunPosture,
   normalizeThreadKind,
+  type RunPosture,
 } from '@org/agent-models';
 import {
   ALL_TOOLS,
@@ -43,11 +46,16 @@ import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
 const router = Router();
 const runManager = new RunManager();
 
-function toolAllowList(mode: ModeConfig, webSearch?: boolean): string[] {
-  return [
+function toolAllowList(
+  mode: ModeConfig,
+  webSearch?: boolean,
+  posture: RunPosture = 'agent',
+): string[] {
+  const names = [
     ...mode.globalTools,
     ...(webSearch !== false ? mode.allowedTools : []),
   ];
+  return applyPostureToTools(names, posture);
 }
 
 async function resolveWorkspaceDir(
@@ -101,6 +109,7 @@ async function prepareRun(input: {
   threadId: string;
   thread?: Thread;
   webSearch?: boolean;
+  posture?: RunPosture;
   lastUserSeq: number;
   envelopes: LedgerEnvelope[];
   model: string;
@@ -111,12 +120,17 @@ async function prepareRun(input: {
   messages: ReturnType<typeof assembleContext>['messages'];
   report: ReturnType<typeof assembleContext>['report'];
   mode: ModeConfig;
+  posture: RunPosture;
 }> {
   const memory = getMemoryStore();
   const files = await memory.read();
   const kind = normalizeThreadKind(input.thread?.kind);
   const mode = modeForKind(kind);
-  if (isWorkspaceKind(kind) && input.thread?.workspaceRoot) {
+  const workspace = isWorkspaceKind(kind);
+  const posture = workspace
+    ? normalizeRunPosture(input.posture)
+    : ('agent' as const);
+  if (workspace && input.thread?.workspaceRoot) {
     const rules = await loadWorkspaceRules(input.thread.workspaceRoot);
     files.agentsMd = rules.agentsMd;
     files.project = rules.project;
@@ -142,7 +156,8 @@ async function prepareRun(input: {
         }),
       }),
     ],
-    toolAllowList(mode, isWorkspaceKind(kind) ? false : input.webSearch),
+    toolAllowList(mode, workspace ? false : input.webSearch, posture),
+    posture,
   );
 
   let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
@@ -169,11 +184,12 @@ async function prepareRun(input: {
       snapshot,
       envelopes: input.envelopes,
       mode: mode.name,
+      posture,
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
 
-  return { tools, messages, report, mode };
+  return { tools, messages, report, mode, posture };
 }
 
 async function maybeCompactThread(input: {
@@ -371,7 +387,9 @@ router.post('/run', async (req: Request, res: Response) => {
     local,
     webSearch,
     thinking,
+    posture: rawPosture,
   } = req.body as StartRunRequest;
+  const posture = normalizeRunPosture(rawPosture);
 
   if (!threadId) {
     return res.status(400).json({ error: 'threadId is required' });
@@ -440,6 +458,7 @@ router.post('/run', async (req: Request, res: Response) => {
     threadId,
     thread,
     webSearch,
+    posture,
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
     model: useModel,
@@ -473,6 +492,7 @@ router.post('/run', async (req: Request, res: Response) => {
     modelCall,
     limits: prepared.mode.limits,
     mode: prepared.mode.name,
+    posture: prepared.posture,
     estimatedPromptTokens: prepared.report.occupiedTokens,
     contextReport: prepared.report,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
@@ -509,7 +529,7 @@ router.post('/run', async (req: Request, res: Response) => {
  * Same assembler as /run: host ledger + memory files + optional draft.
  */
 router.post('/context/estimate', async (req: Request, res: Response) => {
-  const { threadId, draft, attachments, model, webSearch, local } =
+  const { threadId, draft, attachments, model, webSearch, local, posture } =
     req.body as {
       threadId?: string;
       draft?: string;
@@ -517,6 +537,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
       model?: string;
       webSearch?: boolean;
       local?: boolean;
+      posture?: RunPosture;
     };
 
   const store = await getThreadStore();
@@ -553,6 +574,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     threadId: id,
     thread: estimateThread,
     webSearch,
+    posture: normalizeRunPosture(posture),
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
     model: useModel,

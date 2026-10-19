@@ -4,7 +4,11 @@ import type {
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 
-import type { TokenUsage, ToolContext } from '@org/agent-models';
+import {
+  isAskStrippedTool,
+  type TokenUsage,
+  type ToolContext,
+} from '@org/agent-models';
 
 import { consoleTrace, type TraceEvent } from '../events/trace';
 import { DEFAULT_LIMITS } from './limits';
@@ -25,6 +29,23 @@ export type {
 function preview(value: unknown, max = 300): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+/** Compact preview so UI labels are not poisoned by truncated newText/oldText. */
+function toolArgsPreview(toolName: string, args: unknown): string {
+  if (
+    toolName === 'edit_file' &&
+    args &&
+    typeof args === 'object' &&
+    !Array.isArray(args)
+  ) {
+    const record = args as Record<string, unknown>;
+    const path = typeof record.path === 'string' ? record.path : '';
+    const oldText = typeof record.oldText === 'string' ? record.oldText : '';
+    const intent = oldText.length > 0 ? 'patch' : 'create';
+    return preview({ path, intent }, 200);
+  }
+  return preview(args, 200);
 }
 
 function toolCallKey(toolName: string, args: unknown): string {
@@ -226,11 +247,13 @@ export async function runLoop(
   }
 
   trace({ type: 'run_start', runId, model: config.model });
+  const posture = config.posture ?? 'agent';
   emit?.({
     type: 'run.started',
     runId,
     threadId,
     mode: config.mode,
+    posture,
     streaming: config.streaming,
     model: config.model,
     ...(config.estimatedPromptTokens !== undefined
@@ -347,6 +370,32 @@ export async function runLoop(
             continue;
           }
 
+          if (posture === 'ask' && isAskStrippedTool(toolName)) {
+            const blocked =
+              'Blocked: this run is Ask (read-only). Switch the composer to Agent to edit files or run commands.';
+            emit?.({
+              type: 'tool.started',
+              runId,
+              toolCallId: toolCall.id,
+              toolName,
+              argsPreview: toolArgsPreview(toolName, {}),
+            });
+            emit?.({
+              type: 'tool.completed',
+              runId,
+              toolCallId: toolCall.id,
+              toolName,
+              durationMs: 0,
+              resultPreview: preview(blocked, 200),
+            });
+            await appendDurable({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: blocked,
+            });
+            continue;
+          }
+
           let args: Record<string, unknown>;
           try {
             args = JSON.parse(toolCall.function.arguments);
@@ -403,7 +452,7 @@ export async function runLoop(
             runId,
             toolCallId: toolCall.id,
             toolName,
-            argsPreview: preview(args, 200),
+            argsPreview: toolArgsPreview(toolName, args),
           });
 
           const startedAt = Date.now();

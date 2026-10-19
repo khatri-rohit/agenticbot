@@ -4,6 +4,7 @@ import type {
   AgentEventWithoutSeq,
   ContextReport,
   LedgerRecord,
+  RunPosture,
   ToolOrigin,
 } from '@org/agent-models';
 import type { TraceEvent } from '../events/trace-types';
@@ -34,6 +35,8 @@ export type RunLoopConfig = {
   streaming: boolean;
   /** Mode name for run.started (e.g. HOME_MODE.name). */
   mode: string;
+  /** Host-applied Ask | Agent. Loop refuses write/exec when ask. */
+  posture?: RunPosture;
   limits?: Partial<AgentLimits>;
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;

@@ -1,6 +1,6 @@
 import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
-import type { TokenUsage } from './run.js';
+import type { RunPosture, TokenUsage } from './run.js';
 import type { ToolRisk } from './tool-context.js';
 
 /**
@@ -47,6 +47,8 @@ export interface RunStarted {
   mode: string;
   streaming: boolean;
   model: string;
+  /** Host-applied Ask | Agent for this run. Composer chips are not this field. */
+  posture: RunPosture;
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
   /** Per-layer breakdown from assembleContext (M2). */

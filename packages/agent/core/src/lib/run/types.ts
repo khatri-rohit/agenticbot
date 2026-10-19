@@ -1,6 +1,11 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import type { ContextReport, LedgerRecord, ToolOrigin } from '@org/agent-models';
+import type {
+  ContextReport,
+  LedgerRecord,
+  RunPosture,
+  ToolOrigin,
+} from '@org/agent-models';
 
 import type { EventEmitter } from '../events/emitter';
 import type { AgentLimits } from '../loop/limits';
@@ -26,6 +31,7 @@ export type StartRunOptions = {
   streaming: boolean;
   /** Mode name for run.started (e.g. HOME_MODE.name). */
   mode: string;
+  posture?: RunPosture;
   messages: ChatCompletionMessageParam[];
   tools: ToolRegistry;
   modelCall: ModelCallFn;

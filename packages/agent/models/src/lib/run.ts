@@ -59,6 +59,33 @@ export type ChatMessage =
     }
   | { role: 'tool'; tool_call_id: string; content: string };
 
+/**
+ * Per-run workspace posture. Not a ThreadKind / ModeName.
+ * Ask = read-only tool pack; Agent = full workspace tools. Default agent.
+ */
+export type RunPosture = 'ask' | 'agent';
+
+/** Workspace mutation tools. Ask must never register or execute these. */
+export const ASK_STRIPPED_TOOLS = ['edit_file', 'run_terminal'] as const;
+
+export function isAskStrippedTool(name: string): boolean {
+  return (ASK_STRIPPED_TOOLS as readonly string[]).includes(name);
+}
+
+export function normalizeRunPosture(value: unknown): RunPosture {
+  if (typeof value !== 'string') return 'agent';
+  return value.trim().toLowerCase() === 'ask' ? 'ask' : 'agent';
+}
+
+/** Strip workspace write/exec tools when posture is Ask. */
+export function applyPostureToTools(
+  toolNames: string[],
+  posture: RunPosture,
+): string[] {
+  if (posture !== 'ask') return toolNames;
+  return toolNames.filter((name) => !isAskStrippedTool(name));
+}
+
 /** POST /api/agent/run body. History is loaded from the host ledger. */
 export type StartRunRequest = {
   threadId: string;
@@ -82,4 +109,9 @@ export type StartRunRequest = {
   /** When false, omit mode-allowed search tools; globals still apply. Default true. */
   webSearch?: boolean;
   thinking?: ThinkingValue;
+  /**
+   * Workspace-only. Ask strips edit_file + run_terminal at the host allow-list.
+   * Ignored for Home. Default agent.
+   */
+  posture?: RunPosture;
 };

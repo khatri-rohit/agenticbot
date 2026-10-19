@@ -51,6 +51,13 @@ export type {
   ChatMessage,
   ChatContentPart,
   StartRunRequest,
+  RunPosture,
+} from './lib/run.js';
+export {
+  ASK_STRIPPED_TOOLS,
+  normalizeRunPosture,
+  applyPostureToTools,
+  isAskStrippedTool,
 } from './lib/run.js';
 
 export {
