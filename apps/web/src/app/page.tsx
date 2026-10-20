@@ -23,6 +23,7 @@ import {
 } from '@/lib/ollama-models';
 import {
   folderNameFromRoot,
+  ensureWorkspaceInOrder,
   setWorkspaceRoot,
   useAgentSpace,
 } from '@/features/agent/store/space-store';
@@ -94,6 +95,7 @@ export default function HomePage() {
                 ...(bound && workspaceRoot ? { workspaceRoot } : {}),
               });
               if (thread.workspaceRoot) {
+                ensureWorkspaceInOrder(thread.workspaceRoot);
                 setWorkspaceRoot(thread.workspaceRoot);
               }
               await refreshThreads();

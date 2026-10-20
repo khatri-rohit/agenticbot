@@ -10,14 +10,23 @@ import {
 export type SpaceState = {
   /** Composer binding for new chats. Null = Home (no folder). */
   workspaceRoot: string | null;
-  /** Recently opened workspace folders (absolute paths). */
+  /**
+   * Recently opened workspace folders (absolute paths).
+   * Used by the composer picker — not the sidebar group order.
+   */
   recentFolders: string[];
+  /**
+   * Stable sidebar order for workspace projects (absolute paths).
+   * Only folders with threads appear in the rail; drag updates this list.
+   */
+  workspaceOrder: string[];
   /** Folder paths the user collapsed in the sidebar. */
   collapsedFolders: string[];
 };
 
 const ROOT_KEY = 'agenticbot:workspaceRoot';
 const FOLDERS_KEY = 'agenticbot:recentFolders';
+const ORDER_KEY = 'agenticbot:workspaceOrder';
 const COLLAPSED_KEY = 'agenticbot:collapsedFolders';
 
 type Listener = () => void;
@@ -49,7 +58,8 @@ function folderKey(root: string): string {
   return workspaceRootKey(root);
 }
 
-function upsertFolder(list: string[], root: string): string[] {
+/** MRU for the composer picker only — does not move sidebar project rows. */
+function upsertFolderMru(list: string[], root: string): string[] {
   const key = folderKey(root);
   const next = list.filter((item) => folderKey(item) !== key);
   next.unshift(normalizeRoot(root));
@@ -61,16 +71,24 @@ function readStored(): SpaceState {
     const workspaceRoot = localStorage.getItem(ROOT_KEY);
     const recentFolders = readJsonArray(FOLDERS_KEY);
     const collapsedFolders = readJsonArray(COLLAPSED_KEY);
+    let workspaceOrder = readJsonArray(ORDER_KEY);
+    // Migrate: first visit after this feature uses recentFolders as a seed order.
+    if (workspaceOrder.length === 0 && recentFolders.length > 0) {
+      workspaceOrder = [...recentFolders];
+    }
     const root = workspaceRoot?.trim() ? workspaceRoot : null;
     return {
       workspaceRoot: root,
-      recentFolders: root ? upsertFolder(recentFolders, root) : recentFolders,
+      // Keep picker MRU in sync with the active root without implying sidebar order.
+      recentFolders: root ? upsertFolderMru(recentFolders, root) : recentFolders,
+      workspaceOrder,
       collapsedFolders,
     };
   } catch {
     return {
       workspaceRoot: null,
       recentFolders: [],
+      workspaceOrder: [],
       collapsedFolders: [],
     };
   }
@@ -79,6 +97,7 @@ function readStored(): SpaceState {
 const SERVER_SNAPSHOT: SpaceState = {
   workspaceRoot: null,
   recentFolders: [],
+  workspaceOrder: [],
   collapsedFolders: [],
 };
 
@@ -96,6 +115,7 @@ function hydrate(): SpaceState {
 function persistFolders(): void {
   try {
     localStorage.setItem(FOLDERS_KEY, JSON.stringify(state.recentFolders));
+    localStorage.setItem(ORDER_KEY, JSON.stringify(state.workspaceOrder));
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify(state.collapsedFolders));
   } catch {
     /* private mode */
@@ -117,6 +137,11 @@ export function subscribeSpace(listener: Listener): () => void {
   };
 }
 
+/**
+ * Bind the composer to a folder. Updates picker MRU only.
+ * Does not create a sidebar project row — that waits for the first thread
+ * (see ensureWorkspaceInOrder / syncWorkspaceOrder).
+ */
 export function setWorkspaceRoot(workspaceRoot: string | null): void {
   hydrate();
   const next = workspaceRoot?.trim() ? normalizeRoot(workspaceRoot) : null;
@@ -126,7 +151,7 @@ export function setWorkspaceRoot(workspaceRoot: string | null): void {
       next !== null &&
       folderKey(state.workspaceRoot) === folderKey(next));
   const recentFolders = next
-    ? upsertFolder(state.recentFolders, next)
+    ? upsertFolderMru(state.recentFolders, next)
     : state.recentFolders;
   if (sameRoot && recentFolders === state.recentFolders) return;
   state = {
@@ -144,10 +169,85 @@ export function setWorkspaceRoot(workspaceRoot: string | null): void {
   emit();
 }
 
+/** Append a project to the sidebar order once it has (or will have) threads. */
+export function ensureWorkspaceInOrder(workspaceRoot: string): void {
+  hydrate();
+  const normalized = normalizeRoot(workspaceRoot);
+  const key = folderKey(normalized);
+  if (state.workspaceOrder.some((item) => folderKey(item) === key)) return;
+  state = {
+    ...state,
+    workspaceOrder: [...state.workspaceOrder, normalized],
+  };
+  persistFolders();
+  emit();
+}
+
+/**
+ * Keep sidebar order in sync with folders that actually have threads:
+ * drop empties, append newly discovered roots at the end (stable — no jump to top).
+ */
+export function syncWorkspaceOrder(rootsWithThreads: string[]): void {
+  hydrate();
+  const seen = new Set<string>();
+  const normalizedRoots: string[] = [];
+  for (const root of rootsWithThreads) {
+    const normalized = normalizeRoot(root);
+    const key = folderKey(normalized);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalizedRoots.push(normalized);
+  }
+  const rootByKey = new Map(
+    normalizedRoots.map((root) => [folderKey(root), root] as const),
+  );
+
+  const next: string[] = [];
+  for (const item of state.workspaceOrder) {
+    const key = folderKey(item);
+    const live = rootByKey.get(key);
+    if (!live) continue;
+    next.push(live);
+    rootByKey.delete(key);
+  }
+  for (const root of normalizedRoots) {
+    if (rootByKey.has(folderKey(root))) next.push(root);
+  }
+
+  const unchanged =
+    next.length === state.workspaceOrder.length &&
+    next.every(
+      (root, index) =>
+        folderKey(root) === folderKey(state.workspaceOrder[index] ?? ''),
+    );
+  if (unchanged) return;
+
+  state = { ...state, workspaceOrder: next };
+  persistFolders();
+  emit();
+}
+
+/** Persist a full drag-reorder of workspace project rows. */
+export function reorderWorkspaces(orderedRoots: string[]): void {
+  hydrate();
+  const next = orderedRoots
+    .map((root) => normalizeRoot(root))
+    .filter((root, index, all) => {
+      const key = folderKey(root);
+      return all.findIndex((item) => folderKey(item) === key) === index;
+    });
+  state = { ...state, workspaceOrder: next };
+  persistFolders();
+  emit();
+}
+
 export function removeRecentFolder(workspaceRoot: string): void {
   hydrate();
   const key = folderKey(workspaceRoot);
   const recentFolders = state.recentFolders.filter(
+    (item) => folderKey(item) !== key,
+  );
+  const workspaceOrder = state.workspaceOrder.filter(
     (item) => folderKey(item) !== key,
   );
   const collapsedFolders = state.collapsedFolders.filter(
@@ -160,6 +260,7 @@ export function removeRecentFolder(workspaceRoot: string): void {
   state = {
     ...state,
     recentFolders,
+    workspaceOrder,
     collapsedFolders,
     workspaceRoot: workspaceRootNext,
   };
@@ -175,7 +276,9 @@ export function removeRecentFolder(workspaceRoot: string): void {
 export function toggleFolderCollapsed(workspaceRoot: string): void {
   hydrate();
   const key = folderKey(workspaceRoot);
-  const collapsed = state.collapsedFolders.some((item) => folderKey(item) === key);
+  const collapsed = state.collapsedFolders.some(
+    (item) => folderKey(item) === key,
+  );
   const collapsedFolders = collapsed
     ? state.collapsedFolders.filter((item) => folderKey(item) !== key)
     : [...state.collapsedFolders, normalizeRoot(workspaceRoot)];
