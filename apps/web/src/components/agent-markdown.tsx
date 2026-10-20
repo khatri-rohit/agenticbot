@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
 import { mermaid } from '@streamdown/mermaid';
@@ -36,14 +36,14 @@ function mermaidTheme(): 'dark' | 'default' {
     : 'dark';
 }
 
-/** Word-level stagger: readable cadence, catches up if the SSE buffer runs ahead. */
+/** Faster word cadence so a fast SSE buffer does not feel like a carousel. */
 const STREAM_ANIMATION = {
   animation: 'fadeIn' as const,
-  duration: 170,
+  duration: 100,
   easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
   sep: 'word' as const,
-  stagger: 28,
-  maxBacklogMs: 260,
+  stagger: 12,
+  maxBacklogMs: 220,
 };
 
 /**
@@ -53,10 +53,20 @@ const STREAM_ANIMATION = {
  */
 const linkSafety = { enabled: false };
 
-/**
- * Renders assistant markdown via Streamdown.
- * Use `streaming` while tokens are arriving so incomplete fences parse correctly.
- */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setReduced(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+
+  return reduced;
+}
+
 function fileNameFromPath(path: string): string {
   const parts = path.replaceAll('\\', '/').split('/').filter(Boolean);
   return parts.at(-1) ?? path;
@@ -69,23 +79,31 @@ function CitationChips({
 }) {
   if (citations.length === 0) return null;
   return (
-    <ul className="mt-2 flex flex-wrap gap-1.5">
-      {citations.map((citation) => (
-        <li key={`${citation.path}:${citation.start}:${citation.end}`}>
-          <button
-            type="button"
-            className="type-ui rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-            title={`Copy ${citation.path}`}
-            onClick={() => void navigator.clipboard.writeText(citation.path)}
-          >
-            {fileNameFromPath(citation.path)}:{citation.start}–{citation.end}
-          </button>
-        </li>
-      ))}
+    <ul className="mt-2.5 flex flex-wrap gap-1.5" translate="no">
+      {citations.map((citation) => {
+        const label = `${fileNameFromPath(citation.path)}:${citation.start}–${citation.end}`;
+        return (
+          <li key={`${citation.path}:${citation.start}:${citation.end}`}>
+            <button
+              type="button"
+              className="type-caption rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+              title={`Copy ${citation.path}`}
+              aria-label={`Copy path ${citation.path}`}
+              onClick={() => void navigator.clipboard.writeText(citation.path)}
+            >
+              {label}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
+/**
+ * Renders assistant markdown via Streamdown.
+ * Use `streaming` while tokens are arriving so incomplete fences parse correctly.
+ */
 export function AgentMarkdown({
   content,
   streaming = false,
@@ -93,6 +111,7 @@ export function AgentMarkdown({
   content: string;
   streaming?: boolean;
 }) {
+  const reducedMotion = usePrefersReducedMotion();
   const citations = useMemo(() => extractFileCitations(content), [content]);
   const markdown = useMemo(
     () => normalizeAssistantMarkdown(rewriteCitationFences(content)),
@@ -116,9 +135,9 @@ export function AgentMarkdown({
         <Streamdown
           {...shared}
           mode="streaming"
-          animated={STREAM_ANIMATION}
-          caret="circle"
-          isAnimating
+          animated={reducedMotion ? false : STREAM_ANIMATION}
+          caret={reducedMotion ? undefined : 'block'}
+          isAnimating={!reducedMotion}
           parseIncompleteMarkdown
           plugins={codePlugins}
         >

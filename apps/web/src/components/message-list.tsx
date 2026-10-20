@@ -285,12 +285,6 @@ export function MessageList({
                             <article className="chat-prose type-body min-w-0 max-w-full">
                               <AgentMarkdown content={step.content} streaming />
                             </article>
-                            <MessageMetaRow>
-                              <MessageActions
-                                content={step.content}
-                                align="start"
-                              />
-                            </MessageMetaRow>
                           </div>
                         );
                       })}
@@ -387,9 +381,13 @@ function TurnStatusLine({
 
   return (
     <p
-      className="type-caption pl-0.5 text-left text-muted-foreground/65 tabular-nums"
+      className="type-caption flex items-center gap-1.5 pl-0.5 text-left text-muted-foreground/70 tabular-nums"
       aria-live="polite"
     >
+      <span
+        className="size-1.5 shrink-0 rounded-full bg-primary/80 animate-pulse"
+        aria-hidden
+      />
       {label}
     </p>
   );

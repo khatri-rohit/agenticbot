@@ -221,7 +221,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                     disabled
                     aria-disabled="true"
                     aria-label="Search coming soon"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/50"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/70"
                   >
                     <Search className="size-4" strokeWidth={1.75} />
                   </button>
@@ -237,8 +237,8 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
           <ScrollArea className="min-h-0 flex-1 px-2">
             <div className="space-y-4 pb-2">
               <section>
-                <div className="mb-1 flex items-center justify-between gap-1 px-2">
-                  <p className="type-ui text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
+                <div className="mb-1.5 flex items-center justify-between gap-1 px-2">
+                  <p className="type-ui text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
                     Home
                   </p>
                   <button
@@ -251,7 +251,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                   </button>
                 </div>
                 {homeThreads.length === 0 ? (
-                  <p className="type-ui px-2 py-3 text-center text-muted-foreground">
+                  <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
                     No conversations yet
                   </p>
                 ) : (
@@ -268,11 +268,11 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
               </section>
 
               <section>
-                <p className="type-ui mb-1 px-2 text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
+                <p className="type-ui mb-1.5 px-2 text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
                   Workspaces
                 </p>
                 {workspaceGroups.length === 0 ? (
-                  <p className="type-ui px-2 py-3 text-center text-muted-foreground">
+                  <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
                     Open a folder to start project chats
                   </p>
                 ) : (
@@ -511,19 +511,18 @@ function ThreadItem({
     <li className="w-full min-w-0">
       <div
         className={cn(
-          'type-ui group relative flex w-full min-w-0 items-stretch rounded-md transition-colors',
+          'group relative flex w-full min-w-0 items-stretch rounded-md transition-colors',
           active
-            ? 'bg-accent/55 text-foreground'
-            : 'text-muted-foreground/80 hover:bg-accent/55 hover:text-foreground',
+            ? 'bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--primary)]'
+            : 'text-muted-foreground/80 hover:bg-accent/45 hover:text-foreground',
         )}
       >
         <Link
           href={`/chat/${thread.id}`}
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-            dense
-              ? 'py-1 pl-2 pr-[4.25rem] text-sm'
-              : 'py-1.5 pl-2.5 pr-[4.25rem]',
+            dense ? 'py-1 pl-2 pr-9 text-[13px]' : 'py-1.5 pl-2.5 pr-9 text-[13px]',
+            active && 'font-medium text-foreground',
           )}
           title={displayTitle || undefined}
           onClick={() => {
@@ -546,7 +545,14 @@ function ThreadItem({
             </span>
           )}
         </Link>
-        <span className="pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0 group-has-[[data-state=open]]:opacity-0">
+        <span
+          className={cn(
+            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/70 opacity-0 transition-opacity',
+            'group-hover:opacity-100 group-focus-within:opacity-100',
+            active && 'opacity-100',
+            'group-has-[[data-state=open]]:opacity-0',
+          )}
+        >
           {formatRelativeTime(thread.updatedAt)}
         </span>
         <DropdownMenu>

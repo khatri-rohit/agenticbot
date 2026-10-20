@@ -199,7 +199,7 @@ export function ChatInput({
   hideWebSearch = false,
   showWorkspacePicker = false,
   showPostureChips = false,
-  runPosture,
+  runPosture: _runPosture,
 }: {
   onSend: (
     content: string,
@@ -808,49 +808,42 @@ export function ChatInput({
   // Host run posture is shown separately via run.started.
 
   const postureChips = showPostureChips ? (
-    <div className="flex min-w-0 items-center gap-1">
-      <div
-        className="flex h-7 items-center rounded-md border border-border/60 p-0.5"
-        role="group"
-        aria-label="Workspace posture"
-      >
-        {(
-          [
-            { id: 'ask', label: 'Ask' },
-            { id: 'agent', label: 'Agent' },
-          ] as const
-        ).map((option) => {
-          const selected = posture === option.id;
-          return (
-            <Button
-              key={option.id}
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-pressed={selected}
-              className={cn(
-                'h-6 px-2 text-xs font-normal',
-                selected
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-              onClick={() =>
-                onComposerOptionsChange({
-                  ...composerOptions,
-                  posture: option.id,
-                })
-              }
-            >
-              {option.label}
-            </Button>
-          );
-        })}
-      </div>
-      {isRunning && runPosture ? (
-        <span className="type-caption shrink-0 text-muted-foreground">
-          This run: {runPosture === 'ask' ? 'Ask' : 'Agent'}
-        </span>
-      ) : null}
+    <div
+      className="flex h-7 shrink-0 items-center rounded-md border border-border/60 p-0.5"
+      role="group"
+      aria-label="Workspace posture"
+    >
+      {(
+        [
+          { id: 'ask', label: 'Ask' },
+          { id: 'agent', label: 'Agent' },
+        ] as const
+      ).map((option) => {
+        const selected = posture === option.id;
+        return (
+          <Button
+            key={option.id}
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-pressed={selected}
+            className={cn(
+              'h-6 px-2 text-xs font-normal',
+              selected
+                ? 'bg-muted text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() =>
+              onComposerOptionsChange({
+                ...composerOptions,
+                posture: option.id,
+              })
+            }
+          >
+            {option.label}
+          </Button>
+        );
+      })}
     </div>
   ) : null;
 
@@ -1144,7 +1137,7 @@ export function ChatInput({
               no expand/collapse flip, so nothing can oscillate while typing.
             */}
             <div className="grid min-w-0 gap-1 [grid-template-areas:'text_text'_'left_right'] grid-cols-[minmax(0,1fr)_auto]">
-              <div className="flex min-w-0 items-center gap-0.5 [grid-area:left]">
+              <div className="flex min-w-0 flex-wrap items-center gap-1 [grid-area:left]">
                 {attachMenu}
                 {showWorkspacePicker ? (
                   <WorkspacePicker disabled={isRunning} />
@@ -1152,7 +1145,7 @@ export function ChatInput({
                 {modelControls}
               </div>
               <div className="min-w-0 [grid-area:text]">{composerTextarea}</div>
-              <div className="flex shrink-0 items-center gap-0.5 [grid-area:right]">
+              <div className="flex shrink-0 items-center gap-0.5 self-end [grid-area:right]">
                 {actionControls}
               </div>
             </div>
