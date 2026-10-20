@@ -194,6 +194,15 @@ function layerTokens(
 /**
  * Pure assembler. Same envelopes + memory + snapshot → same messages.
  * Stubbing is free and deterministic; compaction is reported, not performed.
+ *
+ * Cache contract: the returned messages are ordered stable-first (system,
+ * memory, plan, mentions, brief) then volatile (tail, current turn). The
+ * loop mutates this array in-place by appending tool results — it never
+ * copies or reorders the prefix. Providers with prompt caching (OpenAI
+ * automatic prefix cache, Ollama context reuse) can exploit this: the
+ * frozen prefix is byte-stable across iterations within a run, so only the
+ * growing tail is "new" work. The only per-run variance in the prefix is
+ * `today()` in the system prompt, which is stable within a calendar day.
  */
 export function assembleContext(
   input: AssembleContextInput,

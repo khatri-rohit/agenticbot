@@ -48,6 +48,10 @@ export type RunHandle = {
   pendingApprovals: Map<string, PendingApprovalWaiter>;
   pendingChoices: Map<string, PendingChoiceWaiter>;
   grantedTools: Set<string>;
+  /** Workspace root for mutex enforcement (coding runs only). */
+  workspaceRoot?: string;
+  /** Posture: ask runs are read-only and don't need the workspace mutex. */
+  posture?: RunPosture;
 };
 
 export type StartRunOptions = {

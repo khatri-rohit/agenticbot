@@ -503,6 +503,21 @@ router.post('/run', async (req: Request, res: Response) => {
     });
   }
 
+  // Workspace mutex: one agent-posture run per folder. Ask runs are
+  // read-only and exempt; research threads have no workspaceRoot.
+  if (thread.workspaceRoot && posture === 'agent') {
+    const conflictingRunId = runManager.hasActiveWorkspaceRun(
+      thread.workspaceRoot,
+    );
+    if (conflictingRunId) {
+      return res.status(409).json({
+        error: 'A run is already active in this workspace',
+        runId: conflictingRunId,
+        reason: 'workspace',
+      });
+    }
+  }
+
   if (typeof rewindThroughSeq === 'number') {
     await store.rewind(threadId, rewindThroughSeq);
   }

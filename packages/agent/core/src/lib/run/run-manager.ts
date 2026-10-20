@@ -57,6 +57,8 @@ export class RunManager {
       pendingApprovals: new Map(),
       pendingChoices: new Map(),
       grantedTools: new Set(),
+      ...(opts.workspaceRoot ? { workspaceRoot: opts.workspaceRoot } : {}),
+      posture: opts.posture ?? 'agent',
     };
 
     this.runs.set(runId, handle);
@@ -349,6 +351,24 @@ export class RunManager {
   activeRunIdForThread(threadId: string): string | undefined {
     for (const handle of this.runs.values()) {
       if (handle.threadId === threadId && handle.status === 'running') {
+        return handle.runId;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Workspace mutex: is another agent-posture run active for this folder?
+   * Ask-posture runs are read-only and don't need exclusion. Research
+   * threads have no workspaceRoot and are never blocked by this check.
+   */
+  hasActiveWorkspaceRun(workspaceRoot: string): string | undefined {
+    for (const handle of this.runs.values()) {
+      if (
+        handle.status === 'running' &&
+        handle.workspaceRoot === workspaceRoot &&
+        (handle.posture ?? 'agent') === 'agent'
+      ) {
         return handle.runId;
       }
     }
