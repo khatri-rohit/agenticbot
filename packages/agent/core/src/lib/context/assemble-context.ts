@@ -14,6 +14,7 @@ import {
   DEFAULT_CONTEXT_BUDGET,
   envelopeToChatMessage,
   formatThreadPlanForPrompt,
+  imageAttachments,
   isThreadPlanEmpty,
 } from '@org/agent-models';
 
@@ -115,9 +116,34 @@ function stubToolContent(envelope: LedgerEnvelope): string {
   return `(stub) tool ${envelope.record.tool_call_id} omitted (${n} chars)`;
 }
 
+/** 0 = keep all (not enough turns yet). Else seq/index of the first kept user turn. */
+function keepFromNthLast(markers: number[], keepTurns: number): number {
+  if (markers.length <= keepTurns) return 0;
+  return markers[markers.length - keepTurns] ?? 0;
+}
+
+function stubbedImageNote(imageCount: number): string {
+  const noun = imageCount === 1 ? 'attachment' : 'attachments';
+  return `(stub) ${imageCount} image ${noun} omitted`;
+}
+
+function stubbedUserText(text: string, imageCount: number): string {
+  const note = stubbedImageNote(imageCount);
+  const trimmed = text.trim();
+  return trimmed ? `${trimmed}\n${note}` : note;
+}
+
+function imagePartCount(
+  content: ChatCompletionMessageParam['content'],
+): number {
+  if (!Array.isArray(content)) return 0;
+  return content.filter((part) => part.type === 'image_url').length;
+}
+
 /**
  * In-loop sibling of assembleContext stubbing. Mutates live Chat Completions
- * messages so a long tool turn does not keep every result at full size.
+ * messages so a long tool turn does not keep every result at full size, and
+ * so old vision parts drop the same way as assemble-time attachment stubs.
  * Ledger rows stay full; the next assembleContext pass stubs from seq.
  */
 export function stubLiveToolResults(
@@ -129,18 +155,36 @@ export function stubLiveToolResults(
   for (let i = 0; i < messages.length; i++) {
     if (messages[i]?.role === 'user') userIndexes.push(i);
   }
-  const keepFromIndex =
-    userIndexes.length <= budget.keepToolResultsForTurns
-      ? 0
-      : (userIndexes[userIndexes.length - budget.keepToolResultsForTurns] ?? 0);
+  const keepToolsFrom = keepFromNthLast(
+    userIndexes,
+    budget.keepToolResultsForTurns,
+  );
+  const keepImagesFrom = keepFromNthLast(
+    userIndexes,
+    budget.keepAttachmentsForTurns,
+  );
 
   let stubbed = 0;
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
-    if (!message || message.role !== 'tool') continue;
+    if (!message) continue;
+    if (message.role === 'user' && i < keepImagesFrom) {
+      const n = imagePartCount(message.content);
+      if (n === 0) continue;
+      const text =
+        typeof message.content === 'string'
+          ? message.content
+          : message.content
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text)
+              .join('\n');
+      messages[i] = { role: 'user', content: stubbedUserText(text, n) };
+      continue;
+    }
+    if (message.role !== 'tool') continue;
     const content = typeof message.content === 'string' ? message.content : '';
     if (content.startsWith('(stub)')) continue;
-    const old = i < keepFromIndex;
+    const old = i < keepToolsFrom;
     const overCap = content.length > maxToolChars;
     if (!old && !overCap) continue;
     messages[i] = {
@@ -155,14 +199,24 @@ export function stubLiveToolResults(
 
 function toParam(
   envelope: LedgerEnvelope,
-  stub: boolean,
+  stubTool: boolean,
+  stubImages: boolean,
 ): ChatCompletionMessageParam | null {
-  if (stub && envelope.record.role === 'tool') {
+  if (stubTool && envelope.record.role === 'tool') {
     return {
       role: 'tool',
       tool_call_id: envelope.record.tool_call_id,
       content: stubToolContent(envelope),
     };
+  }
+  if (stubImages && envelope.record.role === 'user') {
+    const n = imageAttachments(envelope.attachments).length;
+    if (n > 0) {
+      return {
+        role: 'user',
+        content: stubbedUserText(envelope.record.content, n),
+      };
+    }
   }
   const chat = envelopeToChatMessage(envelope);
   if (!chat) return null;
@@ -266,10 +320,11 @@ export function assembleContext(
       : null;
 
   const users = userSeqs(live);
-  const keepFrom =
-    users.length <= budget.keepToolResultsForTurns
-      ? 0
-      : users[users.length - budget.keepToolResultsForTurns];
+  const keepToolsFrom = keepFromNthLast(users, budget.keepToolResultsForTurns);
+  const keepImagesFrom = keepFromNthLast(
+    users,
+    budget.keepAttachmentsForTurns,
+  );
 
   const lastUserSeq = users.at(-1);
   const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
@@ -281,14 +336,16 @@ export function assembleContext(
   for (const envelope of live) {
     const inTurn = lastUserSeq !== undefined && envelope.seq >= lastUserSeq;
     const oldTool =
-      envelope.record.role === 'tool' && envelope.seq < keepFrom;
+      envelope.record.role === 'tool' && envelope.seq < keepToolsFrom;
     const overCap =
       envelope.record.role === 'tool' &&
       envelope.record.content.length > maxToolChars;
-    const stub = oldTool || overCap;
-    if (stub) stubbedToolResults++;
+    const stubTool = oldTool || overCap;
+    if (stubTool) stubbedToolResults++;
+    const stubImages =
+      envelope.record.role === 'user' && envelope.seq < keepImagesFrom;
 
-    const message = toParam(envelope, stub);
+    const message = toParam(envelope, stubTool, stubImages);
     if (!message) continue;
     if (inTurn) turnMessages.push(message);
     else tailMessages.push(message);

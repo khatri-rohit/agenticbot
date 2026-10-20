@@ -546,11 +546,15 @@ export async function runLoop(
     const startedAt = Date.now();
 
     try {
+      // exec tools own their timeout + process-tree kill (workspace.ts).
+      // The loop's withTimeout would race the tool's timer and leak the child.
+      const ownsTimeout =
+        toolName === 'ask_user' ||
+        toolName === 'offer_choice' ||
+        tool.risk === 'exec';
       const result = await withTimeout(
         tool.execute(args, toolCtx),
-        toolName === 'ask_user' || toolName === 'offer_choice'
-          ? 0
-          : limits.toolTimeoutMs,
+        ownsTimeout ? 0 : limits.toolTimeoutMs,
         signal,
       );
       const durationMs = Date.now() - startedAt;
@@ -674,11 +678,14 @@ export async function runLoop(
       batch.map(async (call) => {
         const started = Date.now();
         try {
+          // exec tools own their timeout + process-tree kill.
+          const ownsTimeout =
+            call.toolName === 'ask_user' ||
+            call.toolName === 'offer_choice' ||
+            call.tool.risk === 'exec';
           const result = await withTimeout(
             call.tool.execute(call.args, toolCtx),
-            call.toolName === 'ask_user' || call.toolName === 'offer_choice'
-              ? 0
-              : limits.toolTimeoutMs,
+            ownsTimeout ? 0 : limits.toolTimeoutMs,
             signal,
           );
           return { call, ok: true as const, result, durationMs: Date.now() - started };

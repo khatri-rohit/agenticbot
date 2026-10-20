@@ -25,6 +25,7 @@ import {
 } from '@/lib/ollama-models';
 import {
   applyChatEvent,
+  hasSseSeqGap,
   initialChatState,
   noticeFromSnapshot,
   persistChatEffects,
@@ -194,6 +195,10 @@ export function useAgentRun(threadId: string | null) {
           eventChain = eventChain.then(async () => {
             if (threadIdRef.current !== threadId) return;
             const prev = currentState;
+            const lastSeq = prev.activeRun?.lastSeq ?? fromSeq;
+            if (hasSseSeqGap(lastSeq, event.seq)) {
+              bumpLedger();
+            }
             const next = applyChatEvent(prev, event);
             await persistChatEffects(prev, event, threadId);
             if (threadIdRef.current !== threadId) return;

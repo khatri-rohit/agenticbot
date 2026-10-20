@@ -27,9 +27,23 @@ User message (apps/web)
   → apps/web chat-store reducer → UI
 ```
 
-**Threads are host-owned on disk** (`AGENTICBOT_HOME` SQLite catalog + ledger). The first user turn seeds a sidebar title and refines it with the chat model.
+**Threads are host-owned on disk** (`AGENTICBOT_HOME` SQLite catalog + per-thread `ledger.jsonl`). The first user turn seeds a sidebar title and refines it with the chat model. The ledger is the durable history of the **active tape**. Retry/edit **rewind** truncates that tape (atomic rewrite) — discarded turns are gone. SSE is a live convenience; after a run handle is cleared (5 minute TTL) a late events subscribe is 404 and the client rebuilds from `GET /ledger`.
 
-**One active run per thread** (enforced in API). Use `POST /api/agent/run/:runId/cancel` to stop generation.
+**One active run per thread** (enforced in API). **One agent-posture run per workspace folder** (409 `reason: 'workspace'`); ask-posture and Home threads are exempt. Both mutexes are **in-process** (`RunManager` singleton) — not multi-instance. Use `POST /api/agent/run/:runId/cancel` to stop generation.
+
+### Harness mental models
+
+How to think about this system when changing it or prompting it. (Response branching is not in the tree; rewind stays.)
+
+1. **The loop is a budget machine.** Four budgets: iterations, tool calls, repeated-call tolerance, context window (`packages/agent/core/src/lib/loop/limits.ts`). Tune budgets and context residency when the model loops — almost never the system prompt.
+
+2. **Context is a cache; stubbing is eviction.** `assembleContext` evicts by role: old tool results stub first, old image attachments stub next (`keepAttachmentsForTurns`), large bodies spill to blobs, the tape compact last. Judge new capabilities by cache residency.
+
+3. **The gate is the constitution; the model is a petitioner.** Memory writes, posture, and the workspace path jail are deterministic (`packages/agent/core/src/lib/memory/gate.ts`). Same input → same verdict. Ship the gate in the same change as the capability. Commented exec-approval in `RunManager` is a pending gate, not dead code.
+
+4. **Events are the product; the ledger is the truth; SSE is a convenience.** `AgentEvent` is the live API. Any UI state that cannot be rebuilt from `GET /ledger` is a bug. A seq gap on the stream refetches the ledger (`use-agent-run`).
+
+5. **Determinism is load-bearing.** Everything except the model is deterministic. Compaction is extractive (no LLM on the request path). Model calls belong in maintenance (thread title), not admission or assembly.
 
 ### Tool policy (important)
 
@@ -237,8 +251,8 @@ External HTTP for tools belongs in core modules (e.g. `web_search_api.ts`), not 
 | No tools / wrong tools                 | Request body `allowedTools`; server merge with profile `globalTools`; `createToolRegistry` filter |
 | `web_search` fails                     | Keyless Firecrawl/Tavily 429 (shared caps); or `OLLAMA_API_KEY` path — curl tests above                 |
 | `web_fetch` fails                      | Valid full URL; provider rate limit; page blocked or huge (content truncated at 4k chars in harness)    |
-| Run stuck “running”                    | SSE disconnect; `run.completed` / `run.error`; cancel endpoint                                          |
-| 409 on new message                     | Prior run still active on thread; cancel or wait                                                        |
+| Run stuck “running”                    | SSE disconnect; seq gap should refetch ledger; `run.settled` / `run.error`; cancel endpoint             |
+| 409 on new message                     | Thread already running, or another **agent** run in the same workspace (`reason: 'workspace'`); cancel or wait |
 | Title stays “New Chat”                 | First message must go through `POST /run`; check API logs for `[title] generate failed`                 |
 | Voice / STT errors                     | Speaches health `http://127.0.0.1:8000/health`, model pull per [docker/README.md](./docker/README.md)   |
 | Type errors in API after model changes | Rebuild `packages/agent/models` and `core` `.d.ts` (see above)                                          |

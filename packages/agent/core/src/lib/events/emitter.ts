@@ -4,12 +4,15 @@ import type { EventSubscriber } from './types';
 
 export type { EventSubscriber } from './types';
 
+/** Oldest events drop first. A gap is recovered from the ledger, not this buffer. */
+export const MAX_BUFFERED_EVENTS = 500;
+
 /**
- * In-memory event emitter with monotonic seq counters and a ring buffer
- * for SSE reconnection replay.
+ * In-memory event emitter with monotonic seq counters and a bounded ring
+ * buffer for SSE reconnection replay.
  *
- * One emitter per run. When the run completes, the buffer can be cleared
- * (the client should have persisted events to its own IndexedDB by then).
+ * One emitter per run. Overflow drops the oldest events; clients that
+ * reconnect past the retained window must refetch the ledger.
  */
 export class EventEmitter {
   private seq = 0;
@@ -21,6 +24,9 @@ export class EventEmitter {
     const seq = ++this.seq;
     const fullEvent = { seq, ...event } as AgentEvent;
     this.buffer.push(fullEvent);
+    if (this.buffer.length > MAX_BUFFERED_EVENTS) {
+      this.buffer.shift();
+    }
     for (const sub of this.subscribers) {
       sub(fullEvent);
     }

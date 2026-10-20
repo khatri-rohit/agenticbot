@@ -80,7 +80,7 @@ export { EventEmitter } from './lib/events/emitter';
 export type { EventSubscriber } from './lib/events/types';
 
 // Run manager
-export { RunManager } from './lib/run/run-manager';
+export { RunManager, RUN_HANDLE_TTL_MS } from './lib/run/run-manager';
 export type {
   ResolveApprovalResult,
   ResolveChoiceResult,

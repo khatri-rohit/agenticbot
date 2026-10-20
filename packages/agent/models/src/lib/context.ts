@@ -13,6 +13,8 @@ export type ContextBudget = {
   toolResultMaxTokens: number;
   /** Tool results older than this many user turns become stubs. */
   keepToolResultsForTurns: number;
+  /** Image attachments older than this many user turns become text stubs. */
+  keepAttachmentsForTurns: number;
 };
 
 export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
@@ -21,6 +23,7 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   compactAtRatio: 0.65,
   toolResultMaxTokens: 2_000,
   keepToolResultsForTurns: 2,
+  keepAttachmentsForTurns: 2,
 };
 
 /** Per-layer sizes returned with an assembled prompt for the context meter. */

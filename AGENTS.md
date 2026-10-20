@@ -21,3 +21,7 @@
 - The `nx-generate` skill handles generator discovery internally - don't call nx_docs just to look up generator syntax
 
 <!-- nx configuration end-->
+
+# Agenticbot harness
+
+Ownership, request flow, and **mental models** (budget machine, context cache, gates, ledger vs SSE, determinism) live in [README.md](./README.md) and `.cursor/rules/agenticbot-system.mdc`. Follow those before adding packages, prompt layers, or request-path model calls.

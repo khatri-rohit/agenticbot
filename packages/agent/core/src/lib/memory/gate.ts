@@ -49,7 +49,11 @@ export function applyMemoryText(
   const span = (op.oldText ?? '').trim();
   if (!span) return { error: 'patch/remove requires a unique oldText span' };
   const count = file.split(span).length - 1;
-  if (count === 0) return { error: 'oldText span not found' };
+  if (count === 0)
+    return {
+      error:
+        'oldText span not found — a later op may have modified it; revert that one first',
+    };
   if (count > 1) return { error: 'oldText span is not unique' };
 
   if (op.action === 'remove') {

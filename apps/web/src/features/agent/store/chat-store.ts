@@ -127,6 +127,11 @@ export function noticeFromSnapshot(
   };
 }
 
+/** True when the stream skipped seqs; recover from the ledger, not SSE. */
+export function hasSseSeqGap(lastSeq: number, eventSeq: number): boolean {
+  return eventSeq > lastSeq + 1;
+}
+
 /**
  * Pure AgentEvent → ChatState. Updates lastSeq so SSE can reconnect
  * without full replay.

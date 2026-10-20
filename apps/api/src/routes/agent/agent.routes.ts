@@ -30,6 +30,7 @@ import {
 } from '@org/agent-models';
 import {
   ALL_TOOLS,
+  RUN_HANDLE_TTL_MS,
   RunManager,
   assembleContext,
   buildExtractiveSnapshot,
@@ -617,14 +618,21 @@ router.post('/run', async (req: Request, res: Response) => {
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
-    onFinished: () =>
-      maybeCompactThread({
-        threadId,
-        runId: assignedRunId,
-        model: useModel,
-        webSearch,
-        endpoint,
-      }),
+    onFinished: async () => {
+      try {
+        await maybeCompactThread({
+          threadId,
+          runId: assignedRunId,
+          model: useModel,
+          webSearch,
+          endpoint,
+        });
+      } finally {
+        setTimeout(() => {
+          runManager.clear(assignedRunId);
+        }, RUN_HANDLE_TTL_MS);
+      }
+    },
   });
 
   const started = runManager.get(assignedRunId);

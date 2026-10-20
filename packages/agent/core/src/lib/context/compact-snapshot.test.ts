@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { LedgerEnvelope } from '@org/agent-models';
+import { DEFAULT_CONTEXT_BUDGET, type LedgerEnvelope } from '@org/agent-models';
 
 import {
   buildExtractiveSnapshot,
@@ -195,6 +195,81 @@ describe('compact snapshot', () => {
     if (tool?.role === 'tool') {
       expect(tool.content).toMatch(/^\(stub\)/);
       expect(tool.content.length).toBeLessThan(huge.length);
+    }
+  });
+
+  it('stubs image attachments older than keepAttachmentsForTurns', () => {
+    const tools = createToolRegistry([]);
+    const image = {
+      id: 'img1',
+      mimeType: 'image/png',
+      dataUrl: `data:image/png;base64,${'A'.repeat(80)}`,
+    };
+    const envelopes: LedgerEnvelope[] = [
+      {
+        v: 1,
+        seq: 1,
+        ts: '2026-01-01T00:00:00.000Z',
+        threadId: 't1',
+        runId: null,
+        record: { role: 'user', content: 'look at this' },
+        attachments: [image],
+      },
+      envelope(2, 'assistant', 'ok'),
+      envelope(3, 'user', 'and this?'),
+      envelope(4, 'assistant', 'ok'),
+      envelope(5, 'user', 'now?'),
+    ];
+    const { messages } = assembleContext(
+      {
+        tools,
+        memory: { user: '', notes: '' },
+        snapshot: null,
+        envelopes,
+      },
+      { ...DEFAULT_CONTEXT_BUDGET, keepAttachmentsForTurns: 2 },
+    );
+    const users = messages.filter((m) => m.role === 'user');
+    expect(users).toHaveLength(3);
+    const first = users[0];
+    expect(first?.role).toBe('user');
+    if (first?.role === 'user') {
+      expect(typeof first.content).toBe('string');
+      expect(String(first.content)).toContain('look at this');
+      expect(String(first.content)).toMatch(/\(stub\) 1 image attachment omitted/);
+      expect(JSON.stringify(first.content)).not.toContain('data:image');
+    }
+    const last = users[2];
+    expect(last?.role).toBe('user');
+    if (last?.role === 'user') {
+      expect(last.content).toBe('now?');
+    }
+  });
+
+  it('stubLiveToolResults drops old vision parts in the live prompt', () => {
+    const dataUrl = `data:image/png;base64,${'B'.repeat(80)}`;
+    const messages = [
+      { role: 'system' as const, content: 'sys' },
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: 'first' },
+          { type: 'image_url' as const, image_url: { url: dataUrl } },
+        ],
+      },
+      { role: 'assistant' as const, content: 'ok' },
+      { role: 'user' as const, content: 'second' },
+      { role: 'assistant' as const, content: 'ok' },
+      { role: 'user' as const, content: 'third' },
+    ];
+    stubLiveToolResults(messages, {
+      ...DEFAULT_CONTEXT_BUDGET,
+      keepAttachmentsForTurns: 2,
+    });
+    const first = messages[1];
+    expect(first?.role).toBe('user');
+    if (first?.role === 'user') {
+      expect(first.content).toBe('first\n(stub) 1 image attachment omitted');
     }
   });
 });

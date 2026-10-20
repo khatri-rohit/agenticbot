@@ -29,12 +29,16 @@ export type {
   StartRunOptions,
 } from './types';
 
+/** Hosts should `clear(runId)` after this so late SSE replay still works. */
+export const RUN_HANDLE_TTL_MS = 5 * 60_000;
+
 /**
  * In-memory run manager. Holds live run state and event emitters.
  *
  * One active run per thread (enforced by the caller — the API layer).
- * When a run completes, its handle stays until explicitly cleared
- * (so late SSE subscribers can still replay).
+ * When a run completes, its handle stays until the host calls `clear`
+ * (so late SSE subscribers can still replay). After `RUN_HANDLE_TTL_MS`,
+ * a late events subscription is 404 — the ledger is the durable truth.
  * cancel() aborts the run's AbortSignal so in-flight model/tool work stops.
  */
 export class RunManager {

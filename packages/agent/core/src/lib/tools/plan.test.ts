@@ -158,6 +158,24 @@ describe('thread plan mutations', () => {
     expect(planHasOpenWork(plan)).toBe(false);
   });
 
+  it('finalize clears open todos so a locked plan stops nudging', () => {
+    let plan = emptyThreadPlan('t1');
+    plan.todos = [
+      { id: 'a', content: 'Types', status: 'in_progress' },
+      { id: 'b', content: 'Tests', status: 'pending' },
+    ];
+    expect(planHasOpenWork(plan)).toBe(false); // no final yet
+
+    const result = applyPlanAction(plan, { action: 'finalize', text: 'Ship it' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    plan = result.plan;
+
+    expect(plan.final).toBe('Ship it');
+    expect(plan.todos).toEqual([]);
+    expect(planHasOpenWork(plan)).toBe(false);
+  });
+
   it('restores the last plan written at or before the rewind seq', () => {
     const first = emptyThreadPlan('t1');
     first.goal = 'v1';

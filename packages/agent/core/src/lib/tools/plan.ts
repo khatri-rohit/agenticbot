@@ -156,7 +156,12 @@ export function applyPlanAction(
           'finalize needs the complete plan text (goal, locked decisions, files, steps).',
       };
     }
-    return { ok: true, plan: { ...plan, final: text, updatedAt: at } };
+    // finalize locks the plan; todos are execution scratch. Clearing them
+    // prevents planHasOpenWork from nudging forever on a locked plan.
+    return {
+      ok: true,
+      plan: { ...plan, final: text, todos: [], updatedAt: at },
+    };
   }
 
   const text = clip(input.text ?? '', MAX_PLAN_FINAL_CHARS);
