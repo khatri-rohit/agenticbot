@@ -1,4 +1,4 @@
-import type { Message } from '@org/agent-models';
+import type { Message } from '@agenticbot/agent-models';
 
 export type MessageTurn = {
   userMessage: Message;

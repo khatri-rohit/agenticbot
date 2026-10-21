@@ -5,7 +5,7 @@ import type {
   ContextReport,
   ContextReportLayer,
   MessageAttachment,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 import {
   fetchContextEstimate,
   type ComposerOptions,

@@ -8,7 +8,7 @@ import {
   type Snapshot,
   type ThreadPlan,
   type ToolRisk,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
 
 /**

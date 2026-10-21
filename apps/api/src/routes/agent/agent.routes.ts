@@ -12,7 +12,7 @@ import type {
   Thread,
   ThreadKind,
   ThreadPlan,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 import {
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_MEMORY_CAPS,
@@ -21,13 +21,14 @@ import {
   applyPostureToTools,
   imageAttachments,
   isWorkspaceKind,
+  modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
   planHasOpenWork,
   threadMentions,
   type ApprovalDecision,
   type RunPosture,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 import {
   ALL_TOOLS,
   RUN_HANDLE_TTL_MS,
@@ -42,12 +43,11 @@ import {
   getOllamaModelConfig,
   listOllamaModels,
   loadWorkspaceRules,
-  modeForKind,
   packMentionedThread,
   resolveReasoningEffort,
   type MentionedThreadContext,
   type ToolRegistry,
-} from '@org/agent-core';
+} from '@agenticbot/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
@@ -847,11 +847,7 @@ router.post('/run/:runId/cancel', (req: Request, res: Response) => {
 });
 
 function parseApprovalDecision(value: unknown): ApprovalDecision | null {
-  if (
-    value === 'approved' ||
-    value === 'denied' ||
-    value === 'approved_for_run'
-  ) {
+  if (value === 'approved' || value === 'denied') {
     return value;
   }
   return null;
@@ -859,7 +855,7 @@ function parseApprovalDecision(value: unknown): ApprovalDecision | null {
 
 /**
  * POST /api/agent/run/:runId/approval
- * Resolve a paused approval. The run stays running until the loop continues.
+ * Resolve an ask_user pause. The run stays running until the loop continues.
  */
 router.post('/run/:runId/approval', (req: Request, res: Response) => {
   const { runId } = req.params;
@@ -875,7 +871,7 @@ router.post('/run/:runId/approval', (req: Request, res: Response) => {
     typeof body.optionId === 'string' ? body.optionId.trim() : undefined;
   if (!approvalId || !decision) {
     return res.status(400).json({
-      error: 'approvalId and decision (approved | denied | approved_for_run) are required',
+      error: 'approvalId and decision (approved | denied) are required',
     });
   }
   const result = runManager.resolveApproval(

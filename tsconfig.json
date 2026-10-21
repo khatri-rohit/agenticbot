@@ -7,22 +7,16 @@
       "path": "./apps/api"
     },
     {
-      "path": "./apps/web-e2e"
-    },
-    {
       "path": "./apps/web"
     },
     {
       "path": "./apps/agent"
     },
     {
-      "path": "./packages/agent/models"
+      "path": "./packages/agent-models"
     },
     {
-      "path": "./packages/agent/core"
-    },
-    {
-      "path": "./packages/logger"
+      "path": "./packages/agent-core"
     }
   ]
 }

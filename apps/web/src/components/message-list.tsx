@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { Message } from '@org/agent-models';
+import type { Message } from '@agenticbot/agent-models';
 import type {
   ChatState,
   CompactionNotice,
@@ -298,16 +298,7 @@ export function MessageList({
                       hasStreamingText={Boolean(streaming?.content)}
                       compacting={compactionNotice?.status === 'running'}
                       waitingForApproval={
-                        /*
-                         * IMPORTANT: Allow/Deny exec-approval status.
-                         * Temporarily forced off so file and command tools
-                         * run without a pause. Do not delete the original
-                         * check — it must stay in the tree, commented, until
-                         * the Allow/Deny system is restored.
-                         *
-                         * chatState.pendingApprovals.length > 0
-                         */
-                        false
+                        chatState.pendingApprovals.length > 0
                       }
                       waitingForChoice={
                         chatState.pendingChoices.length > 0
@@ -368,7 +359,7 @@ function TurnStatusLine({
   } else if (waitingForChoice) {
     label = 'Waiting for a choice…';
   } else if (waitingForApproval) {
-    label = 'Waiting for approval…';
+    label = 'Waiting for your answer…';
   } else if (running) {
     label = `${running.toolName}…`;
   } else if (toolActivity.length > 0 && !hasStreamingText) {

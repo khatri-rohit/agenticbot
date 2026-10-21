@@ -18,7 +18,7 @@ import {
   touchRecentThread,
 } from '@/features/agent/store/recent-threads-store';
 import { setWorkspaceRoot } from '@/features/agent/store/space-store';
-import { isWorkspaceKind } from '@org/agent-models';
+import { isWorkspaceKind } from '@agenticbot/agent-models';
 
 type SwitcherEntry = {
   id: string;

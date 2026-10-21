@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@org/agent-models';
+import type { AgentEvent } from '@agenticbot/agent-models';
 
 const SOUND_KEY = 'agenticbot:alerts-sound';
 const NOTIFY_KEY = 'agenticbot:alerts-notify';
@@ -249,7 +249,7 @@ function notificationCopy(
   }
   if (event.type === 'approval.requested') {
     return {
-      title: 'Approval needed',
+      title: 'Answer needed',
       body: clip(event.summary),
       tag: `attention-${event.approvalId}`,
     };

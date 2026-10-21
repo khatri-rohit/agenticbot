@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { MessageAttachment } from '@org/agent-models';
+import type { MessageAttachment } from '@agenticbot/agent-models';
 import { ChatInput } from '../components/chat-input';
 import { ChatShell } from '../components/chat-shell';
 import {

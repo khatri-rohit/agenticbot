@@ -1,15 +1,19 @@
 {
-  "name": "@org/source",
+  "name": "@agenticbot/source",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "dev:api": "npx nx run @agenticbot/api:serve",
+    "dev:web": "npx nx run @agenticbot/web:dev",
+    "typecheck": "npx nx run-many -t typecheck",
+    "build": "npx nx run-many -t build"
+  },
   "private": true,
   "dependencies": {
     "express": "^4.21.2",
     "next": "~16.1.6",
     "react": "19.0.0",
-    "react-dom": "19.0.0",
-    "react-router-dom": "6.30.3"
+    "react-dom": "19.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.14.5",
@@ -70,7 +74,6 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/agent/*",
-    "packages/logger"
+    "packages/*"
   ]
 }

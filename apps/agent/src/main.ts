@@ -1,13 +1,14 @@
 import 'dotenv/config';
 import path from 'node:path';
 
-import type { AgentEvent, ModeName, RunPosture } from '@org/agent-models';
+import type { AgentEvent, ModeName, RunPosture } from '@agenticbot/agent-models';
 import {
   applyPostureToTools,
+  modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
   planHasOpenWork,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 import {
   runLoop,
   streamModelTurn,
@@ -19,8 +20,7 @@ import {
   createPlanTools,
   loadWorkspaceRules,
   type ModelCallFn,
-  modeForKind,
-} from '@org/agent-core';
+} from '@agenticbot/agent-core';
 
 
 function parseHarnessArgs(argv: string[]): {
@@ -141,12 +141,11 @@ async function main() {
       ...(workspaceRoot ? { workspaceRoot } : {}),
       approve: async (request) => {
         const first = request.options?.[0];
-        if (first) {
-          console.log(`[auto-approve] ${request.toolName}: ${request.summary} → ${first.label}`);
-          return { optionId: first.id };
+        if (!first) {
+          throw new Error('ask_user requires options');
         }
-        console.log(`[auto-approve] ${request.toolName}: ${request.summary}`);
-        return {};
+        console.log(`[auto-approve] ${request.toolName}: ${request.summary} → ${first.label}`);
+        return { optionId: first.id };
       },
       offerChoice: async (request) => {
         const first = request.options[0];

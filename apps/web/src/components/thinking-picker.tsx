@@ -1,7 +1,7 @@
 'use client';
 
 import { Brain, ChevronDown } from 'lucide-react';
-import type { OllamaThinkingConfig, ThinkingValue } from '@org/agent-models';
+import type { OllamaThinkingConfig, ThinkingValue } from '@agenticbot/agent-models';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,

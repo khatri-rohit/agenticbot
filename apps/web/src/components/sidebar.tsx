@@ -17,7 +17,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
-import { isWorkspaceKind, type Thread } from '@org/agent-models';
+import { isWorkspaceKind, type Thread } from '@agenticbot/agent-models';
 import {
   folderNameFromRoot,
   reorderWorkspaces,
@@ -575,7 +575,7 @@ function OpenFolderButton({ className }: { className?: string }) {
       toastError(
         error instanceof Error
           ? error.message
-          : 'Could not open the folder picker. The dialog runs on the API host — start @org/api on this machine and try again.',
+          : 'Could not open the folder picker. The dialog runs on the API host — start @agenticbot/api on this machine and try again.',
         'Folder picker failed',
       );
     } finally {

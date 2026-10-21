@@ -1,4 +1,4 @@
-import { HOME_MODE } from '@org/agent-models';
+import { HOME_MODE } from '@agenticbot/agent-models';
 import {
   runLoop,
   createStreamModelCall,
@@ -6,7 +6,7 @@ import {
   createToolRegistry,
   ALL_TOOLS,
   type TraceEvent,
-} from '@org/agent-core';
+} from '@agenticbot/agent-core';
 import { formatReport, scoreScenario, type ScenarioRunInput } from './metrics';
 import { EVAL_SCENARIOS } from './scenarios';
 

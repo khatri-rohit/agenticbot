@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 
-import { createLogger, createHttpLogger } from '@org/logger';
+import { createLogger, createHttpLogger } from './lib/logger';
 import { agentRouter } from './routes/agent/agent.routes';
 import { voiceRouter } from './routes/voice/voice.routes';
 
@@ -28,7 +28,7 @@ app.use(
 app.use(express.json({ limit: '25mb' }));
 
 // Request-scoped structured logging: stamps x-request-id, logs each request in/out.
-// SSE event streams and OPTIONS preflight are skipped (see @org/logger/http).
+// SSE event streams and OPTIONS preflight are skipped (see createHttpLogger).
 app.use(createHttpLogger(logger));
 
 // Agent endpoints

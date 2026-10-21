@@ -22,13 +22,13 @@ import type {
   ContextReport,
   MessageAttachment,
   RunPosture,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 import {
   MAX_THREAD_MENTIONS,
   imageAttachments,
   isThreadMention,
   threadMentions,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 import {
   fetchLocalOllamaModels,
   type ComposerOptions,

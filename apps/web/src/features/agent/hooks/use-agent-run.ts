@@ -13,7 +13,7 @@ import {
   type Message,
   type MessageAttachment,
   type ThreadKind,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 import { toastError } from '@/hooks/use-toast';
 import {
   modelSupportsVision,

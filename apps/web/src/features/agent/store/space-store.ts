@@ -5,7 +5,7 @@ import {
   normalizeWorkspaceRoot,
   sameWorkspaceRoot,
   workspaceRootKey,
-} from '@org/agent-models';
+} from '@agenticbot/agent-models';
 
 export type SpaceState = {
   /** Composer binding for new chats. Null = Home (no folder). */
