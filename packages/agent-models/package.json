@@ -1,5 +1,5 @@
 {
-  "name": "@agenticbot/agent-models",
+  "name": "@desk/agent-models",
   "version": "0.0.1",
   "private": true,
   "main": "./dist/index.js",
@@ -7,7 +7,7 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
-      "@agenticbot/source": "./src/index.ts",
+      "@desk/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"

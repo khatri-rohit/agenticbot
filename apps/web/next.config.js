@@ -3,7 +3,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: [
-    '@agenticbot/agent-models',
+    '@desk/agent-models',
     'streamdown',
     '@streamdown/code',
     '@streamdown/mermaid',

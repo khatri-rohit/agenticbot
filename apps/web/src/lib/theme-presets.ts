@@ -1,4 +1,4 @@
-export const THEME_STORAGE_KEY = 'agenticbot-ui-theme';
+export const THEME_STORAGE_KEY = 'desk-ui-theme';
 
 export type ThemeId = 'studio' | 'midnight' | 'ember' | 'paper';
 

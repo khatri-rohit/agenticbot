@@ -1,7 +1,7 @@
 /**
  * Internal execution trace events (console / eval harness).
  *
- * Distinct from AgentEvent (@agenticbot/agent-models), which is the product protocol
+ * Distinct from AgentEvent (@desk/agent-models), which is the product protocol
  * for SSE and UI. Both may be emitted during a run.
  */
 export type TraceEvent =

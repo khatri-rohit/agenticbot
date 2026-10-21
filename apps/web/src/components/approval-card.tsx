@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { MessageCircleQuestion } from 'lucide-react';
-import type { ApprovalDecision } from '@agenticbot/agent-models';
+import type { ApprovalDecision } from '@desk/agent-models';
 import { Button } from '@/components/ui/button';
 import type { PendingApproval } from '../features/agent/store/chat-store';
 

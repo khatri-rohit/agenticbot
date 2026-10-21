@@ -6,7 +6,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import type { ContextReportLayer } from '@agenticbot/agent-models';
+import type { ContextReportLayer } from '@desk/agent-models';
 import type { ContextMeterSource } from '@/features/agent/hooks/use-context-meter';
 
 export function ContextUsage({

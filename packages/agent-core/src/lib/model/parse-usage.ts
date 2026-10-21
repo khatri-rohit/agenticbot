@@ -1,4 +1,4 @@
-import type { TokenUsage } from '@agenticbot/agent-models';
+import type { TokenUsage } from '@desk/agent-models';
 
 type UsageLike = {
   prompt_tokens?: number | null;

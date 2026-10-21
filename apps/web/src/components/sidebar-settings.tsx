@@ -11,7 +11,7 @@ import {
   UserRound,
   Volume2,
 } from 'lucide-react';
-import { DEFAULT_MEMORY_CAPS, type MemoryOp } from '@agenticbot/agent-models';
+import { DEFAULT_MEMORY_CAPS, type MemoryOp } from '@desk/agent-models';
 import { useTheme } from '@/components/theme-provider';
 import {
   fetchMemory,

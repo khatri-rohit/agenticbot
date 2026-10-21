@@ -1,4 +1,4 @@
-import type { ModeName } from '@agenticbot/agent-models';
+import type { ModeName } from '@desk/agent-models';
 
 /**
  * Frozen agent identity (tone, posture, non-negotiables).

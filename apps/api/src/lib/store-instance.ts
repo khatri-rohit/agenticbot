@@ -1,11 +1,11 @@
 import os from 'node:os';
 
-import { resolveAgenticbotHome } from './agenticbot-home.js';
+import { resolveDeskHome } from './desk-home.js';
 import { MemoryStore } from './memory-store.js';
 import { openThreadStore, type ThreadStore } from './thread-store.js';
 
 function home(): string {
-  return resolveAgenticbotHome({
+  return resolveDeskHome({
     env: process.env,
     homedir: os.homedir(),
   });

@@ -3,7 +3,7 @@
 /** Synthetic MRU id for the home composer (new chat / draft). */
 export const HOME_RECENT_ID = '__home__';
 
-const STORAGE_KEY = 'agenticbot:recentThreads';
+const STORAGE_KEY = 'desk:recentThreads';
 export const MAX_RECENT_THREADS = 10;
 
 let ids: string[] = [];

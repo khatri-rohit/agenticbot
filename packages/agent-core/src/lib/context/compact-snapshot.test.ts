@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CONTEXT_BUDGET, type LedgerEnvelope } from '@agenticbot/agent-models';
+import { DEFAULT_CONTEXT_BUDGET, type LedgerEnvelope } from '@desk/agent-models';
 
 import {
   buildExtractiveSnapshot,
@@ -134,7 +134,7 @@ describe('compact snapshot', () => {
         {
           threadId: 'other',
           title: 'Fix login',
-          sourceLabel: 'agenticbot',
+          sourceLabel: 'desk',
           text: 'User asked to fix auth.',
         },
       ],

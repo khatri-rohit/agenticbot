@@ -2,7 +2,7 @@ import {
   ChoiceSkipped,
   MAX_CHOICE_OPTIONS,
   type ChoiceOption,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 
 import type { Tool } from './type';
 

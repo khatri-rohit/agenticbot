@@ -403,9 +403,9 @@ function formatModelSize(bytes: number): string {
   return `${Math.max(1, Math.round(mib))} MB on disk`;
 }
 
-const MODEL_STORAGE_KEY = 'agenticbot:composerModel';
-const LOCAL_MODEL_STORAGE_KEY = 'agenticbot:composerLocalModel';
-const LOCAL_MODE_KEY = 'agenticbot:composerLocal';
+const MODEL_STORAGE_KEY = 'desk:composerModel';
+const LOCAL_MODEL_STORAGE_KEY = 'desk:composerLocalModel';
+const LOCAL_MODE_KEY = 'desk:composerLocal';
 
 export function readStoredComposerLocal(): boolean {
   if (typeof window === 'undefined') return false;

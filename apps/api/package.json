@@ -1,5 +1,5 @@
 {
-  "name": "@agenticbot/api",
+  "name": "@desk/api",
   "version": "0.0.1",
   "private": true,
   "nx": {
@@ -85,15 +85,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@agenticbot/api:build",
+          "buildTarget": "@desk/api:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@agenticbot/api:build:development"
+            "buildTarget": "@desk/api:build:development"
           },
           "production": {
-            "buildTarget": "@agenticbot/api:build:production"
+            "buildTarget": "@desk/api:build:production"
           }
         }
       },
@@ -124,8 +124,8 @@
     ]
   },
   "dependencies": {
-    "@agenticbot/agent-core": "*",
-    "@agenticbot/agent-models": "*",
+    "@desk/agent-core": "*",
+    "@desk/agent-models": "*",
     "cors": "^2.8.6",
     "express": "^4.21.2",
     "pino": "^9.5.0",

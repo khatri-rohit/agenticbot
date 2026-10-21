@@ -12,7 +12,7 @@ import type {
   Thread,
   ThreadKind,
   ThreadPlan,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 import {
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_MEMORY_CAPS,
@@ -28,7 +28,7 @@ import {
   threadMentions,
   type ApprovalDecision,
   type RunPosture,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 import {
   ALL_TOOLS,
   RUN_HANDLE_TTL_MS,
@@ -47,7 +47,7 @@ import {
   resolveReasoningEffort,
   type MentionedThreadContext,
   type ToolRegistry,
-} from '@agenticbot/agent-core';
+} from '@desk/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';

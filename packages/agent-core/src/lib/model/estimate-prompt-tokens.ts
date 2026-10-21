@@ -1,7 +1,7 @@
 import {
   CHARS_PER_TOKEN,
   ESTIMATED_TOKENS_PER_IMAGE,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 

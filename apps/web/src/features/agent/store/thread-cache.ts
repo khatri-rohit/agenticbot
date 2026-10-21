@@ -1,4 +1,4 @@
-import type { Thread } from '@agenticbot/agent-models';
+import type { Thread } from '@desk/agent-models';
 import { listThreads } from '../api/thread-client';
 
 type Listener = () => void;

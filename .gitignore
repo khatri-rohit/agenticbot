@@ -71,7 +71,7 @@ docker-compose.override.yml
 !.cursor/skills/
 !.cursor/skills/**
 
-# Local agent home (dev AGENTICBOT_HOME)
+# Local agent home (dev DESK_HOME)
 .local/
 .github/agents
 .github/prompts

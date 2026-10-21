@@ -5,7 +5,7 @@ import {
   normalizeWorkspaceRoot,
   sameWorkspaceRoot,
   workspaceRootKey,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 
 export type SpaceState = {
   /** Composer binding for new chats. Null = Home (no folder). */
@@ -24,10 +24,10 @@ export type SpaceState = {
   collapsedFolders: string[];
 };
 
-const ROOT_KEY = 'agenticbot:workspaceRoot';
-const FOLDERS_KEY = 'agenticbot:recentFolders';
-const ORDER_KEY = 'agenticbot:workspaceOrder';
-const COLLAPSED_KEY = 'agenticbot:collapsedFolders';
+const ROOT_KEY = 'desk:workspaceRoot';
+const FOLDERS_KEY = 'desk:recentFolders';
+const ORDER_KEY = 'desk:workspaceOrder';
+const COLLAPSED_KEY = 'desk:collapsedFolders';
 
 type Listener = () => void;
 const listeners = new Set<Listener>();

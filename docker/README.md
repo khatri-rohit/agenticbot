@@ -1,4 +1,4 @@
-# Docker infrastructure (agenticbot)
+# Docker infrastructure (desk)
 
 Compose stack for optional **Speaches** (STT: **faster-distil-whisper-large-v3**). Chat titles no longer use Redis.
 
@@ -31,7 +31,7 @@ Committed defaults use a **Docker named volume** (`speaches-hf-cache`). Works on
 Optional Windows D: bind for Speaches only (never Ollama):
 
 ```env
-SPEACHES_HF_CACHE_DIR=D:/agenticbot/docker-data/speaches/hf-hub
+SPEACHES_HF_CACHE_DIR=D:/desk/docker-data/speaches/hf-hub
 ```
 
 Compose rule: a **bare name** → named volume; an **absolute path** → host bind mount.
@@ -54,8 +54,8 @@ Volume **path stays the same**; only remove old model dirs inside the cache:
 docker compose --env-file .env.docker down
 
 # Host bind example (Windows D:):
-# rm -rf "D:/agenticbot/docker-data/speaches/hf-hub/models--Systran--faster-whisper-medium"
-# rm -rf "D:/agenticbot/docker-data/speaches/hf-hub/models--Systran--faster-whisper-small"
+# rm -rf "D:/desk/docker-data/speaches/hf-hub/models--Systran--faster-whisper-medium"
+# rm -rf "D:/desk/docker-data/speaches/hf-hub/models--Systran--faster-whisper-small"
 
 docker compose --env-file .env.docker up -d
 curl -s http://127.0.0.1:8000/health
@@ -67,7 +67,7 @@ curl -X POST "http://127.0.0.1:8000/v1/models/Systran%2Ffaster-distil-whisper-la
 ## Optional: Windows D: bind (Speaches only)
 
 ```powershell
-New-Item -ItemType Directory -Force -Path D:\agenticbot\docker-data\speaches\hf-hub
+New-Item -ItemType Directory -Force -Path D:\desk\docker-data\speaches\hf-hub
 ```
 
 Do **not** set Speaches paths to `D:\ollama\models`.
@@ -142,7 +142,7 @@ NEXT_PUBLIC_VOICE_STT_PROVIDER=speaches
 SPEACHES_BASE_URL=http://127.0.0.1:8000
 SPEACHES_STT_MODEL=Systran/faster-distil-whisper-large-v3
 VOICE_STT_LANGUAGE=en
-VOICE_STT_PROMPT=agenticbot, Speaches, Nx monorepo, Ollama, agent-core, RunManager, ChatInput
+VOICE_STT_PROMPT=desk, Speaches, Nx monorepo, Ollama, agent-core, RunManager, ChatInput
 # Keep chat on cloud — do not point OLLAMA_BASE_URL at Compose
 ```
 
@@ -162,7 +162,7 @@ curl -X POST "http://127.0.0.1:8000/v1/models/Systran%2Ffaster-distil-whisper-la
 
 ```bash
 docker compose logs -f speaches
-docker stats agenticbot-speaches --no-stream
+docker stats desk-speaches --no-stream
 docker compose down
 ```
 

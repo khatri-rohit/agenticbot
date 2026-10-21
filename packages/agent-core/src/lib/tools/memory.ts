@@ -1,6 +1,6 @@
-import type { ProposedMemoryOp, ToolContext } from '@agenticbot/agent-models';
-import { DEFAULT_MEMORY_CAPS } from '@agenticbot/agent-models';
-import type { MemoryFiles } from '@agenticbot/agent-models';
+import type { ProposedMemoryOp, ToolContext } from '@desk/agent-models';
+import { DEFAULT_MEMORY_CAPS } from '@desk/agent-models';
+import type { MemoryFiles } from '@desk/agent-models';
 
 import { gateMemoryOps } from '../memory/gate';
 import type { Tool } from './type';

@@ -10,7 +10,7 @@ import type {
   OllamaThinkingConfig,
   ThinkingMode,
   ThinkingValue,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 
 import { nativeOllamaBaseUrl } from './client';
 

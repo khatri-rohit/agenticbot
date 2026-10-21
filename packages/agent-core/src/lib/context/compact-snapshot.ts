@@ -1,4 +1,4 @@
-import type { LedgerEnvelope, Snapshot } from '@agenticbot/agent-models';
+import type { LedgerEnvelope, Snapshot } from '@desk/agent-models';
 
 const BRIEF_MAX = 1_200;
 const SUMMARY_MAX = 8_000;

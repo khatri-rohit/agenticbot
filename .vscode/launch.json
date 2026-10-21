@@ -4,9 +4,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @agenticbot/api with Nx",
+      "name": "Debug @desk/api with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@agenticbot/api"],
+      "runtimeArgs": ["nx", "serve", "@desk/api"],
       "env": {
         "NODE_OPTIONS": "--inspect=9229"
       },
@@ -22,9 +22,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @agenticbot/agent with Nx",
+      "name": "Debug @desk/agent with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@agenticbot/agent"],
+      "runtimeArgs": ["nx", "serve", "@desk/agent"],
       "env": {
         "NODE_OPTIONS": "--inspect=9230"
       },

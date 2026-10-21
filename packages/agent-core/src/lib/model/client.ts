@@ -1,5 +1,5 @@
 import { OpenAI } from 'openai';
-import type { OllamaEndpoint } from '@agenticbot/agent-models';
+import type { OllamaEndpoint } from '@desk/agent-models';
 
 /**
  * OpenAI-compatible clients for Ollama cloud vs local daemon.

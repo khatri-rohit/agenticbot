@@ -22,7 +22,7 @@ describe('edit_file unique span', () => {
 
   it('rejects a span that is not unique and does not write', async () => {
     expect(editFile).toBeDefined();
-    const root = await mkdtemp(path.join(os.tmpdir(), 'agenticbot-edit-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'desk-edit-'));
     const rel = 'dup.ts';
     const original = 'const x = 1;\nconst x = 1;\n';
     await writeFile(path.join(root, rel), original, 'utf8');
@@ -36,7 +36,7 @@ describe('edit_file unique span', () => {
   });
 
   it('rejects a span that is missing', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'agenticbot-edit-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'desk-edit-'));
     await writeFile(path.join(root, 'a.ts'), 'hello\n', 'utf8');
     const result = await editFile?.execute(
       { path: 'a.ts', oldText: 'missing', newText: 'nope' },

@@ -1,10 +1,10 @@
 {
-  "name": "@agenticbot/source",
+  "name": "@desk/source",
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
-    "dev:api": "npx nx run @agenticbot/api:serve",
-    "dev:web": "npx nx run @agenticbot/web:dev",
+    "dev:api": "npx nx run @desk/api:serve",
+    "dev:web": "npx nx run @desk/web:dev",
     "typecheck": "npx nx run-many -t typecheck",
     "build": "npx nx run-many -t build"
   },

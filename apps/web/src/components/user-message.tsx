@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Message } from '@agenticbot/agent-models';
-import { imageAttachments, threadMentions } from '@agenticbot/agent-models';
+import type { Message } from '@desk/agent-models';
+import { imageAttachments, threadMentions } from '@desk/agent-models';
 import { ThreadMentionChip } from '@/components/thread-mention-picker';
 import { MessageActions } from '@/components/message-actions';
 import { Button } from '@/components/ui/button';

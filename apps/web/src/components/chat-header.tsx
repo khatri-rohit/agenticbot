@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isWorkspaceKind, type Thread } from '@agenticbot/agent-models';
+import { isWorkspaceKind, type Thread } from '@desk/agent-models';
 import { clampChatTitle } from '@/lib/thread-title';
 import { fetchThread } from '../features/agent/api/thread-client';
 import {

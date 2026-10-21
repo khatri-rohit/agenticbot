@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentEventWithoutSeq } from '@agenticbot/agent-models';
+import type { AgentEvent, AgentEventWithoutSeq } from '@desk/agent-models';
 
 import type { EventSubscriber } from './types';
 

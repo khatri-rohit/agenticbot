@@ -1,8 +1,8 @@
-import type { AgentEvent } from '@agenticbot/agent-models';
+import type { AgentEvent } from '@desk/agent-models';
 
-const SOUND_KEY = 'agenticbot:alerts-sound';
-const NOTIFY_KEY = 'agenticbot:alerts-notify';
-const SEQ_KEY_PREFIX = 'agenticbot:alerts-seq:';
+const SOUND_KEY = 'desk:alerts-sound';
+const NOTIFY_KEY = 'desk:alerts-notify';
+const SEQ_KEY_PREFIX = 'desk:alerts-seq:';
 const CANCELLED_ERROR = 'Run cancelled';
 const BODY_MAX = 140;
 

@@ -3,7 +3,7 @@ import {
   applyPostureToTools,
   isAskStrippedTool,
   normalizeRunPosture,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 
 import { ALL_TOOLS, createToolRegistry } from './registry';
 

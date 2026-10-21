@@ -53,7 +53,7 @@ const WINDOWS_FOLDER_PICKER_CS = `
 using System;
 using System.Runtime.InteropServices;
 
-public static class AgenticbotFolderPicker {
+public static class DeskFolderPicker {
   [ComImport]
   [Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7")]
   class FileOpenDialogRCW { }
@@ -148,7 +148,7 @@ function buildWindowsModernFolderScript(initialDir?: string): string {
     `Add-Type -TypeDefinition @'`,
     WINDOWS_FOLDER_PICKER_CS,
     `'@`,
-    `$path = [AgenticbotFolderPicker]::Pick('Select a project folder', '${initial}')`,
+    `$path = [DeskFolderPicker]::Pick('Select a project folder', '${initial}')`,
     `if ([string]::IsNullOrWhiteSpace($path)) { exit 2 }`,
     `[Console]::Out.Write($path.Trim())`,
     `exit 0`,
@@ -156,7 +156,7 @@ function buildWindowsModernFolderScript(initialDir?: string): string {
 }
 
 async function runPowerShellFile(script: string): Promise<PickFolderResult> {
-  const scriptPath = path.join(tmpdir(), `agenticbot-pick-${randomUUID()}.ps1`);
+  const scriptPath = path.join(tmpdir(), `desk-pick-${randomUUID()}.ps1`);
   await writeFile(scriptPath, `\uFEFF${script}\n`, 'utf8');
   try {
     const { stdout } = await execFileAsync(

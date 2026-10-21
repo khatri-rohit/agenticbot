@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { Message } from '@agenticbot/agent-models';
+import type { Message } from '@desk/agent-models';
 import type {
   ChatState,
   CompactionNotice,

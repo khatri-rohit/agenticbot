@@ -1,6 +1,6 @@
-// @agenticbot/agent-core — host-agnostic agent runtime.
+// @desk/agent-core — host-agnostic agent runtime.
 // Pure library: no HTTP, no DOM, no database.
-// Domain types and modes live in @agenticbot/agent-models — import them from there.
+// Domain types and modes live in @desk/agent-models — import them from there.
 
 export { listSkills } from './lib/tools/skills';
 

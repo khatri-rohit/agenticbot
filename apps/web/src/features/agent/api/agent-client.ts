@@ -12,14 +12,14 @@ import type {
   RunPosture,
   StartRunRequest,
   ThinkingValue,
-} from '@agenticbot/agent-models';
-import { normalizeRunPosture } from '@agenticbot/agent-models';
+} from '@desk/agent-models';
+import { normalizeRunPosture } from '@desk/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
 /* ---------- Pending message (cross-route handoff) ---------- */
 
-const PENDING_MSG_KEY = 'agenticbot:pendingMessage';
+const PENDING_MSG_KEY = 'desk:pendingMessage';
 
 export type ComposerOptions = {
   webSearch: boolean;

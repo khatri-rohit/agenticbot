@@ -10,7 +10,7 @@ import {
   type ApprovalResult,
   type ChoiceRequest,
   type ChoiceResult,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 import { runLoop } from '../loop/loop';
 import { EventEmitter } from '../events/emitter';
 import type { EventSubscriber } from '../events/types';

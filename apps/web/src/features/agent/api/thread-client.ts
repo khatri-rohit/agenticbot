@@ -4,7 +4,7 @@ import type {
   Thread,
   ThreadKind,
   ThreadPlan,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
@@ -31,7 +31,7 @@ export async function pickWorkspaceFolder(
     });
   } catch {
     throw new Error(
-      `Cannot reach the API at ${API_BASE}. Start it with nx serve @agenticbot/api, then try again.`,
+      `Cannot reach the API at ${API_BASE}. Start it with nx serve @desk/api, then try again.`,
     );
   }
   if (res.status === 204) return null;

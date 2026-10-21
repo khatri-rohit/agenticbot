@@ -22,13 +22,13 @@ import type {
   ContextReport,
   MessageAttachment,
   RunPosture,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 import {
   MAX_THREAD_MENTIONS,
   imageAttachments,
   isThreadMention,
   threadMentions,
-} from '@agenticbot/agent-models';
+} from '@desk/agent-models';
 import {
   fetchLocalOllamaModels,
   type ComposerOptions,
@@ -110,7 +110,7 @@ function isPersistedAttachment(value: unknown): value is MessageAttachment {
 }
 
 function draftStorageKey(scope: string): string {
-  return `agenticbot:composerDraft:${scope}`;
+  return `desk:composerDraft:${scope}`;
 }
 
 function loadComposerDraft(scope: string): ComposerDraft | null {

@@ -1,11 +1,11 @@
 ---
-description: Agenticbot monorepo context, agent harness boundaries, and senior engineering bar
+description: Desk monorepo context, agent harness boundaries, and senior engineering bar
 alwaysApply: true
 ---
 
-# Agenticbot — project system context
+# Desk — project system context
 
-You are working on **agenticbot**: an Nx monorepo building a **host-agnostic agent runtime** (`@agenticbot/agent-core`), an **HTTP/SSE API** (`apps/api`), a **Next.js chat UI** (`apps/web`), and a **CLI harness** (`apps/agent`). Treat this as production agent infrastructure—not a demo chatbot.
+You are working on **Desk**: an Nx monorepo building a **host-agnostic agent runtime** (`@desk/agent-core`), an **HTTP/SSE API** (`apps/api`), a **Next.js chat UI** (`apps/web`), and a **CLI harness** (`apps/agent`). Treat this as production agent infrastructure—not a demo chatbot.
 
 ## Before you change code
 
@@ -15,13 +15,13 @@ You are working on **agenticbot**: an Nx monorepo building a **host-agnostic age
 
 ## Architecture map (ownership)
 
-| Layer          | Package / app              | Responsibility                                                                                  |
-| -------------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
-| Domain types   | `@agenticbot/agent-models` | `Run`, `Thread`, `AgentEvent`, modes (`HOME_MODE` / `WORKSPACE_MODE`), chat shapes              |
-| Runtime (pure) | `@agenticbot/agent-core`   | `runLoop`, tools registry, model stream, `EventEmitter`, `RunManager` — **no HTTP, DOM, or DB** |
-| Transport      | `apps/api`                 | Express routes under `/api/agent`, wires core + env secrets                                     |
-| UI             | `apps/web`                 | Chat store, `use-agent-run`, consumes SSE events                                                |
-| Local eval     | `apps/agent`               | Thin script calling core directly (trace)                                                       |
+| Layer          | Package / app        | Responsibility                                                                                  |
+| -------------- | -------------------- | ----------------------------------------------------------------------------------------------- |
+| Domain types   | `@desk/agent-models` | `Run`, `Thread`, `AgentEvent`, modes (`HOME_MODE` / `WORKSPACE_MODE`), chat shapes              |
+| Runtime (pure) | `@desk/agent-core`   | `runLoop`, tools registry, model stream, `EventEmitter`, `RunManager` — **no HTTP, DOM, or DB** |
+| Transport      | `apps/api`           | Express routes under `/api/agent`, wires core + env secrets                                     |
+| UI             | `apps/web`           | Chat store, `use-agent-run`, consumes SSE events                                                |
+| Local eval     | `apps/agent`         | Thin script calling core directly (trace)                                                       |
 
 **Boundary rule:** Loop correctness, tool execution, limits, and event sequencing belong in **agent-core**. HTTP status codes, CORS, and client UX belong in **api** / **web**. Never leak Express or React into core.
 

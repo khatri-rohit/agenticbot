@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ListChecks } from 'lucide-react';
-import { MAX_CHOICE_TEXT_CHARS } from '@agenticbot/agent-models';
+import { MAX_CHOICE_TEXT_CHARS } from '@desk/agent-models';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { PendingChoice } from '../features/agent/store/chat-store';

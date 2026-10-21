@@ -1,4 +1,4 @@
-import type { ModeName, RunPosture } from '@agenticbot/agent-models';
+import type { ModeName, RunPosture } from '@desk/agent-models';
 
 import { listSkills } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
