@@ -1,8 +1,8 @@
-import type { AgentEvent } from '@org/agent-models';
+import type { AgentEvent } from '@desk/agent-models';
 
-const SOUND_KEY = 'agenticbot:alerts-sound';
-const NOTIFY_KEY = 'agenticbot:alerts-notify';
-const SEQ_KEY_PREFIX = 'agenticbot:alerts-seq:';
+const SOUND_KEY = 'desk:alerts-sound';
+const NOTIFY_KEY = 'desk:alerts-notify';
+const SEQ_KEY_PREFIX = 'desk:alerts-seq:';
 const CANCELLED_ERROR = 'Run cancelled';
 const BODY_MAX = 140;
 
@@ -17,6 +17,11 @@ export function readSoundPref(): boolean {
 
 export function writeSoundPref(enabled: boolean): void {
   writeFlag(SOUND_KEY, enabled);
+}
+
+/** Play the finished chime so settings can confirm the sound. */
+export function previewAlertSound(): void {
+  playTone('finished_ok');
 }
 
 export function readNotifyPref(): boolean {
@@ -116,28 +121,76 @@ function playTone(kind: RunAlertKind): void {
   const start = () => {
     try {
       const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(toneHz(kind), now);
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.12, now + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + toneSeconds(kind));
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + toneSeconds(kind) + 0.02);
+      for (const note of chimeNotes(kind)) {
+        scheduleBell(ctx, now + note.delay, note.hz, note.seconds);
+      }
     } catch {
       /* context closed or node failed */
     }
   };
   if (ctx.state === 'suspended') {
-    void ctx.resume().then(start).catch(() => {
-      /* autoplay blocked until a later gesture */
-    });
+    void ctx
+      .resume()
+      .then(start)
+      .catch(() => {
+        /* autoplay blocked until a later gesture */
+      });
     return;
   }
   start();
+}
+
+/** Two-note interval: rising ping, resolving fifth, or falling minor. */
+function chimeNotes(
+  kind: RunAlertKind,
+): ReadonlyArray<{ delay: number; hz: number; seconds: number }> {
+  if (kind === 'attention') {
+    return [
+      { delay: 0, hz: 880, seconds: 0.14 },
+      { delay: 0.11, hz: 1318.5, seconds: 0.32 },
+    ];
+  }
+  if (kind === 'finished_ok') {
+    return [
+      { delay: 0, hz: 523.25, seconds: 0.16 },
+      { delay: 0.13, hz: 783.99, seconds: 0.36 },
+    ];
+  }
+  return [
+    { delay: 0, hz: 493.88, seconds: 0.16 },
+    { delay: 0.14, hz: 369.99, seconds: 0.34 },
+  ];
+}
+
+function scheduleBell(
+  ctx: AudioContext,
+  time: number,
+  hz: number,
+  seconds: number,
+): void {
+  const master = ctx.createGain();
+  master.connect(ctx.destination);
+  master.gain.setValueAtTime(0.0001, time);
+  master.gain.exponentialRampToValueAtTime(0.16, time + 0.018);
+  master.gain.exponentialRampToValueAtTime(0.0001, time + seconds);
+
+  const fundamental = ctx.createOscillator();
+  fundamental.type = 'sine';
+  fundamental.frequency.setValueAtTime(hz, time);
+  fundamental.connect(master);
+
+  const overtone = ctx.createOscillator();
+  overtone.type = 'sine';
+  overtone.frequency.setValueAtTime(hz * 2, time);
+  const overtoneGain = ctx.createGain();
+  overtoneGain.gain.setValueAtTime(0.18, time);
+  overtone.connect(overtoneGain);
+  overtoneGain.connect(master);
+
+  fundamental.start(time);
+  overtone.start(time);
+  fundamental.stop(time + seconds + 0.02);
+  overtone.stop(time + seconds + 0.02);
 }
 
 function getAudioContext(): AudioContext | null {
@@ -154,18 +207,6 @@ function getAudioContext(): AudioContext | null {
     return null;
   }
   return audioContext;
-}
-
-function toneHz(kind: RunAlertKind): number {
-  if (kind === 'attention') return 880;
-  if (kind === 'finished_ok') return 523;
-  return 311;
-}
-
-function toneSeconds(kind: RunAlertKind): number {
-  if (kind === 'attention') return 0.18;
-  if (kind === 'finished_ok') return 0.22;
-  return 0.26;
 }
 
 function showBrowserNotification(kind: RunAlertKind, event: AgentEvent): void {
@@ -208,7 +249,7 @@ function notificationCopy(
   }
   if (event.type === 'approval.requested') {
     return {
-      title: 'Approval needed',
+      title: 'Answer needed',
       body: clip(event.summary),
       tag: `attention-${event.approvalId}`,
     };

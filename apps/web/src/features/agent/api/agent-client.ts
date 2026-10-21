@@ -12,17 +12,16 @@ import type {
   RunPosture,
   StartRunRequest,
   ThinkingValue,
-} from '@org/agent-models';
-import { normalizeRunPosture } from '@org/agent-models';
+} from '@desk/agent-models';
+import { normalizeRunPosture } from '@desk/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
 /* ---------- Pending message (cross-route handoff) ---------- */
 
-const PENDING_MSG_KEY = 'agenticbot:pendingMessage';
+const PENDING_MSG_KEY = 'desk:pendingMessage';
 
 export type ComposerOptions = {
-  streaming: boolean;
   webSearch: boolean;
   model: string;
   /** Route chat + discovery to local Ollama daemon. */
@@ -35,7 +34,6 @@ export type ComposerOptions = {
 
 export type PendingMessage = {
   content: string;
-  streaming: boolean;
   webSearch?: boolean;
   model?: string;
   local?: boolean;
@@ -73,7 +71,6 @@ export async function startRun(
   options: {
     message?: { content: string; attachments?: MessageAttachment[] };
     rewindThroughSeq?: number;
-    streaming?: boolean;
     model?: string;
     local?: boolean;
     webSearch?: boolean;
@@ -85,7 +82,6 @@ export async function startRun(
     threadId,
     message: options.message,
     rewindThroughSeq: options.rewindThroughSeq,
-    streaming: options.streaming ?? true,
     model: options.model,
     local: options.local,
     webSearch: options.webSearch,

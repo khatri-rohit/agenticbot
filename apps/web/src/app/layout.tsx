@@ -21,7 +21,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata = {
-  title: 'AgenticBot',
+  title: 'Desk',
   description: 'Home and workspace agent',
 };
 

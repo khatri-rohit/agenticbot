@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { MessageAttachment } from '@org/agent-models';
+import type { MessageAttachment } from '@desk/agent-models';
 import { ChatInput } from '../components/chat-input';
 import { ChatShell } from '../components/chat-shell';
 import {
@@ -23,6 +23,7 @@ import {
 } from '@/lib/ollama-models';
 import {
   folderNameFromRoot,
+  ensureWorkspaceInOrder,
   setWorkspaceRoot,
   useAgentSpace,
 } from '@/features/agent/store/space-store';
@@ -33,7 +34,6 @@ const HOME_DRAFT_SCOPE = '__home__';
 const defaultOptions = (webSearch: boolean): ComposerOptions => {
   const local = readStoredComposerLocal();
   return {
-    streaming: true,
     webSearch,
     local,
     model: readStoredComposerModel(local),
@@ -44,7 +44,7 @@ const defaultOptions = (webSearch: boolean): ComposerOptions => {
 function restoreHomeDraft(content: string, attachments?: MessageAttachment[]) {
   try {
     localStorage.setItem(
-      `agenticbot:composerDraft:${HOME_DRAFT_SCOPE}`,
+      `desk:composerDraft:${HOME_DRAFT_SCOPE}`,
       JSON.stringify({
         content,
         attachments: attachments ?? [],
@@ -95,12 +95,12 @@ export default function HomePage() {
                 ...(bound && workspaceRoot ? { workspaceRoot } : {}),
               });
               if (thread.workspaceRoot) {
+                ensureWorkspaceInOrder(thread.workspaceRoot);
                 setWorkspaceRoot(thread.workspaceRoot);
               }
               await refreshThreads();
               const stashed = stashPendingMessage({
                 content,
-                streaming: options.streaming,
                 webSearch: options.webSearch,
                 model: options.model,
                 local: options.local,

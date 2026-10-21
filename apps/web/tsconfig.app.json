@@ -55,7 +55,7 @@
   ],
   "references": [
     {
-      "path": "../../packages/agent/models/tsconfig.lib.json"
+      "path": "../../packages/agent-models/tsconfig.lib.json"
     }
   ]
 }

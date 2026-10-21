@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
   FolderOpen,
+  GripVertical,
   MoreHorizontal,
   PanelLeft,
   PanelLeftClose,
@@ -16,12 +17,13 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
-import { isWorkspaceKind, type Thread } from '@org/agent-models';
+import { isWorkspaceKind, type Thread } from '@desk/agent-models';
 import {
   folderNameFromRoot,
-  removeRecentFolder,
+  reorderWorkspaces,
   sameWorkspaceRoot,
   setWorkspaceRoot,
+  syncWorkspaceOrder,
   toggleFolderCollapsed,
   useAgentSpace,
 } from '@/features/agent/store/space-store';
@@ -54,6 +56,9 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
+/** First page of threads under Home or a workspace project. */
+const SIDEBAR_THREAD_PAGE = 8;
+
 type SidebarProps = {
   collapsed: boolean;
   onCollapse: () => void;
@@ -66,14 +71,27 @@ type FolderGroup = {
   threads: Thread[];
 };
 
+function sortThreadsByRecency(threads: Thread[]): Thread[] {
+  return [...threads].sort((a, b) => {
+    const pin = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+    if (pin !== 0) return pin;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+}
+
 export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   const threads = useThreads();
   const pathname = usePathname();
   const router = useRouter();
-  const { workspaceRoot, recentFolders, collapsedFolders } = useAgentSpace();
+  const { workspaceRoot, workspaceOrder, collapsedFolders } = useAgentSpace();
+  const [dragRoot, setDragRoot] = useState<string | null>(null);
+  const [dropTargetRoot, setDropTargetRoot] = useState<string | null>(null);
 
   const homeThreads = useMemo(
-    () => (threads ?? []).filter((thread) => !isWorkspaceKind(thread.kind)),
+    () =>
+      sortThreadsByRecency(
+        (threads ?? []).filter((thread) => !isWorkspaceKind(thread.kind)),
+      ),
     [threads],
   );
 
@@ -97,30 +115,43 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
       return group;
     };
 
-    for (const root of recentFolders) ensure(root);
+    // Only folders that already have threads — never seed empty "ghost" projects.
     for (const thread of workspaceThreads) {
       if (!thread.workspaceRoot) continue;
       ensure(thread.workspaceRoot).threads.push(thread);
     }
 
     for (const group of byKey.values()) {
-      group.threads.sort((a, b) => {
-        const pin = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
-        if (pin !== 0) return pin;
-        return b.updatedAt.localeCompare(a.updatedAt);
-      });
+      group.threads = sortThreadsByRecency(group.threads);
     }
 
+    const orderIndex = new Map(
+      workspaceOrder.map((root, index) => [
+        root.replace(/[\\/]+$/, '').toLowerCase(),
+        index,
+      ]),
+    );
+
     return Array.from(byKey.values()).sort((a, b) => {
-      const aActive = sameWorkspaceRoot(a.root, workspaceRoot);
-      const bActive = sameWorkspaceRoot(b.root, workspaceRoot);
-      if (aActive !== bActive) return aActive ? -1 : 1;
-      const aTime = a.threads[0]?.updatedAt ?? '';
-      const bTime = b.threads[0]?.updatedAt ?? '';
-      if (aTime || bTime) return bTime.localeCompare(aTime);
+      const aKey = a.root.replace(/[\\/]+$/, '').toLowerCase();
+      const bKey = b.root.replace(/[\\/]+$/, '').toLowerCase();
+      const aIndex = orderIndex.get(aKey);
+      const bIndex = orderIndex.get(bKey);
+      if (aIndex !== undefined && bIndex !== undefined) return aIndex - bIndex;
+      if (aIndex !== undefined) return -1;
+      if (bIndex !== undefined) return 1;
       return a.name.localeCompare(b.name);
     });
-  }, [threads, recentFolders, workspaceRoot]);
+  }, [threads, workspaceOrder]);
+
+  // Drop empties from persisted order; append newly discovered projects at the end.
+  const rootsWithThreads = useMemo(
+    () => workspaceGroups.map((group) => group.root),
+    [workspaceGroups],
+  );
+  useEffect(() => {
+    syncWorkspaceOrder(rootsWithThreads);
+  }, [rootsWithThreads]);
 
   const railBtn =
     'flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
@@ -133,6 +164,20 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   const openBlankForFolder = (root: string) => {
     setWorkspaceRoot(root);
     router.push('/');
+  };
+
+  const moveWorkspace = (fromRoot: string, toRoot: string) => {
+    if (sameWorkspaceRoot(fromRoot, toRoot)) return;
+    const roots = workspaceGroups.map((group) => group.root);
+    const fromIndex = roots.findIndex((root) =>
+      sameWorkspaceRoot(root, fromRoot),
+    );
+    const toIndex = roots.findIndex((root) => sameWorkspaceRoot(root, toRoot));
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = [...roots];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    reorderWorkspaces(next);
   };
 
   return (
@@ -185,7 +230,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                 href="/"
                 className="type-ui truncate text-[13px] font-semibold tracking-tight text-foreground hover:text-foreground"
               >
-                AgenticBot
+                Desk
               </Link>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -221,7 +266,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                     disabled
                     aria-disabled="true"
                     aria-label="Search coming soon"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/50"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/70"
                   >
                     <Search className="size-4" strokeWidth={1.75} />
                   </button>
@@ -237,8 +282,8 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
           <ScrollArea className="min-h-0 flex-1 px-2">
             <div className="space-y-4 pb-2">
               <section>
-                <div className="mb-1 flex items-center justify-between gap-1 px-2">
-                  <p className="type-ui text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
+                <div className="mb-1.5 flex items-center justify-between gap-1 px-2">
+                  <p className="type-ui text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
                     Home
                   </p>
                   <button
@@ -251,32 +296,32 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                   </button>
                 </div>
                 {homeThreads.length === 0 ? (
-                  <p className="type-ui px-2 py-3 text-center text-muted-foreground">
+                  <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
                     No conversations yet
                   </p>
                 ) : (
-                  <ul className="w-full min-w-0 space-y-0.5">
-                    {homeThreads.map((thread) => (
-                      <ThreadItem
-                        key={thread.id}
-                        thread={thread}
-                        active={pathname === `/chat/${thread.id}`}
-                      />
-                    ))}
-                  </ul>
+                  <PagedThreadList
+                    threads={homeThreads}
+                    pathname={pathname}
+                    listKey="home"
+                  />
                 )}
               </section>
 
               <section>
-                <p className="type-ui mb-1 px-2 text-[10px] font-medium tracking-wide text-muted-foreground/75 uppercase">
+                <p className="type-ui mb-1.5 px-2 text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
                   Workspaces
                 </p>
                 {workspaceGroups.length === 0 ? (
-                  <p className="type-ui px-2 py-3 text-center text-muted-foreground">
+                  <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
                     Open a folder to start project chats
                   </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div
+                    className="space-y-2"
+                    role="list"
+                    aria-label="Workspace projects"
+                  >
                     {workspaceGroups.map((group) => {
                       const collapsedFolder = collapsedFolders.some((item) =>
                         sameWorkspaceRoot(item, group.root),
@@ -285,16 +330,81 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                         group.root,
                         workspaceRoot,
                       );
+                      const isDragging = sameWorkspaceRoot(
+                        group.root,
+                        dragRoot,
+                      );
+                      const isDropTarget =
+                        !isDragging &&
+                        sameWorkspaceRoot(group.root, dropTargetRoot);
+
                       return (
-                        <div key={group.root} className="min-w-0">
+                        <div
+                          key={group.root}
+                          role="listitem"
+                          className="min-w-0 rounded-md"
+                        >
                           <div
                             className={cn(
-                              'group/folder flex w-full min-w-0 items-center gap-0.5 rounded-md px-1 py-1.5',
+                              'group/folder flex w-full min-w-0 items-center gap-0.5 rounded-md px-1 py-1.5 transition-[opacity,box-shadow]',
                               activeFolder
                                 ? 'bg-accent/70 text-foreground'
                                 : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                              isDragging && 'opacity-45',
+                              isDropTarget &&
+                                'ring-1 ring-primary/50 ring-offset-1 ring-offset-sidebar',
                             )}
+                            draggable
+                            onDragStart={(event) => {
+                              setDragRoot(group.root);
+                              event.dataTransfer.effectAllowed = 'move';
+                              event.dataTransfer.setData(
+                                'text/plain',
+                                group.root,
+                              );
+                            }}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = 'move';
+                              if (
+                                !sameWorkspaceRoot(group.root, dropTargetRoot)
+                              ) {
+                                setDropTargetRoot(group.root);
+                              }
+                            }}
+                            onDragLeave={(event) => {
+                              // Only clear when the pointer truly leaves the row,
+                              // not when crossing into a child element.
+                              const related = event.relatedTarget;
+                              if (
+                                sameWorkspaceRoot(group.root, dropTargetRoot) &&
+                                !(related instanceof Node &&
+                                  event.currentTarget.contains(related))
+                              ) {
+                                setDropTargetRoot(null);
+                              }
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              const from =
+                                event.dataTransfer.getData('text/plain') ||
+                                dragRoot;
+                              if (from) moveWorkspace(from, group.root);
+                              setDragRoot(null);
+                              setDropTargetRoot(null);
+                            }}
+                            onDragEnd={() => {
+                              setDragRoot(null);
+                              setDropTargetRoot(null);
+                            }}
                           >
+                            <span
+                              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground/60 active:cursor-grabbing"
+                              aria-hidden
+                              title="Drag to reorder workspace"
+                            >
+                              <GripVertical className="size-3.5" />
+                            </span>
                             <button
                               type="button"
                               className="flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-accent/80"
@@ -368,40 +478,17 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                                   <FolderOpen className="size-4" />
                                   Use this folder
                                 </DropdownMenuItem>
-                                {group.threads.length === 0 ? (
-                                  <>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      variant="destructive"
-                                      onSelect={() =>
-                                        removeRecentFolder(group.root)
-                                      }
-                                    >
-                                      <Trash2 className="size-4" />
-                                      Remove from list
-                                    </DropdownMenuItem>
-                                  </>
-                                ) : null}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
                           {!collapsedFolder ? (
-                            group.threads.length === 0 ? (
-                              <p className="type-ui px-3 py-2 pl-8 text-[11px] text-muted-foreground/80">
-                                No chats yet
-                              </p>
-                            ) : (
-                              <ul className="mt-0.5 w-full min-w-0 space-y-0.5 pl-3">
-                                {group.threads.map((thread) => (
-                                  <ThreadItem
-                                    key={thread.id}
-                                    thread={thread}
-                                    active={pathname === `/chat/${thread.id}`}
-                                    dense
-                                  />
-                                ))}
-                              </ul>
-                            )
+                            <PagedThreadList
+                              threads={group.threads}
+                              pathname={pathname}
+                              listKey={group.root}
+                              dense
+                              className="mt-0.5 pl-3"
+                            />
                           ) : null}
                         </div>
                       );
@@ -422,6 +509,55 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   );
 }
 
+function PagedThreadList({
+  threads,
+  pathname,
+  listKey,
+  dense = false,
+  className,
+}: {
+  threads: Thread[];
+  pathname: string;
+  listKey: string;
+  dense?: boolean;
+  className?: string;
+}) {
+  const [pages, setPages] = useState(1);
+
+  useEffect(() => {
+    setPages(1);
+  }, [listKey]);
+
+  const limit = pages * SIDEBAR_THREAD_PAGE;
+  const visible = threads.slice(0, limit);
+  const remaining = threads.length - visible.length;
+
+  return (
+    <div className={cn('w-full min-w-0', className)}>
+      <ul className="w-full min-w-0 space-y-0.5">
+        {visible.map((thread) => (
+          <ThreadItem
+            key={thread.id}
+            thread={thread}
+            active={pathname === `/chat/${thread.id}`}
+            dense={dense}
+          />
+        ))}
+      </ul>
+      {remaining > 0 ? (
+        <button
+          type="button"
+          className="type-caption mt-1 flex w-full items-center justify-center rounded-md bg-muted/35 px-2 py-1.5 text-muted-foreground/85 transition-colors hover:bg-muted/55 hover:text-foreground"
+          onClick={() => setPages((current) => current + 1)}
+        >
+          Show {Math.min(remaining, SIDEBAR_THREAD_PAGE)} more
+          {remaining > SIDEBAR_THREAD_PAGE ? ` · ${remaining} left` : ''}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function OpenFolderButton({ className }: { className?: string }) {
   const { workspaceRoot } = useAgentSpace();
   const [picking, setPicking] = useState(false);
@@ -439,7 +575,7 @@ function OpenFolderButton({ className }: { className?: string }) {
       toastError(
         error instanceof Error
           ? error.message
-          : 'Could not open the folder picker. The dialog runs on the API host — start @org/api on this machine and try again.',
+          : 'Could not open the folder picker. The dialog runs on the API host — start @desk/api on this machine and try again.',
         'Folder picker failed',
       );
     } finally {
@@ -511,10 +647,10 @@ function ThreadItem({
     <li className="w-full min-w-0">
       <div
         className={cn(
-          'type-ui group relative flex w-full min-w-0 items-stretch rounded-md transition-colors',
+          'group relative flex w-full min-w-0 items-stretch rounded-md transition-colors',
           active
-            ? 'bg-accent/55 text-foreground'
-            : 'text-muted-foreground/80 hover:bg-accent/55 hover:text-foreground',
+            ? 'bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--primary)]'
+            : 'text-muted-foreground/80 hover:bg-accent/45 hover:text-foreground',
         )}
       >
         <Link
@@ -522,8 +658,9 @@ function ThreadItem({
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
             dense
-              ? 'py-1 pl-2 pr-[4.25rem] text-sm'
-              : 'py-1.5 pl-2.5 pr-[4.25rem]',
+              ? 'py-1 pl-2 pr-9 text-[13px]'
+              : 'py-1.5 pl-2.5 pr-9 text-[13px]',
+            active && 'font-medium text-foreground',
           )}
           title={displayTitle || undefined}
           onClick={() => {
@@ -541,12 +678,19 @@ function ThreadItem({
           {isPending ? (
             <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-muted" />
           ) : (
-            <span className="min-w-0 flex-1 truncate leading-snug">
+            <span className="min-w-0 max-w-[80%] flex-1 truncate leading-snug">
               {displayTitle}
             </span>
           )}
         </Link>
-        <span className="pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0 group-has-[[data-state=open]]:opacity-0">
+        <span
+          className={cn(
+            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/70 transition-opacity',
+            'group-focus-within:opacity-100',
+            active && 'opacity-100',
+            'group-has-[[data-state=open]]:opacity-0',
+          )}
+        >
           {formatRelativeTime(thread.updatedAt)}
         </span>
         <DropdownMenu>

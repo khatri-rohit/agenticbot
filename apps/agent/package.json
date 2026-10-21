@@ -1,10 +1,7 @@
 {
-  "name": "@org/agent",
+  "name": "@desk/agent",
   "version": "0.0.1",
   "private": true,
-  "scripts": {
-    "langgraph:dev": "langgraphjs dev --no-browser"
-  },
   "nx": {
     "projectType": "application",
     "targets": {
@@ -88,15 +85,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@org/agent:build",
+          "buildTarget": "@desk/agent:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@org/agent:build:development"
+            "buildTarget": "@desk/agent:build:development"
           },
           "production": {
-            "buildTarget": "@org/agent:build:production"
+            "buildTarget": "@desk/agent:build:production"
           }
         }
       },
@@ -108,24 +105,16 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@org/agent:build",
+          "buildTarget": "@desk/agent:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@org/agent:build:development"
+            "buildTarget": "@desk/agent:build:development"
           },
           "production": {
-            "buildTarget": "@org/agent:build:production"
+            "buildTarget": "@desk/agent:build:production"
           }
-        }
-      },
-      "langgraph:dev": {
-        "continuous": true,
-        "executor": "nx:run-commands",
-        "options": {
-          "command": "npm run langgraph:dev --workspace=@org/agent",
-          "cwd": "{workspaceRoot}"
         }
       },
       "test": {
@@ -159,8 +148,8 @@
     ]
   },
   "dependencies": {
-    "@org/agent-core": "*",
-    "@org/agent-models": "*",
+    "@desk/agent-core": "*",
+    "@desk/agent-models": "*",
     "dotenv": "^16.4.7",
     "openai": "^7.27.0"
   },

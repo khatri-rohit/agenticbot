@@ -21,6 +21,7 @@ import {
   sameWorkspaceRoot,
   selectPlanForRewind,
   type ChatMessage,
+  type LedgerAppendMeta,
   type LedgerEnvelope,
   type LedgerRecord,
   type Message,
@@ -29,7 +30,7 @@ import {
   type Thread,
   type ThreadKind,
   type ThreadPlan,
-} from '@org/agent-models';
+} from '@desk/agent-models';
 
 const BLOB_INLINE_MAX = 8 * 1024;
 
@@ -38,6 +39,7 @@ export type AppendInput = {
   runId: string | null;
   record: LedgerRecord;
   attachments?: MessageAttachment[];
+  meta?: LedgerAppendMeta;
 };
 
 export class ThreadStore {
@@ -344,6 +346,9 @@ export class ThreadStore {
       record,
       ...(contentBlob ? { contentBlob } : {}),
       ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+      ...(input.meta?.durationMs != null
+        ? { durationMs: input.meta.durationMs }
+        : {}),
     };
 
     try {
@@ -524,10 +529,11 @@ export class ThreadStore {
     }
   }
 
-  private async putBlob(threadId: string, text: string): Promise<string> {
+  async putBlob(threadId: string, text: string): Promise<string> {
     const bytes = Buffer.from(text, 'utf8');
     const sha = createHash('sha256').update(bytes).digest('hex');
     const dest = path.join(this.threadDir(threadId), 'blobs', sha);
+    await mkdir(path.dirname(dest), { recursive: true });
     try {
       await writeFile(dest, bytes, { flag: 'wx' });
     } catch (error) {

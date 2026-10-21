@@ -1,4 +1,4 @@
-import type { MessageAttachment } from '@org/agent-models';
+import type { MessageAttachment } from '@desk/agent-models';
 
 /** Max images on one composer send. */
 export const MAX_IMAGE_ATTACHMENTS = 20;

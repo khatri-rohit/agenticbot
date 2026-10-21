@@ -1,0 +1,66 @@
+---
+description: Desk monorepo context, agent harness boundaries, and senior engineering bar
+alwaysApply: true
+---
+
+# Desk — project system context
+
+You are working on **Desk**: an Nx monorepo building a **host-agnostic agent runtime** (`@desk/agent-core`), an **HTTP/SSE API** (`apps/api`), a **Next.js chat UI** (`apps/web`), and a **CLI harness** (`apps/agent`). Treat this as production agent infrastructure—not a demo chatbot.
+
+## Before you change code
+
+1. **Understand the workspace** — Invoke the `.cursor/skills/nx-workspace` skill (and `nx-run-tasks` / `nx-generate` when running or scaffolding tasks). This repo uses **npm** (`package-lock.json`). Run tasks with `npx nx` or `nx`. Never pnpm. Use Nx MCP; do not guess Nx flags.
+2. **Respect existing TypeScript project references** — Apps use `tsconfig.app.json` with `references` to libs (e.g. `packages/agent-core/tsconfig.lib.json`). Match `module`/`moduleResolution` per app (`nodenext` for API, `bundler` + Next plugin for web). Do not “fix” working tsconfigs with blanket path aliases or duplicate package names.
+3. **Trace the real flow end-to-end** — User message → `apps/web` (SSE client) → `POST /api/agent/run` + `GET /api/agent/run/:runId/events` → `RunManager` → `runLoop` → model/tools → `AgentEvent` stream. Read call sites before editing shared types or loop semantics.
+
+## Architecture map (ownership)
+
+| Layer          | Package / app        | Responsibility                                                                                  |
+| -------------- | -------------------- | ----------------------------------------------------------------------------------------------- |
+| Domain types   | `@desk/agent-models` | `Run`, `Thread`, `AgentEvent`, modes (`HOME_MODE` / `WORKSPACE_MODE`), chat shapes              |
+| Runtime (pure) | `@desk/agent-core`   | `runLoop`, tools registry, model stream, `EventEmitter`, `RunManager` — **no HTTP, DOM, or DB** |
+| Transport      | `apps/api`           | Express routes under `/api/agent`, wires core + env secrets                                     |
+| UI             | `apps/web`           | Chat store, `use-agent-run`, consumes SSE events                                                |
+| Local eval     | `apps/agent`         | Thin script calling core directly (trace)                                                       |
+
+**Boundary rule:** Loop correctness, tool execution, limits, and event sequencing belong in **agent-core**. HTTP status codes, CORS, and client UX belong in **api** / **web**. Never leak Express or React into core.
+
+## Agent loop & harness mindset
+
+- **`runLoop`** is transport-agnostic: inject `ModelCallFn`, `ToolRegistry`, `RunLoopConfig.emit` for `AgentEvent`s. Preserve determinism for limits, tool dedup, and finish reasons; LLM output is stochastic—contracts are not.
+- **`RunManager`** holds in-memory runs and a bounded SSE replay buffer. API enforces **one active run per thread** and **one agent-posture run per workspace**. Both mutexes are in-process. Hosts must `clear()` after `RUN_HANDLE_TTL_MS`; late SSE is 404 — the ledger is the truth. Don’t bypass admission in the client without an explicit product decision.
+- **Events are the product API** between core and UI (`assistant.delta`, tool lifecycle, errors). Changing event shapes requires coordinated updates in api routes, web store, and any harness. The UI must rebuild from `GET /ledger`; SSE is the fast path (seq gap → ledger refetch).
+- **Tools** go through `createToolRegistry` + mode `allowedTools`. Payload compaction and external APIs (e.g. Firecrawl) stay in core tool modules unless the user asks for a new integration boundary.
+- **Rewind is destructive.** Retry/edit truncates `ledger.jsonl`. Do not describe the ledger as append-only.
+
+### Mental models (when changing or prompting the harness)
+
+1. **Budget machine** — looping is a limits or residency problem (`loop/limits.ts`), not a prompt problem.
+2. **Context is a cache** — stubbing is eviction (`assemble-context.ts`). New capabilities are judged by cache residency. Image attachments older than `keepAttachmentsForTurns` become text stubs.
+3. **Gate over prompt** — memory, posture, path jail: model proposes, gate disposes (`memory/gate.ts`). Ship the gate with the capability. Write/exec tools run without an Allow/Deny pause.
+4. **Ledger over stream** — any UI state that cannot be rebuilt from the ledger is a bug.
+5. **Spend determinism carefully** — no LLM on the request path (admission, assembly, extractive compaction). Title generation is maintenance.
+
+## Coding standard (anti-AI-slop)
+
+Think as a **senior software engineer and harness expert** building an ambitious open-source agent runtime. Follow this repo’s structure and ownership map—do not invent parallel folders, packages, or “cleaner” layouts.
+
+**Before writing code:** understand the problem, review the real flow and architecture (call sites, boundaries, existing patterns), then rethink the solution so it is correct, scalable, and maintainable. Prefer the simplest approach that is right; reject complex “AI GoPro” designs when a smaller, correct change works.
+
+- **Clean code, no slop:** match local style; meaningful names; clear control flow; minimal diffs. Fix root causes in the shared layer (core/registry/loop), not one-off patches in a single caller.
+- **No defensive theater:** skip redundant null checks, try/catch wrappers, type guards, and fallbacks that do not protect a real failure mode at a trust boundary.
+- **No file theater:** do not create a new file/module just to import once or to look “structured.” Colocate until reuse is real. Deletion and reuse beat new files, abstractions, env flags, and packages.
+- **Comments:** on important or non-obvious larger functions, add a short (~2 line) comment for the _why_ / contract—not narrating obvious code.
+- **Ambitious but grounded:** propose better loop ergonomics, eval hooks, or streaming UX only when they fit current architecture; ship the smallest change that preserves boundaries.
+- **Validate:** after non-trivial changes, run the relevant Nx target (`typecheck`, `build`, `test`) for affected projects.
+
+## Quick file anchors
+
+- Core entry: `packages/agent-core/src/index.ts`
+- Loop: `packages/agent-core/src/lib/loop/loop.ts`
+- Runs: `packages/agent-core/src/lib/run/run-manager.ts`
+- API agent routes: `apps/api/src/routes/agent/agent.routes.ts`
+- Web run hook: `apps/web/src/features/agent/hooks/use-agent-run.ts`
+- Nx + agents docs: root `AGENTS.md`, `.cursor/skills/`
+
+When unsure how a piece fits, read these paths and follow imports outward—do not invent a parallel structure.

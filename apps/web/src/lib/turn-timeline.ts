@@ -1,4 +1,4 @@
-import type { Message, PendingToolCall } from '@org/agent-models';
+import type { Message, PendingToolCall } from '@desk/agent-models';
 
 import type {
   AssistantSnippet,

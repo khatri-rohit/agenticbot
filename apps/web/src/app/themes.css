@@ -22,7 +22,7 @@
   --card-foreground: oklch(100% 0.00011 271.152);
   --popover: oklch(0.19 0.006 250);
   --popover-foreground: oklch(0.93 0.006 250);
-  --muted: oklch(0.21 0.006 250);
+  --muted: oklch(0.26 0.008 250);
   --muted-foreground: oklch(97.015% 0.00011 271.152);
   --border: oklch(0.28 0.008 250);
   --input: rgb(33, 33, 33);
@@ -44,6 +44,8 @@
   --md-block-bg: oklch(0.16 0.005 250);
   --md-block-border: oklch(0.3 0.01 250);
   --md-block-accent: oklch(0.7 0.1 195);
+  --md-inline-code-bg: oklch(0.26 0.008 250);
+  --md-inline-code-border: oklch(0.34 0.01 250);
 }
 
 /* Midnight — cooler blue-slate dark (alt dark) */
@@ -77,6 +79,8 @@
   --md-block-bg: oklch(0.16 0.022 250);
   --md-block-border: oklch(0.32 0.03 250);
   --md-block-accent: oklch(0.68 0.13 250);
+  --md-inline-code-bg: oklch(0.24 0.026 250);
+  --md-inline-code-border: oklch(0.36 0.03 250);
 }
 
 /* Ember — warm dark for long evening reads (alt dark) */
@@ -110,6 +114,8 @@
   --md-block-bg: oklch(0.165 0.022 55);
   --md-block-border: oklch(0.32 0.03 55);
   --md-block-accent: oklch(0.74 0.12 55);
+  --md-inline-code-bg: oklch(0.25 0.024 55);
+  --md-inline-code-border: oklch(0.36 0.03 55);
 }
 
 /* Paper — light mode. Clean workbench, soft cool gray, ink text */
@@ -143,6 +149,8 @@
   --md-block-bg: oklch(0.965 0.006 250);
   --md-block-border: oklch(0.86 0.012 250);
   --md-block-accent: oklch(0.5 0.1 210);
+  --md-inline-code-bg: oklch(0.93 0.008 250);
+  --md-inline-code-border: oklch(0.86 0.012 250);
   --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(0.99 0.01 25);
 }

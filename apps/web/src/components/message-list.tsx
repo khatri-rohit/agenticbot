@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import { useStickToBottom } from '../hooks/use-stick-to-bottom';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { Message } from '@org/agent-models';
+import type { Message } from '@desk/agent-models';
 import type {
   ChatState,
   CompactionNotice,
@@ -17,7 +17,7 @@ import type {
 } from '../features/agent/store/chat-store';
 import { groupMessageTurns } from '../lib/group-message-turns';
 import { buildTurnTimeline } from '../lib/turn-timeline';
-import { formatMessageTime } from '../lib/format-relative-time';
+import { formatDuration, formatMessageTime } from '../lib/format-relative-time';
 import { AgentMarkdown } from './agent-markdown';
 import {
   ConversationRail,
@@ -285,12 +285,6 @@ export function MessageList({
                             <article className="chat-prose type-body min-w-0 max-w-full">
                               <AgentMarkdown content={step.content} streaming />
                             </article>
-                            <MessageMetaRow>
-                              <MessageActions
-                                content={step.content}
-                                align="start"
-                              />
-                            </MessageMetaRow>
                           </div>
                         );
                       })}
@@ -304,16 +298,7 @@ export function MessageList({
                       hasStreamingText={Boolean(streaming?.content)}
                       compacting={compactionNotice?.status === 'running'}
                       waitingForApproval={
-                        /*
-                         * IMPORTANT: Allow/Deny exec-approval status.
-                         * Temporarily forced off so file and command tools
-                         * run without a pause. Do not delete the original
-                         * check — it must stay in the tree, commented, until
-                         * the Allow/Deny system is restored.
-                         *
-                         * chatState.pendingApprovals.length > 0
-                         */
-                        false
+                        chatState.pendingApprovals.length > 0
                       }
                       waitingForChoice={
                         chatState.pendingChoices.length > 0
@@ -374,7 +359,7 @@ function TurnStatusLine({
   } else if (waitingForChoice) {
     label = 'Waiting for a choice…';
   } else if (waitingForApproval) {
-    label = 'Waiting for approval…';
+    label = 'Waiting for your answer…';
   } else if (running) {
     label = `${running.toolName}…`;
   } else if (toolActivity.length > 0 && !hasStreamingText) {
@@ -383,19 +368,39 @@ function TurnStatusLine({
     label = 'Working…';
   }
 
+  // Each phase (tool call, think gap) gets its own clock keyed on the label.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    setElapsed(0);
+    if (!label) return;
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, [label]);
+
   if (!label) return null;
 
   return (
     <p
-      className="type-caption pl-0.5 text-left text-muted-foreground/65 tabular-nums"
+      className="type-caption flex items-center gap-1.5 pl-0.5 text-left text-muted-foreground/70 tabular-nums"
       aria-live="polite"
     >
+      <span
+        className="size-1.5 shrink-0 rounded-full bg-primary/80 animate-pulse"
+        aria-hidden
+      />
       {label}
+      <span className="text-muted-foreground/50">{elapsed}s</span>
     </p>
   );
 }
 
-function MessageTimestamp({ iso }: { iso: string }) {
+function MessageTimestamp({
+  iso,
+  durationMs,
+}: {
+  iso: string;
+  durationMs?: number;
+}) {
   const text = formatMessageTime(iso);
   if (!text) return null;
   return (
@@ -404,6 +409,7 @@ function MessageTimestamp({ iso }: { iso: string }) {
       className="type-caption text-muted-foreground/55 tabular-nums"
     >
       {text}
+      {durationMs != null && ` · ${formatDuration(durationMs)}`}
     </time>
   );
 }
@@ -414,14 +420,16 @@ function MessageTimestamp({ iso }: { iso: string }) {
  */
 function MessageMetaRow({
   iso,
+  durationMs,
   children,
 }: {
   iso?: string;
+  durationMs?: number;
   children: React.ReactNode;
 }) {
   return (
     <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
-      <MessageTimestamp iso={iso ?? ''} />
+      <MessageTimestamp iso={iso ?? ''} durationMs={durationMs} />
       <div className="flex min-w-0 items-center">{children}</div>
     </div>
   );
@@ -445,7 +453,7 @@ function AssistantMessage({
       <article className="chat-prose type-body min-w-0 max-w-full">
         <AgentMarkdown content={message.content} />
       </article>
-      <MessageMetaRow iso={message.createdAt}>
+      <MessageMetaRow iso={message.createdAt} durationMs={message.durationMs}>
         <MessageActions
           content={message.content}
           align="start"

@@ -1,0 +1,159 @@
+import { randomUUID } from 'node:crypto';
+import type {
+  ChatCompletionCreateParamsStreaming,
+  ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
+} from 'openai/resources/chat/completions';
+
+import type { PendingToolCall, TokenUsage } from '@desk/agent-models';
+
+import { getClient } from './client';
+import type {
+  ModelCallOptions,
+  OllamaChatCompletionCreateParamsStreaming,
+} from './call-options';
+import { parseTokenUsage } from './parse-usage';
+import type { ModelTurn, OnTextDelta } from './types';
+import type { ToolRegistry } from '../tools/type';
+
+export type { OnTextDelta } from './types';
+
+/**
+ * Internal accumulator for a tool call being reconstructed from stream chunks.
+ */
+type AccumulatedToolCall = {
+  id: string;
+  type: 'function';
+  functionName: string;
+  arguments: string;
+};
+
+/**
+ * Streaming model call. Calls chat.completions.create with stream:true,
+ * consumes the async iterable of chunks, accumulates text and tool-call
+ * fragments, and returns the completed ModelTurn.
+ *
+ * Critical rules:
+ * - Never execute a tool on a partial chunk. Wait for finish_reason.
+ * - Tool-call arguments arrive fragmented across chunks; reconstruct by index.
+ * - Some Ollama models drop the tool_call id on stream chunks — synthesize one.
+ *
+ * @param onTextDelta Called for each text fragment as it arrives.
+ */
+export async function streamModelTurn(
+  model: string,
+  messages: ChatCompletionMessageParam[],
+  tools: ToolRegistry,
+  onTextDelta?: OnTextDelta,
+  options?: ModelCallOptions,
+): Promise<ModelTurn> {
+  const params: OllamaChatCompletionCreateParamsStreaming = {
+    model,
+    messages,
+    tools: tools.definitions,
+    stream: true,
+    stream_options: { include_usage: true },
+    ...(options?.temperature !== undefined
+      ? { temperature: options.temperature }
+      : {}),
+    ...(options?.reasoningEffort !== undefined
+      ? { reasoning_effort: options.reasoningEffort }
+      : {}),
+  };
+
+  // Ollama reasoning_effort is wider than OpenAI ReasoningEffort — cast at SDK boundary.
+  const stream = await getClient(
+    options?.endpoint ?? 'cloud',
+  ).chat.completions.create(
+    params as ChatCompletionCreateParamsStreaming,
+    options?.signal ? { signal: options.signal } : undefined,
+  );
+
+  let content = '';
+  let finishReason: string | null = null;
+  let usage: TokenUsage | undefined;
+  const toolCalls = new Map<number, AccumulatedToolCall>();
+
+  for await (const chunk of stream) {
+    if (options?.signal?.aborted) {
+      throw options.signal.reason instanceof Error
+        ? options.signal.reason
+        : new Error('Run cancelled');
+    }
+
+    const chunkUsage = parseTokenUsage(chunk.usage);
+    if (chunkUsage) {
+      usage = chunkUsage;
+    }
+
+    const choice = chunk.choices?.[0];
+    if (!choice) {
+      continue;
+    }
+
+    const delta = choice.delta;
+
+    // Text delta — emit immediately.
+    if (delta?.content) {
+      content += delta.content;
+      onTextDelta?.(delta.content);
+    }
+
+    // Tool-call deltas — accumulate by index.
+    if (delta?.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        const index = tc.index;
+
+        let existing = toolCalls.get(index);
+
+        if (!existing) {
+          // First chunk for this tool call.
+          existing = {
+            id: tc.id || randomUUID(),
+            type: 'function',
+            functionName: tc.function?.name ?? '',
+            arguments: tc.function?.arguments ?? '',
+          };
+          toolCalls.set(index, existing);
+          continue;
+        }
+
+        // Subsequent chunks — append fragments.
+        if (tc.id) {
+          existing.id = tc.id;
+        }
+        if (tc.function?.name) {
+          existing.functionName += tc.function.name;
+        }
+        if (tc.function?.arguments) {
+          existing.arguments += tc.function.arguments;
+        }
+      }
+    }
+
+    if (choice.finish_reason) {
+      finishReason = choice.finish_reason;
+    }
+  }
+
+  // Convert accumulated tool calls to the ChatCompletionMessageToolCall shape.
+  const reconstructedToolCalls: ChatCompletionMessageToolCall[] = [];
+
+  for (const acc of toolCalls.values()) {
+    reconstructedToolCalls.push({
+      id: acc.id,
+      type: 'function',
+      function: {
+        name: acc.functionName,
+        arguments: acc.arguments,
+      },
+    });
+  }
+
+  return {
+    content,
+    toolCalls: reconstructedToolCalls as PendingToolCall[],
+    finishReason,
+    ...(usage ? { usage } : {}),
+  };
+}

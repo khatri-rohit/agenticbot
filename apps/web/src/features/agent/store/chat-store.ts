@@ -8,7 +8,7 @@ import {
   type Snapshot,
   type ThreadPlan,
   type ToolRisk,
-} from '@org/agent-models';
+} from '@desk/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
 
 /**
@@ -125,6 +125,11 @@ export function noticeFromSnapshot(
     summary: snapshot.summary,
     createdAt: snapshot.createdAt,
   };
+}
+
+/** True when the stream skipped seqs; recover from the ledger, not SSE. */
+export function hasSseSeqGap(lastSeq: number, eventSeq: number): boolean {
+  return eventSeq > lastSeq + 1;
 }
 
 /**

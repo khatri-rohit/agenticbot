@@ -6,7 +6,7 @@
 import {
   CHARS_PER_TOKEN,
   ESTIMATED_TOKENS_PER_IMAGE,
-} from '@org/agent-models';
+} from '@desk/agent-models';
 
 export function estimateDraftTokens(
   text: string | null | undefined,

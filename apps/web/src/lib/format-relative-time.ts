@@ -20,6 +20,18 @@ export function formatRelativeTime(iso: string): string {
 }
 
 /**
+ * Formats a duration in milliseconds for compact display next to timestamps.
+ * Under 10s shows one decimal; under 60s shows whole seconds; beyond shows m ss.
+ */
+export function formatDuration(ms: number): string {
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}m ${String(rem).padStart(2, "0")}s`;
+}
+/**
  * Formats an ISO timestamp in the user's locale and system timezone.
  * Today's messages show time only; older messages show date and time.
  * Uses the browser default locale and timezone — no hard-coded format.

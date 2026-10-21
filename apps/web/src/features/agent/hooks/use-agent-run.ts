@@ -13,7 +13,7 @@ import {
   type Message,
   type MessageAttachment,
   type ThreadKind,
-} from '@org/agent-models';
+} from '@desk/agent-models';
 import { toastError } from '@/hooks/use-toast';
 import {
   modelSupportsVision,
@@ -25,6 +25,7 @@ import {
 } from '@/lib/ollama-models';
 import {
   applyChatEvent,
+  hasSseSeqGap,
   initialChatState,
   noticeFromSnapshot,
   persistChatEffects,
@@ -62,7 +63,6 @@ export type QueuedMessage = {
 const defaultComposerOptions = (): ComposerOptions => {
   const local = readStoredComposerLocal();
   return {
-    streaming: true,
     webSearch: true,
     local,
     model: readStoredComposerModel(local),
@@ -195,6 +195,10 @@ export function useAgentRun(threadId: string | null) {
           eventChain = eventChain.then(async () => {
             if (threadIdRef.current !== threadId) return;
             const prev = currentState;
+            const lastSeq = prev.activeRun?.lastSeq ?? fromSeq;
+            if (hasSseSeqGap(lastSeq, event.seq)) {
+              bumpLedger();
+            }
             const next = applyChatEvent(prev, event);
             await persistChatEffects(prev, event, threadId);
             if (threadIdRef.current !== threadId) return;
@@ -289,7 +293,6 @@ export function useAgentRun(threadId: string | null) {
       const local = options.local === true;
       const runId = await startRun(threadId, {
         message: { content, attachments },
-        streaming: options.streaming,
         webSearch: options.webSearch,
         model: resolveOllamaModel(options.model, local),
         local,
@@ -398,7 +401,6 @@ export function useAgentRun(threadId: string | null) {
     ) => {
       const local = options.local ?? composerOptions.local === true;
       const merged: ComposerOptions = {
-        streaming: options.streaming ?? composerOptions.streaming,
         webSearch: options.webSearch ?? composerOptions.webSearch,
         local,
         model: resolveOllamaModel(
@@ -467,7 +469,6 @@ export function useAgentRun(threadId: string | null) {
     const local = composerOptions.local === true;
     const runId = await startRun(threadId, {
       rewindThroughSeq: ledger.lastUserSeq,
-      streaming: composerOptions.streaming,
       webSearch: composerOptions.webSearch,
       model: resolveOllamaModel(composerOptions.model, local),
       local,
@@ -514,7 +515,6 @@ export function useAgentRun(threadId: string | null) {
       const runId = await startRun(threadId, {
         rewindThroughSeq: userSeq - 1,
         message: { content: trimmed, attachments: lastUser.attachments },
-        streaming: composerOptions.streaming,
         webSearch: composerOptions.webSearch,
         model: resolveOllamaModel(composerOptions.model, local),
         local,

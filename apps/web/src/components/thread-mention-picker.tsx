@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
-import type { Thread, ThreadMentionAttachment } from '@org/agent-models';
+import type { Thread, ThreadMentionAttachment } from '@desk/agent-models';
 import {
   isWorkspaceKind,
   MAX_THREAD_MENTIONS,
   sameWorkspaceRoot,
-} from '@org/agent-models';
+} from '@desk/agent-models';
 import { folderNameFromRoot } from '@/features/agent/store/space-store';
 import { cn } from '@/lib/utils';
 import { X } from 'lucide-react';

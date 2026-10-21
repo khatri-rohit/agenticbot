@@ -63,7 +63,9 @@
   --text-hero-sub-leading: 1.55;
 
   --text-body: 0.9375rem;
-  --text-body-leading: 1.68;
+  --text-body-leading: 1.65;
+  --text-body-reading: 0.9375rem;
+  --text-body-reading-leading: 1.65;
   --text-user: 0.875rem;
   --text-user-leading: 1.55;
   --text-composer: 0.9375rem;
@@ -77,6 +79,10 @@
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+
+  .agent-markdown [data-streamdown='animated-word'] {
+    animation: none !important;
   }
 }
 
@@ -146,16 +152,16 @@ body {
   word-break: break-word;
 }
 
-/* Reply, not a paper: section labels + readable body rhythm. */
+/* Reply, not a paper: real heading ladder + full-contrast reading body. */
 .agent-markdown {
   max-width: 100%;
   min-width: 0;
   overflow-x: hidden;
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-size: var(--text-body);
-  line-height: 1.74;
-  color: color-mix(in oklch, var(--foreground) 88%, var(--muted-foreground));
+  font-size: var(--text-body-reading);
+  line-height: var(--text-body-reading-leading);
+  color: var(--foreground);
   font-weight: 400;
 }
 
@@ -186,36 +192,45 @@ body {
 .agent-markdown [data-streamdown='heading-5'],
 .agent-markdown [data-streamdown='heading-6'] {
   color: var(--foreground);
-  font-weight: 600;
-  letter-spacing: -0.018em;
-  margin: 1.85em 0 0.5em;
-  line-height: 1.4;
+  letter-spacing: -0.02em;
+  margin: 1.55em 0 0.45em;
+  line-height: 1.3;
+  text-wrap: pretty;
 }
 
 .agent-markdown h1,
 .agent-markdown [data-streamdown='heading-1'] {
-  font-size: 1.0625rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .agent-markdown h2,
 .agent-markdown [data-streamdown='heading-2'] {
-  font-size: 1.02rem;
+  font-size: 1.125rem;
+  font-weight: 600;
 }
 
 .agent-markdown h3,
+.agent-markdown [data-streamdown='heading-3'] {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
 .agent-markdown h4,
 .agent-markdown h5,
 .agent-markdown h6,
-.agent-markdown [data-streamdown='heading-3'],
 .agent-markdown [data-streamdown='heading-4'],
 .agent-markdown [data-streamdown='heading-5'],
 .agent-markdown [data-streamdown='heading-6'] {
-  font-size: var(--text-body);
+  font-size: var(--text-body-reading);
+  font-weight: 600;
+  letter-spacing: -0.012em;
 }
 
 .agent-markdown [data-streamdown='paragraph'],
 .agent-markdown p {
-  margin: 0 0 1.15em;
+  margin: 0 0 0.85em;
 }
 
 .agent-markdown
@@ -229,32 +244,62 @@ body {
 .agent-markdown [data-streamdown='horizontal-rule'] {
   border: 0;
   height: 1px;
-  margin: 1.85em 0;
+  margin: 1.6em 0;
   background: color-mix(in oklch, var(--border) 72%, transparent);
 }
 
 .agent-markdown [data-streamdown='list'],
 .agent-markdown ul,
 .agent-markdown ol {
-  margin: 0 0 1.2em;
+  margin: 0 0 1em;
   padding-left: 1.25rem;
 }
 
 .agent-markdown [data-streamdown='list-item'],
 .agent-markdown li {
-  margin: 0.4em 0;
+  margin: 0.28em 0;
 }
 
 .agent-markdown li + li {
-  margin-top: 0.45em;
+  margin-top: 0.28em;
 }
 
 .agent-markdown [data-streamdown='blockquote'],
 .agent-markdown blockquote {
-  margin: 1.15em 0 1.35em;
-  padding: 0.15em 0 0.15em 0.95rem;
+  margin: 1em 0 1.15em;
+  padding: 0.1em 0 0.1em 0.95rem;
   border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent);
-  color: color-mix(in oklch, var(--foreground) 78%, var(--muted-foreground));
+  color: color-mix(in oklch, var(--foreground) 82%, var(--muted-foreground));
+  font-size: 0.94em;
+  font-style: italic;
+}
+
+.agent-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-markdown thead th,
+.agent-markdown [data-streamdown='table-header-cell'] {
+  font-weight: 600;
+  text-align: left;
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.agent-markdown tbody td,
+.agent-markdown [data-streamdown='table-cell'] {
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  padding: 0.45rem 0.75rem;
+  vertical-align: top;
+}
+
+.agent-markdown tbody tr:last-child td,
+.agent-markdown tbody tr:last-child [data-streamdown='table-cell'] {
+  border-bottom: none;
 }
 
 /* --- Global scrollbars --- */
@@ -356,9 +401,11 @@ body {
 
 .agent-markdown [data-streamdown='inline-code'] {
   font-size: 0.875em;
-  padding: 0.15em 0.35em;
+  line-height: 1.4;
+  padding: 0.1em 0.32em;
   border-radius: calc(var(--radius) - 2px);
-  background: var(--muted);
+  background: var(--md-inline-code-bg, var(--muted));
+  font-family: var(--font-mono);
 }
 
 /* Block chrome: theme tokens + Streamdown my-* often miss the Tailwind scan. */
@@ -369,7 +416,6 @@ body {
   max-width: 100%;
   min-width: 0;
   border: 1px solid var(--md-block-border, var(--border));
-  border-left: 2px solid var(--md-block-accent, var(--ring));
   border-radius: var(--radius);
   background: var(--md-block-bg, var(--card));
 }
@@ -381,9 +427,12 @@ body {
 /* Fenced code: calmer chrome, copy only (download hidden via controls). */
 .agent-markdown [data-streamdown='code-block-header'] {
   min-height: 2rem;
-  padding: 0 0.25rem;
+  padding: 0 0.5rem;
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-leading);
+  letter-spacing: 0.02em;
 }
 
 .agent-markdown [data-streamdown='code-block-body'] {

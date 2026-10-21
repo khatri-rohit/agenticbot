@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { OllamaEndpoint, OllamaModelConfig } from '@org/agent-models';
+import type { OllamaEndpoint, OllamaModelConfig } from '@desk/agent-models';
 import { fetchOllamaModelConfig } from '../api/agent-client';
 
 const cache = new Map<string, OllamaModelConfig>();

@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Message } from '@org/agent-models';
-import { imageAttachments, threadMentions } from '@org/agent-models';
+import type { Message } from '@desk/agent-models';
+import { imageAttachments, threadMentions } from '@desk/agent-models';
 import { ThreadMentionChip } from '@/components/thread-mention-picker';
 import { MessageActions } from '@/components/message-actions';
 import { Button } from '@/components/ui/button';
@@ -189,10 +189,10 @@ export function UserMessage({
         </div>
       ) : (
         <>
-          {/* Document-style prompt card: full column width, soft fill — not a messenger bubble. */}
+          {/* Document-style prompt card: stronger fill so the prompt reads vs the reply document. */}
           <div
             className={cn(
-              'type-user min-w-0 max-w-full overflow-hidden rounded-2xl bg-card px-4 py-3 text-foreground/95 ring-1 ring-border/30',
+              'type-user min-w-0 max-w-full overflow-hidden rounded-2xl bg-muted/55 px-4 py-3 text-foreground ring-1 ring-border/50',
             )}
           >
             {message.attachments && message.attachments.length > 0 ? (

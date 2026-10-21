@@ -18,7 +18,7 @@ import {
   touchRecentThread,
 } from '@/features/agent/store/recent-threads-store';
 import { setWorkspaceRoot } from '@/features/agent/store/space-store';
-import { isWorkspaceKind } from '@org/agent-models';
+import { isWorkspaceKind } from '@desk/agent-models';
 
 type SwitcherEntry = {
   id: string;
@@ -267,7 +267,7 @@ export function RecentThreadsSwitcher() {
                     </span>
                   ) : null}
                   <span className="shrink-0 text-[11px] text-muted-foreground/70">
-                    agenticbot
+                    Desk
                   </span>
                 </button>
               </li>

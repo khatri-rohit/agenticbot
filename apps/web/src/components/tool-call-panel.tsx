@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Check,
   ChevronDown,
@@ -185,7 +185,7 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
   return <Check className="size-3.5 shrink-0 text-muted-foreground/70" />;
 }
 
-/** Render one tools step from the turn timeline (workspace chips or home group). */
+/** Render one tools step from the turn timeline (collapsible trail for both modes). */
 export function ToolStepList({
   rows,
   variant = 'home',
@@ -194,41 +194,46 @@ export function ToolStepList({
   variant?: 'home' | 'workspace';
 }) {
   if (rows.length === 0) return null;
-
-  if (variant === 'workspace') {
-    return <WorkspaceToolTrail rows={rows} />;
-  }
-  return <HomeToolTrail rows={rows} />;
+  return <ToolTrail rows={rows} variant={variant} />;
 }
 
-function WorkspaceToolTrail({ rows }: { rows: ToolCallRow[] }) {
-  return (
-    <section
-      className="flex min-w-0 max-w-full flex-col gap-1.5"
-      aria-label={`Workspace tools (${rows.length})`}
-    >
-      <ul role="list" className="flex min-w-0 flex-col gap-1.5">
-        {rows.map((row) => (
-          <ToolCard key={row.toolCallId} row={row} />
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function HomeToolTrail({ rows }: { rows: ToolCallRow[] }) {
-  const [expanded, setExpanded] = useState(true);
+/**
+ * Shared tool trail: collapses when idle; stays open while any tool is running
+ * so the active step stays visible without drowning the transcript.
+ */
+function ToolTrail({
+  rows,
+  variant,
+}: {
+  rows: ToolCallRow[];
+  variant: 'home' | 'workspace';
+}) {
   const runningCount = rows.filter((row) => row.status === 'running').length;
   const failedCount = rows.filter((row) => row.status === 'failed').length;
+  const [expanded, setExpanded] = useState(true);
+  const [userToggled, setUserToggled] = useState(false);
+
+  useEffect(() => {
+    if (userToggled) return;
+    setExpanded(runningCount > 0 || rows.length <= 3);
+  }, [runningCount, rows.length, userToggled]);
+
+  const label =
+    variant === 'workspace'
+      ? `Workspace tools (${rows.length})`
+      : `Tool calls (${rows.length})`;
 
   return (
     <section
       className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/60 bg-muted/25"
-      aria-label={`Tool calls (${rows.length})`}
+      aria-label={label}
     >
       <button
         type="button"
-        onClick={() => setExpanded((prev) => !prev)}
+        onClick={() => {
+          setUserToggled(true);
+          setExpanded((prev) => !prev);
+        }}
         aria-expanded={expanded}
         className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
       >
@@ -258,7 +263,12 @@ function HomeToolTrail({ rows }: { rows: ToolCallRow[] }) {
           className="divide-y divide-border/40 border-t border-border/60"
         >
           {rows.map((row) => (
-            <ToolCard key={row.toolCallId} row={row} flush />
+            <ToolCard
+              key={row.toolCallId}
+              row={row}
+              flush
+              defaultOpen={row.status === 'running'}
+            />
           ))}
         </ul>
       ) : null}
@@ -269,13 +279,19 @@ function HomeToolTrail({ rows }: { rows: ToolCallRow[] }) {
 function ToolCard({
   row,
   flush = false,
+  defaultOpen = false,
 }: {
   row: ToolCallRow;
   flush?: boolean;
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
   const summary = summarizeToolRow(row);
+
+  useEffect(() => {
+    if (row.status === 'running') setOpen(true);
+  }, [row.status]);
 
   const copyResult = async () => {
     if (!row.result) return;

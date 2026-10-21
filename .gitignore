@@ -41,7 +41,6 @@ Thumbs.db
 
 .nx/cache
 .nx/workspace-data
-.cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
 vite.config.*.timestamp*
@@ -64,7 +63,16 @@ out
 .env.docker
 # Personal Compose binds (paths, GPU, etc.) — never commit machine-specific mounts
 docker-compose.override.yml
-.cursor
 
-# Local agent home (dev AGENTICBOT_HOME)
+# Cursor: commit shared rules/skills; ignore local-only junk
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/skills/
+!.cursor/skills/**
+
+# Local agent home (dev DESK_HOME)
 .local/
+.github/agents
+.github/prompts
+.github/skills

@@ -7,7 +7,7 @@ export type ContextAnchor = {
 };
 
 function storageKey(threadId: string): string {
-  return `agenticbot:contextAnchor:${threadId}`;
+  return `desk:contextAnchor:${threadId}`;
 }
 
 export function getContextAnchor(threadId: string): ContextAnchor | null {

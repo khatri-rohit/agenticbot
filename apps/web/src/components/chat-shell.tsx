@@ -51,7 +51,7 @@ export function ChatShell({
     <div className="flex min-h-[100dvh] h-[100dvh] w-full bg-background">
       <ResizablePanelGroup
         direction="horizontal"
-        autoSaveId="agenticbot-sidebar"
+        autoSaveId="desk-sidebar"
         className="min-h-0 min-w-0 flex-1"
       >
         <ResizablePanel

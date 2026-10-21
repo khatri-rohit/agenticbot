@@ -2,9 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { MemoryFiles, MemoryOp, ProposedMemoryOp } from '@org/agent-models';
-import { workspaceRootKey } from '@org/agent-models';
-import { applyMemoryText, gateMemoryOps } from '@org/agent-core';
+import type { MemoryFiles, MemoryOp, ProposedMemoryOp } from '@desk/agent-models';
+import { workspaceRootKey } from '@desk/agent-models';
+import { applyMemoryText, gateMemoryOps } from '@desk/agent-core';
 
 export class MemoryStore {
   readonly home: string;

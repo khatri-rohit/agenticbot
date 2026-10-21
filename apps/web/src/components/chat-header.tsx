@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isWorkspaceKind, type Thread } from '@org/agent-models';
+import { isWorkspaceKind, type Thread } from '@desk/agent-models';
 import { clampChatTitle } from '@/lib/thread-title';
 import { fetchThread } from '../features/agent/api/thread-client';
 import {
@@ -38,18 +38,18 @@ export function ChatHeader({ threadId }: { threadId: string }) {
   const display = isPending ? title : clampChatTitle(title);
   const workspace = isWorkspaceKind(thread?.kind);
   const folder = folderNameFromRoot(thread?.workspaceRoot ?? null);
+  const pathTitle =
+    workspace && thread?.workspaceRoot ? thread.workspaceRoot : undefined;
 
   return (
     <header className="shrink-0 border-b border-border/40 px-5 py-2.5">
-      <p className="type-caption mb-0.5 truncate tracking-wide text-muted-foreground/80 uppercase">
+      <p
+        className="type-caption mb-0.5 truncate tracking-[0.06em] text-muted-foreground/80 uppercase"
+        title={pathTitle}
+      >
         {workspace ? `Workspace · ${folder || 'folder'}` : 'Home'}
       </p>
-      {workspace && thread?.workspaceRoot ? (
-        <p className="type-caption mb-1 truncate font-mono text-muted-foreground/70">
-          {thread.workspaceRoot}
-        </p>
-      ) : null}
-      <h1 className="type-ui truncate font-medium tracking-tight text-foreground/90">
+      <h1 className="truncate text-[15px] font-semibold leading-snug tracking-tight text-pretty text-foreground">
         {isPending ? (
           <span className="inline-flex items-center gap-2">
             <span className="text-muted-foreground">Untitled</span>

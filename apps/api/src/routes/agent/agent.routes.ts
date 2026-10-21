@@ -12,7 +12,7 @@ import type {
   Thread,
   ThreadKind,
   ThreadPlan,
-} from '@org/agent-models';
+} from '@desk/agent-models';
 import {
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_MEMORY_CAPS,
@@ -21,20 +21,21 @@ import {
   applyPostureToTools,
   imageAttachments,
   isWorkspaceKind,
+  modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
   planHasOpenWork,
   threadMentions,
   type ApprovalDecision,
   type RunPosture,
-} from '@org/agent-models';
+} from '@desk/agent-models';
 import {
   ALL_TOOLS,
+  RUN_HANDLE_TTL_MS,
   RunManager,
   assembleContext,
   buildExtractiveSnapshot,
   chooseCompactThroughSeq,
-  createInvokeModelCall,
   createMemoryTool,
   createPlanTools,
   createStreamModelCall,
@@ -42,12 +43,11 @@ import {
   getOllamaModelConfig,
   listOllamaModels,
   loadWorkspaceRules,
-  modeForKind,
   packMentionedThread,
   resolveReasoningEffort,
   type MentionedThreadContext,
   type ToolRegistry,
-} from '@org/agent-core';
+} from '@desk/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
@@ -473,7 +473,6 @@ router.post('/run', async (req: Request, res: Response) => {
     threadId,
     message,
     rewindThroughSeq,
-    streaming,
     model,
     local,
     webSearch,
@@ -505,6 +504,21 @@ router.post('/run', async (req: Request, res: Response) => {
     });
   }
 
+  // Workspace mutex: one agent-posture run per folder. Ask runs are
+  // read-only and exempt; research threads have no workspaceRoot.
+  if (thread.workspaceRoot && posture === 'agent') {
+    const conflictingRunId = runManager.hasActiveWorkspaceRun(
+      thread.workspaceRoot,
+    );
+    if (conflictingRunId) {
+      return res.status(409).json({
+        error: 'A run is already active in this workspace',
+        runId: conflictingRunId,
+        reason: 'workspace',
+      });
+    }
+  }
+
   if (typeof rewindThroughSeq === 'number') {
     await store.rewind(threadId, rewindThroughSeq);
   }
@@ -528,7 +542,6 @@ router.post('/run', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'thread has no messages' });
   }
 
-  const useStreaming = streaming ?? true;
   const useModel = model ?? thread.model ?? HOME_MODE.model;
   const endpoint = endpointFromLocal(local);
 
@@ -584,14 +597,11 @@ router.post('/run', async (req: Request, res: Response) => {
     endpoint,
     prepared.mode.temperature,
   );
-  const modelCall = useStreaming
-    ? createStreamModelCall(callOptions)
-    : createInvokeModelCall(callOptions);
+  const modelCall = createStreamModelCall(callOptions);
 
   assignedRunId = runManager.start({
     threadId,
     model: useModel,
-    streaming: useStreaming,
     messages: prepared.messages,
     tools: prepared.tools,
     modelCall,
@@ -602,20 +612,35 @@ router.post('/run', async (req: Request, res: Response) => {
     contextReport: prepared.report,
     contextBudget: prepared.report.budget,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
-    onMessage: async (record) => {
+    putBlob: (text) => store.putBlob(threadId, text),
+    readBlob: async (sha256, offset, length) => {
+      const buf = await store.readBlob(threadId, sha256);
+      const text = buf.toString('utf8');
+      if (offset === undefined && length === undefined) return text;
+      const start = offset ?? 0;
+      return text.slice(start, length === undefined ? undefined : start + length);
+    },
+    onMessage: async (record, meta) => {
       if (record.role === 'system') return;
-      await store.append({ threadId, runId: assignedRunId, record });
+      await store.append({ threadId, runId: assignedRunId, record, ...(meta ? { meta } : {}) });
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
-    onFinished: () =>
-      maybeCompactThread({
-        threadId,
-        runId: assignedRunId,
-        model: useModel,
-        webSearch,
-        endpoint,
-      }),
+    onFinished: async () => {
+      try {
+        await maybeCompactThread({
+          threadId,
+          runId: assignedRunId,
+          model: useModel,
+          webSearch,
+          endpoint,
+        });
+      } finally {
+        setTimeout(() => {
+          runManager.clear(assignedRunId);
+        }, RUN_HANDLE_TTL_MS);
+      }
+    },
   });
 
   const started = runManager.get(assignedRunId);
@@ -822,11 +847,7 @@ router.post('/run/:runId/cancel', (req: Request, res: Response) => {
 });
 
 function parseApprovalDecision(value: unknown): ApprovalDecision | null {
-  if (
-    value === 'approved' ||
-    value === 'denied' ||
-    value === 'approved_for_run'
-  ) {
+  if (value === 'approved' || value === 'denied') {
     return value;
   }
   return null;
@@ -834,7 +855,7 @@ function parseApprovalDecision(value: unknown): ApprovalDecision | null {
 
 /**
  * POST /api/agent/run/:runId/approval
- * Resolve a paused approval. The run stays running until the loop continues.
+ * Resolve an ask_user pause. The run stays running until the loop continues.
  */
 router.post('/run/:runId/approval', (req: Request, res: Response) => {
   const { runId } = req.params;
@@ -850,7 +871,7 @@ router.post('/run/:runId/approval', (req: Request, res: Response) => {
     typeof body.optionId === 'string' ? body.optionId.trim() : undefined;
   if (!approvalId || !decision) {
     return res.status(400).json({
-      error: 'approvalId and decision (approved | denied | approved_for_run) are required',
+      error: 'approvalId and decision (approved | denied) are required',
     });
   }
   const result = runManager.resolveApproval(
