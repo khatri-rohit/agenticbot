@@ -9,6 +9,7 @@ import {
   ChoiceSkipped,
   DEFAULT_CONTEXT_BUDGET,
   isAskStrippedTool,
+  type LedgerAppendMeta,
   type TokenUsage,
   type ToolContext,
 } from '@org/agent-models';
@@ -329,9 +330,10 @@ export async function runLoop(
     return sha;
   }
 
-  async function getWebSource(sha256: string): Promise<
-    | { sha256: string; url: string; title: string; content: string }
-    | undefined
+  async function getWebSource(
+    sha256: string,
+  ): Promise<
+    { sha256: string; url: string; title: string; content: string } | undefined
   > {
     const sha = sha256.toLowerCase();
     if (!trustedWebShas.has(sha)) return undefined;
@@ -377,10 +379,11 @@ export async function runLoop(
 
   async function appendDurable(
     message: ChatCompletionMessageParam,
+    meta?: LedgerAppendMeta,
   ): Promise<void> {
     messages.push(message);
     if (config.onMessage) {
-      await config.onMessage(toLedgerRecord(message));
+      await config.onMessage(toLedgerRecord(message), meta);
     }
   }
 
@@ -913,7 +916,12 @@ export async function runLoop(
             ownsTimeout ? 0 : limits.toolTimeoutMs,
             signal,
           );
-          return { call, ok: true as const, result, durationMs: Date.now() - started };
+          return {
+            call,
+            ok: true as const,
+            result,
+            durationMs: Date.now() - started,
+          };
         } catch (error) {
           return {
             call,
@@ -1046,6 +1054,8 @@ export async function runLoop(
 
     emit?.({ type: 'assistant.started', runId, messageId: finalMessageId });
 
+    // duration = model-call + stream time; excludes tool execution (on ToolCompleted).
+    const startedAt = Date.now();
     const turn = await finalizeWithoutTools(
       modelCall,
       config.model,
@@ -1054,17 +1064,22 @@ export async function runLoop(
       signal,
     );
     const content = turn.content ?? '';
+    const durationMs = Date.now() - startedAt;
 
-    await appendDurable({
-      role: 'assistant',
-      content,
-    });
+    await appendDurable(
+      {
+        role: 'assistant',
+        content,
+      },
+      { durationMs },
+    );
 
     emit?.({
       type: 'assistant.completed',
       runId,
       messageId: finalMessageId,
       content,
+      durationMs,
     });
 
     return { content, usage: turn.usage };
@@ -1131,6 +1146,8 @@ export async function runLoop(
 
       emit?.({ type: 'assistant.started', runId, messageId });
 
+      // duration = model-call + stream time; excludes tool execution (on ToolCompleted).
+      const startedAt = Date.now();
       const turn = await modelCall(
         config.model,
         messages,
@@ -1139,6 +1156,7 @@ export async function runLoop(
         signal,
       );
       throwIfAborted(signal);
+      const durationMs = Date.now() - startedAt;
 
       trace({
         type: 'llm_response',
@@ -1150,11 +1168,14 @@ export async function runLoop(
       });
 
       if (turn.toolCalls.length > 0) {
-        await appendDurable({
-          role: 'assistant',
-          content: turn.content || null,
-          tool_calls: turn.toolCalls,
-        });
+        await appendDurable(
+          {
+            role: 'assistant',
+            content: turn.content || null,
+            tool_calls: turn.toolCalls,
+          },
+          { durationMs },
+        );
 
         // Tool turns end like any other: the ledger row is durable, so the
         // client can settle this assistant message before tools run.
@@ -1163,6 +1184,7 @@ export async function runLoop(
           runId,
           messageId,
           content: turn.content,
+          durationMs,
         });
 
         let index = 0;
@@ -1200,7 +1222,10 @@ export async function runLoop(
               if (!upcoming || upcoming.type !== 'function') break;
               const upcomingTool = tools.byName.get(upcoming.function.name);
               if (!isParallelSafeTool(upcomingTool)) break;
-              if (posture === 'ask' && isAskStrippedTool(upcoming.function.name)) {
+              if (
+                posture === 'ask' &&
+                isAskStrippedTool(upcoming.function.name)
+              ) {
                 break;
               }
               try {
@@ -1233,10 +1258,8 @@ export async function runLoop(
             }
             if (batch.length > 0) {
               if (
-                (await executeReadyBatch(
-                  batch,
-                  turn.toolCalls.slice(next),
-                )) === 'deferred'
+                (await executeReadyBatch(batch, turn.toolCalls.slice(next))) ===
+                'deferred'
               ) {
                 return finishChoiceSkipped();
               }
@@ -1262,16 +1285,20 @@ export async function runLoop(
       }
 
       // No tool calls — this is the final assistant response.
-      await appendDurable({
-        role: 'assistant',
-        content: turn.content ?? '',
-      });
+      await appendDurable(
+        {
+          role: 'assistant',
+          content: turn.content ?? '',
+        },
+        { durationMs },
+      );
 
       emit?.({
         type: 'assistant.completed',
         runId,
         messageId,
         content: turn.content,
+        durationMs,
       });
 
       if (turn.finishReason === 'stop') {

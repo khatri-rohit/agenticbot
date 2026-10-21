@@ -56,6 +56,7 @@ import type { ThemeId } from '@/lib/theme-presets';
 import { cn } from '@/lib/utils';
 import {
   enableBrowserNotifications,
+  previewAlertSound,
   readNotifyPref,
   readSoundPref,
   writeNotifyPref,
@@ -199,6 +200,7 @@ export function SidebarSettings({
               const on = checked === true;
               writeSoundPref(on);
               setSoundOn(on);
+              if (on) previewAlertSound();
             }}
           >
             <Volume2 className="mt-0.5 size-4 shrink-0 opacity-80" />

@@ -80,6 +80,8 @@ export interface Message {
   toolCallId?: string;
   status: MessageStatus;
   createdAt: string;
+  /** Wall-clock model-call + stream time for assistant messages; undefined for user/tool and old ledger replays. */
+  durationMs?: number;
 }
 
 /**

@@ -100,6 +100,7 @@ export type {
   LedgerAssistantRecord,
   LedgerToolRecord,
   LedgerEnvelope,
+  LedgerAppendMeta,
 } from './lib/ledger.js';
 export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
 

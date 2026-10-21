@@ -19,6 +19,12 @@ export type LedgerRecord =
   | LedgerAssistantRecord
   | LedgerToolRecord;
 
+/** Host-assigned metadata passed alongside a ledger record on append. */
+export type LedgerAppendMeta = {
+  /** Assistant response wall-clock duration (model-call + stream time). */
+  durationMs?: number;
+};
+
 export type LedgerSystemRecord = {
   role: 'system';
   content: string;
@@ -58,6 +64,8 @@ export type LedgerEnvelope = {
   contentBlob?: string;
   /** User image attachments (not part of the Chat Completions record). */
   attachments?: MessageAttachment[];
+  /** Assistant response wall-clock duration (model-call + stream); host-assigned like seq/ts. */
+  durationMs?: number;
 };
 
 /** Skip system rows; they are rebuilt by the host each run. */
@@ -140,6 +148,9 @@ export function envelopeToUiMessage(
       ...(chat.tool_calls?.length ? { toolCalls: chat.tool_calls } : {}),
       status: 'complete',
       createdAt: envelope.ts,
+      ...(envelope.durationMs != null
+        ? { durationMs: envelope.durationMs }
+        : {}),
     };
   }
   return {

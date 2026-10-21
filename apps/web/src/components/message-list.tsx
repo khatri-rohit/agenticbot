@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import { useStickToBottom } from '../hooks/use-stick-to-bottom';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import type {
 } from '../features/agent/store/chat-store';
 import { groupMessageTurns } from '../lib/group-message-turns';
 import { buildTurnTimeline } from '../lib/turn-timeline';
-import { formatMessageTime } from '../lib/format-relative-time';
+import { formatDuration, formatMessageTime } from '../lib/format-relative-time';
 import { AgentMarkdown } from './agent-markdown';
 import {
   ConversationRail,
@@ -377,6 +377,15 @@ function TurnStatusLine({
     label = 'Working…';
   }
 
+  // Each phase (tool call, think gap) gets its own clock keyed on the label.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    setElapsed(0);
+    if (!label) return;
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, [label]);
+
   if (!label) return null;
 
   return (
@@ -389,11 +398,18 @@ function TurnStatusLine({
         aria-hidden
       />
       {label}
+      <span className="text-muted-foreground/50">{elapsed}s</span>
     </p>
   );
 }
 
-function MessageTimestamp({ iso }: { iso: string }) {
+function MessageTimestamp({
+  iso,
+  durationMs,
+}: {
+  iso: string;
+  durationMs?: number;
+}) {
   const text = formatMessageTime(iso);
   if (!text) return null;
   return (
@@ -402,6 +418,7 @@ function MessageTimestamp({ iso }: { iso: string }) {
       className="type-caption text-muted-foreground/55 tabular-nums"
     >
       {text}
+      {durationMs != null && ` · ${formatDuration(durationMs)}`}
     </time>
   );
 }
@@ -412,14 +429,16 @@ function MessageTimestamp({ iso }: { iso: string }) {
  */
 function MessageMetaRow({
   iso,
+  durationMs,
   children,
 }: {
   iso?: string;
+  durationMs?: number;
   children: React.ReactNode;
 }) {
   return (
     <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
-      <MessageTimestamp iso={iso ?? ''} />
+      <MessageTimestamp iso={iso ?? ''} durationMs={durationMs} />
       <div className="flex min-w-0 items-center">{children}</div>
     </div>
   );
@@ -443,7 +462,7 @@ function AssistantMessage({
       <article className="chat-prose type-body min-w-0 max-w-full">
         <AgentMarkdown content={message.content} />
       </article>
-      <MessageMetaRow iso={message.createdAt}>
+      <MessageMetaRow iso={message.createdAt} durationMs={message.durationMs}>
         <MessageActions
           content={message.content}
           align="start"

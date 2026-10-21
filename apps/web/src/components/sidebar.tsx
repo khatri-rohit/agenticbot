@@ -342,42 +342,17 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                         <div
                           key={group.root}
                           role="listitem"
-                          className={cn(
-                            'min-w-0 rounded-md transition-[opacity,box-shadow]',
-                            isDragging && 'opacity-45',
-                            isDropTarget &&
-                              'ring-1 ring-primary/50 ring-offset-1 ring-offset-sidebar',
-                          )}
-                          onDragOver={(event) => {
-                            event.preventDefault();
-                            event.dataTransfer.dropEffect = 'move';
-                            if (
-                              !sameWorkspaceRoot(group.root, dropTargetRoot)
-                            ) {
-                              setDropTargetRoot(group.root);
-                            }
-                          }}
-                          onDragLeave={() => {
-                            if (sameWorkspaceRoot(group.root, dropTargetRoot)) {
-                              setDropTargetRoot(null);
-                            }
-                          }}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            const from =
-                              event.dataTransfer.getData('text/plain') ||
-                              dragRoot;
-                            if (from) moveWorkspace(from, group.root);
-                            setDragRoot(null);
-                            setDropTargetRoot(null);
-                          }}
+                          className="min-w-0 rounded-md"
                         >
                           <div
                             className={cn(
-                              'group/folder flex w-full min-w-0 items-center gap-0.5 rounded-md px-1 py-1.5',
+                              'group/folder flex w-full min-w-0 items-center gap-0.5 rounded-md px-1 py-1.5 transition-[opacity,box-shadow]',
                               activeFolder
                                 ? 'bg-accent/70 text-foreground'
                                 : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                              isDragging && 'opacity-45',
+                              isDropTarget &&
+                                'ring-1 ring-primary/50 ring-offset-1 ring-offset-sidebar',
                             )}
                             draggable
                             onDragStart={(event) => {
@@ -387,6 +362,36 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                                 'text/plain',
                                 group.root,
                               );
+                            }}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = 'move';
+                              if (
+                                !sameWorkspaceRoot(group.root, dropTargetRoot)
+                              ) {
+                                setDropTargetRoot(group.root);
+                              }
+                            }}
+                            onDragLeave={(event) => {
+                              // Only clear when the pointer truly leaves the row,
+                              // not when crossing into a child element.
+                              const related = event.relatedTarget;
+                              if (
+                                sameWorkspaceRoot(group.root, dropTargetRoot) &&
+                                !(related instanceof Node &&
+                                  event.currentTarget.contains(related))
+                              ) {
+                                setDropTargetRoot(null);
+                              }
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              const from =
+                                event.dataTransfer.getData('text/plain') ||
+                                dragRoot;
+                              if (from) moveWorkspace(from, group.root);
+                              setDragRoot(null);
+                              setDropTargetRoot(null);
                             }}
                             onDragEnd={() => {
                               setDragRoot(null);

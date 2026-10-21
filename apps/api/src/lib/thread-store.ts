@@ -21,6 +21,7 @@ import {
   sameWorkspaceRoot,
   selectPlanForRewind,
   type ChatMessage,
+  type LedgerAppendMeta,
   type LedgerEnvelope,
   type LedgerRecord,
   type Message,
@@ -38,6 +39,7 @@ export type AppendInput = {
   runId: string | null;
   record: LedgerRecord;
   attachments?: MessageAttachment[];
+  meta?: LedgerAppendMeta;
 };
 
 export class ThreadStore {
@@ -344,6 +346,9 @@ export class ThreadStore {
       record,
       ...(contentBlob ? { contentBlob } : {}),
       ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+      ...(input.meta?.durationMs != null
+        ? { durationMs: input.meta.durationMs }
+        : {}),
     };
 
     try {

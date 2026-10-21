@@ -92,6 +92,8 @@ export interface AssistantCompleted {
   messageId: string;
   /** The full final text content of the assistant message. */
   content: string;
+  /** Wall-clock model-call + stream time; excludes tool execution (on ToolCompleted). */
+  durationMs?: number;
 }
 
 export interface ToolStarted {

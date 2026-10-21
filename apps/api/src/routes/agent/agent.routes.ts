@@ -620,9 +620,9 @@ router.post('/run', async (req: Request, res: Response) => {
       const start = offset ?? 0;
       return text.slice(start, length === undefined ? undefined : start + length);
     },
-    onMessage: async (record) => {
+    onMessage: async (record, meta) => {
       if (record.role === 'system') return;
-      await store.append({ threadId, runId: assignedRunId, record });
+      await store.append({ threadId, runId: assignedRunId, record, ...(meta ? { meta } : {}) });
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),

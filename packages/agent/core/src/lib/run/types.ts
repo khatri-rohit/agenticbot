@@ -7,6 +7,7 @@ import type {
   ChoiceResult,
   ContextBudget,
   ContextReport,
+  LedgerAppendMeta,
   LedgerRecord,
   RunPosture,
   ToolOrigin,
@@ -76,7 +77,7 @@ export type StartRunOptions = {
     length?: number,
   ) => Promise<string>;
   /** Host persistence seam (ledger append in M1). */
-  onMessage?: (record: LedgerRecord) => void | Promise<void>;
+  onMessage?: (record: LedgerRecord, meta?: LedgerAppendMeta) => void | Promise<void>;
   /** After the loop returns (success or error). Used for M4 compaction. */
   onFinished?: (result: RunLoopResult) => void | Promise<void>;
   hasOpenPlanWork?: () => boolean | Promise<boolean>;

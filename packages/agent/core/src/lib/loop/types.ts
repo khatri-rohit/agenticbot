@@ -8,6 +8,7 @@ import type {
   ChoiceResult,
   ContextBudget,
   ContextReport,
+  LedgerAppendMeta,
   LedgerRecord,
   RunPosture,
   ToolOrigin,
@@ -74,7 +75,7 @@ export type RunLoopConfig = {
    * Host persistence seam: called when the loop appends a durable turn.
    * Not used for SSE preview deltas. Host owns append (ledger in M1).
    */
-  onMessage?: (record: LedgerRecord) => void | Promise<void>;
+  onMessage?: (record: LedgerRecord, meta?: LedgerAppendMeta) => void | Promise<void>;
   /**
    * Host reads the live plan. When a Final plan still has open todos,
    * the loop nudges once, then finishes incomplete instead of a clean stop.
