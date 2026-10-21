@@ -101,14 +101,9 @@ export class RunManager {
       signal: handle.abortController.signal,
       origin: opts.origin,
       workspaceRoot: opts.workspaceRoot,
-      /*
-       * IMPORTANT: Allow/Deny exec-approval wire. Temporarily commented so
-       * file and command tools run without a pause, as they did before this
-       * card. Do not delete this line — it must stay in the tree, commented,
-       * until the Allow/Deny system is restored.
-       *
-       * approve: (request) => this.requestApproval(runId, request),
-       */
+      ...(opts.putBlob ? { putBlob: opts.putBlob } : {}),
+      ...(opts.readBlob ? { readBlob: opts.readBlob } : {}),
+      approve: (request) => this.requestApproval(runId, request),
       offerChoice: (request) => this.requestChoice(runId, request),
       onMessage: opts.onMessage,
       hasOpenPlanWork: opts.hasOpenPlanWork,

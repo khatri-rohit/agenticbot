@@ -50,8 +50,9 @@ export const WORKSPACE_MODE: ModeConfig = {
   name: 'workspace',
   model: 'glm-5.3:cloud',
   temperature: 0.2,
-  allowedTools: ['web_search', 'web_fetch'],
+  allowedTools: ['web_search'],
   globalTools: [
+    'web_fetch',
     'glob',
     'grep',
     'read_file',

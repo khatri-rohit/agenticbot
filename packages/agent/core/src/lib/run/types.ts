@@ -69,6 +69,12 @@ export type StartRunOptions = {
   contextReport?: ContextReport;
   origin?: ToolOrigin;
   workspaceRoot?: string;
+  putBlob?: (text: string) => Promise<string>;
+  readBlob?: (
+    sha256: string,
+    offset?: number,
+    length?: number,
+  ) => Promise<string>;
   /** Host persistence seam (ledger append in M1). */
   onMessage?: (record: LedgerRecord) => void | Promise<void>;
   /** After the loop returns (success or error). Used for M4 compaction. */

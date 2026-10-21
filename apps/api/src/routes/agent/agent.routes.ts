@@ -612,6 +612,14 @@ router.post('/run', async (req: Request, res: Response) => {
     contextReport: prepared.report,
     contextBudget: prepared.report.budget,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
+    putBlob: (text) => store.putBlob(threadId, text),
+    readBlob: async (sha256, offset, length) => {
+      const buf = await store.readBlob(threadId, sha256);
+      const text = buf.toString('utf8');
+      if (offset === undefined && length === undefined) return text;
+      const start = offset ?? 0;
+      return text.slice(start, length === undefined ? undefined : start + length);
+    },
     onMessage: async (record) => {
       if (record.role === 'system') return;
       await store.append({ threadId, runId: assignedRunId, record });

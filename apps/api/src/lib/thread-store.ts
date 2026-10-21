@@ -524,10 +524,11 @@ export class ThreadStore {
     }
   }
 
-  private async putBlob(threadId: string, text: string): Promise<string> {
+  async putBlob(threadId: string, text: string): Promise<string> {
     const bytes = Buffer.from(text, 'utf8');
     const sha = createHash('sha256').update(bytes).digest('hex');
     const dest = path.join(this.threadDir(threadId), 'blobs', sha);
+    await mkdir(path.dirname(dest), { recursive: true });
     try {
       await writeFile(dest, bytes, { flag: 'wx' });
     } catch (error) {

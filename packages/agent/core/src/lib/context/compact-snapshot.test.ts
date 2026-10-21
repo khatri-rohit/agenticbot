@@ -178,7 +178,7 @@ describe('compact snapshot', () => {
   });
 
   it('stubLiveToolResults caps oversized tool rows in the live prompt', () => {
-    const huge = 'x'.repeat(20_000);
+    const huge = 'x'.repeat(40_000);
     const messages = [
       { role: 'system' as const, content: 'sys' },
       { role: 'user' as const, content: 'go' },
@@ -193,7 +193,8 @@ describe('compact snapshot', () => {
     const tool = messages[2];
     expect(tool?.role).toBe('tool');
     if (tool?.role === 'tool') {
-      expect(tool.content).toMatch(/^\(stub\)/);
+      expect(tool.content).toContain('live prompt capped');
+      expect(tool.content).not.toMatch(/^\(stub\) tool .* omitted/);
       expect(tool.content.length).toBeLessThan(huge.length);
     }
   });

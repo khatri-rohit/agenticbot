@@ -12,6 +12,7 @@ import type { Dirent } from 'node:fs';
 import path from 'node:path';
 
 import type { Tool } from './type';
+import { isOutboundHttpShellCommand } from './web-trust';
 import {
   globMatch,
   isPathInside,
@@ -130,6 +131,9 @@ function deniedTerminalCommand(command: string): string | null {
   ];
   for (const test of tests) {
     if (test.pattern.test(compact)) return test.reason;
+  }
+  if (isOutboundHttpShellCommand(compact)) {
+    return 'refuses outbound HTTP from the shell; use web_fetch / web_search';
   }
   return null;
 }

@@ -54,6 +54,8 @@ export type ToolContext = {
     offset?: number,
     length?: number,
   ) => Promise<string>;
+  /** Persist full text; returns sha256. Host optional — loop keeps an in-run cache. */
+  putBlob?: (text: string) => Promise<string>;
   /**
    * Pause the run until the host resolves. Resolves with the decision payload;
    * rejects with ApprovalDenied or a cancel error.
@@ -64,4 +66,23 @@ export type ToolContext = {
    * Resolves on Continue; rejects with ChoiceSkipped on Skip, or cancel.
    */
   offerChoice?: (request: ChoiceRequest) => Promise<ChoiceResult>;
+  /**
+   * Record http(s) URLs this run may web_fetch (user-pasted or search hits).
+   * Page body links are not trusted.
+   */
+  noteTrustedWebUrls?: (urls: string[]) => void;
+  /** Register a fetched page in the run source index (url → sha, body cache). */
+  noteWebSource?: (source: {
+    sha256: string;
+    url: string;
+    title: string;
+    content: string;
+  }) => void;
+  /** Resolve a previously fetched page by sha (run cache, then host readBlob). */
+  getWebSource?: (sha256: string) => Promise<
+    | { sha256: string; url: string; title: string; content: string }
+    | undefined
+  >;
+  /** Resolve sha for a URL already fetched this run. */
+  getWebSourceByUrl?: (url: string) => string | undefined;
 };

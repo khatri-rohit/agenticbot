@@ -51,8 +51,8 @@ Tools are registered in `@org/agent-core` and filtered per run:
 
 | Tool         | When available                                                                             | Purpose                                                                                                                                                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `web_search` | Only if the client enables **Web search** in the composer (`allowedTools: ['web_search']`) | Live search via a provider chain (Ollama if keyed; else Firecrawl keyless → Tavily keyless). Tiered results: rich hits skip a second fetch; short snippets auto-fetch top **2** URLs; remaining hits are **Further Reading**. |
-| `web_fetch`  | **Always** (server `globalTools`)                                                          | Fetch a single URL (same provider chain) — user pasted links or deeper read from search.                                                                                                                                      |
+| `web_search` | Only if the client enables **Web search** in the composer (`allowedTools: ['web_search']`) | Live search: Ollama → Firecrawl → Tavily. Returns **hit cards**; top **2** hits are prefetched into the source store (`sha256`). |
+| `web_fetch`  | **Always** (Home and Workspace `globalTools`)                                              | `url` → fetch pipeline (Ollama → Firecrawl → Tavily → **local HTTP**), store full page, return a **card** (~2k teaser). `sha256`+`offset`+`limit` → page the stored source. |
 | `load_skill` | **Always** (server `globalTools`)                                                          | Optional skill packs. `web_search` / `web_fetch` work without loading a skill.                                                                                                                                                |
 
 **Resource discipline (by design):**
@@ -70,11 +70,11 @@ Profile defaults live in `packages/agent/models/src/lib/mode.ts` (`HOME_MODE` / 
 - **Node.js** 20+ (LTS recommended)
 - **npm** (root `package.json` `workspaces` + `package-lock.json`)
 - **Ollama** for chat: cloud API key and/or local `OLLAMA_BASE_URL` ([docs](https://docs.ollama.com))
-- **Web search** works with **no search API key** (Firecrawl keyless → Tavily keyless). Optional `OLLAMA_API_KEY` / `FIRECRAWL_API_KEY` / `TAVILY_API_KEY` for higher limits — see env table
+- **Web search/fetch** always run the same layered pipeline (Ollama → Firecrawl → Tavily; fetch then **local HTTP**). Keys are credentials for a layer, not a router. Firecrawl/Tavily keyless still work without a dedicated search key.
 - **Redis** (optional but required for async **thread title** jobs): local Docker or existing instance — see [docker/README.md](./docker/README.md)
 - **Voice STT** (optional): default **browser** Web Speech API; optional **Speaches** via Docker — see env table + [docker/README.md](./docker/README.md)
 
-Ollama **chat** uses the OpenAI-compatible endpoint (`OLLAMA_BASE_URL=https://ollama.com/v1`). Web search/fetch are routed in `packages/agent/core/src/lib/tools/web_search_api.ts`: with `OLLAMA_API_KEY`, Ollama cloud search/fetch; otherwise Firecrawl keyless then Tavily keyless. Keyless tiers are shared / rate-limited — not a production SLA.
+Ollama **chat** uses the OpenAI-compatible endpoint (`OLLAMA_BASE_URL=https://ollama.com/v1`). Web tools are independent of which model is chatting: `web_search_api.ts` tries Ollama, then Firecrawl, then Tavily; `web_fetch` then tries local HTTP. Keyless Firecrawl/Tavily tiers are shared / rate-limited — not a production SLA.
 
 ---
 
@@ -91,7 +91,7 @@ Host-run API (typical dev) — see [.env.example](./.env.example):
 | Variable                         | Purpose                                                       |
 | -------------------------------- | ------------------------------------------------------------- |
 | `OLLAMA_BASE_URL`                | Chat completions base URL (default cloud)                     |
-| `OLLAMA_API_KEY`                 | Chat (cloud) + forces Ollama web search/fetch when set        |
+| `OLLAMA_API_KEY`                 | Chat (cloud) + first web search/fetch layer when set          |
 | `FIRECRAWL_API_KEY`              | Optional — higher Firecrawl limits (keyless works without it) |
 | `TAVILY_API_KEY`                 | Optional — higher Tavily limits (keyless works without it)    |
 | `AGENTICBOT_HOME`                | Session catalog/ledger root (default `~/.local/agenticbot`)   |
@@ -250,7 +250,7 @@ External HTTP for tools belongs in core modules (e.g. `web_search_api.ts`), not 
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | No tools / wrong tools                 | Request body `allowedTools`; server merge with profile `globalTools`; `createToolRegistry` filter |
 | `web_search` fails                     | Keyless Firecrawl/Tavily 429 (shared caps); or `OLLAMA_API_KEY` path — curl tests above                 |
-| `web_fetch` fails                      | Valid full URL; provider rate limit; page blocked or huge (content truncated at 4k chars in harness)    |
+| `web_fetch` fails                      | Valid public http(s) URL; all scrape layers + local HTTP failed; huge pages are prefixed at 16k chars  |
 | Run stuck “running”                    | SSE disconnect; seq gap should refetch ledger; `run.settled` / `run.error`; cancel endpoint             |
 | 409 on new message                     | Thread already running, or another **agent** run in the same workspace (`reason: 'workspace'`); cancel or wait |
 | Title stays “New Chat”                 | First message must go through `POST /run`; check API logs for `[title] generate failed`                 |
@@ -288,10 +288,11 @@ agenticbot/
 
 Implementation in `web_search_api.ts` + `web-search-providers.ts`:
 
-1. **Provider router:** `OLLAMA_API_KEY` → Ollama only; else Firecrawl keyless, then Tavily keyless on retryable failure (429 / 5xx / empty / network). Failover is inside the tool — not a second model `web_search`.
-2. One search (default **5** results). Hits that already include long scraped/chunked content skip a second fetch.
-3. **Auto-fetch** only for short snippets on the top **2** URLs; truncate page body at 4k chars.
-4. Return **Detailed Sources** + **Further Reading**. Model may `web_fetch` a listed URL if needed — do not re-search the same question.
+1. **Fixed pipeline:** search = Ollama → Firecrawl → Tavily. Fetch = those scrape layers, then **local HTTP**. Failover is inside the tool. Thin bodies continue.
+2. **Store vs view:** full page text is stored (run cache + thread `putBlob`). The model sees a **source card** (~2k teaser + headings + `sha256`), then pages with `web_fetch { sha256, offset, limit }`.
+3. **Search** returns hit cards; top **2** URLs are prefetched into the store (not dumped into the prompt).
+4. Same-URL refetch (hash / reader proxy) is a repeated tool call; prefer sha paging.
+5. **Untrusted web:** teaser/slices wrapped as `UNTRUSTED_WEB_*`. URL allowlist + sha allowlist (sources from this run only). Local HTTP re-checks private hosts after redirects. `run_terminal` refuses curl/wget/IRW. `edit_file` / `run_terminal` pause for Allow/Deny.
 
 System prompt (`system-prompt.ts`) instructs: answer from stable knowledge without tools; synthesize one comprehensive reply when tools are used; cite URLs; do not loop on poor searches.
 

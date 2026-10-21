@@ -1,4 +1,5 @@
 import type { WebFetchResponse, WebSearchResponse } from './type';
+import { assertPublicHttpUrl } from './web-url';
 
 /** Thrown when a provider response is empty or retryable (429 / 5xx / network). */
 export class RetryableSearchError extends Error {
@@ -45,7 +46,7 @@ export async function ollamaSearch(
 ): Promise<WebSearchResponse> {
   const apiKey = process.env.OLLAMA_API_KEY;
   if (!apiKey) {
-    throw new Error('OLLAMA_API_KEY is not set');
+    throw new RetryableSearchError('ollama web_search skipped: no API key');
   }
 
   const response = await fetch(
@@ -93,7 +94,7 @@ export async function ollamaFetch(
 ): Promise<WebFetchResponse> {
   const apiKey = process.env.OLLAMA_API_KEY;
   if (!apiKey) {
-    throw new Error('OLLAMA_API_KEY is not set');
+    throw new RetryableSearchError('ollama web_fetch skipped: no API key');
   }
 
   const response = await fetch(
@@ -341,4 +342,116 @@ export async function tavilyFetch(
     content: String(first.raw_content ?? first.content ?? ''),
     links: [],
   };
+}
+
+// --- Local HTTP (last fetch layer) ------------------------------------------
+
+const HTTP_FETCH_MAX_BYTES = 1_000_000;
+
+/**
+ * Direct GET of a public URL. Last fetch fallback when scrape vendors fail
+ * or return a thin body. No search index — fetch only.
+ */
+export async function httpFetch(
+  url: string,
+  signal?: AbortSignal,
+): Promise<WebFetchResponse> {
+  const headers = {
+    Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1',
+    'User-Agent': 'agenticbot-web-fetch/1.0',
+  };
+  let target = assertPublicHttpUrl(url);
+  let response: Response | undefined;
+  for (let hop = 0; hop < 5; hop++) {
+    response = await fetch(
+      target.href,
+      withSignal(
+        {
+          method: 'GET',
+          headers,
+          redirect: 'manual',
+        },
+        signal,
+      ),
+    );
+    if (response.status < 300 || response.status >= 400) break;
+    const location = response.headers.get('location');
+    if (!location) {
+      throw new Error('http fetch redirect missing Location');
+    }
+    target = assertPublicHttpUrl(new URL(location, target.href).href);
+  }
+  if (!response) {
+    throw new Error('http fetch failed');
+  }
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error('http fetch too many redirects');
+  }
+  if (!response.ok) {
+    throwForHttpStatus('http fetch', response.status);
+  }
+
+  const mime = (response.headers.get('content-type') ?? '')
+    .split(';', 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (
+    mime &&
+    !mime.startsWith('text/') &&
+    mime !== 'application/xhtml+xml' &&
+    mime !== 'application/xml' &&
+    mime !== 'application/json'
+  ) {
+    throw new Error(`http fetch unsupported content type: ${mime}`);
+  }
+
+  const buffer = new Uint8Array(await response.arrayBuffer());
+  const bytes = buffer.byteLength > HTTP_FETCH_MAX_BYTES
+    ? buffer.slice(0, HTTP_FETCH_MAX_BYTES)
+    : buffer;
+  const html = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  return extractReadablePage(target.href, html);
+}
+
+function extractReadablePage(url: string, html: string): WebFetchResponse {
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = decodeEntities(
+    (titleMatch?.[1] ?? '').replace(/\s+/g, ' ').trim(),
+  );
+
+  const links: string[] = [];
+  const hrefPattern = /<a\b[^>]*href\s*=\s*["']([^"']+)["']/gi;
+  let hrefMatch: RegExpExecArray | null;
+  while ((hrefMatch = hrefPattern.exec(html)) !== null && links.length < 10) {
+    try {
+      const absolute = new URL(hrefMatch[1], url).href;
+      if (
+        (absolute.startsWith('http://') || absolute.startsWith('https://')) &&
+        !links.includes(absolute)
+      ) {
+        links.push(absolute);
+      }
+    } catch {
+      /* skip invalid href */
+    }
+  }
+
+  const withoutNoise = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ');
+  const content = decodeEntities(withoutNoise).replace(/\s+/g, ' ').trim();
+
+  return { title, url, content, links };
+}
+
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
 }

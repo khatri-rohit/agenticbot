@@ -20,6 +20,8 @@ import {
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
 import type { ToolRegistry } from '../tools/type';
+import { stubWebSourceCard } from '../tools/web-source';
+import { hostListedWebUrls } from '../tools/web-trust';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 
 export type MentionedThreadContext = {
@@ -109,11 +111,43 @@ function userSeqs(envelopes: LedgerEnvelope[]): number[] {
 
 function stubToolContent(envelope: LedgerEnvelope): string {
   if (envelope.record.role !== 'tool') return '';
+  const card = stubWebSourceCard(
+    envelope.record.content,
+    envelope.record.tool_call_id,
+  );
+  if (card) return card;
+  const listed = hostListedWebUrls(envelope.record.content);
+  const urlTail =
+    listed.length > 0
+      ? `\n${listed.map((url) => `URL: ${url}`).join('\n')}`
+      : '';
   if (envelope.contentBlob) {
-    return `(stub) tool ${envelope.record.tool_call_id} full result in blob sha256:${envelope.contentBlob}`;
+    return `(stub) tool ${envelope.record.tool_call_id} full result in blob sha256:${envelope.contentBlob}${urlTail}`;
   }
   const n = envelope.record.content.length;
-  return `(stub) tool ${envelope.record.tool_call_id} omitted (${n} chars)`;
+  return `(stub) tool ${envelope.record.tool_call_id} omitted (${n} chars)${urlTail}`;
+}
+
+/**
+ * Recent oversized tool rows keep a prefix (and host-listed URLs) so research
+ * can continue. Silent "omitted" is only for old turns.
+ */
+export function capRecentToolContent(
+  content: string,
+  maxChars: number,
+): string {
+  if (content.length <= maxChars) return content;
+  const listed = hostListedWebUrls(content);
+  const listing =
+    listed.length > 0
+      ? `${listed.map((url) => `URL: ${url}`).join('\n')}\n\n`
+      : '';
+  const footer = `\n\n(live prompt capped at ${maxChars} chars; full tool result remains in the ledger)`;
+  const budget = maxChars - listing.length - footer.length;
+  if (budget < 256) {
+    return `${content.slice(0, maxChars)}${footer}`;
+  }
+  return `${listing}${content.slice(0, budget)}${footer}`;
 }
 
 /** 0 = keep all (not enough turns yet). Else seq/index of the first kept user turn. */
@@ -187,11 +221,22 @@ export function stubLiveToolResults(
     const old = i < keepToolsFrom;
     const overCap = content.length > maxToolChars;
     if (!old && !overCap) continue;
-    messages[i] = {
-      role: 'tool',
-      tool_call_id: message.tool_call_id,
-      content: `(stub) tool ${message.tool_call_id} omitted (${content.length} chars)`,
-    };
+    if (old) {
+      const card = stubWebSourceCard(content, message.tool_call_id);
+      messages[i] = {
+        role: 'tool',
+        tool_call_id: message.tool_call_id,
+        content:
+          card ??
+          `(stub) tool ${message.tool_call_id} omitted (${content.length} chars)`,
+      };
+    } else {
+      messages[i] = {
+        role: 'tool',
+        tool_call_id: message.tool_call_id,
+        content: capRecentToolContent(content, maxToolChars),
+      };
+    }
     stubbed++;
   }
   return stubbed;
@@ -340,12 +385,24 @@ export function assembleContext(
     const overCap =
       envelope.record.role === 'tool' &&
       envelope.record.content.length > maxToolChars;
-    const stubTool = oldTool || overCap;
-    if (stubTool) stubbedToolResults++;
+    const stubTool = oldTool;
+    if (oldTool) stubbedToolResults++;
     const stubImages =
       envelope.record.role === 'user' && envelope.seq < keepImagesFrom;
 
-    const message = toParam(envelope, stubTool, stubImages);
+    let message = toParam(envelope, stubTool, stubImages);
+    if (
+      message?.role === 'tool' &&
+      overCap &&
+      !oldTool &&
+      typeof message.content === 'string'
+    ) {
+      message = {
+        role: 'tool',
+        tool_call_id: message.tool_call_id,
+        content: capRecentToolContent(message.content, maxToolChars),
+      };
+    }
     if (!message) continue;
     if (inTurn) turnMessages.push(message);
     else tailMessages.push(message);

@@ -317,7 +317,11 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                     Open a folder to start project chats
                   </p>
                 ) : (
-                  <div className="space-y-2" role="list" aria-label="Workspace projects">
+                  <div
+                    className="space-y-2"
+                    role="list"
+                    aria-label="Workspace projects"
+                  >
                     {workspaceGroups.map((group) => {
                       const collapsedFolder = collapsedFolders.some((item) =>
                         sameWorkspaceRoot(item, group.root),
@@ -347,7 +351,9 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                           onDragOver={(event) => {
                             event.preventDefault();
                             event.dataTransfer.dropEffect = 'move';
-                            if (!sameWorkspaceRoot(group.root, dropTargetRoot)) {
+                            if (
+                              !sameWorkspaceRoot(group.root, dropTargetRoot)
+                            ) {
                               setDropTargetRoot(group.root);
                             }
                           }}
@@ -435,10 +441,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                                   aria-label={`New chat in ${group.name}`}
                                   onClick={() => openBlankForFolder(group.root)}
                                 >
-                                  <Plus
-                                    className="size-3.5"
-                                    strokeWidth={2}
-                                  />
+                                  <Plus className="size-3.5" strokeWidth={2} />
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent side="right">
@@ -455,10 +458,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                                   <MoreHorizontal className="size-3.5" />
                                 </button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent
-                                align="end"
-                                className="w-44"
-                              >
+                              <DropdownMenuContent align="end" className="w-44">
                                 <DropdownMenuItem
                                   onSelect={() =>
                                     openBlankForFolder(group.root)
@@ -468,9 +468,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                                   New chat
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  onSelect={() =>
-                                    setWorkspaceRoot(group.root)
-                                  }
+                                  onSelect={() => setWorkspaceRoot(group.root)}
                                 >
                                   <FolderOpen className="size-4" />
                                   Use this folder
@@ -548,9 +546,7 @@ function PagedThreadList({
           onClick={() => setPages((current) => current + 1)}
         >
           Show {Math.min(remaining, SIDEBAR_THREAD_PAGE)} more
-          {remaining > SIDEBAR_THREAD_PAGE
-            ? ` · ${remaining} left`
-            : ''}
+          {remaining > SIDEBAR_THREAD_PAGE ? ` · ${remaining} left` : ''}
         </button>
       ) : null}
     </div>
@@ -677,15 +673,15 @@ function ThreadItem({
           {isPending ? (
             <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-muted" />
           ) : (
-            <span className="min-w-0 flex-1 truncate leading-snug">
+            <span className="min-w-0 max-w-[80%] flex-1 truncate leading-snug">
               {displayTitle}
             </span>
           )}
         </Link>
         <span
           className={cn(
-            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/70 opacity-0 transition-opacity',
-            'group-hover:opacity-100 group-focus-within:opacity-100',
+            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/70 transition-opacity',
+            'group-focus-within:opacity-100',
             active && 'opacity-100',
             'group-has-[[data-state=open]]:opacity-0',
           )}

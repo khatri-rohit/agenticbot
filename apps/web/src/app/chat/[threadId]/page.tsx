@@ -5,13 +5,7 @@ import { ChatHeader } from '../../../components/chat-header';
 import { MessageList } from '../../../components/message-list';
 import { ChatInput } from '../../../components/chat-input';
 import { ThreadPlanCard } from '../../../components/thread-plan-card';
-/*
- * IMPORTANT: Allow/Deny exec-approval card. Temporarily unused so file and
- * command tools run without a pause. Do not delete this import — it must
- * stay in the tree, commented, until the Allow/Deny system is restored.
- *
- * import { ApprovalCard } from '../../../components/approval-card';
- */
+import { ApprovalCard } from '../../../components/approval-card';
 import { ChoiceCard } from '../../../components/choice-card';
 import { ChatShell } from '../../../components/chat-shell';
 import {
@@ -37,7 +31,7 @@ export default function ChatThreadPage({
     setComposerOptions,
     isRunning,
     stopGeneration,
-    // resolvePendingApproval,
+    resolvePendingApproval,
     resolvePendingChoice,
     retryLastResponse,
     editLastUserMessage,
@@ -89,21 +83,14 @@ export default function ChatThreadPage({
               }
               onResolve={resolvePendingChoice}
             />
-            {/*
-              IMPORTANT: Allow/Deny exec-approval card. Temporarily commented
-              so file and command tools run without a pause, as they did before
-              this card. Do not delete this block — it must stay in the tree,
-              commented, until the Allow/Deny system is restored.
-
-              <ApprovalCard
-                approval={
-                  chatState.pendingApprovals[
-                    chatState.pendingApprovals.length - 1
-                  ] ?? null
-                }
-                onResolve={resolvePendingApproval}
-              />
-            */}
+            <ApprovalCard
+              approval={
+                chatState.pendingApprovals[
+                  chatState.pendingApprovals.length - 1
+                ] ?? null
+              }
+              onResolve={resolvePendingApproval}
+            />
           </div>
           <ChatInput
             key={threadId}

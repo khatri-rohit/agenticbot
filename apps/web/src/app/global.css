@@ -404,7 +404,7 @@ body {
   line-height: 1.4;
   padding: 0.1em 0.32em;
   border-radius: calc(var(--radius) - 2px);
-  background: var(--muted);
+  background: var(--md-inline-code-bg, var(--muted));
   font-family: var(--font-mono);
 }
 

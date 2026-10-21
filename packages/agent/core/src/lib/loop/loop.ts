@@ -18,6 +18,14 @@ import { consoleTrace, type TraceEvent } from '../events/trace';
 import { DEFAULT_LIMITS } from './limits';
 import type { ModelTurn } from '../model/types';
 import type { Tool, ToolRegistry } from '../tools/type';
+import { sha256Text } from '../tools/web-source';
+import {
+  extractHttpUrls,
+  hostListedWebUrls,
+  WEB_FETCH_UNTRUSTED_SHA,
+  WEB_FETCH_UNTRUSTED_URL,
+} from '../tools/web-trust';
+import { canonicalizeWebFetchUrl, looksLikeHttpUrl } from '../tools/web-url';
 import { toLedgerRecord } from './to-ledger-record';
 import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
@@ -125,6 +133,26 @@ function canonicalJson(value: unknown): string {
 }
 
 function toolCallKey(toolName: string, args: unknown): string {
+  if (
+    toolName === 'web_fetch' &&
+    args !== null &&
+    typeof args === 'object' &&
+    !Array.isArray(args)
+  ) {
+    const record = args as Record<string, unknown>;
+    if (typeof record.sha256 === 'string' && record.sha256.trim()) {
+      return `${toolName}:${canonicalJson({
+        sha256: record.sha256.trim().toLowerCase(),
+        offset: record.offset ?? 0,
+        limit: record.limit ?? 0,
+      })}`;
+    }
+    if (typeof record.url === 'string') {
+      return `${toolName}:${canonicalJson({
+        url: canonicalizeWebFetchUrl(record.url),
+      })}`;
+    }
+  }
   return `${toolName}:${canonicalJson(args)}`;
 }
 
@@ -135,29 +163,22 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
     : new Error('Run cancelled');
 }
 
-/*
- * IMPORTANT: Allow/Deny exec-approval copy. Temporarily commented so file
- * and command tools run without a pause, as they did before this gate.
- * Do not delete this block — it must stay in the tree, commented, until
- * the Allow/Deny system is restored.
- *
- * function approvalSummary(
- *   toolName: string,
- *   args: Record<string, unknown>,
- * ): string {
- *   if (toolName === 'edit_file') {
- *     const filePath = typeof args.path === 'string' ? args.path : '';
- *     const oldText = typeof args.oldText === 'string' ? args.oldText : '';
- *     const intent = oldText.length > 0 ? 'patch' : 'create';
- *     return `${intent} ${filePath}`.trim();
- *   }
- *   if (toolName === 'run_terminal') {
- *     const command = typeof args.command === 'string' ? args.command : '';
- *     return command.length > 200 ? `${command.slice(0, 200)}…` : command;
- *   }
- *   return toolName;
- * }
- */
+function approvalSummary(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
+  if (toolName === 'edit_file') {
+    const filePath = typeof args.path === 'string' ? args.path : '';
+    const oldText = typeof args.oldText === 'string' ? args.oldText : '';
+    const intent = oldText.length > 0 ? 'patch' : 'create';
+    return `${intent} ${filePath}`.trim();
+  }
+  if (toolName === 'run_terminal') {
+    const command = typeof args.command === 'string' ? args.command : '';
+    return command.length > 200 ? `${command.slice(0, 200)}…` : command;
+  }
+  return toolName;
+}
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -259,6 +280,93 @@ export async function runLoop(
   let planWorkNudges = 0;
   const repeatedCalls = new Map<string, number>();
   const contextBudget = config.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
+  const trustedWebUrls = new Set<string>();
+  const trustedWebShas = new Set<string>();
+  const webBodies = new Map<string, string>();
+  const webMeta = new Map<string, { url: string; title: string }>();
+  const urlToSha = new Map<string, string>();
+
+  function noteTrustedWebUrls(urls: string[]): void {
+    for (const raw of urls) {
+      const trimmed = raw.trim();
+      if (!looksLikeHttpUrl(trimmed)) continue;
+      trustedWebUrls.add(canonicalizeWebFetchUrl(trimmed));
+    }
+  }
+
+  function noteWebSource(source: {
+    sha256: string;
+    url: string;
+    title: string;
+    content: string;
+  }): void {
+    const sha = source.sha256.toLowerCase();
+    trustedWebShas.add(sha);
+    webBodies.set(sha, source.content);
+    webMeta.set(sha, {
+      url: canonicalizeWebFetchUrl(source.url),
+      title: source.title,
+    });
+    urlToSha.set(canonicalizeWebFetchUrl(source.url), sha);
+    noteTrustedWebUrls([source.url]);
+  }
+
+  async function putBlob(text: string): Promise<string> {
+    if (config.putBlob) {
+      const sha = (await config.putBlob(text)).toLowerCase();
+      webBodies.set(sha, text);
+      return sha;
+    }
+    const sha = sha256Text(text);
+    webBodies.set(sha, text);
+    return sha;
+  }
+
+  async function getWebSource(sha256: string): Promise<
+    | { sha256: string; url: string; title: string; content: string }
+    | undefined
+  > {
+    const sha = sha256.toLowerCase();
+    if (!trustedWebShas.has(sha)) return undefined;
+    let content = webBodies.get(sha);
+    if (!content && config.readBlob) {
+      content = await config.readBlob(sha);
+      if (content) webBodies.set(sha, content);
+    }
+    if (!content) return undefined;
+    const meta = webMeta.get(sha) ?? { url: '', title: '' };
+    return { sha256: sha, url: meta.url, title: meta.title, content };
+  }
+
+  function getWebSourceByUrl(url: string): string | undefined {
+    return urlToSha.get(canonicalizeWebFetchUrl(url));
+  }
+
+  function seedTrustedWebUrls(): void {
+    for (const message of messages) {
+      if (typeof message.content !== 'string') continue;
+      if (message.role === 'user') {
+        noteTrustedWebUrls(extractHttpUrls(message.content));
+      } else if (message.role === 'tool') {
+        noteTrustedWebUrls(hostListedWebUrls(message.content));
+        const sha = message.content.match(/^sha256: ([a-f0-9]{64})$/m)?.[1];
+        const url = message.content.match(/^URL: (.+)$/m)?.[1]?.trim();
+        const title = message.content.match(/^title: (.+)$/m)?.[1]?.trim();
+        if (sha) {
+          const id = sha.toLowerCase();
+          trustedWebShas.add(id);
+          if (url) {
+            const canonical = canonicalizeWebFetchUrl(url);
+            webMeta.set(id, { url: canonical, title: title ?? '' });
+            urlToSha.set(canonical, id);
+            noteTrustedWebUrls([canonical]);
+          }
+        }
+      }
+    }
+  }
+
+  seedTrustedWebUrls();
 
   async function appendDurable(
     message: ChatCompletionMessageParam,
@@ -293,6 +401,29 @@ export async function runLoop(
         : {}),
       ...(config.approve ? { approve: config.approve } : {}),
       ...(config.offerChoice ? { offerChoice: config.offerChoice } : {}),
+      putBlob,
+      ...(config.readBlob
+        ? {
+            readBlob: async (sha, offset, length) => {
+              const source = await getWebSource(sha);
+              if (source) {
+                if (offset === undefined && length === undefined) {
+                  return source.content;
+                }
+                const start = offset ?? 0;
+                return source.content.slice(
+                  start,
+                  length === undefined ? undefined : start + length,
+                );
+              }
+              return config.readBlob!(sha, offset, length);
+            },
+          }
+        : {}),
+      noteTrustedWebUrls,
+      noteWebSource,
+      getWebSource,
+      getWebSourceByUrl,
     };
   }
 
@@ -400,6 +531,93 @@ export async function runLoop(
       return { kind: 'filled' };
     }
 
+    if (toolName === 'web_fetch') {
+      const sha =
+        typeof args.sha256 === 'string' ? args.sha256.trim().toLowerCase() : '';
+      const url = typeof args.url === 'string' ? args.url.trim() : '';
+      if (sha) {
+        if (!trustedWebShas.has(sha)) {
+          const blocked = WEB_FETCH_UNTRUSTED_SHA;
+          emit?.({
+            type: 'tool.started',
+            runId,
+            toolCallId: toolCall.id,
+            toolName,
+            argsPreview: toolArgsPreview(toolName, args),
+          });
+          emit?.({
+            type: 'tool.completed',
+            runId,
+            toolCallId: toolCall.id,
+            toolName,
+            durationMs: 0,
+            resultPreview: preview(blocked, 200),
+          });
+          await appendDurable({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: blocked,
+          });
+          return { kind: 'filled' };
+        }
+      } else if (looksLikeHttpUrl(url)) {
+        const canonical = canonicalizeWebFetchUrl(url);
+        if (!trustedWebUrls.has(canonical)) {
+          const blocked = WEB_FETCH_UNTRUSTED_URL;
+          emit?.({
+            type: 'tool.started',
+            runId,
+            toolCallId: toolCall.id,
+            toolName,
+            argsPreview: toolArgsPreview(toolName, args),
+          });
+          emit?.({
+            type: 'tool.completed',
+            runId,
+            toolCallId: toolCall.id,
+            toolName,
+            durationMs: 0,
+            resultPreview: preview(blocked, 200),
+          });
+          await appendDurable({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: blocked,
+          });
+          return { kind: 'filled' };
+        }
+      }
+    } else if (toolName === 'web_search') {
+      const candidate = String(args.query ?? '').trim();
+      if (looksLikeHttpUrl(candidate)) {
+        const canonical = canonicalizeWebFetchUrl(candidate);
+        if (!trustedWebUrls.has(canonical)) {
+          const blocked = WEB_FETCH_UNTRUSTED_URL;
+          emit?.({
+            type: 'tool.started',
+            runId,
+            toolCallId: toolCall.id,
+            toolName,
+            argsPreview: toolArgsPreview(toolName, args),
+          });
+          emit?.({
+            type: 'tool.completed',
+            runId,
+            toolCallId: toolCall.id,
+            toolName,
+            durationMs: 0,
+            resultPreview: preview(blocked, 200),
+          });
+          await appendDurable({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: blocked,
+          });
+          return { kind: 'filled' };
+        }
+      }
+    }
+
     const callKey = toolCallKey(toolName, args);
     const repeatCount = (repeatedCalls.get(callKey) ?? 0) + 1;
     repeatedCalls.set(callKey, repeatCount);
@@ -501,32 +719,25 @@ export async function runLoop(
     const { toolCall, toolName, tool, args } = call;
     const toolCtx = buildToolContext();
 
-    /*
-     * IMPORTANT: Allow/Deny exec-approval gate. Temporarily commented so
-     * file and command tools run without a pause, as they did before this
-     * card. Do not delete this block — it must stay in the tree, commented,
-     * until the Allow/Deny system is restored.
-     *
-     * if (LOOP_APPROVAL_TOOLS.has(toolName) && config.approve) {
-     *   try {
-     *     await config.approve({
-     *       toolName,
-     *       summary: approvalSummary(toolName, args),
-     *       risk: tool.risk ?? 'write',
-     *       argsPreview: toolArgsPreview(toolName, args),
-     *     });
-     *   } catch (error) {
-     *     if (signal?.aborted) {
-     *       await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
-     *       throwIfAborted(signal);
-     *     }
-     *     if (error instanceof ApprovalDenied) {
-     *       return completeAsDenied(call);
-     *     }
-     *     throw error;
-     *   }
-     * }
-     */
+    if (LOOP_APPROVAL_TOOLS.has(toolName) && config.approve) {
+      try {
+        await config.approve({
+          toolName,
+          summary: approvalSummary(toolName, args),
+          risk: tool.risk ?? 'write',
+          argsPreview: toolArgsPreview(toolName, args),
+        });
+      } catch (error) {
+        if (signal?.aborted) {
+          await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
+          throwIfAborted(signal);
+        }
+        if (error instanceof ApprovalDenied) {
+          return completeAsDenied(call);
+        }
+        throw error;
+      }
+    }
 
     trace({
       type: 'tool_start',

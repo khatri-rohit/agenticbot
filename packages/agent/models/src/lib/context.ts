@@ -21,7 +21,8 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   windowTokens: 128_000,
   outputReserveTokens: 20_000,
   compactAtRatio: 0.65,
-  toolResultMaxTokens: 2_000,
+  /** ~16k chars; cards are small, slices max 8k — keep recent research readable. */
+  toolResultMaxTokens: 4_000,
   keepToolResultsForTurns: 2,
   keepAttachmentsForTurns: 2,
 };

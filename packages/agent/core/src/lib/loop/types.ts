@@ -52,6 +52,13 @@ export type RunLoopConfig = {
   origin?: ToolOrigin;
   /** Bound workspace for file tools. */
   workspaceRoot?: string;
+  /** Host blob store for full web pages (optional; loop keeps an in-run cache). */
+  putBlob?: (text: string) => Promise<string>;
+  readBlob?: (
+    sha256: string,
+    offset?: number,
+    length?: number,
+  ) => Promise<string>;
   /**
    * Host approval seam. Chat wires RunManager; CLI/eval may auto-resolve.
    * The wait must not sit inside toolTimeoutMs.
