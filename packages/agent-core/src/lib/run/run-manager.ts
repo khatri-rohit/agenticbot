@@ -1,13 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
 import {
-  ApprovalDenied,
   ChoiceSkipped,
   MAX_CHOICE_TEXT_CHARS,
   type AgentEvent,
-  type ApprovalDecision,
-  type ApprovalRequest,
-  type ApprovalResult,
   type ChoiceRequest,
   type ChoiceResult,
 } from '@agent/agent-models';
@@ -15,14 +11,12 @@ import { runLoop } from '../loop/loop';
 import { EventEmitter } from '../events/emitter';
 import type { EventSubscriber } from '../events/types';
 import type {
-  ResolveApprovalResult,
   ResolveChoiceResult,
   RunHandle,
   StartRunOptions,
 } from './types';
 
 export type {
-  ResolveApprovalResult,
   ResolveChoiceResult,
   RunHandle,
   RunHandleStatus,
@@ -58,7 +52,6 @@ export class RunManager {
       abortController,
       emitter,
       result: null,
-      pendingApprovals: new Map(),
       pendingChoices: new Map(),
       ...(opts.workspaceRoot ? { workspaceRoot: opts.workspaceRoot } : {}),
       posture: opts.posture ?? 'agent',
@@ -102,8 +95,7 @@ export class RunManager {
       workspaceRoot: opts.workspaceRoot,
       ...(opts.putBlob ? { putBlob: opts.putBlob } : {}),
       ...(opts.readBlob ? { readBlob: opts.readBlob } : {}),
-      // ask_user pause; write/exec tools do not go through this hook.
-      approve: (request) => this.requestApproval(runId, request),
+      // offer_choice pause; write/exec tools do not go through this hook.
       offerChoice: (request) => this.requestChoice(runId, request),
       onMessage: opts.onMessage,
       hasOpenPlanWork: opts.hasOpenPlanWork,
@@ -134,102 +126,6 @@ export class RunManager {
         runId,
       });
     }
-  }
-
-  /** Pause until the client resolves an ask_user question. */
-  requestApproval(
-    runId: string,
-    request: ApprovalRequest,
-  ): Promise<ApprovalResult> {
-    const handle = this.runs.get(runId);
-    if (!handle || handle.status !== 'running' || handle.cancelled) {
-      return Promise.reject(new Error('Run cancelled'));
-    }
-
-    const approvalId = randomUUID();
-    const signal = handle.abortController.signal;
-
-    handle.emitter.emit({
-      type: 'approval.requested',
-      runId,
-      approvalId,
-      toolName: request.toolName,
-      summary: request.summary,
-      risk: request.risk,
-      ...(request.options ? { options: request.options } : {}),
-      ...(request.argsPreview !== undefined
-        ? { argsPreview: request.argsPreview }
-        : {}),
-    });
-
-    return new Promise<ApprovalResult>((resolve, reject) => {
-      const onAbort = () => {
-        handle.pendingApprovals.delete(approvalId);
-        reject(
-          signal.reason instanceof Error
-            ? signal.reason
-            : new Error('Run cancelled'),
-        );
-      };
-
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-
-      signal.addEventListener('abort', onAbort, { once: true });
-      handle.pendingApprovals.set(approvalId, {
-        toolName: request.toolName,
-        options: request.options,
-        resolve: (result) => {
-          signal.removeEventListener('abort', onAbort);
-          resolve(result);
-        },
-        reject: (error) => {
-          signal.removeEventListener('abort', onAbort);
-          reject(error);
-        },
-      });
-    });
-  }
-
-  /** Apply a human decision to a pending approval. */
-  resolveApproval(
-    runId: string,
-    approvalId: string,
-    decision: ApprovalDecision,
-    optionId?: string,
-  ): ResolveApprovalResult {
-    const handle = this.runs.get(runId);
-    if (!handle || handle.status !== 'running' || handle.cancelled) {
-      return 'not_found';
-    }
-    const pending = handle.pendingApprovals.get(approvalId);
-    if (!pending) return 'not_found';
-
-    const options = pending.options ?? [];
-    if (decision !== 'denied' && options.length > 0) {
-      if (!optionId || !options.some((option) => option.id === optionId)) {
-        return 'invalid_option';
-      }
-    }
-
-    handle.pendingApprovals.delete(approvalId);
-
-    handle.emitter.emit({
-      type: 'approval.resolved',
-      runId,
-      approvalId,
-      decision,
-      ...(optionId ? { optionId } : {}),
-    });
-
-    if (decision === 'denied') {
-      pending.reject(new ApprovalDenied());
-    } else {
-      pending.resolve({ ...(optionId ? { optionId } : {}) });
-    }
-    return 'ok';
   }
 
   requestChoice(runId: string, request: ChoiceRequest): Promise<ChoiceResult> {

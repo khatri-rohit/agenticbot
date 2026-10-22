@@ -5,7 +5,6 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import {
-  ApprovalDenied,
   ChoiceSkipped,
   DEFAULT_CONTEXT_BUDGET,
   isAskStrippedTool,
@@ -32,9 +31,6 @@ import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
 const OPEN_PLAN_WORK_NUDGE =
   'Open todos remain on the Final plan. Update todo status or finish those items before ending the turn. Do not claim the work is done.';
-
-const USER_DENIED =
-  'Denied by the user. Do not retry this exact call unless they ask again.';
 
 const USER_SKIPPED_CHOICE =
   'User skipped this choice. Stop. Do not assume a path or keep editing.';
@@ -74,7 +70,7 @@ function toolArgsPreview(toolName: string, args: unknown): string {
     return preview({ path, intent }, 200);
   }
   if (
-    (toolName === 'ask_user' || toolName === 'offer_choice') &&
+    toolName === 'offer_choice' &&
     args &&
     typeof args === 'object' &&
     !Array.isArray(args)
@@ -382,7 +378,6 @@ export async function runLoop(
       ...(config.workspaceRoot !== undefined
         ? { workspaceRoot: config.workspaceRoot }
         : {}),
-      ...(config.approve ? { approve: config.approve } : {}),
       ...(config.offerChoice ? { offerChoice: config.offerChoice } : {}),
       putBlob,
       ...(config.readBlob
@@ -654,23 +649,6 @@ export async function runLoop(
     return completeAfterLimit();
   }
 
-  async function completeAsDenied(call: ReadyToolCall): Promise<'ok'> {
-    emit?.({
-      type: 'tool.completed',
-      runId,
-      toolCallId: call.toolCall.id,
-      toolName: call.toolName,
-      durationMs: 0,
-      resultPreview: preview(USER_DENIED, 200),
-    });
-    await appendDurable({
-      role: 'tool',
-      tool_call_id: call.toolCall.id,
-      content: USER_DENIED,
-    });
-    return 'ok';
-  }
-
   function lastAssistantContent(): string {
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i];
@@ -726,9 +704,7 @@ export async function runLoop(
       // exec tools own their timeout + process-tree kill (workspace.ts).
       // The loop's withTimeout would race the tool's timer and leak the child.
       const ownsTimeout =
-        toolName === 'ask_user' ||
-        toolName === 'offer_choice' ||
-        tool.risk === 'exec';
+        toolName === 'offer_choice' || tool.risk === 'exec';
       const result = await withTimeout(
         tool.execute(args, toolCtx),
         ownsTimeout ? 0 : limits.toolTimeoutMs,
@@ -761,9 +737,6 @@ export async function runLoop(
       if (signal?.aborted) {
         await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
         throwIfAborted(signal);
-      }
-      if (error instanceof ApprovalDenied) {
-        return completeAsDenied(call);
       }
       if (error instanceof ChoiceSkipped) {
         emit?.({
@@ -821,7 +794,6 @@ export async function runLoop(
         return (
           risk === 'write' ||
           risk === 'exec' ||
-          call.toolName === 'ask_user' ||
           call.toolName === 'offer_choice'
         );
       })
@@ -862,9 +834,7 @@ export async function runLoop(
         try {
           // exec tools own their timeout + process-tree kill.
           const ownsTimeout =
-            call.toolName === 'ask_user' ||
-            call.toolName === 'offer_choice' ||
-            call.tool.risk === 'exec';
+            call.toolName === 'offer_choice' || call.tool.risk === 'exec';
           const result = await withTimeout(
             call.tool.execute(call.args, toolCtx),
             ownsTimeout ? 0 : limits.toolTimeoutMs,
@@ -934,11 +904,6 @@ export async function runLoop(
           'Skipped: run cancelled.',
         );
         throwIfAborted(signal);
-      }
-
-      if (item.error instanceof ApprovalDenied) {
-        await completeAsDenied(call);
-        continue;
       }
 
       if (item.error instanceof ChoiceSkipped) {

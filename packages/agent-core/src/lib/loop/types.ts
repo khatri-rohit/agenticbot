@@ -2,8 +2,6 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import type {
   AgentEventWithoutSeq,
-  ApprovalRequest,
-  ApprovalResult,
   ChoiceRequest,
   ChoiceResult,
   ContextBudget,
@@ -60,11 +58,6 @@ export type RunLoopConfig = {
     offset?: number,
     length?: number,
   ) => Promise<string>;
-  /**
-   * ask_user pause seam. Chat wires RunManager; CLI/eval may auto-resolve.
-   * The wait must not sit inside toolTimeoutMs.
-   */
-  approve?: (request: ApprovalRequest) => Promise<ApprovalResult>;
   /** Mid-turn direction picker. Skip must stop the run, not invent a path. */
   offerChoice?: (request: ChoiceRequest) => Promise<ChoiceResult>;
   /** Legacy trace callback (eval harness). Kept for backward compat. */

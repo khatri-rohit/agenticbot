@@ -5,7 +5,6 @@ import { ChatHeader } from '../../../components/chat-header';
 import { MessageList } from '../../../components/message-list';
 import { ChatInput } from '../../../components/chat-input';
 import { ThreadPlanCard } from '../../../components/thread-plan-card';
-import { ApprovalCard } from '../../../components/approval-card';
 import { ChoiceCard } from '../../../components/choice-card';
 import { ChatShell } from '../../../components/chat-shell';
 import {
@@ -31,7 +30,6 @@ export default function ChatThreadPage({
     setComposerOptions,
     isRunning,
     stopGeneration,
-    resolvePendingApproval,
     resolvePendingChoice,
     retryLastResponse,
     editLastUserMessage,
@@ -82,14 +80,6 @@ export default function ChatThreadPage({
                 ] ?? null
               }
               onResolve={resolvePendingChoice}
-            />
-            <ApprovalCard
-              approval={
-                chatState.pendingApprovals[
-                  chatState.pendingApprovals.length - 1
-                ] ?? null
-              }
-              onResolve={resolvePendingApproval}
             />
           </div>
           <ChatInput

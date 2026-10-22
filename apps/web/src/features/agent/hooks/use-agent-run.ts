@@ -9,7 +9,6 @@ import {
   isWorkspaceKind,
   normalizeRunPosture,
   type AgentEvent,
-  type ApprovalDecision,
   type Message,
   type MessageAttachment,
   type ThreadKind,
@@ -35,7 +34,6 @@ import {
   startRun,
   subscribeRun,
   cancelRun,
-  resolveApproval,
   resolveChoice,
   type ComposerOptions,
 } from '../api/agent-client';
@@ -314,31 +312,6 @@ export function useAgentRun(threadId: string | null) {
     [threadId, subscribeToRun, bumpLedger],
   );
 
-  const resolvePendingApproval = useCallback(
-    async (
-      approvalId: string,
-      decision: ApprovalDecision,
-      optionId?: string,
-    ) => {
-      const runId = chatStateRef.current.activeRun?.runId;
-      if (!runId) return;
-      try {
-        await resolveApproval(runId, {
-          approvalId,
-          decision,
-          ...(optionId ? { optionId } : {}),
-        });
-      } catch (err) {
-        toastError(
-          err instanceof Error ? err.message : 'Could not send decision',
-          'Approval failed',
-        );
-        throw err;
-      }
-    },
-    [],
-  );
-
   const resolvePendingChoice = useCallback(
     async (
       choiceId: string,
@@ -573,7 +546,6 @@ export function useAgentRun(threadId: string | null) {
     editLastUserMessage,
     disconnect,
     stopGeneration: interruptActiveRun,
-    resolvePendingApproval,
     resolvePendingChoice,
     // Busy through post-loop compaction until run.settled clears activeRun.
     isRunning: chatState.activeRun !== null,

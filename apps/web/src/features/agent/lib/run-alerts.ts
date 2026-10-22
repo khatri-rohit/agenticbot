@@ -76,7 +76,7 @@ export function observeRunEvent(input: {
 }
 
 function classifyAlert(event: AgentEvent): RunAlertKind | null {
-  if (event.type === 'choice.requested' || event.type === 'approval.requested') {
+  if (event.type === 'choice.requested') {
     return 'attention';
   }
   if (event.type === 'run.settled') return 'finished_ok';
@@ -89,9 +89,6 @@ function classifyAlert(event: AgentEvent): RunAlertKind | null {
 function alertDedupeKey(kind: RunAlertKind, event: AgentEvent): string | null {
   if (event.type === 'choice.requested') {
     return `attention:${event.choiceId}`;
-  }
-  if (event.type === 'approval.requested') {
-    return `attention:${event.approvalId}`;
   }
   if (kind === 'finished_ok' || kind === 'finished_fail') {
     return `finished:${event.runId}:${kind === 'finished_ok' ? 'ok' : 'fail'}`;
@@ -245,13 +242,6 @@ function notificationCopy(
       title: 'Choice needed',
       body: clip(event.question),
       tag: `attention-${event.choiceId}`,
-    };
-  }
-  if (event.type === 'approval.requested') {
-    return {
-      title: 'Answer needed',
-      body: clip(event.summary),
-      tag: `attention-${event.approvalId}`,
     };
   }
   if (kind === 'finished_ok') {

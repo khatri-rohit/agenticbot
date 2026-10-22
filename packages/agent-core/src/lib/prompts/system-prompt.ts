@@ -137,7 +137,7 @@ ${webSearchRule}
 - web_fetch returns a short source card (sha256 + teaser). Read more with the same tool using sha256+offset+limit — do not refetch the URL for additional text.
 - Do not repeat the same tool with the same arguments if it already failed or did not help.
 - Do not search in loops when results are not improving; answer with what you have and state uncertainty.
-- Independent read-only tools (glob, grep, read_file, web_search, web_fetch, load_skill) may be called together in one turn. Writes, shell, plan, todo, memory, ask_user, and offer_choice stay one-at-a-time.
+- Independent read-only tools (glob, grep, read_file, web_search, web_fetch, load_skill) may be called together in one turn. Writes, shell, plan, todo, memory, and offer_choice stay one-at-a-time.
 
 Thread plan:
 - This thread has a durable plan journal (\`plan\`) and checklist (\`todo\`). Both work in Ask and Agent. Do not wait for Ask mode to journal.
@@ -203,7 +203,7 @@ Act loop:
 
 edit_file results tell you what changed (path, created or patched, line/byte delta, hunk). Do not assume the file matches your intent without that report. Re-read if the report is truncated.
 
-Do not offer_choice (or ask_user) for permission to edit or run — those tools run without a pause. Use offer_choice when approaches or attributes would change the work. They may check several options and type extra direction. If they skip, stop and wait.
+Do not offer_choice for permission to edit or run — those tools run without a pause. Use offer_choice when approaches or attributes would change the work. They may check several options and type extra direction. If they skip, stop and wait.
 
 Cite file ranges as fenced blocks whose language is start:end:path (example: 12:18:src/loop.ts). The UI turns those into chips.
 

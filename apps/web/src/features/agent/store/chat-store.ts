@@ -1,13 +1,11 @@
 import {
   occupiedFromUsage,
   type AgentEvent,
-  type ApprovalOption,
   type ChoiceOption,
   type ContextReport,
   type RunPosture,
   type Snapshot,
   type ThreadPlan,
-  type ToolRisk,
 } from '@agent/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
 
@@ -71,16 +69,6 @@ export type LimitNotice = {
   reason: string;
 };
 
-export type PendingApproval = {
-  approvalId: string;
-  runId: string;
-  toolName: string;
-  summary: string;
-  risk: ToolRisk;
-  options?: ApprovalOption[];
-  argsPreview?: unknown;
-};
-
 export type PendingChoice = {
   choiceId: string;
   runId: string;
@@ -97,7 +85,6 @@ export type ChatState = {
   /** Thread-scoped plan journal + todos. Survives run.settled. */
   plan: ThreadPlan | null;
   /** Live pauses; cleared on resolve / run end. */
-  pendingApprovals: PendingApproval[];
   pendingChoices: PendingChoice[];
 };
 
@@ -107,7 +94,6 @@ export function initialChatState(): ChatState {
     compactionNotice: null,
     limitNotice: null,
     plan: null,
-    pendingApprovals: [],
     pendingChoices: [],
   };
 }
@@ -161,7 +147,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         compactionNotice: state.compactionNotice,
         limitNotice: null,
         plan: state.plan,
-        pendingApprovals: [],
         pendingChoices: [],
       };
     }
@@ -302,7 +287,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         },
         limitNotice: state.limitNotice,
         plan: state.plan,
-        pendingApprovals: state.pendingApprovals,
         pendingChoices: state.pendingChoices,
       };
     }
@@ -323,7 +307,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         },
         limitNotice: state.limitNotice,
         plan: state.plan,
-        pendingApprovals: state.pendingApprovals,
         pendingChoices: state.pendingChoices,
       };
     }
@@ -349,7 +332,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         plan: state.plan,
-        pendingApprovals: [],
         pendingChoices: [],
       };
     }
@@ -360,7 +342,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         plan: state.plan,
-        pendingApprovals: [],
         pendingChoices: [],
       };
     }
@@ -410,44 +391,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           ...state.activeRun,
           lastSeq,
         },
-      };
-    }
-
-    case 'approval.requested': {
-      const next: PendingApproval = {
-        approvalId: event.approvalId,
-        runId: event.runId,
-        toolName: event.toolName,
-        summary: event.summary,
-        risk: event.risk,
-        ...(event.options ? { options: event.options } : {}),
-        ...(event.argsPreview !== undefined
-          ? { argsPreview: event.argsPreview }
-          : {}),
-      };
-      return {
-        ...state,
-        pendingApprovals: [
-          ...state.pendingApprovals.filter(
-            (item) => item.approvalId !== event.approvalId,
-          ),
-          next,
-        ],
-        activeRun: state.activeRun
-          ? { ...state.activeRun, lastSeq }
-          : state.activeRun,
-      };
-    }
-
-    case 'approval.resolved': {
-      return {
-        ...state,
-        pendingApprovals: state.pendingApprovals.filter(
-          (item) => item.approvalId !== event.approvalId,
-        ),
-        activeRun: state.activeRun
-          ? { ...state.activeRun, lastSeq }
-          : state.activeRun,
       };
     }
 

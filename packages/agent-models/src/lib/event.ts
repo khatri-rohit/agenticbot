@@ -3,11 +3,6 @@ import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
 import type { ThreadPlan } from './plan.js';
 import type { RunPosture, TokenUsage } from './run.js';
-import type {
-  ApprovalDecision,
-  ApprovalOption,
-  ToolRisk,
-} from './tool-context.js';
 
 /**
  * AgentEvent — the server's streaming protocol to the client.
@@ -33,8 +28,6 @@ export type AgentEvent =
   | ToolStarted
   | ToolCompleted
   | ToolFailed
-  | ApprovalRequested
-  | ApprovalResolved
   | ChoiceRequested
   | ChoiceResolved
   | MemoryUpdated
@@ -156,28 +149,6 @@ export interface LimitHit {
   type: 'limit.hit';
   runId: string;
   reason: string;
-}
-
-/** Run is paused until the client POSTs a decision for this approvalId. */
-export interface ApprovalRequested {
-  seq: number;
-  type: 'approval.requested';
-  runId: string;
-  approvalId: string;
-  toolName: string;
-  summary: string;
-  risk: ToolRisk;
-  options?: ApprovalOption[];
-  argsPreview?: unknown;
-}
-
-export interface ApprovalResolved {
-  seq: number;
-  type: 'approval.resolved';
-  runId: string;
-  approvalId: string;
-  decision: ApprovalDecision;
-  optionId?: string;
 }
 
 /** Run is paused until the client Continues or Skips this choice. */

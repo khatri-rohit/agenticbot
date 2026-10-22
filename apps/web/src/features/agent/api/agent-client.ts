@@ -1,6 +1,5 @@
 import type {
   AgentEvent,
-  ApprovalDecision,
   ContextReport,
   MemoryCaps,
   MemoryFiles,
@@ -292,27 +291,6 @@ export async function cancelRun(runId: string): Promise<void> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Failed to cancel run: ${res.status}`);
-  }
-}
-
-export async function resolveApproval(
-  runId: string,
-  body: {
-    approvalId: string;
-    decision: ApprovalDecision;
-    optionId?: string;
-  },
-): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/agent/run/${runId}/approval`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const payload = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(
-      payload.error ?? `Failed to resolve approval: ${res.status}`,
-    );
   }
 }
 

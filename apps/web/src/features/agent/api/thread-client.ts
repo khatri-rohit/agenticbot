@@ -133,7 +133,7 @@ export type LedgerResponse = {
   snapshot?: Snapshot | null;
   /** Thread-scoped plan journal + todos. */
   plan?: ThreadPlan | null;
-  /** Live run to reattach after reload (ask_user pause, in-flight turn). */
+  /** Live run to reattach after reload (in-flight turn, offer_choice pause). */
   activeRunId?: string;
 };
 

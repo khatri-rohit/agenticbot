@@ -139,14 +139,6 @@ async function main() {
       limits: mode.limits,
       hasOpenPlanWork: async () => planHasOpenWork(await planStore.read()),
       ...(workspaceRoot ? { workspaceRoot } : {}),
-      approve: async (request) => {
-        const first = request.options?.[0];
-        if (!first) {
-          throw new Error('ask_user requires options');
-        }
-        console.log(`[auto-approve] ${request.toolName}: ${request.summary} → ${first.label}`);
-        return { optionId: first.id };
-      },
       offerChoice: async (request) => {
         const first = request.options[0];
         if (!first) return { optionIds: [] };

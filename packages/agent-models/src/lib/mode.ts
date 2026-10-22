@@ -38,7 +38,6 @@ export const HOME_MODE: ModeConfig = {
     'memory',
     'plan',
     'todo',
-    'ask_user',
     'offer_choice',
   ],
   limits: {
@@ -66,7 +65,6 @@ export const WORKSPACE_MODE: ModeConfig = {
     'memory',
     'plan',
     'todo',
-    'ask_user',
     'offer_choice',
   ],
   limits: {

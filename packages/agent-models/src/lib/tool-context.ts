@@ -8,33 +8,6 @@ export type ToolRisk = 'read' | 'write' | 'exec' | 'network' | 'external';
 /** Where the run originated — chat today; cron/channels later. */
 export type ToolOrigin = 'chat' | 'cron' | 'channel' | 'eval';
 
-/** Human decision on an ask_user pause. */
-export type ApprovalDecision = 'approved' | 'denied';
-
-export type ApprovalOption = {
-  id: string;
-  label: string;
-};
-
-export type ApprovalRequest = {
-  toolName: string;
-  summary: string;
-  risk: ToolRisk;
-  options?: ApprovalOption[];
-  argsPreview?: unknown;
-};
-
-export type ApprovalResult = {
-  optionId?: string;
-};
-
-/** Thrown when the human denies (not a tool crash). */
-export class ApprovalDenied extends Error {
-  override readonly name = 'ApprovalDenied';
-  constructor(message = 'Denied by the user') {
-    super(message);
-  }
-}
 
 /**
  * Injected into every tool `execute(args, ctx)`.
@@ -56,11 +29,6 @@ export type ToolContext = {
   ) => Promise<string>;
   /** Persist full text; returns sha256. Host optional — loop keeps an in-run cache. */
   putBlob?: (text: string) => Promise<string>;
-  /**
-   * Pause for ask_user until the host resolves. Resolves with the chosen
-   * option; rejects with ApprovalDenied or a cancel error.
-   */
-  approve?: (request: ApprovalRequest) => Promise<ApprovalResult>;
   /**
    * Pause for a mid-turn direction (checkboxes + optional text).
    * Resolves on Continue; rejects with ChoiceSkipped on Skip, or cancel.

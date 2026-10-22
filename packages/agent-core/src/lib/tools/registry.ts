@@ -1,7 +1,6 @@
 import type { RunPosture } from '@agent/agent-models';
 import { applyPostureToTools } from '@agent/agent-models';
 
-import { ask_user } from './ask-user';
 import { offer_choice } from './offer-choice';
 import { load_skill } from './skills';
 import type { Tool, ToolRegistry } from './type';
@@ -39,7 +38,6 @@ export function createToolRegistry(
 
 export const ALL_TOOLS: Tool[] = [
   load_skill,
-  ask_user,
   offer_choice,
   ...WEB_SEARCH_TOOLS,
   ...WORKSPACE_TOOLS,

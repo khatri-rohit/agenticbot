@@ -14,8 +14,6 @@ export type {
   ToolStarted,
   ToolCompleted,
   ToolFailed,
-  ApprovalRequested,
-  ApprovalResolved,
   ChoiceRequested,
   ChoiceResolved,
   MemoryUpdated,
@@ -108,12 +106,7 @@ export type {
   ToolRisk,
   ToolOrigin,
   ToolContext,
-  ApprovalDecision,
-  ApprovalOption,
-  ApprovalRequest,
-  ApprovalResult,
 } from './lib/tool-context.js';
-export { ApprovalDenied } from './lib/tool-context.js';
 
 export type {
   ChoiceOption,

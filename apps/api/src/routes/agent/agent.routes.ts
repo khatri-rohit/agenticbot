@@ -26,7 +26,6 @@ import {
   normalizeThreadKind,
   planHasOpenWork,
   threadMentions,
-  type ApprovalDecision,
   type RunPosture,
 } from '@agent/agent-models';
 import {
@@ -842,51 +841,6 @@ router.post('/run/:runId/cancel', (req: Request, res: Response) => {
   const ok = runManager.cancel(runId);
   if (!ok) {
     return res.status(404).json({ error: 'Run not found or not active' });
-  }
-  return res.json({ ok: true });
-});
-
-function parseApprovalDecision(value: unknown): ApprovalDecision | null {
-  if (value === 'approved' || value === 'denied') {
-    return value;
-  }
-  return null;
-}
-
-/**
- * POST /api/agent/run/:runId/approval
- * Resolve an ask_user pause. The run stays running until the loop continues.
- */
-router.post('/run/:runId/approval', (req: Request, res: Response) => {
-  const { runId } = req.params;
-  const body = req.body as {
-    approvalId?: unknown;
-    decision?: unknown;
-    optionId?: unknown;
-  };
-  const approvalId =
-    typeof body.approvalId === 'string' ? body.approvalId.trim() : '';
-  const decision = parseApprovalDecision(body.decision);
-  const optionId =
-    typeof body.optionId === 'string' ? body.optionId.trim() : undefined;
-  if (!approvalId || !decision) {
-    return res.status(400).json({
-      error: 'approvalId and decision (approved | denied) are required',
-    });
-  }
-  const result = runManager.resolveApproval(
-    runId,
-    approvalId,
-    decision,
-    optionId || undefined,
-  );
-  if (result === 'invalid_option') {
-    return res.status(400).json({ error: 'optionId is required and must match' });
-  }
-  if (result !== 'ok') {
-    return res.status(404).json({
-      error: 'Approval not found or already resolved',
-    });
   }
   return res.json({ ok: true });
 });

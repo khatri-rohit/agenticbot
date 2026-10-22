@@ -38,7 +38,6 @@ export { createStreamModelCall } from './lib/loop/model-call';
 
 // Tools
 export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
-export { ask_user } from './lib/tools/ask-user';
 export { offer_choice } from './lib/tools/offer-choice';
 export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
 export { WORKSPACE_TOOLS } from './lib/tools/workspace';
@@ -85,7 +84,6 @@ export type { EventSubscriber } from './lib/events/types';
 // Run manager
 export { RunManager, RUN_HANDLE_TTL_MS } from './lib/run/run-manager';
 export type {
-  ResolveApprovalResult,
   ResolveChoiceResult,
   RunHandle,
   RunHandleStatus,

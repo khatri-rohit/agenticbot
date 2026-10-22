@@ -98,7 +98,7 @@ export function gateMemoryOps(
       results.push({
         op,
         verdict: 'stage',
-        why: 'skill writes wait for approval',
+        why: 'skill writes are staged',
       });
       continue;
     }
@@ -113,7 +113,7 @@ export function gateMemoryOps(
       results.push({
         op,
         verdict: 'stage',
-        why: 'external evidence waits for approval',
+        why: 'external evidence is staged',
       });
       continue;
     }
@@ -122,7 +122,7 @@ export function gateMemoryOps(
       results.push({
         op,
         verdict: 'stage',
-        why: 'review edits to USER.md wait for approval',
+        why: 'review edits to USER.md are staged',
       });
       continue;
     }

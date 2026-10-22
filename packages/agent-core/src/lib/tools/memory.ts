@@ -103,7 +103,7 @@ export function createMemoryTool(store: MemoryToolStore): Tool {
       }
       if (gated.verdict === 'stage') {
         const staged = await store.stage(proposed);
-        return `Staged (${gated.why}). op=${staged.id}. Not in the prompt until approved.`;
+        return `Staged (${gated.why}). op=${staged.id}. Not in the prompt until confirmed in a later turn.`;
       }
 
       const applied = await store.apply(proposed);
