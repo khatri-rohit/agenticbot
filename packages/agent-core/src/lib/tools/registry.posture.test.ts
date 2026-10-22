@@ -3,7 +3,7 @@ import {
   applyPostureToTools,
   isAskStrippedTool,
   normalizeRunPosture,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 
 import { ALL_TOOLS, createToolRegistry } from './registry';
 

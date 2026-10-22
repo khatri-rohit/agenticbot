@@ -22,6 +22,6 @@
 
 <!-- nx configuration end-->
 
-# Desk harness
+# Personal Agent harness
 
-Ownership, request flow, and **mental models** (budget machine, context cache, gates, ledger vs SSE, determinism) live in [README.md](./README.md) and `.cursor/rules/desk-system.mdc`. Follow those before adding packages, prompt layers, or request-path model calls.
+Ownership, request flow, and **mental models** (budget machine, context cache, gates, ledger vs SSE, determinism) live in [README.md](./README.md) and `.cursor/rules/agent-system.mdc`. Follow those before adding packages, prompt layers, or request-path model calls.

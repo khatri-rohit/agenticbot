@@ -13,7 +13,7 @@ import {
   type Message,
   type MessageAttachment,
   type ThreadKind,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 import { toastError } from '@/hooks/use-toast';
 import {
   modelSupportsVision,

@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@desk/agent-models';
+import type { AgentEvent } from '@agent/agent-models';
 
 const SOUND_KEY = 'desk:alerts-sound';
 const NOTIFY_KEY = 'desk:alerts-notify';

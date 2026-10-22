@@ -11,7 +11,7 @@ import type {
   LedgerRecord,
   RunPosture,
   ToolOrigin,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 
 import type { EventEmitter } from '../events/emitter';
 import type { AgentLimits } from '../loop/limits';

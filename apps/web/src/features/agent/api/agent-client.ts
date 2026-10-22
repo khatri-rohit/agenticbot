@@ -12,8 +12,8 @@ import type {
   RunPosture,
   StartRunRequest,
   ThinkingValue,
-} from '@desk/agent-models';
-import { normalizeRunPosture } from '@desk/agent-models';
+} from '@agent/agent-models';
+import { normalizeRunPosture } from '@agent/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 

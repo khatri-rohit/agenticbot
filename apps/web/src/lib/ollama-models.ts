@@ -403,9 +403,9 @@ function formatModelSize(bytes: number): string {
   return `${Math.max(1, Math.round(mib))} MB on disk`;
 }
 
-const MODEL_STORAGE_KEY = 'desk:composerModel';
-const LOCAL_MODEL_STORAGE_KEY = 'desk:composerLocalModel';
-const LOCAL_MODE_KEY = 'desk:composerLocal';
+const MODEL_STORAGE_KEY = 'agent:composerModel';
+const LOCAL_MODEL_STORAGE_KEY = 'agent:composerLocalModel';
+const LOCAL_MODE_KEY = 'agent:composerLocal';
 
 export function readStoredComposerLocal(): boolean {
   if (typeof window === 'undefined') return false;

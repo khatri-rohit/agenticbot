@@ -6,7 +6,7 @@ import type {
   PlanTodoStatus,
   ThreadPlan,
   ToolContext,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 import {
   MAX_PLAN_DECISIONS,
   MAX_PLAN_FINAL_CHARS,
@@ -17,7 +17,7 @@ import {
   MAX_PLAN_TODOS,
   emptyThreadPlan,
   formatThreadPlanForPrompt,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 
 import type { Tool } from './type';
 

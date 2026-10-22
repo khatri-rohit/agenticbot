@@ -12,7 +12,7 @@ import {
   type LedgerAppendMeta,
   type TokenUsage,
   type ToolContext,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 
 import { stubLiveToolResults } from '../context/assemble-context';
 import { consoleTrace, type TraceEvent } from '../events/trace';

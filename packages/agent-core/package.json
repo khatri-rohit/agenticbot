@@ -1,5 +1,5 @@
 {
-  "name": "@desk/agent-core",
+  "name": "@agent/agent-core",
   "version": "0.0.1",
   "private": true,
   "main": "./dist/index.js",
@@ -8,7 +8,7 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
-      "@desk/source": "./src/index.ts",
+      "@agent/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
@@ -30,7 +30,7 @@
   "dependencies": {
     "tslib": "^2.3.0",
     "openai": "^7.27.0",
-    "@desk/agent-models": "*"
+    "@agent/agent-models": "*"
   },
   "devDependencies": {}
 }

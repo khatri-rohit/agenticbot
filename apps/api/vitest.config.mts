@@ -4,7 +4,7 @@ export default defineConfig({
   root: import.meta.dirname,
   cacheDir: '../../node_modules/.vite/apps/api',
   test: {
-    name: '@desk/api',
+    name: '@agent/api',
     watch: false,
     globals: true,
     environment: 'node',

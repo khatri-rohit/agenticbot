@@ -1,10 +1,12 @@
 {
-  "name": "@desk/source",
+  "name": "@agent/source",
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
-    "dev:api": "npx nx run @desk/api:serve",
-    "dev:web": "npx nx run @desk/web:dev",
+    "dev:api": "npx nx run @agent/api:serve",
+    "dev:web": "npx nx run @agent/web:dev --port=4200",
+    "prod:api": "npx nx serve @agent/api --configuration=production --watch=false",
+    "prod:web": "npx nx run @agent/web:start --port=4200",
     "typecheck": "npx nx run-many -t typecheck",
     "build": "npx nx run-many -t build"
   },
@@ -62,7 +64,7 @@
     "jiti": "2.4.2",
     "jsdom": "~22.1.0",
     "jsonc-eslint-parser": "^2.1.0",
-    "nx": "23.2.0",
+    "nx": "^23.2.0",
     "prettier": "^3.8.1",
     "supertest": "^7.1.4",
     "ts-node": "10.9.1",

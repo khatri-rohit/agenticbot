@@ -1,14 +1,14 @@
 import 'dotenv/config';
 import path from 'node:path';
 
-import type { AgentEvent, ModeName, RunPosture } from '@desk/agent-models';
+import type { AgentEvent, ModeName, RunPosture } from '@agent/agent-models';
 import {
   applyPostureToTools,
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
   planHasOpenWork,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 import {
   runLoop,
   streamModelTurn,
@@ -20,7 +20,7 @@ import {
   createPlanTools,
   loadWorkspaceRules,
   type ModelCallFn,
-} from '@desk/agent-core';
+} from '@agent/agent-core';
 
 
 function parseHarnessArgs(argv: string[]): {

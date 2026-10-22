@@ -12,7 +12,7 @@ import type {
   LedgerRecord,
   RunPosture,
   ToolOrigin,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 import type { TraceEvent } from '../events/trace-types';
 import type { ModelTurn } from '../model/types';
 import type { ToolRegistry } from '../tools/type';

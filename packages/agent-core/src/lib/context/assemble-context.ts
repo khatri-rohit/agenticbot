@@ -8,7 +8,7 @@ import type {
   RunPosture,
   Snapshot,
   ThreadPlan,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 import {
   CHARS_PER_TOKEN,
   DEFAULT_CONTEXT_BUDGET,
@@ -16,7 +16,7 @@ import {
   formatThreadPlanForPrompt,
   imageAttachments,
   isThreadPlanEmpty,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
 import type { ToolRegistry } from '../tools/type';

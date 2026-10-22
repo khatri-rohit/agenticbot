@@ -1,4 +1,4 @@
-import type { ApprovalOption } from '@desk/agent-models';
+import type { ApprovalOption } from '@agent/agent-models';
 
 import type { Tool } from './type';
 

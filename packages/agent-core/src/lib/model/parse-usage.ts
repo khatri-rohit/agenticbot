@@ -1,4 +1,4 @@
-import type { TokenUsage } from '@desk/agent-models';
+import type { TokenUsage } from '@agent/agent-models';
 
 type UsageLike = {
   prompt_tokens?: number | null;

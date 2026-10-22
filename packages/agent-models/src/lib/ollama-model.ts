@@ -1,6 +1,6 @@
 /**
  * Ollama model capability snapshot (from native POST /api/show).
- * Shared contract between @desk/agent-core discovery, API JSON, and the web UI.
+ * Shared contract between @agent/agent-core discovery, API JSON, and the web UI.
  * Zero runtime deps — shapes only.
  */
 

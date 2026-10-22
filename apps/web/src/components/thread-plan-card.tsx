@@ -6,7 +6,7 @@ import {
   isThreadPlanEmpty,
   planTodoCounts,
   type ThreadPlan,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 import { cn } from '@/lib/utils';
 
 /**

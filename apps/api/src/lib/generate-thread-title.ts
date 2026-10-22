@@ -1,5 +1,5 @@
-import { getClient } from '@desk/agent-core';
-import { clampChatTitle, type OllamaEndpoint } from '@desk/agent-models';
+import { getClient } from '@agent/agent-core';
+import { clampChatTitle, type OllamaEndpoint } from '@agent/agent-models';
 
 /** Fallback when the model call fails or the message is empty. */
 export function seedThreadTitle(firstMessage: string): string {

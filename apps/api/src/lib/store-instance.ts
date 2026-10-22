@@ -1,11 +1,11 @@
 import os from 'node:os';
 
-import { resolveDeskHome } from './desk-home.js';
+import { resolveAgentHome } from './agent-home.js';
 import { MemoryStore } from './memory-store.js';
 import { openThreadStore, type ThreadStore } from './thread-store.js';
 
 function home(): string {
-  return resolveDeskHome({
+  return resolveAgentHome({
     env: process.env,
     homedir: os.homedir(),
   });

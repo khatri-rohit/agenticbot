@@ -30,7 +30,7 @@ import {
   type Thread,
   type ThreadKind,
   type ThreadPlan,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 
 const BLOB_INLINE_MAX = 8 * 1024;
 

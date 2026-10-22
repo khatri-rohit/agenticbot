@@ -4,8 +4,8 @@ import type {
   MemoryGateResult,
   MemoryTarget,
   ProposedMemoryOp,
-} from '@desk/agent-models';
-import { DEFAULT_MEMORY_CAPS } from '@desk/agent-models';
+} from '@agent/agent-models';
+import { DEFAULT_MEMORY_CAPS } from '@agent/agent-models';
 
 const SECRET_RE =
   /sk-[a-zA-Z0-9]{16,}|api[_-]?key\s*[:=]|bearer\s+[a-z0-9\-._~+/]+=*|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;

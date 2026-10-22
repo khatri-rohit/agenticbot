@@ -4,7 +4,7 @@ import {
   formatThreadPlanForPrompt,
   planHasOpenWork,
   selectPlanForRewind,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 
 import {
   applyPlanAction,

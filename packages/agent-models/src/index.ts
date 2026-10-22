@@ -1,6 +1,6 @@
-// @desk/agent-models — agent domain types.
+// @agent/agent-models — agent domain types.
 // Pure types + mode config constants. Zero runtime deps.
-// Consumed by @desk/agent-core, apps/api, apps/web.
+// Consumed by @agent/agent-core, apps/api, apps/web.
 
 export type {
   AgentEvent,

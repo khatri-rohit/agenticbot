@@ -1,5 +1,5 @@
-import type { RunPosture } from '@desk/agent-models';
-import { applyPostureToTools } from '@desk/agent-models';
+import type { RunPosture } from '@agent/agent-models';
+import { applyPostureToTools } from '@agent/agent-models';
 
 import { ask_user } from './ask-user';
 import { offer_choice } from './offer-choice';

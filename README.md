@@ -1,20 +1,20 @@
-# Desk
+# Personal Agent
 
-Personal **agent harness** in an [Nx](https://nx.dev) monorepo: a host-agnostic runtime (`@desk/agent-core`), Express API with SSE (`apps/api`), Next.js chat UI (`apps/web`), and a CLI eval harness (`apps/agent`). One engine, two bindings: **Home** (chat, optional web) and **Workspace** (folder-bound coding tools).
+Personal **agent harness** in an [Nx](https://nx.dev) monorepo: a host-agnostic runtime (`@agent/agent-core`), Express API with SSE (`apps/api`), Next.js chat UI (`apps/web`), and a CLI eval harness (`apps/agent`). One engine, two bindings: **Home** (chat, optional web) and **Workspace** (folder-bound coding tools).
 
-For Nx-specific conventions (tasks, generators, MCP), see [AGENTS.md](./AGENTS.md). For Cursor/agent context, see [.cursor/rules/desk-system.mdc](./.cursor/rules/desk-system.mdc).
+For Nx-specific conventions (tasks, generators, MCP), see [AGENTS.md](./AGENTS.md). For Cursor/agent context, see [.cursor/rules/agent-system.mdc](./.cursor/rules/agent-system.mdc).
 
 ---
 
 ## Architecture
 
-| Layer          | Package / app        | Responsibility                                                                               |
-| -------------- | -------------------- | -------------------------------------------------------------------------------------------- |
-| Domain types   | `@desk/agent-models` | `Run`, `Thread`, `AgentEvent`, `HOME_MODE` / `WORKSPACE_MODE`, chat shapes                   |
-| Runtime (pure) | `@desk/agent-core`   | `runLoop`, `RunManager`, tools, model invoke/stream, system prompt — **no HTTP, DOM, or DB** |
-| Transport      | `apps/api`           | Express: `/api/agent/*`, disk thread store, voice STT proxy                                  |
-| UI             | `apps/web`           | Chat UI + SSE via `use-agent-run` (threads from API catalog)                                 |
-| Local eval     | `apps/agent`         | Thin script calling core directly                                                            |
+| Layer          | Package / app         | Responsibility                                                                               |
+| -------------- | --------------------- | -------------------------------------------------------------------------------------------- |
+| Domain types   | `@agent/agent-models` | `Run`, `Thread`, `AgentEvent`, `HOME_MODE` / `WORKSPACE_MODE`, chat shapes                   |
+| Runtime (pure) | `@agent/agent-core`   | `runLoop`, `RunManager`, tools, model invoke/stream, system prompt — **no HTTP, DOM, or DB** |
+| Transport      | `apps/api`            | Express: `/api/agent/*`, disk thread store, voice STT proxy                                  |
+| UI             | `apps/web`            | Chat UI + SSE via `use-agent-run` (threads from API catalog)                                 |
+| Local eval     | `apps/agent`          | Thin script calling core directly                                                            |
 
 ### Request flow (chat)
 
@@ -27,7 +27,7 @@ User message (apps/web)
   → apps/web chat-store reducer → UI
 ```
 
-**Threads are host-owned on disk** (`DESK_HOME` SQLite catalog + per-thread `ledger.jsonl`). The first user turn seeds a sidebar title and refines it with the chat model. The ledger is the durable history of the **active tape**. Retry/edit **rewind** truncates that tape (atomic rewrite) — discarded turns are gone. SSE is a live convenience; after a run handle is cleared (5 minute TTL) a late events subscribe is 404 and the client rebuilds from `GET /ledger`.
+**Threads are host-owned on disk** (`AGENT_HOME` SQLite catalog + per-thread `ledger.jsonl`). The first user turn seeds a sidebar title and refines it with the chat model. The ledger is the durable history of the **active tape**. Retry/edit **rewind** truncates that tape (atomic rewrite) — discarded turns are gone. SSE is a live convenience; after a run handle is cleared (5 minute TTL) a late events subscribe is 404 and the client rebuilds from `GET /ledger`.
 
 **One active run per thread** (enforced in API). **One agent-posture run per workspace folder** (409 `reason: 'workspace'`); ask-posture and Home threads are exempt. Both mutexes are **in-process** (`RunManager` singleton) — not multi-instance. Use `POST /api/agent/run/:runId/cancel` to stop generation.
 
@@ -47,7 +47,7 @@ How to think about this system when changing it or prompting it. (Response branc
 
 ### Tool policy (important)
 
-Tools are registered in `@desk/agent-core` and filtered per run:
+Tools are registered in `@agent/agent-core` and filtered per run:
 
 | Tool         | When available                                                                             | Purpose                                                                                                                                                                     |
 | ------------ | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -88,19 +88,19 @@ cp .env.example .env
 
 Host-run API (typical dev) — see [.env.example](./.env.example):
 
-| Variable                         | Purpose                                                       |
-| -------------------------------- | ------------------------------------------------------------- |
-| `OLLAMA_BASE_URL`                | Chat completions base URL (default cloud)                     |
-| `OLLAMA_API_KEY`                 | Chat (cloud) + first web search/fetch layer when set          |
-| `FIRECRAWL_API_KEY`              | Optional — higher Firecrawl limits (keyless works without it) |
-| `TAVILY_API_KEY`                 | Optional — higher Tavily limits (keyless works without it)    |
-| `DESK_HOME`                      | Session catalog/ledger root (default `~/.local/desk`)         |
-| `VOICE_STT_PROVIDER`             | `browser` (default) \| `speaches` \| `off`                    |
-| `NEXT_PUBLIC_VOICE_STT_PROVIDER` | Same value for the web app (must match)                       |
-| `SPEACHES_BASE_URL`              | Speaches only — STT proxy base URL                            |
-| `SPEACHES_STT_MODEL`             | Speaches only — e.g. distil-whisper-large-v3                  |
-| `VOICE_STT_LANGUAGE`             | Speaches `language` (default `en`)                            |
-| `VOICE_STT_PROMPT`               | Speaches vocabulary hint                                      |
+| Variable                         | Purpose                                                             |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `OLLAMA_BASE_URL`                | Chat completions base URL (default cloud)                           |
+| `OLLAMA_API_KEY`                 | Chat (cloud) + first web search/fetch layer when set                |
+| `FIRECRAWL_API_KEY`              | Optional — higher Firecrawl limits (keyless works without it)       |
+| `TAVILY_API_KEY`                 | Optional — higher Tavily limits (keyless works without it)          |
+| `AGENT_HOME`                     | Session catalog/ledger root (default `~/.local/personal-assistant`) |
+| `VOICE_STT_PROVIDER`             | `browser` (default) \| `speaches` \| `off`                          |
+| `NEXT_PUBLIC_VOICE_STT_PROVIDER` | Same value for the web app (must match)                             |
+| `SPEACHES_BASE_URL`              | Speaches only — STT proxy base URL                                  |
+| `SPEACHES_STT_MODEL`             | Speaches only — e.g. distil-whisper-large-v3                        |
+| `VOICE_STT_LANGUAGE`             | Speaches `language` (default `en`)                                  |
+| `VOICE_STT_PROMPT`               | Speaches vocabulary hint                                            |
 
 Web app (optional override):
 
@@ -123,10 +123,10 @@ docker compose --profile cpu up -d
 # Optional: docker compose --env-file .env.docker up -d
 
 # Terminal 1 — API (port 3333)
-npx nx run @desk/api:serve
+npx nx run @agent/api:serve
 
 # Terminal 2 — Web (Next.js)
-npx nx run @desk/web:dev
+npx nx run @agent/web:dev
 ```
 
 Open the web app URL printed by Next (often `http://localhost:4200` or `3000` — check Nx output).
@@ -165,14 +165,14 @@ Use `npx nx` (npm workspaces + package-lock.json):
 
 ```bash
 # Typecheck / build affected libs after changing agent packages
-npx nx run @desk/agent-core:typecheck
-npx nx run @desk/agent-models:typecheck
-npx nx run @desk/api:typecheck
-npx nx run @desk/web:lint
+npx nx run @agent/agent-core:typecheck
+npx nx run @agent/agent-models:typecheck
+npx nx run @agent/api:typecheck
+npx nx run @agent/web:lint
 
-npx nx run @desk/agent-core:build
-npx nx run @desk/api:build
-npx nx run @desk/web:build
+npx nx run @agent/agent-core:build
+npx nx run @agent/api:build
+npx nx run @agent/web:build
 
 # Lint / test (as configured)
 npx nx affected -t typecheck build lint test
@@ -180,7 +180,7 @@ npx nx affected -t typecheck build lint test
 
 ### Typecheck troubleshooting
 
-- Apps reference built **`.d.ts`** from `packages/agent-*/dist` via TypeScript project references. After changing `@desk/agent-models` types (e.g. `ModeConfig.globalTools`), rebuild declarations:
+- Apps reference built **`.d.ts`** from `packages/agent-*/dist` via TypeScript project references. After changing `@agent/agent-models` types (e.g. `ModeConfig.globalTools`), rebuild declarations:
 
   ```bash
   node node_modules/typescript/bin/tsc -p packages/agent-models/tsconfig.lib.json
@@ -231,14 +231,14 @@ Client tool wiring (`apps/web/src/features/agent/api/agent-client.ts`):
 
 ## Adding or changing tools (implementation guide)
 
-1. **Define the tool** in `@desk/agent-core` (`Tool`: OpenAI `definition`, `guidance`, `execute`).
+1. **Define the tool** in `@agent/agent-core` (`Tool`: OpenAI `definition`, `guidance`, `execute`).
 2. **Register** in `ALL_TOOLS` (`packages/agent-core/src/lib/tools/registry.ts`).
 3. **Expose to the model** via profile policy:
    - User-toggleable → `HOME_MODE.allowedTools` and/or client `allowedTools`.
    - Always on → `HOME_MODE.globalTools` or `WORKSPACE_MODE.globalTools` (merged in `agent.routes.ts`).
 4. **System prompt** — per-tool guardrails are injected from `guidance` in `buildSystemPrompt()`. Add policy in `system-prompt.ts` only when it is cross-tool behavior.
 5. **UI** — tool lifecycle events (`tool.started` / `completed` / `failed`) are generic in `chat-store.ts`; no change needed unless you add new event types.
-6. **Validate** — `npx nx run @desk/agent-core:typecheck` and `@desk/api:typecheck`.
+6. **Validate** — `npx nx run @agent/agent-core:typecheck` and `@agent/api:typecheck`.
 
 External HTTP for tools belongs in core modules (e.g. `web_search_api.ts`), not in Express routes.
 
@@ -264,14 +264,14 @@ Enable API logging around agent routes and watch SSE in browser devtools (Networ
 ## Repository layout (high level)
 
 ```
-desk/
+agent/
 ├── apps/
 │   ├── api/              # Express — agent, voice
 │   ├── web/              # Next.js chat UI
 │   └── agent/            # CLI / eval harness
 ├── packages/
-│   ├── agent-core/       # @desk/agent-core — loop, tools, model
-│   └── agent-models/     # @desk/agent-models — types, HOME_MODE / WORKSPACE_MODE
+│   ├── agent-core/       # @agent/agent-core — loop, tools, model
+│   └── agent-models/     # @agent/agent-models — types, HOME_MODE / WORKSPACE_MODE
 ├── docker/               # Compose docs
 ├── docker-compose.yml
 ├── LICENSE

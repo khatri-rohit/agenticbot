@@ -3,9 +3,9 @@ description: Desk monorepo context, agent harness boundaries, and senior enginee
 alwaysApply: true
 ---
 
-# Desk — project system context
+# Personal Agent — project system context
 
-You are working on **Desk**: an Nx monorepo building a **host-agnostic agent runtime** (`@desk/agent-core`), an **HTTP/SSE API** (`apps/api`), a **Next.js chat UI** (`apps/web`), and a **CLI harness** (`apps/agent`). Treat this as production agent infrastructure—not a demo chatbot.
+You are working on **Personal Agent**: an Nx monorepo building a **host-agnostic agent runtime** (`@agent/agent-core`), an **HTTP/SSE API** (`apps/api`), a **Next.js chat UI** (`apps/web`), and a **CLI harness** (`apps/agent`). Treat this as production agent infrastructure—not a demo chatbot.
 
 ## Before you change code
 
@@ -17,8 +17,8 @@ You are working on **Desk**: an Nx monorepo building a **host-agnostic agent run
 
 | Layer          | Package / app        | Responsibility                                                                                  |
 | -------------- | -------------------- | ----------------------------------------------------------------------------------------------- |
-| Domain types   | `@desk/agent-models` | `Run`, `Thread`, `AgentEvent`, modes (`HOME_MODE` / `WORKSPACE_MODE`), chat shapes              |
-| Runtime (pure) | `@desk/agent-core`   | `runLoop`, tools registry, model stream, `EventEmitter`, `RunManager` — **no HTTP, DOM, or DB** |
+| Domain types   | `@agent/agent-models` | `Run`, `Thread`, `AgentEvent`, modes (`HOME_MODE` / `WORKSPACE_MODE`), chat shapes              |
+| Runtime (pure) | `@agent/agent-core`   | `runLoop`, tools registry, model stream, `EventEmitter`, `RunManager` — **no HTTP, DOM, or DB** |
 | Transport      | `apps/api`           | Express routes under `/api/agent`, wires core + env secrets                                     |
 | UI             | `apps/web`           | Chat store, `use-agent-run`, consumes SSE events                                                |
 | Local eval     | `apps/agent`         | Thin script calling core directly (trace)                                                       |

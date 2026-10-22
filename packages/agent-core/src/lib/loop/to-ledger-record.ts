@@ -1,6 +1,6 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import type { LedgerRecord, PendingToolCall } from '@desk/agent-models';
+import type { LedgerRecord, PendingToolCall } from '@agent/agent-models';
 
 /** Map a loop message to the durable ledger shape (wire-accurate subset). */
 export function toLedgerRecord(

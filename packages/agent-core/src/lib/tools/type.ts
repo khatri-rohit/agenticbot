@@ -3,7 +3,7 @@ import type {
   ChatCompletionFunctionTool,
 } from 'openai/resources/chat/completions';
 
-import type { ToolContext, ToolRisk } from '@desk/agent-models';
+import type { ToolContext, ToolRisk } from '@agent/agent-models';
 
 /**
  * Guidance text injected into the system prompt per tool.

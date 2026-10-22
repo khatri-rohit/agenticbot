@@ -5,7 +5,7 @@ import type {
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 
-import type { PendingToolCall, TokenUsage } from '@desk/agent-models';
+import type { PendingToolCall, TokenUsage } from '@agent/agent-models';
 
 import { getClient } from './client';
 import type {

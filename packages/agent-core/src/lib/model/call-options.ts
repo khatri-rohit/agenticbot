@@ -2,7 +2,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
 } from 'openai/resources/chat/completions';
-import type { OllamaEndpoint } from '@desk/agent-models';
+import type { OllamaEndpoint } from '@agent/agent-models';
 
 /** Optional knobs closed over by createInvoke/StreamModelCall. */
 export type ModelCallOptions = {

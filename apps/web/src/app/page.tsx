@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { MessageAttachment } from '@desk/agent-models';
+import type { MessageAttachment } from '@agent/agent-models';
 import { ChatInput } from '../components/chat-input';
 import { ChatShell } from '../components/chat-shell';
 import {
@@ -44,7 +44,7 @@ const defaultOptions = (webSearch: boolean): ComposerOptions => {
 function restoreHomeDraft(content: string, attachments?: MessageAttachment[]) {
   try {
     localStorage.setItem(
-      `desk:composerDraft:${HOME_DRAFT_SCOPE}`,
+      `agent:composerDraft:${HOME_DRAFT_SCOPE}`,
       JSON.stringify({
         content,
         attachments: attachments ?? [],

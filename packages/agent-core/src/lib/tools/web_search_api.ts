@@ -1,4 +1,4 @@
-import type { ToolContext } from '@desk/agent-models';
+import type { ToolContext } from '@agent/agent-models';
 
 import type { WebFetchResponse, WebSearchResponse } from './type';
 import {

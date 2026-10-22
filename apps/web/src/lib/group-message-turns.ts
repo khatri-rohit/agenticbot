@@ -1,4 +1,4 @@
-import type { Message } from '@desk/agent-models';
+import type { Message } from '@agent/agent-models';
 
 export type MessageTurn = {
   userMessage: Message;

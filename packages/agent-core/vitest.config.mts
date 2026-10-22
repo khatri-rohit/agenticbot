@@ -6,7 +6,7 @@ export default defineConfig({
   root: import.meta.dirname,
   cacheDir: '../../node_modules/.vite/packages/agent-core',
   test: {
-    name: '@desk/agent-core',
+    name: '@agent/agent-core',
     watch: false,
     globals: true,
     environment: 'node',

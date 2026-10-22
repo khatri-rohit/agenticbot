@@ -1,5 +1,5 @@
 {
-  "name": "@desk/agent",
+  "name": "@agent/cli",
   "version": "0.0.1",
   "private": true,
   "nx": {
@@ -85,15 +85,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@desk/agent:build",
+          "buildTarget": "@agent/cli:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@desk/agent:build:development"
+            "buildTarget": "@agent/cli:build:development"
           },
           "production": {
-            "buildTarget": "@desk/agent:build:production"
+            "buildTarget": "@agent/cli:build:production"
           }
         }
       },
@@ -105,15 +105,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@desk/agent:build",
+          "buildTarget": "@agent/cli:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@desk/agent:build:development"
+            "buildTarget": "@agent/cli:build:development"
           },
           "production": {
-            "buildTarget": "@desk/agent:build:production"
+            "buildTarget": "@agent/cli:build:production"
           }
         }
       },
@@ -148,8 +148,8 @@
     ]
   },
   "dependencies": {
-    "@desk/agent-core": "*",
-    "@desk/agent-models": "*",
+    "@agent/agent-core": "*",
+    "@agent/agent-models": "*",
     "dotenv": "^16.4.7",
     "openai": "^7.27.0"
   },

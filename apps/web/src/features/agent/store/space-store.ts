@@ -5,7 +5,7 @@ import {
   normalizeWorkspaceRoot,
   sameWorkspaceRoot,
   workspaceRootKey,
-} from '@desk/agent-models';
+} from '@agent/agent-models';
 
 export type SpaceState = {
   /** Composer binding for new chats. Null = Home (no folder). */
