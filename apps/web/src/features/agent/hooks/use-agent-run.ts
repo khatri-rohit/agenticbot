@@ -31,6 +31,10 @@ import {
   type ChatState,
 } from '../store/chat-store';
 import {
+  isThreadPlanEmpty,
+  type ThreadPlan,
+} from '@agent/agent-models';
+import {
   startRun,
   subscribeRun,
   cancelRun,
@@ -42,6 +46,7 @@ import {
   fetchThread,
   patchThread,
   seqFromMessageId,
+  type LedgerResponse,
 } from '../api/thread-client';
 import {
   ensureThreadsLoaded,
@@ -57,6 +62,28 @@ export type QueuedMessage = {
   options: ComposerOptions;
   attachments?: MessageAttachment[];
 };
+
+/**
+ * A plan is current iff it was written after the thread's last user message
+ * (plan revisions are stamped with the ledger seq of the tool row that
+ * followed their write). Older plans belong to settled turns — they render
+ * as chips from history, never as live state.
+ */
+function planIsCurrent(
+  plan: ThreadPlan | null | undefined,
+  lastUserSeq: number | undefined,
+): boolean {
+  if (!plan || isThreadPlanEmpty(plan)) return false;
+  if (lastUserSeq === undefined) return false;
+  return (plan.ledgerSeq ?? 0) > lastUserSeq;
+}
+
+/** Ledger plan → live state, or null when the plan predates the last turn. */
+function planFromLedger(
+  ledger: LedgerResponse,
+): ThreadPlan | null {
+  return planIsCurrent(ledger.plan, ledger.lastUserSeq) ? ledger.plan ?? null : null;
+}
 
 const defaultComposerOptions = (): ComposerOptions => {
   const local = readStoredComposerLocal();
@@ -131,7 +158,7 @@ export function useAgentRun(threadId: string | null) {
           ...(ledger.snapshot
             ? { compactionNotice: noticeFromSnapshot(ledger.snapshot) }
             : {}),
-          plan: ledger.plan ?? prev.plan,
+          plan: planFromLedger(ledger),
         }));
         if (ledger.activeRunId && !chatStateRef.current.activeRun) {
           subscribeToRunRef.current(ledger.activeRunId);
@@ -181,7 +208,6 @@ export function useAgentRun(threadId: string | null) {
           : {
               ...initialChatState(),
               compactionNotice: prior.compactionNotice,
-              plan: prior.plan,
             };
       const fromSeq = currentState.activeRun?.lastSeq ?? 0;
       let eventChain = Promise.resolve();
@@ -223,7 +249,7 @@ export function useAgentRun(threadId: string | null) {
                   setChatState((prev) => {
                     const withPlan = {
                       ...prev,
-                      plan: ledger.plan ?? prev.plan,
+                      plan: planFromLedger(ledger),
                     };
                     if (ledger.snapshot) {
                       const fromDisk = noticeFromSnapshot(ledger.snapshot);
@@ -301,7 +327,6 @@ export function useAgentRun(threadId: string | null) {
       setChatState((prev) => ({
         ...initialChatState(),
         compactionNotice: prev.compactionNotice,
-        plan: prev.plan,
       }));
       bumpLedger();
       // Server writes a model-generated title on first turn before /run returns.
@@ -362,7 +387,6 @@ export function useAgentRun(threadId: string | null) {
     setChatState((prev) => ({
       ...initialChatState(),
       compactionNotice: prev.compactionNotice,
-      plan: prev.plan,
     }));
   }, [disconnect]);
 
@@ -455,7 +479,7 @@ export function useAgentRun(threadId: string | null) {
       compactionNotice: restored.snapshot
         ? noticeFromSnapshot(restored.snapshot)
         : prev.compactionNotice,
-      plan: restored.plan ?? null,
+      plan: planFromLedger(restored),
     }));
     bumpLedger();
     subscribeToRun(runId);
@@ -501,7 +525,7 @@ export function useAgentRun(threadId: string | null) {
         compactionNotice: restored.snapshot
           ? noticeFromSnapshot(restored.snapshot)
           : prev.compactionNotice,
-        plan: restored.plan ?? null,
+        plan: planFromLedger(restored),
       }));
       bumpLedger();
       subscribeToRun(runId);

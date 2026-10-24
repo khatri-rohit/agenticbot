@@ -230,7 +230,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                 href="/"
                 className="type-ui truncate text-[13px] font-semibold tracking-tight text-foreground hover:text-foreground"
               >
-                Personal Agent
+                Personal Assistant
               </Link>
               <Tooltip>
                 <TooltipTrigger asChild>

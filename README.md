@@ -1,4 +1,4 @@
-# Personal Agent
+# Personal Assistant
 
 Personal **agent harness** in an [Nx](https://nx.dev) monorepo: a host-agnostic runtime (`@agent/agent-core`), Express API with SSE (`apps/api`), Next.js chat UI (`apps/web`), and a CLI eval harness (`apps/agent`). One engine, two bindings: **Home** (chat, optional web) and **Workspace** (folder-bound coding tools).
 

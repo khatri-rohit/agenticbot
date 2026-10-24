@@ -82,7 +82,8 @@ export type ChatState = {
   compactionNotice: CompactionNotice | null;
   /** Last limit.hit / incomplete finish, until the next run. */
   limitNotice: LimitNotice | null;
-  /** Thread-scoped plan journal + todos. Survives run.settled. */
+  /** Thread plan. Live above the input while running; pinned as a chip
+   *  under the anchor user message once the run settles. */
   plan: ThreadPlan | null;
   /** Live pauses; cleared on resolve / run end. */
   pendingChoices: PendingChoice[];
@@ -347,6 +348,9 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     }
 
     case 'plan.updated': {
+      // Settle is the closing bracket: late plan writes after run end are
+      // an SSE race, not new state.
+      if (!state.activeRun) return state;
       return {
         ...state,
         plan: event.plan,

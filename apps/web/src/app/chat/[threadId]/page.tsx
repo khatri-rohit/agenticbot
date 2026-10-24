@@ -70,9 +70,8 @@ export default function ChatThreadPage({
     <ChatShell
       header={<ChatHeader threadId={threadId} />}
       footer={
-        <div className="flex min-w-0 flex-col">
+        <div className="relative flex min-w-0 flex-col">
           <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
-            <ThreadPlanCard plan={chatState.plan} />
             <ChoiceCard
               choice={
                 chatState.pendingChoices[
@@ -82,6 +81,14 @@ export default function ChatThreadPage({
               onResolve={resolvePendingChoice}
             />
           </div>
+          {/* Live plan overlay: absolute so the composer height never changes. */}
+          {isRunning && chatState.plan ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-full z-10 px-4 pb-2 sm:px-6">
+              <div className="pointer-events-auto mx-auto w-full max-w-3xl">
+                <ThreadPlanCard plan={chatState.plan} />
+              </div>
+            </div>
+          ) : null}
           <ChatInput
             key={threadId}
             draftScope={threadId}

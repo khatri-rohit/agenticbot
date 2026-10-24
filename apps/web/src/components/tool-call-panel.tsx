@@ -251,21 +251,26 @@ function ToolTrail({
           )}
         />
       </button>
-      {expanded ? (
-        <ul
-          role="list"
-          className="divide-y divide-border/40 border-t border-border/60"
-        >
-          {rows.map((row) => (
-            <ToolCard
-              key={row.toolCallId}
-              row={row}
-              flush
-              defaultOpen={row.status === 'running'}
-            />
-          ))}
-        </ul>
-      ) : null}
+      {/* Rows stay mounted across group collapse so each row's own open
+          state survives; hiding is CSS, not unmounting. */}
+      <ul
+        role="list"
+        className={cn(
+          'divide-y divide-border/40',
+          expanded && 'border-t border-border/60',
+        )}
+        hidden={!expanded}
+      >
+        {rows.map((row) => (
+          <ToolCard
+            key={row.toolCallId}
+            row={row}
+            flush
+            visible={expanded}
+            defaultOpen={row.status === 'running'}
+          />
+        ))}
+      </ul>
     </section>
   );
 }
@@ -274,18 +279,22 @@ function ToolCard({
   row,
   flush = false,
   defaultOpen = false,
+  /** False while the parent group is collapsed: auto-open pauses so an
+   *  invisible row can't spring open on group re-expand. */
+  visible = true,
 }: {
   row: ToolCallRow;
   flush?: boolean;
   defaultOpen?: boolean;
+  visible?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
   const summary = summarizeToolRow(row);
 
   useEffect(() => {
-    if (row.status === 'running') setOpen(true);
-  }, [row.status]);
+    if (visible && row.status === 'running') setOpen(true);
+  }, [visible, row.status]);
 
   const copyResult = async () => {
     if (!row.result) return;

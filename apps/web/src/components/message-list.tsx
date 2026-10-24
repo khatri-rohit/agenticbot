@@ -26,7 +26,9 @@ import {
 import { MessageActions } from './message-actions';
 import { CompactionCard } from './compaction-card';
 import { ToolStepList } from './tool-call-panel';
+import { PlanChip } from './thread-plan-card';
 import { UserMessage } from './user-message';
+import { cn } from 'cn';
 
 export function MessageList({
   messages,
@@ -166,7 +168,11 @@ export function MessageList({
       )}
       <div
         ref={scrollRef}
-        className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable [overflow-anchor:none]"
+        className={cn(
+          'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable [overflow-anchor:none]',
+          // Keep the newest lines reachable above the floating plan card.
+          isRunning && chatState.plan ? 'pb-40' : 'pb-5',
+        )}
       >
         <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-5 sm:px-6">
           {!hasMessages && !isRunning && !streaming?.content && (
@@ -225,18 +231,24 @@ export function MessageList({
                     onEditSubmit={onEditLastUserMessage}
                   />
 
+                  {/* Settled plan pins under its anchor user message; while
+                      a run is live the plan floats above the composer instead. */}
+                  {isLastTurn && !isRunning ? (
+                    <PlanChip plan={chatState.plan} />
+                  ) : null}
+
                   {showSteps ? (
                     <div className="flex min-w-0 flex-col gap-3">
                       {steps.map((step) => {
                         if (step.type === 'assistant') {
+                          const isLatestAssistant =
+                            step.message.id === latestAssistantMessageId;
                           return (
                             <AssistantMessage
                               key={step.message.id}
                               message={step.message}
-                              showRetry={
-                                !isRunning &&
-                                step.message.id === latestAssistantMessageId
-                              }
+                              showMeta={isLatestAssistant}
+                              showRetry={!isRunning && isLatestAssistant}
                               onRetry={onRetryLastResponse}
                               retryDisabled={isRunning}
                             />
@@ -251,12 +263,6 @@ export function MessageList({
                               <article className="chat-prose type-body min-w-0 max-w-full">
                                 <AgentMarkdown content={step.content} />
                               </article>
-                              <MessageMetaRow>
-                                <MessageActions
-                                  content={step.content}
-                                  align="start"
-                                />
-                              </MessageMetaRow>
                             </div>
                           );
                         }
@@ -278,10 +284,7 @@ export function MessageList({
                           );
                         }
                         return (
-                          <div
-                            key="stream"
-                            className="min-w-0 max-w-full"
-                          >
+                          <div key="stream" className="min-w-0 max-w-full">
                             <article className="chat-prose type-body min-w-0 max-w-full">
                               <AgentMarkdown content={step.content} streaming />
                             </article>
@@ -297,9 +300,7 @@ export function MessageList({
                       toolActivity={toolActivity}
                       hasStreamingText={Boolean(streaming?.content)}
                       compacting={compactionNotice?.status === 'running'}
-                      waitingForChoice={
-                        chatState.pendingChoices.length > 0
-                      }
+                      waitingForChoice={chatState.pendingChoices.length > 0}
                     />
                   ) : null}
                 </section>
@@ -308,7 +309,10 @@ export function MessageList({
           </div>
 
           {chatState.limitNotice ? (
-            <p className="type-caption px-1 text-muted-foreground" role="status">
+            <p
+              className="type-caption px-1 text-muted-foreground"
+              role="status"
+            >
               Run stopped early: {chatState.limitNotice.reason}
             </p>
           ) : null}
@@ -430,11 +434,14 @@ function MessageMetaRow({
 
 function AssistantMessage({
   message,
+  showMeta = true,
   showRetry,
   onRetry,
   retryDisabled,
 }: {
   message: Message;
+  /** Meta footer (time · duration · Copy) only on the turn's final response. */
+  showMeta?: boolean;
   showRetry?: boolean;
   onRetry: () => void | Promise<void>;
   retryDisabled?: boolean;
@@ -446,15 +453,17 @@ function AssistantMessage({
       <article className="chat-prose type-body min-w-0 max-w-full">
         <AgentMarkdown content={message.content} />
       </article>
-      <MessageMetaRow iso={message.createdAt} durationMs={message.durationMs}>
-        <MessageActions
-          content={message.content}
-          align="start"
-          showRetry={showRetry}
-          onRetry={onRetry}
-          disabled={retryDisabled}
-        />
-      </MessageMetaRow>
+      {showMeta ? (
+        <MessageMetaRow iso={message.createdAt} durationMs={message.durationMs}>
+          <MessageActions
+            content={message.content}
+            align="start"
+            showRetry={showRetry}
+            onRetry={onRetry}
+            disabled={retryDisabled}
+          />
+        </MessageMetaRow>
+      ) : null}
     </div>
   );
 }
