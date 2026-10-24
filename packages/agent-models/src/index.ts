@@ -160,6 +160,7 @@ export {
 
 export type {
   ContextBudget,
+  ContextWindowSource,
   ContextReportLayer,
   ContextReport,
   Snapshot,

@@ -1,9 +1,14 @@
 /** Last provider-measured window fill for a thread (prompt tokens). */
 
+import type { ContextWindowSource } from '@agent/agent-models';
+
 export type ContextAnchor = {
   occupiedTokens: number;
   model: string;
   measuredAt: string;
+  /** Assembler window used when this occupancy was measured. */
+  windowTokens?: number;
+  windowSource?: ContextWindowSource;
 };
 
 function storageKey(threadId: string): string {
@@ -18,6 +23,8 @@ export function getContextAnchor(threadId: string): ContextAnchor | null {
       occupiedTokens?: unknown;
       model?: unknown;
       measuredAt?: unknown;
+      windowTokens?: unknown;
+      windowSource?: unknown;
     };
     if (
       typeof parsed.occupiedTokens !== 'number' ||
@@ -28,10 +35,22 @@ export function getContextAnchor(threadId: string): ContextAnchor | null {
     ) {
       return null;
     }
+    const windowTokens =
+      typeof parsed.windowTokens === 'number' &&
+      Number.isFinite(parsed.windowTokens) &&
+      parsed.windowTokens > 0
+        ? parsed.windowTokens
+        : undefined;
+    const windowSource =
+      parsed.windowSource === 'show' || parsed.windowSource === 'default'
+        ? parsed.windowSource
+        : undefined;
     return {
       occupiedTokens: parsed.occupiedTokens,
       model: parsed.model,
       measuredAt: parsed.measuredAt,
+      ...(windowTokens !== undefined ? { windowTokens } : {}),
+      ...(windowSource !== undefined ? { windowSource } : {}),
     };
   } catch {
     return null;

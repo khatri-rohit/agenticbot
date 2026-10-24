@@ -81,9 +81,10 @@ export function buildSystemPrompt(
     ? `
 # Skills
 
-Optional procedure packs. Selected names live in the skills layer.
-Call load_skill with a selected skill_name when that workflow applies.
-Built-in tools work without a skill. Loading does not approve steps or add tools.
+Optional procedure packs. The skills layer lists the full catalog; * marks host suggestions for this turn.
+Call load_skill with a catalog skill_name when that workflow matches the user intent.
+Prefer suggested skills when they fit. If several could apply and intent is unclear, ask briefly or load the closest match and follow its guardrails.
+Respect modes tags in the catalog. Built-in tools work without a skill. Loading does not approve steps or add tools.
 `
     : '';
 

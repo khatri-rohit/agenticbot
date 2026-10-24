@@ -6,7 +6,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import type { ContextReportLayer } from '@agent/agent-models';
+import type {
+  ContextReportLayer,
+  ContextWindowSource,
+} from '@agent/agent-models';
 import type { ContextMeterSource } from '@/features/agent/hooks/use-context-meter';
 
 const BUCKETS: {
@@ -66,6 +69,7 @@ export function ContextUsage({
   approximate,
   layers = [],
   reserve = 0,
+  windowSource,
 }: {
   used: number;
   limit: number | null;
@@ -73,6 +77,7 @@ export function ContextUsage({
   approximate: boolean;
   layers?: ContextReportLayer[];
   reserve?: number;
+  windowSource?: ContextWindowSource;
 }) {
   if (limit == null || limit <= 0) return null;
 
@@ -81,6 +86,7 @@ export function ContextUsage({
   const usedLabel = used.toLocaleString();
   const limitLabel = limit.toLocaleString();
   const showTilde = source === 'estimate' || approximate;
+  const defaultWindow = windowSource === 'default';
   const size = 20;
   const stroke = 2.25;
   const radius = (size - stroke) / 2;
@@ -94,7 +100,7 @@ export function ContextUsage({
         <button
           type="button"
           className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-          aria-label={`${showTilde ? 'About ' : ''}${percent}% context used, ${usedLabel} of ${limitLabel} tokens, ${source}`}
+          aria-label={`${showTilde ? 'About ' : ''}${percent}% context used, ${usedLabel} of ${limitLabel} tokens, ${source}${defaultWindow ? ', default window' : ''}`}
         >
           <svg
             width={size}
@@ -205,6 +211,11 @@ export function ContextUsage({
           <dt className="text-muted-foreground">Limit</dt>
           <dd className="text-right font-medium tabular-nums">{limitLabel}</dd>
         </dl>
+        {defaultWindow ? (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Using default window — model show unavailable
+          </p>
+        ) : null}
         <p className="mt-2 text-[11px] text-muted-foreground tabular-nums">
           {showTilde ? '~' : ''}
           {percent}% of window

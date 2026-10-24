@@ -49,7 +49,10 @@ export type AssembleContextInput = {
   mentionedThreads?: MentionedThreadContext[];
   /** Thread-scoped plan journal + todos. Injected when non-empty. */
   plan?: ThreadPlan | null;
-  /** Skill names selected for this run (0–3). Host computes via selectSkills. */
+  /**
+   * Host soft suggestions for this run (selectSkills, usually 0–3).
+   * Marked with * in the skills catalog; does not gate load_skill.
+   */
   skillNames?: string[];
 };
 
@@ -400,11 +403,9 @@ export function assembleContext(
     content: systemText,
   };
 
-  const selectedSkills = input.tools.byName.has('load_skill')
-    ? listSkills().filter((skill) => input.skillNames?.includes(skill.name))
-    : [];
-  const skillsText =
-    selectedSkills.length > 0 ? formatSkillsCatalog(selectedSkills) : '';
+  const skillsText = input.tools.byName.has('load_skill')
+    ? formatSkillsCatalog(listSkills(), input.skillNames ?? [])
+    : '';
   const skillsMessage: ChatCompletionMessageParam | null = skillsText
     ? { role: 'system', content: skillsText }
     : null;

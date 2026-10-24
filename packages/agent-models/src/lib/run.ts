@@ -113,8 +113,8 @@ export type StartRunRequest = {
    */
   posture?: RunPosture;
   /**
-   * Soft skill hints for this send. Host runs selectSkills; the client
-   * does not pick the catalog.
+   * Soft skill hints for this send. Host runs selectSkills for suggestions
+   * (UI chips + catalog * marks). Does not gate load_skill.
    */
   skills?: {
     pinned?: string[];

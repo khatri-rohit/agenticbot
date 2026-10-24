@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type {
   ContextReport,
   ContextReportLayer,
+  ContextWindowSource,
   MessageAttachment,
 } from '@agent/agent-models';
 import {
@@ -13,7 +14,6 @@ import {
 } from '@/features/agent/api/agent-client';
 import { getContextAnchor } from '@/features/agent/lib/context-anchor';
 import { estimateDraftTokens } from '@/lib/estimate-tokens';
-import { OLLAMA_MODELS } from '@/lib/ollama-models';
 
 /** Stable empty list — never use `= []` in hook args (new ref every render → effect loop). */
 const EMPTY_ATTACHMENTS: MessageAttachment[] = [];
@@ -28,6 +28,8 @@ export type ContextMeter = {
   layers: ContextReportLayer[];
   reserve: number;
   selectedSkills: { name: string; description: string }[];
+  /** Assembler window provenance when known; catalog soft-fallback leaves this unset. */
+  windowSource?: ContextWindowSource;
 };
 
 export function useContextMeter(options: {
@@ -38,6 +40,7 @@ export function useContextMeter(options: {
   queuedAttachments?: MessageAttachment[];
   streamingContent?: string | null;
   composerOptions: ComposerOptions;
+  /** Soft fallback only until live report or /context/estimate returns. */
   contextLimit: number | null;
   liveOccupiedTokens?: number;
   /** Last measured usage already includes the current streaming text. */
@@ -69,6 +72,8 @@ export function useContextMeter(options: {
     tokens: number;
     layers: ContextReportLayer[];
     reserve: number;
+    windowTokens: number;
+    windowSource?: ContextWindowSource;
     selectedSkills: { name: string; description: string }[];
   } | null>(null);
 
@@ -82,15 +87,24 @@ export function useContextMeter(options: {
       : null;
   const liveLayers =
     sameModel && liveContextReport ? liveContextReport.layers : [];
+  const liveWindowTokens =
+    sameModel && liveContextReport
+      ? liveContextReport.budget.windowTokens
+      : null;
+  const liveWindowSource =
+    sameModel && liveContextReport
+      ? liveContextReport.windowSource
+      : undefined;
 
   const persisted =
     liveOccupied == null && liveEstimated == null && threadId
       ? getContextAnchor(threadId)
       : null;
-  const persistedOccupied =
-    persisted && persisted.model === composerOptions.model
-      ? persisted.occupiedTokens
-      : null;
+  const persistedForModel =
+    persisted && persisted.model === composerOptions.model ? persisted : null;
+  const persistedOccupied = persistedForModel?.occupiedTokens ?? null;
+  const persistedWindowTokens = persistedForModel?.windowTokens ?? null;
+  const persistedWindowSource = persistedForModel?.windowSource;
 
   const composerTokens = estimateDraftTokens(
     [draft, queuedContent].filter(Boolean).join('\n') || null,
@@ -137,6 +151,8 @@ export function useContextMeter(options: {
               tokens: res.estimatedPromptTokens,
               layers: res.contextReport.layers,
               reserve: res.contextReport.budget.outputReserveTokens,
+              windowTokens: res.contextReport.budget.windowTokens,
+              windowSource: res.contextReport.windowSource,
               selectedSkills: res.skills?.selected ?? [],
             });
           }
@@ -167,10 +183,18 @@ export function useContextMeter(options: {
     skillHints?.dismissed,
   ]);
 
+  // Assembler/report window first; catalog contextLimit only until estimate lands.
   const limit =
+    liveWindowTokens ??
+    serverEstimate?.windowTokens ??
+    persistedWindowTokens ??
     contextLimit ??
-    OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.contextLength ??
     null;
+  const windowSource =
+    liveWindowSource ??
+    serverEstimate?.windowSource ??
+    persistedWindowSource ??
+    undefined;
 
   const liveReserve =
     liveContextReport?.budget.outputReserveTokens ??
@@ -190,6 +214,7 @@ export function useContextMeter(options: {
       layers,
       reserve: liveReserve,
       selectedSkills: suggested,
+      windowSource,
     };
   }
 
@@ -202,6 +227,7 @@ export function useContextMeter(options: {
       layers,
       reserve: liveReserve,
       selectedSkills: suggested,
+      windowSource,
     };
   }
 
@@ -214,6 +240,7 @@ export function useContextMeter(options: {
       layers,
       reserve: liveReserve,
       selectedSkills: suggested,
+      windowSource,
     };
   }
 
@@ -226,6 +253,7 @@ export function useContextMeter(options: {
       layers: serverEstimate.layers,
       reserve: serverEstimate.reserve,
       selectedSkills: serverEstimate.selectedSkills,
+      windowSource,
     };
   }
 
@@ -237,5 +265,6 @@ export function useContextMeter(options: {
     layers: [],
     reserve: 0,
     selectedSkills: [],
+    windowSource,
   };
 }

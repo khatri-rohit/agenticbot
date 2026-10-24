@@ -174,7 +174,7 @@ export function MessageList({
           isRunning && chatState.plan ? 'pb-40' : 'pb-5',
         )}
       >
-        <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-5 sm:px-6">
+        <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-5 sm:px-6">
           {!hasMessages && !isRunning && !streaming?.content && (
             <p className="type-ui text-center text-muted-foreground/70">
               Conversation will appear here.

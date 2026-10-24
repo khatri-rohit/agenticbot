@@ -405,9 +405,6 @@ export async function runLoop(
       noteWebSource,
       getWebSource,
       getWebSourceByUrl,
-      ...(config.skillNames !== undefined
-        ? { skillNames: config.skillNames }
-        : {}),
     };
   }
 

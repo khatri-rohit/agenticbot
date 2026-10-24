@@ -464,10 +464,19 @@ export async function persistChatEffects(
     const usage = event.usage;
     const occupied = usage ? occupiedFromUsage(usage) : undefined;
     if (occupied !== undefined) {
+      const report = event.contextReport ?? prev.activeRun.contextReport;
       setContextAnchor(threadId, {
         occupiedTokens: occupied,
         model: prev.activeRun.model,
         measuredAt: new Date().toISOString(),
+        ...(report
+          ? {
+              windowTokens: report.budget.windowTokens,
+              ...(report.windowSource
+                ? { windowSource: report.windowSource }
+                : {}),
+            }
+          : {}),
       });
     }
   }

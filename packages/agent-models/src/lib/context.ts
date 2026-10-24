@@ -17,6 +17,9 @@ export type ContextBudget = {
   keepAttachmentsForTurns: number;
 };
 
+/** Provenance of ContextReport.budget.windowTokens (host sets after assemble). */
+export type ContextWindowSource = 'show' | 'default';
+
 export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   windowTokens: 128_000,
   outputReserveTokens: 20_000,
@@ -41,6 +44,11 @@ export type ContextReport = {
   occupiedTokens: number;
   stubbedToolResults: number;
   needsCompaction: boolean;
+  /**
+   * Where budget.windowTokens came from for this assembly.
+   * Hosts set this after assembleContext; refresh preserves it.
+   */
+  windowSource?: ContextWindowSource;
 };
 
 /**

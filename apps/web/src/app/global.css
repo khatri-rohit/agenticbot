@@ -76,6 +76,18 @@
   --text-caption-leading: 1.35;
 }
 
+/* Extra-large screens: scale up the reading measure so text isn't cramped. */
+@media (min-width: 1536px) {
+  :root {
+    --text-body: 1.0625rem;
+    --text-body-leading: 1.6;
+    --text-body-reading: 1.0625rem;
+    --text-body-reading-leading: 1.6;
+    --text-user: 1rem;
+    --text-user-leading: 1.55;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

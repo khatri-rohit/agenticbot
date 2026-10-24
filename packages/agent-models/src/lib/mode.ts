@@ -2,8 +2,10 @@ import type { ThreadKind } from './thread.js';
 import { isWorkspaceKind } from './thread.js';
 
 /**
- * A profile is a policy bundle: model, temperature, tools, and loop limits.
+ * A profile is a policy bundle: temperature, tools, and loop limits.
  * Home vs workspace is binding; thinking is reserved.
+ * `model` is a harness/CLI default only — web chat model id is UI/thread-owned
+ * (`body.model ?? thread.model ?? HOME_MODE.model`), not modeForKind().model.
  */
 export type ModeName = 'home' | 'workspace' | 'thinking';
 
@@ -18,6 +20,7 @@ export type ModeLimits = {
 
 export interface ModeConfig {
   name: ModeName;
+  /** Default model id for CLI/harness; not applied by API chat resolution. */
   model: string;
   temperature: number;
   /** Profile-optional tools (e.g. web_search); gated by client webSearch flag. */

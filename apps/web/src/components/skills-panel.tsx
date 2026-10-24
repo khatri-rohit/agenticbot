@@ -416,10 +416,11 @@ export function SkillsPanel({
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/60 px-4 py-3.5 pr-12">
           <DialogTitle>Skills</DialogTitle>
           <DialogDescription>
-            Catalog of procedure packs. Pin ones for this thread; the host also
-            matches the draft. The agent loads a body with{' '}
-            <span className="font-mono text-xs">load_skill</span> when that
-            workflow applies.
+            Catalog of procedure packs. Pin ones for this thread; the host
+            suggests matches for the draft. The agent sees the full catalog and
+            loads a body with{' '}
+            <span className="font-mono text-xs">load_skill</span> when intent
+            fits.
           </DialogDescription>
         </DialogHeader>
 

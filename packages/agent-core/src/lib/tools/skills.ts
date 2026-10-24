@@ -186,16 +186,41 @@ export function listSkills(): SkillMetadata[] {
   }));
 }
 
-export function formatSkillsCatalog(skills: SkillMetadata[]): string {
+/**
+ * Compact catalog for the skills_catalog context layer.
+ * `suggested` are host lexical hints (selectSkills); marked with `*`.
+ */
+export function formatSkillsCatalog(
+  skills: SkillMetadata[],
+  suggested: string[] = [],
+): string {
+  const suggestedSet = new Set(
+    suggested.map((name) => name.toLowerCase()),
+  );
   const lines =
     skills.length === 0
       ? '- (none)'
       : skills
-          .map((skill) => `- ${skill.name}: ${skill.description}`)
+          .map((skill) => {
+            const mark = suggestedSet.has(skill.name.toLowerCase())
+              ? '*'
+              : '';
+            const tags: string[] = [];
+            if (skill.when?.length) {
+              tags.push(`when: ${skill.when.join(', ')}`);
+            }
+            if (skill.modes?.length) {
+              tags.push(`modes: ${skill.modes.join(', ')}`);
+            }
+            const suffix = tags.length > 0 ? ` (${tags.join('; ')})` : '';
+            return `- ${mark}${skill.name}: ${skill.description}${suffix}`;
+          })
           .join('\n');
   return [
     '# Skills',
-    'Selected for this run. Call load_skill with skill_name to load a body.',
+    'Catalog of procedure packs. Host suggestions for this turn are marked *.',
+    'Call load_skill with skill_name when that workflow matches the user intent.',
+    'Prefer suggested when they fit; if unsure which skill applies, ask briefly or load the closest match.',
     'Built-in tools work without a skill. Loading does not approve steps or add tools.',
     '',
     lines,
@@ -203,8 +228,8 @@ export function formatSkillsCatalog(skills: SkillMetadata[]): string {
 }
 
 /**
- * Deterministic run-set picker. No LLM. Name / when-hits beat description
- * overlap; `not` and mode mismatch drop a skill unless it is pinned.
+ * Deterministic soft suggestions for UI chips + catalog `*` marks. No LLM.
+ * Does not gate load_skill — the model may load any catalog skill.
  */
 export function selectSkills(input: {
   query: string;
@@ -319,13 +344,13 @@ export const load_skill: Tool = {
     function: {
       name: 'load_skill',
       description:
-        'Load the body of a named skill selected for this run. Optional. Built-in tools work without a skill.',
+        'Load the procedure body for a skill from the catalog. Optional. Built-in tools work without a skill.',
       parameters: {
         type: 'object',
         properties: {
           skill_name: {
             type: 'string',
-            description: 'Exact skill name from the selected run set',
+            description: 'Exact skill name from the skills catalog',
           },
         },
         required: ['skill_name'],
@@ -335,29 +360,27 @@ export const load_skill: Tool = {
   },
   guidance: {
     whenToUse: [
-      'You need the procedure body for a skill selected on this run.',
+      'A catalog skill (especially a * suggested one) matches the user intent and you need its procedure body.',
     ],
     whenNotToUse: [
       'Do not load a skill on every turn.',
       'Do not load a skill instead of calling a built-in tool.',
       'Do not load a skill for small talk or a one-line factual answer.',
+      'Do not load a skill whose modes clearly exclude this run mode.',
     ],
     usage: [
-      'Pass skill_name exactly as listed in the selected skills.',
+      'Pass skill_name exactly as listed in the skills catalog.',
+      'If several skills could apply and intent is unclear, ask briefly before loading.',
       'Follow the loaded steps; they do not grant extra tools or bypass the path jail.',
     ],
   },
-  execute: async (args, ctx) => {
+  execute: async (args) => {
     const name = String(args.skill_name ?? '').trim();
-    const allowed = ctx.skillNames;
-    if (allowed && !allowed.includes(name)) {
-      return `Skill not selected for this run. Selected: ${allowed.join(', ') || '(none)'}`;
-    }
     const skill = catalog().find((item) => item.name === name);
     if (skill) return skill.instructions;
-    const available = (allowed ?? listSkills().map((item) => item.name)).join(
-      ', ',
-    );
+    const available = listSkills()
+      .map((item) => item.name)
+      .join(', ');
     return `Skill not found. Available skills: ${available || '(none)'}`;
   },
 };

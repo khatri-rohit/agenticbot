@@ -45,7 +45,7 @@ export type RunLoopConfig = {
   estimatedPromptTokens?: number;
   /** Per-layer breakdown from assembleContext. */
   contextReport?: ContextReport;
-  /** Skill names load_skill may return this run. */
+  /** Soft skill suggestions for this run (ledger / assemble * marks). Not a load_skill jail. */
   skillNames?: string[];
   /** Aborted when RunManager.cancel runs. */
   signal?: AbortSignal;

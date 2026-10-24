@@ -195,6 +195,7 @@ function parseSkillHints(raw: unknown): {
   };
 }
 
+/** Soft suggestions for ledger / catalog * marks / UI chips. Not a load_skill jail. */
 function resolveSkillNames(input: {
   query: string;
   mode: string;
@@ -294,12 +295,16 @@ async function prepareRun(input: {
   );
 
   let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
+  let windowSource: 'show' | 'default' = 'default';
   try {
     const config = await getOllamaModelConfig(
       input.model,
       input.endpoint ?? 'cloud',
     );
-    if (config.contextLength) windowTokens = config.contextLength;
+    if (config.contextLength) {
+      windowTokens = config.contextLength;
+      windowSource = 'show';
+    }
   } catch {
     // Keep the default window when /api/show is unavailable.
   }
@@ -331,7 +336,14 @@ async function prepareRun(input: {
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
 
-  return { tools, messages, report, mode, posture, skillNames };
+  return {
+    tools,
+    messages,
+    report: { ...report, windowSource },
+    mode,
+    posture,
+    skillNames,
+  };
 }
 
 async function maybeCompactThread(input: {

@@ -282,8 +282,9 @@ describe('compact snapshot', () => {
     expect(catalog?.tokens).toBeGreaterThan(0);
     expect(rules?.tokens).toBeGreaterThan(0);
     const blob = JSON.stringify(messages);
-    expect(blob).toContain('patch-and-verify');
-    expect(blob).not.toContain('home-research');
+    expect(blob).toContain('*patch-and-verify');
+    // Full catalog is always in context; suggestions only get the * mark.
+    expect(blob).toContain('home-research');
   });
 
   it('refreshContextReport uses promptTokens as occupied', () => {

@@ -59,7 +59,6 @@ import { WorkspacePicker } from '@/components/workspace-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
 import { SkillsPanel } from '@/components/skills-panel';
-import { VoiceModePill } from '@/components/voice-mode-pill';
 import { registerComposerFocus } from '@/components/composer-focus';
 import { Button } from '@/components/ui/button';
 import {
@@ -212,6 +211,28 @@ function composerPlaceholder(opts: {
   if (opts.voiceTranscribing) return 'Transcribing…';
   if (opts.isHero) return 'Ask anything to start…';
   return 'Send a follow-up…';
+}
+
+const WAVE_BAR_COUNT = 5;
+
+/** Compact waveform that fits inside the mic button while voice is active. */
+function MicWaveform({ level }: { level: number }) {
+  const clamped = Math.max(0, Math.min(1, level));
+  return (
+    <span className="flex h-4 items-end gap-0.5" aria-hidden>
+      {Array.from({ length: WAVE_BAR_COUNT }, (_, i) => {
+        const weight = 1 - Math.abs(i - (WAVE_BAR_COUNT - 1) / 2) * 0.28;
+        const h = 22 + clamped * weight * 78;
+        return (
+          <span
+            key={i}
+            className="w-0.5 rounded-full bg-current transition-[height] duration-75 ease-out"
+            style={{ height: `${h}%` }}
+          />
+        );
+      })}
+    </span>
+  );
 }
 
 export function ChatInput({
@@ -416,6 +437,7 @@ export function ChatInput({
   }, [draftScope, input, pendingAttachments]);
 
   const modelConfig = useOllamaModelConfig(composerOptions.model, localMode);
+  // Soft fallback until /context/estimate or live ContextReport supplies windowTokens.
   const contextLimit =
     modelConfig?.contextLength ??
     CLOUD_OLLAMA_MODELS.find((m) => m.id === composerOptions.model)
@@ -828,9 +850,6 @@ export function ChatInput({
 
   const attachMenu = (
     <>
-      {voice.enabled && (voice.active || voice.transcribing) ? (
-        <VoiceModePill level={voice.level} className="mr-0.5" />
-      ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -996,6 +1015,7 @@ export function ChatInput({
         approximate={contextMeter.approximate}
         layers={contextMeter.layers}
         reserve={contextMeter.reserve}
+        windowSource={contextMeter.windowSource}
       />
     </>
   );
@@ -1008,10 +1028,6 @@ export function ChatInput({
           size="icon-sm"
           variant={voice.active || voice.transcribing ? 'secondary' : 'ghost'}
           onClick={() => voice.toggle()}
-          className={cn(
-            'shrink-0 rounded-full',
-            (voice.active || voice.transcribing) && 'text-foreground',
-          )}
           aria-label={
             voice.transcribing
               ? 'Transcribing voice'
@@ -1021,9 +1037,16 @@ export function ChatInput({
           }
           aria-pressed={voice.active}
           aria-busy={voice.transcribing}
-          title={voice.transcribing ? 'Transcribing…' : 'Voice mode (Alt+A)'}
+          title={voice.transcribing ? 'Transcribing…' : 'Voice mode'}
+          className={cn(
+            'shrink-0 rounded-full',
+            (voice.active || voice.transcribing) && 'text-foreground',
+            voice.active && 'w-auto px-2',
+          )}
         >
-          {voice.transcribing ? (
+          {voice.active ? (
+            <MicWaveform level={voice.level} />
+          ) : voice.transcribing ? (
             <Loader2 className="size-4 animate-spin" strokeWidth={2.25} />
           ) : (
             <Mic className="size-4" strokeWidth={2.25} />
@@ -1097,7 +1120,7 @@ export function ChatInput({
       <div
         className={cn(
           'mx-auto w-full min-w-0 space-y-2',
-          isHero ? 'max-w-none' : 'max-w-3xl',
+          isHero ? 'max-w-none' : 'max-w-4xl',
         )}
       >
         {queuedMessage && (

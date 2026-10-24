@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ToolContext } from '@agent/agent-models';
 
 import {
+  formatSkillsCatalog,
   load_skill,
   parseSkillMarkdown,
   selectSkills,
@@ -9,13 +10,12 @@ import {
 } from './skills';
 import type { SkillMetadata } from './type';
 
-function ctx(skillNames?: string[]): ToolContext {
+function ctx(): ToolContext {
   return {
     runId: 'r1',
     threadId: 't1',
     origin: 'eval',
     signal: new AbortController().signal,
-    ...(skillNames !== undefined ? { skillNames } : {}),
   };
 }
 
@@ -124,12 +124,34 @@ describe('selectSkills', () => {
   });
 });
 
+describe('formatSkillsCatalog', () => {
+  it('lists the full catalog and marks suggested names', () => {
+    const text = formatSkillsCatalog(catalog, ['patch-and-verify']);
+    expect(text).toContain('*patch-and-verify:');
+    expect(text).toContain('- home-research:');
+    expect(text).toContain('when: patch, edit, implement');
+    expect(text).toContain('modes: workspace');
+    expect(text).toMatch(/Catalog of procedure packs/i);
+  });
+});
+
 describe('load_skill', () => {
-  it('refuses names outside the run set', async () => {
+  it('loads any catalog skill (no run-set jail)', async () => {
     const result = await load_skill.execute(
       { skill_name: 'patch-and-verify' },
-      ctx([]),
+      ctx(),
     );
-    expect(result).toMatch(/not selected/i);
+    expect(result).not.toMatch(/not selected/i);
+    expect(typeof result).toBe('string');
+    expect(result.length).toBeGreaterThan(20);
+  });
+
+  it('reports available names when missing', async () => {
+    const result = await load_skill.execute(
+      { skill_name: 'no-such-skill' },
+      ctx(),
+    );
+    expect(result).toMatch(/Skill not found/i);
+    expect(result).toMatch(/Available skills:/i);
   });
 });
