@@ -30,6 +30,7 @@ import {
 } from '@agent/agent-models';
 import {
   ALL_TOOLS,
+  MAX_RUN_SKILLS,
   RUN_HANDLE_TTL_MS,
   RunManager,
   assembleContext,
@@ -44,6 +45,7 @@ import {
   loadWorkspaceRules,
   packMentionedThread,
   resolveReasoningEffort,
+  selectSkills,
   type MentionedThreadContext,
   type ToolRegistry,
 } from '@agent/agent-core';
@@ -161,6 +163,59 @@ type PlanUpdatedPayload = {
   plan: ThreadPlan;
 };
 
+function lastUserEnvelope(
+  envelopes: LedgerEnvelope[],
+): LedgerEnvelope | undefined {
+  for (let i = envelopes.length - 1; i >= 0; i--) {
+    if (envelopes[i].record.role === 'user') return envelopes[i];
+  }
+  return undefined;
+}
+
+function skillNameList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const names = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return names;
+}
+
+function parseSkillHints(raw: unknown): {
+  pinned?: string[];
+  dismissed?: string[];
+} {
+  if (!raw || typeof raw !== 'object') return {};
+  const body = raw as { pinned?: unknown; dismissed?: unknown };
+  const pinned = skillNameList(body.pinned);
+  const dismissed = skillNameList(body.dismissed);
+  return {
+    ...(pinned ? { pinned } : {}),
+    ...(dismissed ? { dismissed } : {}),
+  };
+}
+
+function resolveSkillNames(input: {
+  query: string;
+  mode: string;
+  hints?: { pinned?: string[]; dismissed?: string[] };
+  stored?: string[];
+}): string[] {
+  if (input.hints) {
+    return selectSkills({
+      query: input.query,
+      mode: input.mode,
+      pinned: input.hints.pinned,
+      dismissed: input.hints.dismissed,
+    }).selected.map((skill) => skill.name);
+  }
+  if (input.stored) return input.stored.slice(0, MAX_RUN_SKILLS);
+  return selectSkills({
+    query: input.query,
+    mode: input.mode,
+  }).selected.map((skill) => skill.name);
+}
+
 async function prepareRun(input: {
   threadId: string;
   thread?: Thread;
@@ -170,6 +225,7 @@ async function prepareRun(input: {
   envelopes: LedgerEnvelope[];
   model: string;
   endpoint?: OllamaEndpoint;
+  skillNames?: string[];
   onMemoryUpdated?: (payload: MemoryUpdatedPayload) => void;
   onPlanUpdated?: (payload: PlanUpdatedPayload) => void;
 }): Promise<{
@@ -178,6 +234,7 @@ async function prepareRun(input: {
   report: ReturnType<typeof assembleContext>['report'];
   mode: ModeConfig;
   posture: RunPosture;
+  skillNames: string[];
 }> {
   const memory = getMemoryStore();
   const kind = normalizeThreadKind(input.thread?.kind);
@@ -256,6 +313,7 @@ async function prepareRun(input: {
     input.threadId,
   );
 
+  const skillNames = input.skillNames ?? [];
   const { messages, report } = assembleContext(
     {
       tools,
@@ -265,12 +323,13 @@ async function prepareRun(input: {
       mode: mode.name,
       posture,
       mentionedThreads,
+      skillNames,
       ...(plan ? { plan } : {}),
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
 
-  return { tools, messages, report, mode, posture };
+  return { tools, messages, report, mode, posture, skillNames };
 }
 
 async function maybeCompactThread(input: {
@@ -284,6 +343,7 @@ async function maybeCompactThread(input: {
   const thread = store.getThread(input.threadId);
   if (!thread) return;
   const envelopes = await store.hydrateEnvelopes(input.threadId);
+  const lastUser = lastUserEnvelope(envelopes);
   const prepared = await prepareRun({
     threadId: input.threadId,
     thread,
@@ -292,6 +352,11 @@ async function maybeCompactThread(input: {
     envelopes,
     model: input.model,
     endpoint: input.endpoint,
+    skillNames: resolveSkillNames({
+      query: lastUser?.record.role === 'user' ? lastUser.record.content : '',
+      mode: modeForKind(normalizeThreadKind(thread.kind)).name,
+      stored: lastUser?.skills?.selected,
+    }),
   });
   if (!prepared.report.needsCompaction) return;
   const throughSeq = chooseCompactThroughSeq(
@@ -477,8 +542,11 @@ router.post('/run', async (req: Request, res: Response) => {
     webSearch,
     thinking,
     posture: rawPosture,
+    skills: rawSkills,
   } = req.body as StartRunRequest;
   const posture = normalizeRunPosture(rawPosture);
+  const skillHints =
+    rawSkills !== undefined ? parseSkillHints(rawSkills) : undefined;
 
   if (!threadId) {
     return res.status(400).json({ error: 'threadId is required' });
@@ -524,6 +592,15 @@ router.post('/run', async (req: Request, res: Response) => {
 
   const ledgerBefore = await store.readLedger(threadId, 0);
   const isFirstUserTurn = ledgerBefore.length === 0 && Boolean(message);
+  const priorUser = lastUserEnvelope(ledgerBefore);
+  const skillQuery = message?.content ??
+    (priorUser?.record.role === 'user' ? priorUser.record.content : '');
+  const skillNames = resolveSkillNames({
+    query: skillQuery,
+    mode: modeForKind(normalizeThreadKind(thread.kind)).name,
+    hints: skillHints,
+    stored: priorUser?.skills?.selected,
+  });
 
   if (message) {
     await store.append({
@@ -533,6 +610,7 @@ router.post('/run', async (req: Request, res: Response) => {
       ...(message.attachments?.length
         ? { attachments: message.attachments }
         : {}),
+      skills: { selected: skillNames },
     });
   }
 
@@ -571,6 +649,7 @@ router.post('/run', async (req: Request, res: Response) => {
     envelopes,
     model: useModel,
     endpoint,
+    skillNames,
     onMemoryUpdated: (payload) => {
       const handle = runManager.get(assignedRunId);
       handle?.emitter.emit({
@@ -610,6 +689,7 @@ router.post('/run', async (req: Request, res: Response) => {
     estimatedPromptTokens: prepared.report.occupiedTokens,
     contextReport: prepared.report,
     contextBudget: prepared.report.budget,
+    skillNames: prepared.skillNames,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     putBlob: (text) => store.putBlob(threadId, text),
     readBlob: async (sha256, offset, length) => {
@@ -677,16 +757,25 @@ router.post('/run', async (req: Request, res: Response) => {
  * Same assembler as /run: host ledger + memory files + optional draft.
  */
 router.post('/context/estimate', async (req: Request, res: Response) => {
-  const { threadId, draft, attachments, model, webSearch, local, posture } =
-    req.body as {
-      threadId?: string;
-      draft?: string;
-      attachments?: MessageAttachment[];
-      model?: string;
-      webSearch?: boolean;
-      local?: boolean;
-      posture?: RunPosture;
-    };
+  const {
+    threadId,
+    draft,
+    attachments,
+    model,
+    webSearch,
+    local,
+    posture,
+    skills: rawSkills,
+  } = req.body as {
+    threadId?: string;
+    draft?: string;
+    attachments?: MessageAttachment[];
+    model?: string;
+    webSearch?: boolean;
+    local?: boolean;
+    posture?: RunPosture;
+    skills?: StartRunRequest['skills'];
+  };
 
   const store = await getThreadStore();
   let envelopes: LedgerEnvelope[] = [];
@@ -718,6 +807,15 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
 
   const estimateThread = id === 'draft' ? undefined : store.getThread(id);
   const useModel = model ?? estimateThread?.model ?? HOME_MODE.model;
+  const lastUser = lastUserEnvelope(envelopes);
+  const skillQuery =
+    trimmed ||
+    (lastUser?.record.role === 'user' ? lastUser.record.content : '');
+  const selected = selectSkills({
+    query: skillQuery,
+    mode: modeForKind(normalizeThreadKind(estimateThread?.kind)).name,
+    ...parseSkillHints(rawSkills),
+  }).selected;
   const { report } = await prepareRun({
     threadId: id,
     thread: estimateThread,
@@ -727,6 +825,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     envelopes,
     model: useModel,
     endpoint: endpointFromLocal(local),
+    skillNames: selected.map((skill) => skill.name),
   });
 
   return res.json({
@@ -734,6 +833,12 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     contextLength: report.budget.windowTokens,
     source: 'estimate' as const,
     contextReport: report,
+    skills: {
+      selected: selected.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+      })),
+    },
   });
 });
 

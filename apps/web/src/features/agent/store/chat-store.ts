@@ -377,6 +377,9 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
                 ),
               }
             : {}),
+          ...(event.contextReport
+            ? { contextReport: event.contextReport }
+            : {}),
         },
       };
     }

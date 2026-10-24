@@ -19,6 +19,7 @@ import {
 } from '@agent/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
+import { formatSkillsCatalog, listSkills } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
 import { stubWebSourceCard } from '../tools/web-source';
 import { hostListedWebUrls } from '../tools/web-trust';
@@ -48,6 +49,8 @@ export type AssembleContextInput = {
   mentionedThreads?: MentionedThreadContext[];
   /** Thread-scoped plan journal + todos. Injected when non-empty. */
   plan?: ThreadPlan | null;
+  /** Skill names selected for this run (0–3). Host computes via selectSkills. */
+  skillNames?: string[];
 };
 
 export type AssembleContextResult = {
@@ -63,9 +66,6 @@ function charsToTokens(length: number): number {
 function buildMemoryPrompt(memory: MemoryFiles): string {
   const user = memory.user.trim();
   const notes = memory.notes.trim();
-  const project = memory.project?.trim() ?? '';
-  const agents = memory.agentsMd?.trim() ?? '';
-
   const parts: string[] = [];
   if (user) {
     parts.push(
@@ -85,7 +85,6 @@ function buildMemoryPrompt(memory: MemoryFiles): string {
       ].join('\n'),
     );
   }
-
   if (notes) {
     const notesTitle =
       memory.agentsMd || memory.project
@@ -93,14 +92,98 @@ function buildMemoryPrompt(memory: MemoryFiles): string {
         : '# Agent notes (MEMORY.md)';
     parts.push([notesTitle, notes].join('\n'));
   }
+  return parts.join('\n\n');
+}
+
+function buildRulesPrompt(memory: MemoryFiles): string {
+  const parts: string[] = [];
+  const agents = memory.agentsMd?.trim() ?? '';
+  const project = memory.project?.trim() ?? '';
   if (agents) {
     parts.push(['# Project instructions (AGENTS.md)', agents].join('\n'));
   }
   if (project) {
     parts.push(['# Project notes (PROJECT.md)', project].join('\n'));
   }
-
   return parts.join('\n\n');
+}
+
+function loadSkillCallIds(
+  source: LedgerEnvelope[] | ChatCompletionMessageParam[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const item of source) {
+    const calls =
+      'record' in item
+        ? item.record.role === 'assistant'
+          ? item.record.tool_calls
+          : undefined
+        : item.role === 'assistant'
+          ? item.tool_calls
+          : undefined;
+    if (!calls) continue;
+    for (const call of calls) {
+      const name = 'function' in call ? call.function.name : undefined;
+      if (name === 'load_skill') ids.add(call.id);
+    }
+  }
+  return ids;
+}
+
+function loadSkillTokensFromMessages(
+  messages: ChatCompletionMessageParam[],
+): number {
+  const ids = loadSkillCallIds(messages);
+  if (ids.size === 0) return 0;
+  let chars = 0;
+  for (const message of messages) {
+    if (message.role !== 'tool' || !ids.has(message.tool_call_id)) continue;
+    chars += String(message.content ?? '').length;
+  }
+  return charsToTokens(chars);
+}
+
+const PREFIX_LAYER_IDS = new Set([
+  'system',
+  'tools',
+  'skills_catalog',
+  'memory',
+  'rules',
+  'plan',
+  'mentions',
+  'brief',
+]);
+
+/**
+ * Rebuild conversation / loaded-skill layers after a model turn.
+ * Prefix layer sizes stay the assemble-time estimates; occupied follows
+ * provider promptTokens when present.
+ */
+export function refreshContextReport(
+  report: ContextReport,
+  messages: ChatCompletionMessageParam[],
+  tools: ToolRegistry,
+  usage?: { promptTokens: number },
+): ContextReport {
+  const prefix = report.layers.filter((layer) => PREFIX_LAYER_IDS.has(layer.id));
+  const prefixSum = prefix.reduce((sum, layer) => sum + layer.tokens, 0);
+  const skillsLoaded = loadSkillTokensFromMessages(messages);
+  const occupied =
+    usage?.promptTokens ?? layerTokens(messages, tools.definitions);
+  const conversation = Math.max(0, occupied - prefixSum - skillsLoaded);
+  const layers = [
+    ...prefix,
+    { id: 'conversation', label: 'Conversation', tokens: conversation },
+    { id: 'skills_loaded', label: 'Loaded skills', tokens: skillsLoaded },
+  ];
+  const inputBudget =
+    report.budget.windowTokens - report.budget.outputReserveTokens;
+  return {
+    ...report,
+    layers,
+    occupiedTokens: occupied,
+    needsCompaction: occupied > inputBudget * report.budget.compactAtRatio,
+  };
 }
 
 function userSeqs(envelopes: LedgerEnvelope[]): number[] {
@@ -317,11 +400,25 @@ export function assembleContext(
     content: systemText,
   };
 
+  const selectedSkills = input.tools.byName.has('load_skill')
+    ? listSkills().filter((skill) => input.skillNames?.includes(skill.name))
+    : [];
+  const skillsText =
+    selectedSkills.length > 0 ? formatSkillsCatalog(selectedSkills) : '';
+  const skillsMessage: ChatCompletionMessageParam | null = skillsText
+    ? { role: 'system', content: skillsText }
+    : null;
+
   const memoryText = buildMemoryPrompt(input.memory);
   const memoryMessage: ChatCompletionMessageParam = {
     role: 'system',
     content: memoryText,
   };
+
+  const rulesText = buildRulesPrompt(input.memory);
+  const rulesMessage: ChatCompletionMessageParam | null = rulesText
+    ? { role: 'system', content: rulesText }
+    : null;
 
   const plan = input.plan ?? null;
   const planText =
@@ -410,7 +507,9 @@ export function assembleContext(
 
   const messages: ChatCompletionMessageParam[] = [
     systemMessage,
+    ...(skillsMessage ? [skillsMessage] : []),
     memoryMessage,
+    ...(rulesMessage ? [rulesMessage] : []),
     ...(planMessage ? [planMessage] : []),
     ...(mentionsMessage ? [mentionsMessage] : []),
     ...(briefMessage ? [briefMessage] : []),
@@ -418,16 +517,47 @@ export function assembleContext(
     ...turnMessages,
   ];
 
+  const loadSkillIds = loadSkillCallIds(live);
+  let skillsLoadedChars = 0;
+  for (const envelope of live) {
+    if (
+      envelope.record.role === 'tool' &&
+      loadSkillIds.has(envelope.record.tool_call_id)
+    ) {
+      skillsLoadedChars += envelope.record.content.length;
+    }
+  }
+  const skillsLoadedTokens = charsToTokens(skillsLoadedChars);
+  const conversationTokens = Math.max(
+    0,
+    layerTokens([...tailMessages, ...turnMessages]) - skillsLoadedTokens,
+  );
+
   const layers = [
     {
       id: 'system',
       label: 'System',
-      tokens: layerTokens([systemMessage], input.tools.definitions),
+      tokens: layerTokens([systemMessage]),
+    },
+    {
+      id: 'tools',
+      label: 'Tools',
+      tokens: layerTokens([], input.tools.definitions),
+    },
+    {
+      id: 'skills_catalog',
+      label: 'Skill catalog',
+      tokens: skillsText ? charsToTokens(skillsText.length) + 4 : 0,
     },
     {
       id: 'memory',
       label: 'Memory',
       tokens: charsToTokens(memoryText.length) + 4,
+    },
+    {
+      id: 'rules',
+      label: 'Rules',
+      tokens: rulesText ? charsToTokens(rulesText.length) + 4 : 0,
     },
     {
       id: 'plan',
@@ -449,19 +579,14 @@ export function assembleContext(
         : 0,
     },
     {
-      id: 'tail',
-      label: 'Recent tail',
-      tokens: layerTokens(tailMessages),
+      id: 'conversation',
+      label: 'Conversation',
+      tokens: conversationTokens,
     },
     {
-      id: 'turn',
-      label: 'Current turn',
-      tokens: layerTokens(turnMessages),
-    },
-    {
-      id: 'scratch',
-      label: 'Run scratch',
-      tokens: 0,
+      id: 'skills_loaded',
+      label: 'Loaded skills',
+      tokens: skillsLoadedTokens,
     },
   ];
 

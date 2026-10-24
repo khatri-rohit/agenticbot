@@ -13,7 +13,10 @@ import {
   type ToolContext,
 } from '@agent/agent-models';
 
-import { stubLiveToolResults } from '../context/assemble-context';
+import {
+  refreshContextReport,
+  stubLiveToolResults,
+} from '../context/assemble-context';
 import { consoleTrace, type TraceEvent } from '../events/trace';
 import { resolveLimits } from './limits';
 import type { ModelTurn } from '../model/types';
@@ -402,15 +405,22 @@ export async function runLoop(
       noteWebSource,
       getWebSource,
       getWebSourceByUrl,
+      ...(config.skillNames !== undefined
+        ? { skillNames: config.skillNames }
+        : {}),
     };
   }
 
   function emitTurnCompleted(iteration: number, usage?: TokenUsage): void {
+    const contextReport = config.contextReport
+      ? refreshContextReport(config.contextReport, messages, tools, usage)
+      : undefined;
     emit?.({
       type: 'turn.completed',
       runId,
       iteration,
       ...(usage ? { usage } : {}),
+      ...(contextReport ? { contextReport } : {}),
     });
   }
 

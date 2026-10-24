@@ -64,6 +64,10 @@ export type WebSearchResults = {
 export interface SkillMetadata {
   name: string;
   description: string;
+  /** Retrieval hints from SKILL.md frontmatter. */
+  when?: string[];
+  not?: string[];
+  modes?: string[];
 }
 
 export interface Skill extends SkillMetadata {

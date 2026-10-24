@@ -125,6 +125,8 @@ export interface TurnCompleted {
   iteration: number;
   /** Provider usage for the model call that finished this iteration. */
   usage?: TokenUsage;
+  /** Layers rebuilt from the live prompt after this iteration. */
+  contextReport?: ContextReport;
 }
 
 export interface RunCompleted {

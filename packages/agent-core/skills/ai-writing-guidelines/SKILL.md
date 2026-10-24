@@ -1,6 +1,8 @@
 ---
 name: ai-writing-guidelines
 description: Default anti-slop prose direction for this agent — rules, banned-phrase list, prompt template, and review loop so user-facing writing stays specific, human, and vocabulary-safe. Load when drafting or rewriting docs, explanations, posts, emails, product copy, or any reply the user will read as finished prose; also when the user asks to de-slop, sound less AI, or check writing quality. Short house style in identity is always-on; load this for the full guided checklist so long exposure to the agent does not flatten the reader's vocabulary into AI defaults.
+when: write, draft, rewrite, prose, email, post, copy, de-slop
+not: patch, implement
 ---
 
 # The Anti-Slop Writing Guide

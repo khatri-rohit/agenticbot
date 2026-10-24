@@ -2,6 +2,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import type { ModeName, RunPosture } from '@agent/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
+import { formatSkillsCatalog, selectSkills } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
 
 /**
@@ -14,11 +15,17 @@ export function getContext(
   mode?: ModeName,
   posture: RunPosture = 'agent',
 ): ChatCompletionMessageParam[] {
+  const selected = tools.byName.has('load_skill')
+    ? selectSkills({ query: task, mode }).selected
+    : [];
   return [
     {
       role: 'system',
       content: buildSystemPrompt(tools, mode, posture),
     },
+    ...(selected.length > 0
+      ? [{ role: 'system' as const, content: formatSkillsCatalog(selected) }]
+      : []),
     {
       role: 'user',
       content: task,

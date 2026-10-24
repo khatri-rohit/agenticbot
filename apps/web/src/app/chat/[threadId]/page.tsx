@@ -61,6 +61,7 @@ export default function ChatThreadPage({
         model,
         thinking: pending.thinking,
         posture: pending.posture === 'ask' ? 'ask' : 'agent',
+        ...(pending.skills ? { skills: pending.skills } : {}),
       },
       pending.attachments,
     );

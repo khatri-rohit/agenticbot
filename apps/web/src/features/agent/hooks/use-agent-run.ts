@@ -307,10 +307,8 @@ export function useAgentRun(threadId: string | null) {
         return;
       }
 
-      if (chatStateRef.current.activeRun) {
-        if (!skipQueue) {
-          setQueuedMessage({ content, options, attachments });
-        }
+      if (chatStateRef.current.activeRun && !skipQueue) {
+        setQueuedMessage({ content, options, attachments });
         return;
       }
 
@@ -322,6 +320,7 @@ export function useAgentRun(threadId: string | null) {
         local,
         thinking: options.thinking,
         posture: normalizeRunPosture(options.posture),
+        ...(options.skills ? { skills: options.skills } : {}),
       });
 
       setChatState((prev) => ({
@@ -384,10 +383,14 @@ export function useAgentRun(threadId: string | null) {
     }
 
     disconnect();
-    setChatState((prev) => ({
+    const next: ChatState = {
       ...initialChatState(),
-      compactionNotice: prev.compactionNotice,
-    }));
+      compactionNotice: chatStateRef.current.compactionNotice,
+    };
+    // Ref must clear in this turn — setState alone leaves sendQueuedNow
+    // seeing a stale activeRun and dropping the flushed message.
+    chatStateRef.current = next;
+    setChatState(next);
   }, [disconnect]);
 
   const sendMessage = useCallback(
@@ -408,6 +411,7 @@ export function useAgentRun(threadId: string | null) {
         posture: normalizeRunPosture(
           options.posture ?? composerOptions.posture,
         ),
+        ...(options.skills ? { skills: options.skills } : {}),
       };
 
       if (chatStateRef.current.activeRun) {
@@ -430,6 +434,7 @@ export function useAgentRun(threadId: string | null) {
     };
     setQueuedMessage(null);
     await interruptActiveRun();
+    if (chatStateRef.current.activeRun) return;
     await startRunForMessages(content, flushOptions, {
       skipQueue: true,
       attachments,

@@ -66,6 +66,8 @@ export type LedgerEnvelope = {
   attachments?: MessageAttachment[];
   /** Assistant response wall-clock duration (model-call + stream); host-assigned like seq/ts. */
   durationMs?: number;
+  /** Skill names selected for the run that consumed this user turn. */
+  skills?: { selected: string[] };
 };
 
 /** Skip system rows; they are rebuilt by the host each run. */

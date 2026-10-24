@@ -90,6 +90,7 @@ export class RunManager {
       limits: opts.limits,
       estimatedPromptTokens: opts.estimatedPromptTokens,
       contextReport: opts.contextReport,
+      skillNames: opts.skillNames,
       signal: handle.abortController.signal,
       origin: opts.origin,
       workspaceRoot: opts.workspaceRoot,

@@ -112,4 +112,12 @@ export type StartRunRequest = {
    * Ignored for Home. Default agent.
    */
   posture?: RunPosture;
+  /**
+   * Soft skill hints for this send. Host runs selectSkills; the client
+   * does not pick the catalog.
+   */
+  skills?: {
+    pinned?: string[];
+    dismissed?: string[];
+  };
 };

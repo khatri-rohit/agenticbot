@@ -54,10 +54,48 @@ export function invalidateSkillCatalog(): void {
   cached = null;
 }
 
+export const MAX_RUN_SKILLS = 3;
+
+const TOKEN = /[a-z0-9][a-z0-9+._-]*/g;
+const MODE_NAMES = new Set(['home', 'workspace', 'thinking']);
+
+export type ParsedSkill = {
+  name: string;
+  description: string;
+  instructions: string;
+  when: string[];
+  not: string[];
+  modes: string[];
+};
+
+function csv(value: string): string[] {
+  return value
+    .replace(/^\[|\]$/g, '')
+    .split(',')
+    .map((part) => part.trim().toLowerCase().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean);
+}
+
+function tokens(text: string): string[] {
+  return text.toLowerCase().match(TOKEN) ?? [];
+}
+
+function metaFields(skill: {
+  when?: string[];
+  not?: string[];
+  modes?: string[];
+}): Pick<SkillMetadata, 'when' | 'not' | 'modes'> {
+  return {
+    ...(skill.when?.length ? { when: skill.when } : {}),
+    ...(skill.not?.length ? { not: skill.not } : {}),
+    ...(skill.modes?.length ? { modes: skill.modes } : {}),
+  };
+}
+
 export function parseSkillMarkdown(
   raw: string,
   fallbackName: string,
-): { name: string; description: string; instructions: string } {
+): ParsedSkill {
   const trimmed = raw.replace(/^\uFEFF/, '');
   const end = trimmed.startsWith('---') ? trimmed.indexOf('\n---', 3) : -1;
   if (end < 0) {
@@ -65,12 +103,18 @@ export function parseSkillMarkdown(
       name: fallbackName,
       description: fallbackName,
       instructions: trimmed.trim(),
+      when: [],
+      not: [],
+      modes: [],
     };
   }
   const fm = trimmed.slice(3, end).trim().replace(/\r/g, '');
   const body = trimmed.slice(end + 4).trim();
   let name = fallbackName;
   let description = fallbackName;
+  let when: string[] = [];
+  let not: string[] = [];
+  let modes: string[] = [];
   for (const line of fm.split('\n')) {
     const match = line.match(/^([A-Za-z][\w-]*)\s*:\s*(.*)$/);
     if (!match) continue;
@@ -78,8 +122,13 @@ export function parseSkillMarkdown(
     const value = match[2].trim().replace(/^['"]|['"]$/g, '');
     if (key === 'name' && value) name = value;
     if (key === 'description' && value) description = value;
+    if (key === 'when') when = csv(value);
+    if (key === 'not') not = csv(value);
+    if (key === 'modes') {
+      modes = csv(value).filter((mode) => MODE_NAMES.has(mode));
+    }
   }
-  return { name, description, instructions: body };
+  return { name, description, instructions: body, when, not, modes };
 }
 
 function readRoot(root: string): { folder: string; skill: Skill }[] {
@@ -103,6 +152,7 @@ function readRoot(root: string): { folder: string; skill: Skill }[] {
           name: parsed.name,
           description: parsed.description,
           instructions: parsed.instructions,
+          ...metaFields(parsed),
         },
       });
     } catch {
@@ -129,7 +179,115 @@ function catalog(): Skill[] {
 }
 
 export function listSkills(): SkillMetadata[] {
-  return catalog().map(({ name, description }) => ({ name, description }));
+  return catalog().map(({ name, description, when, not, modes }) => ({
+    name,
+    description,
+    ...metaFields({ when, not, modes }),
+  }));
+}
+
+export function formatSkillsCatalog(skills: SkillMetadata[]): string {
+  const lines =
+    skills.length === 0
+      ? '- (none)'
+      : skills
+          .map((skill) => `- ${skill.name}: ${skill.description}`)
+          .join('\n');
+  return [
+    '# Skills',
+    'Selected for this run. Call load_skill with skill_name to load a body.',
+    'Built-in tools work without a skill. Loading does not approve steps or add tools.',
+    '',
+    lines,
+  ].join('\n');
+}
+
+/**
+ * Deterministic run-set picker. No LLM. Name / when-hits beat description
+ * overlap; `not` and mode mismatch drop a skill unless it is pinned.
+ */
+export function selectSkills(input: {
+  query: string;
+  mode?: string;
+  pinned?: string[];
+  dismissed?: string[];
+  catalog?: SkillMetadata[];
+  limit?: number;
+}): { selected: SkillMetadata[]; scores: { name: string; score: number }[] } {
+  const catalog = input.catalog ?? listSkills();
+  const limit = input.limit ?? MAX_RUN_SKILLS;
+  const dismissed = new Set(
+    (input.dismissed ?? []).map((name) => name.toLowerCase()),
+  );
+  const pinnedNames = (input.pinned ?? []).map((name) => name.toLowerCase());
+  const query = input.query.toLowerCase();
+  const queryTokens = new Set(tokens(query));
+
+  const byName = new Map(
+    catalog.map((skill) => [skill.name.toLowerCase(), skill]),
+  );
+  const selected: SkillMetadata[] = [];
+  const seen = new Set<string>();
+
+  for (const name of pinnedNames) {
+    if (selected.length >= limit) break;
+    const skill = byName.get(name);
+    if (!skill || dismissed.has(name) || seen.has(name)) continue;
+    selected.push(skill);
+    seen.add(name);
+  }
+
+  const scored: { skill: SkillMetadata; score: number }[] = [];
+  for (const skill of catalog) {
+    const key = skill.name.toLowerCase();
+    if (seen.has(key) || dismissed.has(key)) continue;
+    if (
+      skill.modes?.length &&
+      input.mode &&
+      !skill.modes.includes(input.mode)
+    ) {
+      continue;
+    }
+    if (skill.not?.some((word) => queryTokens.has(word))) continue;
+
+    const nameParts = skill.name
+      .toLowerCase()
+      .split(/[-_\s]+/)
+      .filter((part) => part.length >= 4);
+    const nameHit =
+      query.includes(key) ||
+      (nameParts.length > 0 && nameParts.every((part) => queryTokens.has(part)));
+
+    let score = nameHit ? 100 : 0;
+    for (const word of skill.when ?? []) {
+      if (queryTokens.has(word)) score += 10;
+    }
+    for (const word of tokens(skill.description)) {
+      if (word.length >= 4 && queryTokens.has(word)) score += 1;
+    }
+    if (score < 10 && !nameHit) continue;
+    scored.push({ skill, score });
+  }
+
+  scored.sort(
+    (a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
+  );
+  for (const row of scored) {
+    if (selected.length >= limit) break;
+    selected.push(row.skill);
+  }
+
+  return {
+    selected,
+    scores: [
+      ...selected
+        .filter((skill) =>
+          pinnedNames.includes(skill.name.toLowerCase()),
+        )
+        .map((skill) => ({ name: skill.name, score: Number.POSITIVE_INFINITY })),
+      ...scored.map((row) => ({ name: row.skill.name, score: row.score })),
+    ],
+  };
 }
 
 export function listSkillCatalogs(): {
@@ -161,13 +319,13 @@ export const load_skill: Tool = {
     function: {
       name: 'load_skill',
       description:
-        'Load the body of a named skill from the catalog. Optional. Built-in tools work without a skill.',
+        'Load the body of a named skill selected for this run. Optional. Built-in tools work without a skill.',
       parameters: {
         type: 'object',
         properties: {
           skill_name: {
             type: 'string',
-            description: 'Exact skill name from the catalog',
+            description: 'Exact skill name from the selected run set',
           },
         },
         required: ['skill_name'],
@@ -177,7 +335,7 @@ export const load_skill: Tool = {
   },
   guidance: {
     whenToUse: [
-      'You need the procedure body for a named workflow listed in the skill catalog.',
+      'You need the procedure body for a skill selected on this run.',
     ],
     whenNotToUse: [
       'Do not load a skill on every turn.',
@@ -185,17 +343,21 @@ export const load_skill: Tool = {
       'Do not load a skill for small talk or a one-line factual answer.',
     ],
     usage: [
-      'Pass skill_name exactly as listed in the catalog.',
+      'Pass skill_name exactly as listed in the selected skills.',
       'Follow the loaded steps; they do not grant extra tools or bypass the path jail.',
     ],
   },
-  execute: async (args) => {
+  execute: async (args, ctx) => {
     const name = String(args.skill_name ?? '').trim();
+    const allowed = ctx.skillNames;
+    if (allowed && !allowed.includes(name)) {
+      return `Skill not selected for this run. Selected: ${allowed.join(', ') || '(none)'}`;
+    }
     const skill = catalog().find((item) => item.name === name);
     if (skill) return skill.instructions;
-    const available = listSkills()
-      .map((item) => item.name)
-      .join(', ');
+    const available = (allowed ?? listSkills().map((item) => item.name)).join(
+      ', ',
+    );
     return `Skill not found. Available skills: ${available || '(none)'}`;
   },
 };

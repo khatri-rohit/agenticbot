@@ -34,7 +34,32 @@ export type FoundSkill = {
   description: string;
   folderName: string;
   pathInRepo: string;
+  /** True when another skill in this archive flattens to the same folder. */
+  folderCollision?: boolean;
 };
+
+export function collidingFolderNames(
+  skills: { folderName: string }[],
+): string[] {
+  const counts = new Map<string, number>();
+  for (const skill of skills) {
+    counts.set(skill.folderName, (counts.get(skill.folderName) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+    .sort();
+}
+
+function markFolderCollisions(skills: FoundSkill[]): FoundSkill[] {
+  const colliding = new Set(collidingFolderNames(skills));
+  if (colliding.size === 0) return skills;
+  return skills.map((skill) =>
+    colliding.has(skill.folderName)
+      ? { ...skill, folderCollision: true }
+      : skill,
+  );
+}
 
 export class SkillImportError extends Error {
   constructor(
@@ -213,7 +238,7 @@ async function skillsInArchive(
 
   await Promise.all(pending);
   found.sort((a, b) => a.name.localeCompare(b.name));
-  return found;
+  return markFolderCollisions(found);
 }
 
 export async function previewGitHubSkills(repoUrl: string): Promise<{
@@ -265,6 +290,13 @@ export async function installGitHubSkills(input: {
     pathInRepo: skill.pathInRepo.replace(/\\/g, '/'),
     folderName: folderName(skill.folderName, parsed.repo),
   }));
+  const collisions = collidingFolderNames(selected);
+  if (collisions.length > 0) {
+    throw new SkillImportError(
+      `Cannot install: folder name collision (${collisions.join(', ')}). Uncheck one of the packs that flatten to the same folder.`,
+      409,
+    );
+  }
 
   const archive = await downloadTarball(parsed.owner, parsed.repo, commit);
   const staging = path.join(

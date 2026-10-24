@@ -45,6 +45,8 @@ export type RunLoopConfig = {
   estimatedPromptTokens?: number;
   /** Per-layer breakdown from assembleContext. */
   contextReport?: ContextReport;
+  /** Skill names load_skill may return this run. */
+  skillNames?: string[];
   /** Aborted when RunManager.cancel runs. */
   signal?: AbortSignal;
   /** Origin for ToolContext (default chat). */

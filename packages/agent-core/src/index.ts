@@ -3,12 +3,15 @@
 // Domain types and modes live in @agent/agent-models — import them from there.
 
 export {
+  MAX_RUN_SKILLS,
   configureSkillRoots,
+  formatSkillsCatalog,
   invalidateSkillCatalog,
   listSkillCatalogs,
   listSkills,
   parseSkillMarkdown,
   resolveSkillsRoot,
+  selectSkills,
 } from './lib/tools/skills';
 export type { SkillCatalogEntry } from './lib/tools/skills';
 
@@ -56,6 +59,7 @@ export {
 } from './lib/tools/workspace-path';
 export {
   assembleContext,
+  refreshContextReport,
   stubLiveToolResults,
 } from './lib/context/assemble-context';
 export { loadWorkspaceRules } from './lib/context/load-workspace-rules';

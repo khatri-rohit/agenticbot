@@ -40,6 +40,7 @@ export type AppendInput = {
   record: LedgerRecord;
   attachments?: MessageAttachment[];
   meta?: LedgerAppendMeta;
+  skills?: { selected: string[] };
 };
 
 export class ThreadStore {
@@ -349,6 +350,7 @@ export class ThreadStore {
       ...(input.meta?.durationMs != null
         ? { durationMs: input.meta.durationMs }
         : {}),
+      ...(input.skills ? { skills: input.skills } : {}),
     };
 
     try {

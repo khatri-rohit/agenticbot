@@ -7,9 +7,9 @@ export const CHARS_PER_TOKEN = 4;
 export const ESTIMATED_TOKENS_PER_IMAGE = 1000;
 
 /**
- * Window fill after a model turn: last prompt plus the completion that
- * stays in history for the next call.
+ * Window fill for the request that just ran. Completion sits in the
+ * output reserve until the next prompt includes it.
  */
 export function occupiedFromUsage(usage: TokenUsage): number {
-  return usage.promptTokens + usage.completionTokens;
+  return usage.promptTokens;
 }

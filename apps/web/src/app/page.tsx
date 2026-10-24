@@ -111,6 +111,7 @@ export default function HomePage() {
                     : 'agent'
                   : undefined,
                 attachments,
+                ...(options.skills ? { skills: options.skills } : {}),
               });
               if (!stashed) {
                 await deleteThread(thread.id);

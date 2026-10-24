@@ -9,6 +9,7 @@ import type {
 import {
   fetchContextEstimate,
   type ComposerOptions,
+  type ComposerSkillHints,
 } from '@/features/agent/api/agent-client';
 import { getContextAnchor } from '@/features/agent/lib/context-anchor';
 import { estimateDraftTokens } from '@/lib/estimate-tokens';
@@ -25,6 +26,8 @@ export type ContextMeter = {
   source: ContextMeterSource;
   approximate: boolean;
   layers: ContextReportLayer[];
+  reserve: number;
+  selectedSkills: { name: string; description: string }[];
 };
 
 export function useContextMeter(options: {
@@ -42,6 +45,7 @@ export function useContextMeter(options: {
   liveEstimatedPromptTokens?: number;
   liveContextReport?: ContextReport;
   liveRunModel?: string;
+  skillHints?: ComposerSkillHints;
 }): ContextMeter {
   const {
     threadId,
@@ -57,12 +61,15 @@ export function useContextMeter(options: {
     liveEstimatedPromptTokens,
     liveContextReport,
     liveRunModel,
+    skillHints,
   } = options;
   const queuedAttachments = queuedAttachmentsOption ?? EMPTY_ATTACHMENTS;
 
   const [serverEstimate, setServerEstimate] = useState<{
     tokens: number;
     layers: ContextReportLayer[];
+    reserve: number;
+    selectedSkills: { name: string; description: string }[];
   } | null>(null);
 
   const sameModel =
@@ -120,12 +127,15 @@ export function useContextMeter(options: {
         local: composerOptions.local,
         webSearch: composerOptions.webSearch,
         posture: composerOptions.posture,
+        skills: skillHints,
       })
         .then((res) => {
           if (!cancelled) {
             setServerEstimate({
               tokens: res.estimatedPromptTokens,
               layers: res.contextReport.layers,
+              reserve: res.contextReport.budget.outputReserveTokens,
+              selectedSkills: res.skills?.selected ?? [],
             });
           }
         })
@@ -150,12 +160,16 @@ export function useContextMeter(options: {
     composerOptions.local,
     composerOptions.webSearch,
     composerOptions.posture,
+    skillHints?.pinned,
+    skillHints?.dismissed,
   ]);
 
   const limit =
     contextLimit ??
     OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.contextLength ??
     null;
+
+  const liveReserve = liveContextReport?.budget.outputReserveTokens ?? 0;
 
   if (liveOccupied != null) {
     const extra = composerTokens + streamingTokens;
@@ -165,6 +179,8 @@ export function useContextMeter(options: {
       source: 'measured',
       approximate: extra > 0,
       layers: liveLayers,
+      reserve: liveReserve,
+      selectedSkills: [],
     };
   }
 
@@ -175,6 +191,8 @@ export function useContextMeter(options: {
       source: 'estimate',
       approximate: true,
       layers: liveLayers,
+      reserve: liveReserve,
+      selectedSkills: [],
     };
   }
 
@@ -185,6 +203,8 @@ export function useContextMeter(options: {
       source: 'measured',
       approximate: composerTokens > 0,
       layers: liveLayers,
+      reserve: liveReserve,
+      selectedSkills: [],
     };
   }
 
@@ -195,6 +215,8 @@ export function useContextMeter(options: {
       source: 'estimate',
       approximate: true,
       layers: serverEstimate.layers,
+      reserve: serverEstimate.reserve,
+      selectedSkills: serverEstimate.selectedSkills,
     };
   }
 
@@ -204,5 +226,7 @@ export function useContextMeter(options: {
     source: 'estimate',
     approximate: true,
     layers: [],
+    reserve: 0,
+    selectedSkills: [],
   };
 }

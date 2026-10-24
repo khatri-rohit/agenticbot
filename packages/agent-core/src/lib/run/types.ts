@@ -55,6 +55,7 @@ export type StartRunOptions = {
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
   contextReport?: ContextReport;
+  skillNames?: string[];
   origin?: ToolOrigin;
   workspaceRoot?: string;
   putBlob?: (text: string) => Promise<string>;

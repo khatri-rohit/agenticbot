@@ -53,4 +53,9 @@ export type ToolContext = {
   >;
   /** Resolve sha for a URL already fetched this run. */
   getWebSourceByUrl?: (url: string) => string | undefined;
+  /**
+   * Skill names selected for this run. When set, load_skill may only
+   * return bodies for these names (empty = none). Omit to allow the full catalog.
+   */
+  skillNames?: string[];
 };

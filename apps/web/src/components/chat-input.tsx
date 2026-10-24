@@ -15,6 +15,7 @@ import {
   Loader2,
   Mic,
   Pencil,
+  Pin,
   Plus,
   Square,
   X,
@@ -61,6 +62,11 @@ import { SkillsPanel } from '@/components/skills-panel';
 import { VoiceModePill } from '@/components/voice-mode-pill';
 import { registerComposerFocus } from '@/components/composer-focus';
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -113,6 +119,35 @@ function isPersistedAttachment(value: unknown): value is MessageAttachment {
 
 function draftStorageKey(scope: string): string {
   return `agent:composerDraft:${scope}`;
+}
+
+function pinnedSkillsKey(scope: string): string {
+  return `agent:pinnedSkills:${scope}`;
+}
+
+function loadPinnedSkills(scope: string): string[] {
+  try {
+    const raw = localStorage.getItem(pinnedSkillsKey(scope));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePinnedSkills(scope: string, names: string[]): void {
+  try {
+    if (names.length === 0) {
+      localStorage.removeItem(pinnedSkillsKey(scope));
+      return;
+    }
+    localStorage.setItem(pinnedSkillsKey(scope), JSON.stringify(names));
+  } catch {
+    /* storage blocked */
+  }
 }
 
 function loadComposerDraft(scope: string): ComposerDraft | null {
@@ -248,6 +283,10 @@ export function ChatInput({
     null,
   );
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [dismissedSkills, setDismissedSkills] = useState<string[]>([]);
+  const [pinnedSkills, setPinnedSkills] = useState<string[]>(() =>
+    loadPinnedSkills(draftScope),
+  );
   const catalog = useThreads() ?? [];
   const { workspaceRoot } = useAgentSpace();
   const mentionCandidates = rankMentionThreads(
@@ -400,7 +439,54 @@ export function ChatInput({
     liveEstimatedPromptTokens: estimatedPromptTokens,
     liveContextReport: contextReport,
     liveRunModel: runModel,
+    skillHints: { pinned: pinnedSkills, dismissed: dismissedSkills },
   });
+
+  const skillChips = useMemo(() => {
+    const names: string[] = [];
+    for (const name of [
+      ...pinnedSkills,
+      ...contextMeter.selectedSkills.map((skill) => skill.name),
+    ]) {
+      if (dismissedSkills.includes(name) || names.includes(name)) continue;
+      names.push(name);
+    }
+    return names;
+  }, [pinnedSkills, dismissedSkills, contextMeter.selectedSkills]);
+
+  const pinSkill = useCallback(
+    (name: string) => {
+      setPinnedSkills((current) => {
+        if (current.includes(name)) return current;
+        const next = [...current, name];
+        savePinnedSkills(draftScope, next);
+        return next;
+      });
+      setDismissedSkills((current) => current.filter((item) => item !== name));
+    },
+    [draftScope],
+  );
+
+  const unpinSkill = useCallback(
+    (name: string) => {
+      setPinnedSkills((current) => {
+        const next = current.filter((item) => item !== name);
+        savePinnedSkills(draftScope, next);
+        return next;
+      });
+    },
+    [draftScope],
+  );
+
+  const dismissSkill = useCallback(
+    (name: string) => {
+      unpinSkill(name);
+      setDismissedSkills((current) =>
+        current.includes(name) ? current : [...current, name],
+      );
+    },
+    [unpinSkill],
+  );
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -500,7 +586,15 @@ export function ChatInput({
     setMentionOpen(false);
     setSelectedMentionId(null);
     clearComposerDraft(draftScope);
-    onSend(content, composerOptions, attachments);
+    setDismissedSkills([]);
+    onSend(
+      content,
+      {
+        ...composerOptions,
+        skills: { pinned: pinnedSkills, dismissed: dismissedSkills },
+      },
+      attachments,
+    );
   }, [
     input,
     pendingAttachments,
@@ -515,6 +609,8 @@ export function ChatInput({
     onSend,
     composerOptions,
     draftScope,
+    pinnedSkills,
+    dismissedSkills,
   ]);
 
   const visibleMentions = useMemo(() => {
@@ -899,6 +995,7 @@ export function ChatInput({
         source={contextMeter.source}
         approximate={contextMeter.approximate}
         layers={contextMeter.layers}
+        reserve={contextMeter.reserve}
       />
     </>
   );
@@ -1128,6 +1225,46 @@ export function ChatInput({
               </div>
             ) : null}
 
+            {skillChips.length > 0 ? (
+              <div className="mb-1.5 flex flex-wrap gap-1 px-1">
+                {skillChips.map((name) => {
+                  const pinned = pinnedSkills.includes(name);
+                  return (
+                    <span
+                      key={name}
+                      className="inline-flex max-w-full items-center gap-0.5 rounded-full border border-border/60 bg-muted/40 py-0.5 pr-0.5 pl-2 text-[11px] text-foreground"
+                    >
+                      <span className="truncate">{name}</span>
+                      <button
+                        type="button"
+                        className={cn(
+                          'inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground',
+                          pinned && 'text-foreground',
+                        )}
+                        aria-label={
+                          pinned ? `Unpin ${name}` : `Pin ${name} on this thread`
+                        }
+                        aria-pressed={pinned}
+                        onClick={() =>
+                          pinned ? unpinSkill(name) : pinSkill(name)
+                        }
+                      >
+                        <Pin className="size-3" />
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                        aria-label={`Skip ${name} this send`}
+                        onClick={() => dismissSkill(name)}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
+
             {mentionOpen ? (
               <ThreadMentionPicker
                 threads={mentionCandidates}
@@ -1152,6 +1289,23 @@ export function ChatInput({
             <div className="grid min-w-0 gap-1 [grid-template-areas:'text_text'_'left_right'] grid-cols-[minmax(0,1fr)_auto]">
               <div className="flex min-w-0 flex-wrap items-center gap-1 [grid-area:left]">
                 {attachMenu}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                      aria-label="Skills"
+                      aria-haspopup="dialog"
+                      aria-expanded={skillsOpen}
+                      onClick={() => setSkillsOpen(true)}
+                    >
+                      <BookMarked className="size-4" strokeWidth={2.25} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Skills</TooltipContent>
+                </Tooltip>
                 {showWorkspacePicker ? (
                   <WorkspacePicker disabled={isRunning} />
                 ) : null}

@@ -17,6 +17,7 @@ export type FoundSkill = {
   description: string;
   folderName: string;
   pathInRepo: string;
+  folderCollision?: boolean;
 };
 
 export type SkillPreview = {

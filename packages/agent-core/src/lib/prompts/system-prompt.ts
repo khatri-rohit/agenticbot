@@ -1,6 +1,5 @@
 import type { ModeName, RunPosture } from '@agent/agent-models';
 
-import { listSkills } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
 import {
   ANTI_SLOP_CODE_LAW,
@@ -69,11 +68,6 @@ export function buildSystemPrompt(
 ): string {
   const toolNames = Array.from(registry.byName.keys());
   const hasLoadSkill = registry.byName.has('load_skill');
-  const catalog = hasLoadSkill
-    ? listSkills()
-        .map((skill) => `- ${skill.name}: ${skill.description}`)
-        .join('\n')
-    : '';
 
   const availableTools =
     toolNames.length > 0
@@ -87,12 +81,9 @@ export function buildSystemPrompt(
     ? `
 # Skills
 
-Available skills:
-${catalog || '- (none)'}
-
-Skills are optional procedure packs. Names and descriptions above are pointers.
-Call load_skill with skill_name to load a body when that workflow applies.
-Built-in tools work without a skill. Loading a skill does not approve its steps.
+Optional procedure packs. Selected names live in the skills layer.
+Call load_skill with a selected skill_name when that workflow applies.
+Built-in tools work without a skill. Loading does not approve steps or add tools.
 `
     : '';
 
