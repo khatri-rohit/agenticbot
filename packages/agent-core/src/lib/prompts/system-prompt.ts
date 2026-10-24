@@ -93,7 +93,6 @@ ${catalog || '- (none)'}
 Skills are optional procedure packs. Names and descriptions above are pointers.
 Call load_skill with skill_name to load a body when that workflow applies.
 Built-in tools work without a skill. Loading a skill does not approve its steps.
-Additional user, workspace, and MCP skills are not in this catalog yet.
 `
     : '';
 

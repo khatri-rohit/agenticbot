@@ -4,40 +4,33 @@ import path from 'node:path';
 import type { Skill, SkillMetadata, Tool } from './type';
 
 /**
- * Global skills live in packages/agent-core/skills/<name>/SKILL.md.
- * This wave loads that catalog only. Wave 4 should merge user + workspace
- * catalogs through the same listSkills / load_skill API — do not add a second loader.
- *
- * Resolved without import.meta so the CJS lib emit and the API bundle still work.
+ * Built-in packs: packages/agent-core/skills/<name>/SKILL.md.
+ * Host may set a user root ($AGENT_HOME/skills). One catalog API;
+ * user name wins on collision.
  */
 
-type ParsedSkillFile = {
-  name: string;
-  description: string;
-  instructions: string;
+export type SkillCatalogEntry = SkillMetadata & {
+  folder: string;
+  source: 'global' | 'user';
 };
 
+let userRoot: string | null = null;
 let cached: Skill[] | null = null;
-
-function moduleDir(): string | null {
-  try {
-    return __dirname;
-  } catch {
-    return null;
-  }
-}
 
 export function resolveSkillsRoot(): string {
   const starts = [process.cwd()];
-  const fromModule = moduleDir();
-  if (fromModule) starts.push(fromModule);
+  try {
+    starts.push(__dirname);
+  } catch {
+    /* CJS bundle without __dirname */
+  }
 
   const candidates: string[] = [];
   for (const start of starts) {
     let dir = path.resolve(start);
     for (let i = 0; i < 8; i++) {
       candidates.push(path.join(dir, 'skills'));
-      candidates.push(path.join(dir, 'packages', 'agent', 'core', 'skills'));
+      candidates.push(path.join(dir, 'packages', 'agent-core', 'skills'));
       const parent = path.dirname(dir);
       if (parent === dir) break;
       dir = parent;
@@ -47,22 +40,26 @@ export function resolveSkillsRoot(): string {
   for (const dir of candidates) {
     if (existsSync(dir)) return dir;
   }
-  return path.resolve(process.cwd(), 'packages', 'agent', 'core', 'skills');
+  return path.resolve(process.cwd(), 'packages', 'agent-core', 'skills');
 }
 
-function parseSkillMarkdown(
+export function configureSkillRoots(nextUserRoot: string | null): void {
+  const resolved = nextUserRoot ? path.resolve(nextUserRoot) : null;
+  if (resolved === userRoot) return;
+  userRoot = resolved;
+  cached = null;
+}
+
+export function invalidateSkillCatalog(): void {
+  cached = null;
+}
+
+export function parseSkillMarkdown(
   raw: string,
   fallbackName: string,
-): ParsedSkillFile {
+): { name: string; description: string; instructions: string } {
   const trimmed = raw.replace(/^\uFEFF/, '');
-  if (!trimmed.startsWith('---')) {
-    return {
-      name: fallbackName,
-      description: fallbackName,
-      instructions: trimmed.trim(),
-    };
-  }
-  const end = trimmed.indexOf('\n---', 3);
+  const end = trimmed.startsWith('---') ? trimmed.indexOf('\n---', 3) : -1;
   if (end < 0) {
     return {
       name: fallbackName,
@@ -85,37 +82,49 @@ function parseSkillMarkdown(
   return { name, description, instructions: body };
 }
 
-function readCatalogFromDisk(): Skill[] {
-  const root = resolveSkillsRoot();
+function readRoot(root: string): { folder: string; skill: Skill }[] {
   let entries: { name: string; isDirectory: () => boolean }[] = [];
   try {
     entries = readdirSync(root, { withFileTypes: true });
   } catch {
     return [];
   }
-  const skills: Skill[] = [];
+  const out: { folder: string; skill: Skill }[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const filePath = path.join(root, entry.name, 'SKILL.md');
-    let raw: string;
     try {
-      raw = readFileSync(filePath, 'utf8');
+      const parsed = parseSkillMarkdown(
+        readFileSync(path.join(root, entry.name, 'SKILL.md'), 'utf8'),
+        entry.name,
+      );
+      out.push({
+        folder: entry.name,
+        skill: {
+          name: parsed.name,
+          description: parsed.description,
+          instructions: parsed.instructions,
+        },
+      });
     } catch {
       continue;
     }
-    const parsed = parseSkillMarkdown(raw, entry.name);
-    skills.push({
-      name: parsed.name,
-      description: parsed.description,
-      instructions: parsed.instructions,
-    });
   }
-  skills.sort((a, b) => a.name.localeCompare(b.name));
-  return skills;
+  return out;
 }
 
 function catalog(): Skill[] {
-  if (!cached) cached = readCatalogFromDisk();
+  if (!cached) {
+    const byName = new Map<string, Skill>();
+    for (const { skill } of readRoot(resolveSkillsRoot())) {
+      byName.set(skill.name, skill);
+    }
+    if (userRoot) {
+      for (const { skill } of readRoot(userRoot)) {
+        byName.set(skill.name, skill);
+      }
+    }
+    cached = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
   return cached;
 }
 
@@ -123,8 +132,27 @@ export function listSkills(): SkillMetadata[] {
   return catalog().map(({ name, description }) => ({ name, description }));
 }
 
-function getSkill(name: string): Skill | undefined {
-  return catalog().find((skill) => skill.name === name);
+export function listSkillCatalogs(): {
+  global: SkillCatalogEntry[];
+  user: SkillCatalogEntry[];
+} {
+  const toEntries = (
+    root: string,
+    source: SkillCatalogEntry['source'],
+  ): SkillCatalogEntry[] =>
+    readRoot(root)
+      .map(({ folder, skill }) => ({
+        name: skill.name,
+        description: skill.description,
+        folder,
+        source,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    global: toEntries(resolveSkillsRoot(), 'global'),
+    user: userRoot ? toEntries(userRoot, 'user') : [],
+  };
 }
 
 export const load_skill: Tool = {
@@ -133,7 +161,7 @@ export const load_skill: Tool = {
     function: {
       name: 'load_skill',
       description:
-        'Load the body of a named skill (patch-and-verify, diagnose-bug, home-research, anti-slop-examples, ai-writing-guidelines). Optional. Built-in tools work without a skill.',
+        'Load the body of a named skill from the catalog. Optional. Built-in tools work without a skill.',
       parameters: {
         type: 'object',
         properties: {
@@ -149,7 +177,7 @@ export const load_skill: Tool = {
   },
   guidance: {
     whenToUse: [
-      'You need the procedure body for a named workflow in the skill catalog (patch-and-verify, diagnose-bug, home-research, anti-slop-examples, ai-writing-guidelines).',
+      'You need the procedure body for a named workflow listed in the skill catalog.',
     ],
     whenNotToUse: [
       'Do not load a skill on every turn.',
@@ -162,9 +190,9 @@ export const load_skill: Tool = {
     ],
   },
   execute: async (args) => {
-    const skill = String(args.skill_name ?? '').trim();
-    const skillBody = getSkill(skill);
-    if (skillBody) return skillBody.instructions;
+    const name = String(args.skill_name ?? '').trim();
+    const skill = catalog().find((item) => item.name === name);
+    if (skill) return skill.instructions;
     const available = listSkills()
       .map((item) => item.name)
       .join(', ');

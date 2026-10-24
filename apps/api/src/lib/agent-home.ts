@@ -11,12 +11,12 @@ export type ResolveAgentHomeInput = {
  * Resolve the durable agent home directory (pure — no mkdir or I/O).
  *
  * 1. AGENT_HOME if set → path.resolve (absolute)
- * 2. else → path.join(homedir, '.local', 'agent') on all platforms
+ * 2. else → path.join(homedir, '.local', 'personal-assistant')
  */
 export function resolveAgentHome(input: ResolveAgentHomeInput): string {
   const configured = input.env.AGENT_HOME;
   if (configured !== undefined && configured !== '') {
     return path.resolve(configured);
   }
-  return path.join(input.homedir, '.local', 'agent');
+  return path.join(input.homedir, '.local', 'personal-assistant');
 }

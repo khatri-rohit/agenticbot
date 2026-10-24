@@ -2,7 +2,15 @@
 // Pure library: no HTTP, no DOM, no database.
 // Domain types and modes live in @agent/agent-models — import them from there.
 
-export { listSkills } from './lib/tools/skills';
+export {
+  configureSkillRoots,
+  invalidateSkillCatalog,
+  listSkillCatalogs,
+  listSkills,
+  parseSkillMarkdown,
+  resolveSkillsRoot,
+} from './lib/tools/skills';
+export type { SkillCatalogEntry } from './lib/tools/skills';
 
 // Model layer
 export {

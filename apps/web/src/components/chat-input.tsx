@@ -10,6 +10,7 @@ import {
 } from 'react';
 import {
   ArrowUp,
+  BookMarked,
   ImagePlus,
   Loader2,
   Mic,
@@ -56,6 +57,7 @@ import { ModelPicker } from '@/components/model-picker';
 import { WorkspacePicker } from '@/components/workspace-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
+import { SkillsPanel } from '@/components/skills-panel';
 import { VoiceModePill } from '@/components/voice-mode-pill';
 import { registerComposerFocus } from '@/components/composer-focus';
 import { Button } from '@/components/ui/button';
@@ -245,6 +247,7 @@ export function ChatInput({
   const [selectedMentionId, setSelectedMentionId] = useState<string | null>(
     null,
   );
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const catalog = useThreads() ?? [];
   const { workspaceRoot } = useAgentSpace();
   const mentionCandidates = rankMentionThreads(
@@ -528,7 +531,9 @@ export function ChatInput({
 
   const pickMention = useCallback(
     (threadIdToAdd: string) => {
-      const thread = mentionCandidates.find((item) => item.id === threadIdToAdd);
+      const thread = mentionCandidates.find(
+        (item) => item.id === threadIdToAdd,
+      );
       if (!thread) return;
       const existing = threadMentions(pendingAttachments);
       if (existing.some((item) => item.threadId === thread.id)) {
@@ -753,6 +758,14 @@ export function ChatInput({
           >
             <ImagePlus className="size-4" />
             Attach image
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              setSkillsOpen(true);
+            }}
+          >
+            <BookMarked className="size-4" />
+            Skills
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuCheckboxItem
@@ -1165,6 +1178,7 @@ export function ChatInput({
           </p>
         )}
       </div>
+      <SkillsPanel open={skillsOpen} onOpenChange={setSkillsOpen} />
     </div>
   );
 }

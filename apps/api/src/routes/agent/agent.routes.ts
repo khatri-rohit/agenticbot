@@ -50,9 +50,11 @@ import {
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
+import { skillsRouter } from './skills.routes';
 import type { ThreadStore } from '../../lib/thread-store';
 
 const router = Router();
+router.use(skillsRouter);
 const runManager = new RunManager();
 
 function toolAllowList(
@@ -122,7 +124,7 @@ async function loadMentionedThreads(
     const other = await store.hydrateEnvelopes(mention.threadId);
     const snapshot = await store.readSnapshot(mention.threadId);
     const sourceLabel = isWorkspaceKind(thread.kind)
-      ? thread.workspaceRoot ?? 'Workspace'
+      ? (thread.workspaceRoot ?? 'Workspace')
       : 'Home';
     segments.push({
       threadId: thread.id,
@@ -193,9 +195,7 @@ async function prepareRun(input: {
   }
   const store = await getThreadStore();
   const plan =
-    input.threadId === 'draft'
-      ? null
-      : await store.readPlan(input.threadId);
+    input.threadId === 'draft' ? null : await store.readPlan(input.threadId);
   const planTools =
     input.threadId === 'draft'
       ? []
@@ -617,11 +617,19 @@ router.post('/run', async (req: Request, res: Response) => {
       const text = buf.toString('utf8');
       if (offset === undefined && length === undefined) return text;
       const start = offset ?? 0;
-      return text.slice(start, length === undefined ? undefined : start + length);
+      return text.slice(
+        start,
+        length === undefined ? undefined : start + length,
+      );
     },
     onMessage: async (record, meta) => {
       if (record.role === 'system') return;
-      await store.append({ threadId, runId: assignedRunId, record, ...(meta ? { meta } : {}) });
+      await store.append({
+        threadId,
+        runId: assignedRunId,
+        record,
+        ...(meta ? { meta } : {}),
+      });
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
@@ -875,7 +883,9 @@ router.post('/run/:runId/choice', (req: Request, res: Response) => {
   }
 
   if (body.skipped === true) {
-    const skipped = runManager.resolveChoice(runId, choiceId, { skipped: true });
+    const skipped = runManager.resolveChoice(runId, choiceId, {
+      skipped: true,
+    });
     if (skipped !== 'ok') {
       return res.status(404).json({
         error: 'Choice not found or already resolved',
@@ -895,7 +905,8 @@ router.post('/run/:runId/choice', (req: Request, res: Response) => {
 
   if (result === 'invalid') {
     return res.status(400).json({
-      error: 'Select at least one option or enter text, with matching option ids',
+      error:
+        'Select at least one option or enter text, with matching option ids',
     });
   }
   if (result !== 'ok') {
