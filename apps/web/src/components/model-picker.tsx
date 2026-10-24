@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Brain, Check, ChevronDown, ImageIcon, Search } from 'lucide-react';
 import {
   CLOUD_OLLAMA_MODELS,
@@ -15,32 +15,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-
-type Group = {
-  label: string;
-  models: OllamaModel[];
-};
-
-function groupModels(models: OllamaModel[]): Group[] {
-  const groups = new Map<string, OllamaModel[]>();
-
-  for (const m of models) {
-    const key = m.cloud ? `Cloud — ${m.family}` : `Local — ${m.family}`;
-    const list = groups.get(key);
-    if (list) list.push(m);
-    else groups.set(key, [m]);
-  }
-
-  const order: string[] = [];
-  for (const key of groups.keys()) {
-    if (key.startsWith('Cloud')) order.push(key);
-  }
-  for (const key of groups.keys()) {
-    if (key.startsWith('Local')) order.push(key);
-  }
-
-  return order.map((label) => ({ label, models: groups.get(label)! }));
-}
 
 function matchesQuery(m: OllamaModel, q: string): boolean {
   if (!q) return true;
@@ -73,16 +47,52 @@ export function ModelPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const modelId = local ? value.trim() : resolveOllamaModel(value);
   const label = local
     ? modelId || 'Select local model'
     : getOllamaModelLabel(modelId);
 
-  const groups = useMemo(() => {
-    const filtered = models.filter((m) => matchesQuery(m, query));
-    return groupModels(filtered);
-  }, [models, query]);
+  const filteredModels = useMemo(
+    () => models.filter((m) => matchesQuery(m, query)),
+    [models, query],
+  );
+
+  // Keep activeIndex in bounds when the filter changes.
+  const clampedIndex = Math.min(activeIndex, Math.max(0, filteredModels.length - 1));
+
+  const scrollActiveIntoView = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const item = list.children[clampedIndex] as HTMLElement | undefined;
+    item?.scrollIntoView({ block: 'nearest' });
+  }, [clampedIndex]);
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (filteredModels.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, filteredModels.length - 1));
+      requestAnimationFrame(scrollActiveIntoView);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+      requestAnimationFrame(scrollActiveIntoView);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const selected = filteredModels[clampedIndex];
+      if (selected) {
+        onChange(selected.id);
+        setOpen(false);
+        setQuery('');
+      }
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+      setQuery('');
+    }
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -113,87 +123,102 @@ export function ModelPicker({
           <input
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setActiveIndex(0);
+            }}
+            onKeyDown={handleSearchKeyDown}
             placeholder="Search models…"
             className="h-5 w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/70"
             aria-label="Search models"
+            aria-activedescendant={
+              filteredModels.length > 0
+                ? `model-option-${filteredModels[clampedIndex]?.id}`
+                : undefined
+            }
+            role="combobox"
+            aria-expanded={open}
+            aria-controls="model-list"
           />
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto py-0.5">
+        <div
+          ref={listRef}
+          id="model-list"
+          role="listbox"
+          className="min-h-0 flex-1 overflow-y-auto py-0.5"
+        >
           {loading ? (
             <p className="px-2.5 py-4 text-center text-xs text-muted-foreground">
               Loading local models…
             </p>
-          ) : groups.length === 0 ? (
+          ) : filteredModels.length === 0 ? (
             <p className="px-2.5 py-4 text-center text-xs text-muted-foreground">
               {emptyMessage ?? 'No models found'}
             </p>
           ) : (
-            groups.map((group) => (
-              <div key={group.label} className="py-0.5">
-                <p className="px-2 py-1 text-[10px] font-medium tracking-wide text-muted-foreground/80 uppercase">
-                  {group.label}
-                </p>
-                {group.models.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
+            filteredModels.map((m, index) => (
+              <button
+                key={m.id}
+                id={`model-option-${m.id}`}
+                role="option"
+                aria-selected={m.id === modelId}
+                type="button"
+                className={cn(
+                  'flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent',
+                  m.id === modelId && 'bg-accent/60',
+                  index === clampedIndex &&
+                    'bg-accent ring-1 ring-inset ring-accent-foreground/20',
+                )}
+                onClick={() => {
+                  onChange(m.id);
+                  setOpen(false);
+                  setQuery('');
+                }}
+              >
+                <span className="flex min-w-0 flex-1 items-start gap-2">
+                  <Check
                     className={cn(
-                      'flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent',
-                      m.id === modelId && 'bg-accent/60',
+                      'mt-0.5 size-3.5 shrink-0',
+                      m.id === modelId ? 'opacity-100' : 'opacity-0',
                     )}
-                    onClick={() => {
-                      onChange(m.id);
-                      setOpen(false);
-                      setQuery('');
-                    }}
-                  >
-                    <span className="flex min-w-0 flex-1 items-start gap-2">
-                      <Check
-                        className={cn(
-                          'mt-0.5 size-3.5 shrink-0',
-                          m.id === modelId ? 'opacity-100' : 'opacity-0',
-                        )}
-                        aria-hidden
-                      />
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium leading-tight">
-                          {m.label}
-                        </span>
-                        {m.hint ? (
-                          <span className="block truncate text-[11px] text-muted-foreground">
-                            {m.hint}
-                          </span>
-                        ) : null}
+                    aria-hidden
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium leading-tight">
+                      {m.label}
+                    </span>
+                    {m.hint ? (
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {m.hint}
                       </span>
+                    ) : null}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {m.contextLength != null ? (
+                    <span
+                      className="text-[10px] font-medium tabular-nums text-muted-foreground"
+                      title={`${m.contextLength.toLocaleString()} token context`}
+                    >
+                      {m.contextLength >= 1_000_000
+                        ? `${m.contextLength / 1_000_000}M`
+                        : `${m.contextLength / 1_000}K`}
                     </span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      {m.contextLength != null ? (
-                        <span
-                          className="text-[10px] font-medium tabular-nums text-muted-foreground"
-                          title={`${m.contextLength.toLocaleString()} token context`}
-                        >
-                          {m.contextLength >= 1_000_000
-                            ? `${m.contextLength / 1_000_000}M`
-                            : `${m.contextLength / 1_000}K`}
-                        </span>
-                      ) : null}
-                      {m.thinking ? (
-                        <Brain
-                          className="size-3.5 text-muted-foreground"
-                          aria-label="Supports thinking"
-                        />
-                      ) : null}
-                      {m.vision ? (
-                        <ImageIcon
-                          className="size-3.5 text-muted-foreground"
-                          aria-label="Supports image input"
-                        />
-                      ) : null}
-                    </span>
-                  </button>
-                ))}
-              </div>
+                  ) : null}
+                  {m.thinking ? (
+                    <Brain
+                      className="size-3.5 text-muted-foreground"
+                      aria-label="Supports thinking"
+                    />
+                  ) : null}
+                  {m.vision ? (
+                    <ImageIcon
+                      className="size-3.5 text-muted-foreground"
+                      aria-label="Supports image input"
+                    />
+                  ) : null}
+                </span>
+              </button>
             ))
           )}
         </div>

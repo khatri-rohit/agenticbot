@@ -211,6 +211,16 @@ export async function fetchLocalOllamaModels(): Promise<LocalOllamaModelsRespons
   return res.json() as Promise<LocalOllamaModelsResponse>;
 }
 
+/** Discover cloud models from Ollama Cloud (`/api/tags` at ollama.com). */
+export async function fetchCloudOllamaModels(): Promise<LocalOllamaModelsResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/models?endpoint=cloud`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to list cloud models: ${res.status}`);
+  }
+  return res.json() as Promise<LocalOllamaModelsResponse>;
+}
+
 export type ContextEstimateResponse = {
   estimatedPromptTokens: number;
   contextLength: number | null;

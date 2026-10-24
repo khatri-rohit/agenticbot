@@ -250,6 +250,9 @@ export function useAgentRun(threadId: string | null) {
                     const withPlan = {
                       ...prev,
                       plan: planFromLedger(ledger),
+                      // Ledger has the committed messages now — drop the bridge.
+                      settledSnippets: [],
+                      settledToolActivity: [],
                     };
                     if (ledger.snapshot) {
                       const fromDisk = noticeFromSnapshot(ledger.snapshot);

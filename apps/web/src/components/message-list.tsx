@@ -53,8 +53,10 @@ export function MessageList({
   const anchorRefs = useRef(new Map<string, HTMLDivElement>());
 
   const streaming = chatState.activeRun?.streamingMessage;
-  const toolActivity = chatState.activeRun?.toolActivity ?? [];
-  const assistantSnippets = chatState.activeRun?.assistantSnippets ?? [];
+  const toolActivity =
+    chatState.activeRun?.toolActivity ?? chatState.settledToolActivity ?? [];
+  const assistantSnippets =
+    chatState.activeRun?.assistantSnippets ?? chatState.settledSnippets ?? [];
   const activeRunId = chatState.activeRun?.runId;
   const compactionNotice = chatState.compactionNotice;
 

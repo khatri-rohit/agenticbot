@@ -32,6 +32,7 @@ import {
   threadMentions,
 } from '@agent/agent-models';
 import {
+  fetchCloudOllamaModels,
   fetchLocalOllamaModels,
   type ComposerOptions,
 } from '@/features/agent/api/agent-client';
@@ -50,6 +51,7 @@ import {
   CLOUD_OLLAMA_MODELS,
   DEFAULT_OLLAMA_MODEL,
   listedModelToPickerModel,
+  mergeCloudModels,
   modelSupportsVision,
   readStoredComposerModel,
   type OllamaModel,
@@ -327,6 +329,28 @@ export function ChatInput({
   const [localModels, setLocalModels] = useState<OllamaModel[]>([]);
   const [localModelsLoading, setLocalModelsLoading] = useState(false);
   const [localModelsError, setLocalModelsError] = useState<string | null>(null);
+  const [cloudModels, setCloudModels] = useState<OllamaModel[]>(CLOUD_OLLAMA_MODELS);
+
+  // Discover cloud models from Ollama Cloud on mount; fall back to the
+  // static catalog on error so cloud chat still works with known models.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCloudOllamaModels()
+      .then((res) => {
+        if (cancelled) return;
+        const merged = mergeCloudModels(
+          res.models.map((m) => ({ id: m.id, family: m.family, size: m.size })),
+        );
+        if (merged.length > 0) setCloudModels(merged);
+      })
+      .catch((err) => {
+        // Keep the static catalog — cloud chat still works with known models.
+        console.warn('[chat-input] live cloud models fetch failed, using catalog fallback', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Discover installed models from the API host's Ollama when Local is on.
   useEffect(() => {
@@ -440,7 +464,7 @@ export function ChatInput({
   // Soft fallback until /context/estimate or live ContextReport supplies windowTokens.
   const contextLimit =
     modelConfig?.contextLength ??
-    CLOUD_OLLAMA_MODELS.find((m) => m.id === composerOptions.model)
+    cloudModels.find((m) => m.id === composerOptions.model)
       ?.contextLength ??
     null;
   const visionOk = modelSupportsVision(
@@ -989,7 +1013,7 @@ export function ChatInput({
         }
         disabled={isRunning}
         local={localMode}
-        models={localMode ? localModels : CLOUD_OLLAMA_MODELS}
+        models={localMode ? localModels : cloudModels}
         loading={localMode && localModelsLoading}
         emptyMessage={
           localMode

@@ -87,11 +87,18 @@ export type ChatState = {
   plan: ThreadPlan | null;
   /** Live pauses; cleared on resolve / run end. */
   pendingChoices: PendingChoice[];
+  /** Snippets from the just-settled run, kept until the ledger refetch
+   *  lands so the response doesn't flash off→on at run.settled. */
+  settledSnippets: AssistantSnippet[];
+  /** Tool activity from the just-settled run, same lifetime as settledSnippets. */
+  settledToolActivity: ToolActivity[];
 };
 
 export function initialChatState(): ChatState {
   return {
     activeRun: null,
+    settledSnippets: [],
+    settledToolActivity: [],
     compactionNotice: null,
     limitNotice: null,
     plan: null,
@@ -145,6 +152,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             ? { contextReport: event.contextReport }
             : {}),
         },
+        settledSnippets: [],
+        settledToolActivity: [],
         compactionNotice: state.compactionNotice,
         limitNotice: null,
         plan: state.plan,
@@ -274,6 +283,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'context.compacting': {
       return {
+        ...state,
         activeRun: state.activeRun
           ? { ...state.activeRun, lastSeq }
           : state.activeRun,
@@ -286,14 +296,12 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           summary: state.compactionNotice?.summary ?? '',
           createdAt: state.compactionNotice?.createdAt ?? '',
         },
-        limitNotice: state.limitNotice,
-        plan: state.plan,
-        pendingChoices: state.pendingChoices,
       };
     }
 
     case 'context.compacted': {
       return {
+        ...state,
         activeRun: state.activeRun
           ? { ...state.activeRun, lastSeq }
           : state.activeRun,
@@ -306,9 +314,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           summary: event.summary,
           createdAt: event.createdAt,
         },
-        limitNotice: state.limitNotice,
-        plan: state.plan,
-        pendingChoices: state.pendingChoices,
       };
     }
 
@@ -328,8 +333,12 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     }
 
     case 'run.settled': {
+      // Keep snippets/tools alive until the ledger refetch lands — otherwise
+      // the response flashes off→on between activeRun nulling and messages update.
       return {
         activeRun: null,
+        settledSnippets: state.activeRun?.assistantSnippets ?? [],
+        settledToolActivity: state.activeRun?.toolActivity ?? [],
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         plan: state.plan,
@@ -340,6 +349,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'run.error': {
       return {
         activeRun: null,
+        settledSnippets: state.activeRun?.assistantSnippets ?? [],
+        settledToolActivity: state.activeRun?.toolActivity ?? [],
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         plan: state.plan,
