@@ -6,7 +6,7 @@ import {
   useMemo,
   useState,
 } from 'react';
-import { Loader2, Search } from 'lucide-react';
+import { Loader2, Pin, Search, Trash2 } from 'lucide-react';
 import {
   deleteUserSkill,
   fetchSkillCatalogs,
@@ -52,22 +52,22 @@ function shortSha(sha: string): string {
 
 function CatalogSkeleton() {
   return (
-    <div className="flex flex-col gap-3" aria-busy="true" aria-live="polite">
-      <div className="h-8 w-full animate-pulse rounded-md bg-muted" />
-      <div className="h-12 w-full animate-pulse rounded-md bg-muted" />
-      <div className="h-12 w-full animate-pulse rounded-md bg-muted" />
-      <div className="h-12 w-2/3 animate-pulse rounded-md bg-muted" />
+    <div className="flex flex-col gap-2.5" aria-busy="true" aria-live="polite">
+      <div className="h-9 w-full animate-pulse rounded-lg bg-muted" />
+      <div className="h-14 w-full animate-pulse rounded-lg bg-muted" />
+      <div className="h-14 w-full animate-pulse rounded-lg bg-muted" />
+      <div className="h-14 w-4/5 animate-pulse rounded-lg bg-muted" />
     </div>
   );
 }
 
 function OriginBadge({ source }: { source: SkillCatalogItem['source'] }) {
   return source === 'global' ? (
-    <Badge variant="secondary" className="font-normal">
+    <Badge variant="secondary" className="shrink-0 font-normal">
       Built-in
     </Badge>
   ) : (
-    <Badge variant="outline" className="font-normal">
+    <Badge variant="outline" className="shrink-0 font-normal">
       Yours
     </Badge>
   );
@@ -78,27 +78,48 @@ function CatalogRow({
   overrides,
   expanded,
   onToggleExpand,
+  pinned,
+  matched,
+  onTogglePin,
   action,
 }: {
   skill: SkillCatalogItem;
   overrides: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
+  pinned?: boolean;
+  matched?: boolean;
+  onTogglePin?: () => void;
   action?: React.ReactNode;
 }) {
   return (
-    <li className="flex items-start gap-3 py-3">
+    <li
+      className={cn(
+        'flex items-start gap-2 rounded-lg px-2 py-2.5 transition-colors',
+        matched && 'bg-muted/50',
+      )}
+    >
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <p className="truncate text-sm font-medium text-foreground">
             {skill.name}
           </p>
           <OriginBadge source={skill.source} />
+          {pinned ? (
+            <Badge variant="secondary" className="font-normal">
+              Pinned
+            </Badge>
+          ) : null}
+          {matched && !pinned ? (
+            <Badge variant="outline" className="font-normal text-muted-foreground">
+              This send
+            </Badge>
+          ) : null}
         </div>
         <button
           type="button"
           onClick={onToggleExpand}
-          className="mt-0.5 block w-full text-left"
+          className="mt-1 block w-full text-left"
           aria-expanded={expanded}
         >
           <p
@@ -116,7 +137,29 @@ function CatalogRow({
           </p>
         ) : null}
       </div>
-      {action ? <div className="shrink-0 pt-0.5">{action}</div> : null}
+      <div className="flex shrink-0 items-start gap-0.5 pt-0.5">
+        {onTogglePin ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn(
+              'size-7 text-muted-foreground hover:text-foreground',
+              pinned && 'text-foreground',
+            )}
+            aria-label={
+              pinned
+                ? `Unpin ${skill.name}`
+                : `Pin ${skill.name} for this thread`
+            }
+            aria-pressed={pinned}
+            onClick={onTogglePin}
+          >
+            <Pin className="size-3.5" />
+          </Button>
+        ) : null}
+        {action}
+      </div>
     </li>
   );
 }
@@ -132,7 +175,7 @@ function ImportRow({
 }) {
   const id = `import-skill-${skill.pathInRepo}`;
   return (
-    <li className="flex items-start gap-3 py-3">
+    <li className="flex items-start gap-3 rounded-lg px-2 py-2.5">
       <input
         id={id}
         type="checkbox"
@@ -167,9 +210,19 @@ function ImportRow({
 export function SkillsPanel({
   open,
   onOpenChange,
+  pinnedNames = [],
+  selectedNames = [],
+  onPin,
+  onUnpin,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Thread-pinned skill names (always candidates for the next send). */
+  pinnedNames?: string[];
+  /** Host-selected skill names for the current draft (context meter). */
+  selectedNames?: string[];
+  onPin?: (name: string) => void;
+  onUnpin?: (name: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>('catalog');
   const [catalogs, setCatalogs] = useState<SkillCatalogs>({
@@ -188,6 +241,15 @@ export function SkillsPanel({
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  const pinnedSet = useMemo(
+    () => new Set(pinnedNames.map((name) => name.toLowerCase())),
+    [pinnedNames],
+  );
+  const selectedSet = useMemo(
+    () => new Set(selectedNames.map((name) => name.toLowerCase())),
+    [selectedNames],
+  );
+
   const loadCatalogs = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -197,7 +259,6 @@ export function SkillsPanel({
       const message =
         error instanceof Error ? error.message : 'Could not load skills';
       setLoadError(message);
-      toastError(message);
     } finally {
       setLoading(false);
     }
@@ -322,13 +383,17 @@ export function SkillsPanel({
     });
   }
 
-  const tabs: ReadonlyArray<{ id: Tab; label: string }> = [
-    {
-      id: 'catalog',
-      label: loading ? 'Catalog' : `Catalog · ${catalogCount}`,
-    },
-    { id: 'import', label: 'Import' },
-  ];
+  function pinHandlers(skillName: string) {
+    if (!onPin || !onUnpin) return undefined;
+    const key = skillName.toLowerCase();
+    const pinned = pinnedSet.has(key);
+    return {
+      pinned,
+      onTogglePin: () => (pinned ? onUnpin(skillName) : onPin(skillName)),
+    };
+  }
+
+  const canPin = Boolean(onPin && onUnpin);
 
   return (
     <Dialog
@@ -344,260 +409,349 @@ export function SkillsPanel({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="gap-3 sm:max-w-lg" showCloseButton>
-        <DialogHeader className="pr-8">
-          <DialogTitle className="flex items-center gap-2">
-            Skills
-            {!loading && !loadError ? (
-              <Badge variant="secondary" className="font-normal">
-                {catalogCount}
-              </Badge>
-            ) : null}
-          </DialogTitle>
+      <DialogContent
+        className="grid max-h-[min(90dvh,40rem)] w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-xl"
+        showCloseButton
+      >
+        <DialogHeader className="shrink-0 gap-1.5 border-b border-border/60 px-4 py-3.5 pr-12">
+          <DialogTitle>Skills</DialogTitle>
           <DialogDescription>
-            Packs the agent can load on a run. Built-in stay with the product;
-            imports live in your agent home.
+            Catalog of procedure packs. Pin ones for this thread; the host also
+            matches the draft. The agent loads a body with{' '}
+            <span className="font-mono text-xs">load_skill</span> when that
+            workflow applies.
           </DialogDescription>
         </DialogHeader>
 
-        <div
-          role="tablist"
-          aria-label="Skill sections"
-          className="flex items-center gap-1 rounded-lg bg-muted/60 p-1 text-xs"
-        >
-          {tabs.map((entry) => (
+        <div className="flex min-h-0 flex-col gap-3 overflow-hidden px-4 pt-3 pb-3 [grid-row:2]">
+          <div
+            role="tablist"
+            aria-label="Skill sections"
+            className="flex shrink-0 items-center gap-1 rounded-lg bg-muted/60 p-1 text-xs"
+          >
             <button
-              key={entry.id}
               type="button"
               role="tab"
-              aria-selected={tab === entry.id}
-              onClick={() => setTab(entry.id)}
+              id="skills-tab-catalog"
+              aria-controls="skills-panel-catalog"
+              aria-selected={tab === 'catalog'}
+              onClick={() => setTab('catalog')}
               className={cn(
                 'flex-1 rounded-md px-2 py-1.5 font-medium transition-colors',
-                tab === entry.id
+                tab === 'catalog'
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              {entry.label}
+              Catalog
+              {!loading && !loadError ? (
+                <span className="ml-1 text-muted-foreground">
+                  · {catalogCount}
+                </span>
+              ) : null}
             </button>
-          ))}
-        </div>
+            <button
+              type="button"
+              role="tab"
+              id="skills-tab-import"
+              aria-controls="skills-panel-import"
+              aria-selected={tab === 'import'}
+              onClick={() => setTab('import')}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1.5 font-medium transition-colors',
+                tab === 'import'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Import
+            </button>
+          </div>
 
-        {tab === 'catalog' ? (
-          loading ? (
-            <CatalogSkeleton />
-          ) : loadError ? (
-            <div className="rounded-md border border-border px-3 py-4 text-sm">
-              <p className="text-foreground">Could not load the catalog.</p>
-              <p className="mt-1 text-muted-foreground">{loadError}</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => void loadCatalogs()}
-              >
-                Retry
-              </Button>
+          {tab === 'catalog' ? (
+            <div
+              id="skills-panel-catalog"
+              role="tabpanel"
+              aria-labelledby="skills-tab-catalog"
+              className="flex min-h-0 flex-1 flex-col gap-2"
+            >
+              {loading ? (
+                <CatalogSkeleton />
+              ) : loadError ? (
+                <div className="rounded-lg border border-border px-3 py-4 text-sm">
+                  <p className="text-foreground">Could not load the catalog.</p>
+                  <p className="mt-1 text-muted-foreground">{loadError}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => void loadCatalogs()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div className="relative shrink-0">
+                    <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Search by name or description"
+                      aria-label="Search skills"
+                      className="h-9 w-full rounded-lg border border-input bg-transparent py-1 pr-2.5 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    />
+                  </div>
+                  <ScrollArea className="h-[min(48vh,22rem)] pr-2">
+                    <div className="pb-1">
+                      {filteredGlobal.length === 0 &&
+                      filteredUser.length === 0 ? (
+                        <div className="px-0.5 py-8 text-center">
+                          <p className="text-sm text-muted-foreground">
+                            {query
+                              ? 'No skills match that search.'
+                              : 'No skills in the catalog yet.'}
+                          </p>
+                          {!query ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="mt-3"
+                              onClick={() => setTab('import')}
+                            >
+                              Import from GitHub
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {filteredGlobal.length > 0 ? (
+                            <section>
+                              <h3 className="sticky top-0 z-10 bg-popover px-2 pt-1 pb-1 text-xs font-medium text-muted-foreground">
+                                Built-in · {filteredGlobal.length}
+                              </h3>
+                              <ul className="space-y-0.5">
+                                {filteredGlobal.map((skill) => {
+                                  const pin = pinHandlers(skill.name);
+                                  return (
+                                    <CatalogRow
+                                      key={`global:${skill.folder}`}
+                                      skill={skill}
+                                      overrides={false}
+                                      expanded={expanded.has(
+                                        `global:${skill.folder}`,
+                                      )}
+                                      onToggleExpand={() =>
+                                        toggleExpand(`global:${skill.folder}`)
+                                      }
+                                      pinned={pin?.pinned}
+                                      matched={selectedSet.has(
+                                        skill.name.toLowerCase(),
+                                      )}
+                                      onTogglePin={pin?.onTogglePin}
+                                    />
+                                  );
+                                })}
+                              </ul>
+                            </section>
+                          ) : null}
+                          <section>
+                            <h3 className="sticky top-0 z-10 bg-popover px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                              Yours · {filteredUser.length}
+                            </h3>
+                            {filteredUser.length === 0 ? (
+                              <div className="px-2 pb-3">
+                                <p className="text-sm text-muted-foreground">
+                                  {query
+                                    ? 'No imported skills match that search.'
+                                    : 'Nothing imported yet.'}
+                                </p>
+                                {!query ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-2"
+                                    onClick={() => setTab('import')}
+                                  >
+                                    Import from GitHub
+                                  </Button>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <ul className="space-y-0.5">
+                                {filteredUser.map((skill) => {
+                                  const pin = pinHandlers(skill.name);
+                                  const confirming =
+                                    confirmFolder === skill.folder;
+                                  return (
+                                    <CatalogRow
+                                      key={`user:${skill.folder}`}
+                                      skill={skill}
+                                      overrides={globalNames.has(skill.name)}
+                                      expanded={expanded.has(
+                                        `user:${skill.folder}`,
+                                      )}
+                                      onToggleExpand={() =>
+                                        toggleExpand(`user:${skill.folder}`)
+                                      }
+                                      pinned={pin?.pinned}
+                                      matched={selectedSet.has(
+                                        skill.name.toLowerCase(),
+                                      )}
+                                      onTogglePin={pin?.onTogglePin}
+                                      action={
+                                        confirming ? (
+                                          <div className="flex flex-col items-stretch gap-1 sm:flex-row">
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-7 px-2 text-muted-foreground"
+                                              onClick={() =>
+                                                setConfirmFolder(null)
+                                              }
+                                            >
+                                              Keep
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              variant="destructive"
+                                              size="sm"
+                                              className="h-7 px-2"
+                                              disabled={
+                                                deletingFolder === skill.folder
+                                              }
+                                              onClick={() =>
+                                                void handleDelete(skill.folder)
+                                              }
+                                            >
+                                              {deletingFolder === skill.folder
+                                                ? 'Removing…'
+                                                : 'Remove'}
+                                            </Button>
+                                          </div>
+                                        ) : (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="size-7 text-muted-foreground hover:text-destructive"
+                                            aria-label={`Remove ${skill.name}`}
+                                            onClick={() =>
+                                              setConfirmFolder(skill.folder)
+                                            }
+                                          >
+                                            <Trash2 className="size-3.5" />
+                                          </Button>
+                                        )
+                                      }
+                                    />
+                                  );
+                                })}
+                              </ul>
+                            )}
+                          </section>
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                  {canPin ? (
+                    <p className="shrink-0 text-[11px] leading-4 text-muted-foreground">
+                      Pin keeps a skill on this thread. Composer chips above the
+                      input mirror the next send.
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : (
-            <div className="flex min-h-0 flex-col gap-2">
-              <div className="relative">
-                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search skills"
-                  aria-label="Search skills"
-                  className="h-8 w-full rounded-lg border border-input bg-transparent py-1 pr-2.5 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                />
+            <div
+              id="skills-panel-import"
+              role="tabpanel"
+              aria-labelledby="skills-tab-import"
+              className="flex min-h-0 flex-1 flex-col gap-3"
+            >
+              <div className="shrink-0 space-y-1.5">
+                <Label htmlFor="skill-repo-url">GitHub repository</Label>
+                <div className="flex gap-2">
+                  <input
+                    id="skill-repo-url"
+                    value={repoUrl}
+                    onChange={(event) => {
+                      setRepoUrl(event.target.value);
+                      if (preview) resetPreview();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void handleCheck();
+                      }
+                    }}
+                    placeholder="https://github.com/owner/repo"
+                    className="h-9 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 shrink-0"
+                    disabled={checking || !repoUrl.trim()}
+                    onClick={() => void handleCheck()}
+                  >
+                    {checking ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : null}
+                    Check
+                  </Button>
+                </div>
               </div>
-              <ScrollArea className="h-[min(52vh,22rem)] pr-2">
-                <div className="pb-2">
-                  {filteredGlobal.length === 0 && filteredUser.length === 0 ? (
-                    <p className="px-0.5 py-6 text-sm text-muted-foreground">
-                      {query
-                        ? 'No skills match that search.'
-                        : 'No skills in the catalog yet.'}
+
+              {checking ? (
+                <CatalogSkeleton />
+              ) : preview ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <p className="mb-1.5 shrink-0 text-xs text-muted-foreground">
+                    {preview.owner}/{preview.repo} @ {shortSha(preview.commit)}
+                    {preview.skills.length === 0
+                      ? ' — no SKILL.md files'
+                      : ` · ${selectedCount} of ${preview.skills.length} selected`}
+                  </p>
+                  {preview.skills.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+                      This repository has no skill packs the agent can import.
                     </p>
                   ) : (
-                    <div className="divide-y divide-border">
-                      {filteredGlobal.length > 0 ? (
-                        <section>
-                          <h3 className="pt-1 pb-1 text-xs text-muted-foreground">
-                            Built-in · {filteredGlobal.length}
-                          </h3>
-                          <ul>
-                            {filteredGlobal.map((skill) => (
-                              <CatalogRow
-                                key={`global:${skill.folder}`}
-                                skill={skill}
-                                overrides={false}
-                                expanded={expanded.has(`global:${skill.folder}`)}
-                                onToggleExpand={() =>
-                                  toggleExpand(`global:${skill.folder}`)
-                                }
-                              />
-                            ))}
-                          </ul>
-                        </section>
-                      ) : null}
-                      <section>
-                        <h3 className="pt-3 pb-1 text-xs text-muted-foreground">
-                          Yours · {filteredUser.length}
-                        </h3>
-                        {filteredUser.length === 0 ? (
-                          <p className="pb-3 text-sm text-muted-foreground">
-                            {query
-                              ? 'No imported skills match that search.'
-                              : 'Nothing imported yet — switch to Import to add a GitHub pack.'}
-                          </p>
-                        ) : (
-                          <ul>
-                            {filteredUser.map((skill) => (
-                              <CatalogRow
-                                key={`user:${skill.folder}`}
-                                skill={skill}
-                                overrides={globalNames.has(skill.name)}
-                                expanded={expanded.has(`user:${skill.folder}`)}
-                                onToggleExpand={() =>
-                                  toggleExpand(`user:${skill.folder}`)
-                                }
-                                action={
-                                  confirmFolder === skill.folder ? (
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 px-2 text-muted-foreground"
-                                        onClick={() => setConfirmFolder(null)}
-                                      >
-                                        Keep
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="destructive"
-                                        size="sm"
-                                        className="h-7 px-2"
-                                        disabled={
-                                          deletingFolder === skill.folder
-                                        }
-                                        onClick={() =>
-                                          void handleDelete(skill.folder)
-                                        }
-                                      >
-                                        {deletingFolder === skill.folder
-                                          ? 'Removing…'
-                                          : 'Remove'}
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 px-2 text-muted-foreground"
-                                      onClick={() =>
-                                        setConfirmFolder(skill.folder)
-                                      }
-                                    >
-                                      Remove
-                                    </Button>
-                                  )
-                                }
-                              />
-                            ))}
-                          </ul>
-                        )}
-                      </section>
-                    </div>
+                    <ScrollArea className="h-[min(40vh,18rem)] pr-2">
+                      <ul className="space-y-0.5 pb-1">
+                        {preview.skills.map((skill) => (
+                          <ImportRow
+                            key={skill.pathInRepo}
+                            skill={skill}
+                            checked={selectedPaths.has(skill.pathInRepo)}
+                            onToggle={() => toggleSelected(skill.pathInRepo)}
+                          />
+                        ))}
+                      </ul>
+                    </ScrollArea>
                   )}
                 </div>
-              </ScrollArea>
-            </div>
-          )
-        ) : (
-          <div className="flex min-h-0 flex-col gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="skill-repo-url">GitHub repository</Label>
-              <div className="flex gap-2">
-                <input
-                  id="skill-repo-url"
-                  value={repoUrl}
-                  onChange={(event) => {
-                    setRepoUrl(event.target.value);
-                    if (preview) resetPreview();
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      void handleCheck();
-                    }
-                  }}
-                  placeholder="https://github.com/owner/repo"
-                  className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0"
-                  disabled={checking || !repoUrl.trim()}
-                  onClick={() => void handleCheck()}
-                >
-                  {checking ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : null}
-                  Check
-                </Button>
-              </div>
-            </div>
-
-            {checking ? (
-              <CatalogSkeleton />
-            ) : preview ? (
-              <div className="min-h-0">
-                <p className="mb-1 text-xs text-muted-foreground">
-                  {preview.owner}/{preview.repo} @ {shortSha(preview.commit)}
-                  {preview.skills.length === 0
-                    ? ' — no SKILL.md files'
-                    : ` · ${selectedCount} of ${preview.skills.length} selected`}
-                </p>
-                {preview.skills.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                    This repository has no skill packs the agent can import.
+              ) : (
+                <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border px-4 py-8">
+                  <p className="max-w-sm text-center text-sm text-muted-foreground">
+                    Paste a public GitHub URL, then Check to preview skill
+                    packs. Nothing is written until you install.
                   </p>
-                ) : (
-                  <ScrollArea className="h-[min(40vh,16rem)] pr-2">
-                    <ul className="divide-y divide-border">
-                      {preview.skills.map((skill) => (
-                        <ImportRow
-                          key={skill.pathInRepo}
-                          skill={skill}
-                          checked={selectedPaths.has(skill.pathInRepo)}
-                          onToggle={() => toggleSelected(skill.pathInRepo)}
-                        />
-                      ))}
-                    </ul>
-                  </ScrollArea>
-                )}
-              </div>
-            ) : (
-              <p className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-                Paste a public GitHub URL, then Check to preview skill packs.
-                Nothing is written until you install.{' '}
-                <span className="font-mono text-xs">
-                  e.g. github.com/owner/repo
-                </span>
-              </p>
-            )}
-          </div>
-        )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-        <DialogFooter className="mt-1">
-          {tab === 'import' ? (
+        {tab === 'import' ? (
+          <DialogFooter className="mt-0 shrink-0">
             <div className="flex w-full flex-col items-stretch gap-2">
               {selectedCollisions.length > 0 ? (
                 <p className="text-xs text-amber-600 dark:text-amber-500">
@@ -632,17 +786,8 @@ export function SkillsPanel({
                 </Button>
               </div>
             </div>
-          ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-            >
-              Close
-            </Button>
-          )}
-        </DialogFooter>
+          </DialogFooter>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

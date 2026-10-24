@@ -200,13 +200,15 @@ function resolveSkillNames(input: {
   mode: string;
   hints?: { pinned?: string[]; dismissed?: string[] };
   stored?: string[];
+  /** New user text: always match. Retry with no message: reuse stored. */
+  hasNewMessage?: boolean;
 }): string[] {
-  if (input.hints) {
+  if (input.hasNewMessage) {
     return selectSkills({
       query: input.query,
       mode: input.mode,
-      pinned: input.hints.pinned,
-      dismissed: input.hints.dismissed,
+      pinned: input.hints?.pinned,
+      dismissed: input.hints?.dismissed,
     }).selected.map((skill) => skill.name);
   }
   if (input.stored) return input.stored.slice(0, MAX_RUN_SKILLS);
@@ -600,6 +602,7 @@ router.post('/run', async (req: Request, res: Response) => {
     mode: modeForKind(normalizeThreadKind(thread.kind)).name,
     hints: skillHints,
     stored: priorUser?.skills?.selected,
+    hasNewMessage: Boolean(message),
   });
 
   if (message) {

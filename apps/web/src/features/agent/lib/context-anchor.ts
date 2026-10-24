@@ -1,4 +1,4 @@
-/** Last provider-measured window fill for a thread (prompt + completion). */
+/** Last provider-measured window fill for a thread (prompt tokens). */
 
 export type ContextAnchor = {
   occupiedTokens: number;

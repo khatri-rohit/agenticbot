@@ -58,7 +58,7 @@ export type ChatRunState = {
   /** Heuristic from run.started until provider usage arrives. */
   estimatedPromptTokens?: number;
   contextReport?: ContextReport;
-  /** Latest prompt+completion from turn.completed in this run. */
+  /** Last prompt tokens from turn.completed in this run. */
   occupiedTokens?: number;
   /** True when occupiedTokens already includes the current streamingMessage. */
   occupiedCoversStream?: boolean;

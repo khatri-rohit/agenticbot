@@ -101,18 +101,20 @@ export function useContextMeter(options: {
     : estimateDraftTokens(streamingContent);
 
   const hasAnchor = liveOccupied != null || persistedOccupied != null;
+  const combinedDraft = [draft, queuedContent].filter(Boolean).join('\n');
+  const attachmentCount =
+    pendingAttachments.length + queuedAttachments.length;
+  const hasDraft = combinedDraft.length > 0 || attachmentCount > 0;
 
   useEffect(() => {
-    if (hasAnchor || liveEstimated != null) {
+    // Occupancy can skip the token estimate; a non-empty draft still
+    // needs selectSkills so follow-up chips are not blank.
+    if (!hasDraft && (hasAnchor || liveEstimated != null)) {
       setServerEstimate(null);
       return;
     }
-
-    const combinedDraft = [draft, queuedContent].filter(Boolean).join('\n');
-    const attachmentCount =
-      pendingAttachments.length + queuedAttachments.length;
     // Idle home / empty composer: local char estimate is enough; skip hammering API.
-    if (!threadId && !combinedDraft && attachmentCount === 0) {
+    if (!threadId && !hasDraft) {
       setServerEstimate(null);
       return;
     }
@@ -152,6 +154,7 @@ export function useContextMeter(options: {
     hasAnchor,
     liveEstimated,
     threadId,
+    hasDraft,
     draft,
     pendingAttachments,
     queuedContent,
@@ -169,7 +172,13 @@ export function useContextMeter(options: {
     OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.contextLength ??
     null;
 
-  const liveReserve = liveContextReport?.budget.outputReserveTokens ?? 0;
+  const liveReserve =
+    liveContextReport?.budget.outputReserveTokens ??
+    serverEstimate?.reserve ??
+    0;
+  const suggested = serverEstimate?.selectedSkills ?? [];
+  const layers =
+    liveLayers.length > 0 ? liveLayers : (serverEstimate?.layers ?? []);
 
   if (liveOccupied != null) {
     const extra = composerTokens + streamingTokens;
@@ -178,9 +187,9 @@ export function useContextMeter(options: {
       limit,
       source: 'measured',
       approximate: extra > 0,
-      layers: liveLayers,
+      layers,
       reserve: liveReserve,
-      selectedSkills: [],
+      selectedSkills: suggested,
     };
   }
 
@@ -190,9 +199,9 @@ export function useContextMeter(options: {
       limit,
       source: 'estimate',
       approximate: true,
-      layers: liveLayers,
+      layers,
       reserve: liveReserve,
-      selectedSkills: [],
+      selectedSkills: suggested,
     };
   }
 
@@ -202,9 +211,9 @@ export function useContextMeter(options: {
       limit,
       source: 'measured',
       approximate: composerTokens > 0,
-      layers: liveLayers,
+      layers,
       reserve: liveReserve,
-      selectedSkills: [],
+      selectedSkills: suggested,
     };
   }
 
