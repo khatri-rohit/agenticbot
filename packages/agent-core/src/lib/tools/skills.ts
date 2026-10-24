@@ -50,7 +50,10 @@ export function resolveSkillsRoot(): string {
   return path.resolve(process.cwd(), 'packages', 'agent', 'core', 'skills');
 }
 
-function parseSkillMarkdown(raw: string, fallbackName: string): ParsedSkillFile {
+function parseSkillMarkdown(
+  raw: string,
+  fallbackName: string,
+): ParsedSkillFile {
   const trimmed = raw.replace(/^\uFEFF/, '');
   if (!trimmed.startsWith('---')) {
     return {
@@ -67,7 +70,7 @@ function parseSkillMarkdown(raw: string, fallbackName: string): ParsedSkillFile 
       instructions: trimmed.trim(),
     };
   }
-  const fm = trimmed.slice(3, end).trim();
+  const fm = trimmed.slice(3, end).trim().replace(/\r/g, '');
   const body = trimmed.slice(end + 4).trim();
   let name = fallbackName;
   let description = fallbackName;
@@ -130,7 +133,7 @@ export const load_skill: Tool = {
     function: {
       name: 'load_skill',
       description:
-        'Load the body of a named skill (patch-and-verify, diagnose-bug, home-research, anti-slop-examples). Optional. Built-in tools work without a skill.',
+        'Load the body of a named skill (patch-and-verify, diagnose-bug, home-research, anti-slop-examples, ai-writing-guidelines). Optional. Built-in tools work without a skill.',
       parameters: {
         type: 'object',
         properties: {
@@ -146,7 +149,7 @@ export const load_skill: Tool = {
   },
   guidance: {
     whenToUse: [
-      'You need the procedure body for a named workflow in the skill catalog (patch-and-verify, diagnose-bug, home-research, anti-slop-examples).',
+      'You need the procedure body for a named workflow in the skill catalog (patch-and-verify, diagnose-bug, home-research, anti-slop-examples, ai-writing-guidelines).',
     ],
     whenNotToUse: [
       'Do not load a skill on every turn.',
