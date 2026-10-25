@@ -27,7 +27,6 @@ export type ContextMeter = {
   approximate: boolean;
   layers: ContextReportLayer[];
   reserve: number;
-  selectedSkills: { name: string; description: string }[];
   /** Assembler window provenance when known; catalog soft-fallback leaves this unset. */
   windowSource?: ContextWindowSource;
 };
@@ -74,7 +73,6 @@ export function useContextMeter(options: {
     reserve: number;
     windowTokens: number;
     windowSource?: ContextWindowSource;
-    selectedSkills: { name: string; description: string }[];
   } | null>(null);
 
   const sameModel =
@@ -154,7 +152,6 @@ export function useContextMeter(options: {
               reserve: res.contextReport.budget.outputReserveTokens,
               windowTokens: res.contextReport.budget.windowTokens,
               windowSource: res.contextReport.windowSource,
-              selectedSkills: res.skills?.selected ?? [],
             });
           }
         })
@@ -179,8 +176,7 @@ export function useContextMeter(options: {
     composerOptions.local,
     composerOptions.webSearch,
     composerOptions.posture,
-    skillHints?.pinned,
-    skillHints?.dismissed,
+    skillHints?.requested,
   ]);
 
   // Assembler/report window first; catalog contextLimit only until estimate lands.
@@ -200,7 +196,6 @@ export function useContextMeter(options: {
     liveContextReport?.budget.outputReserveTokens ??
     serverEstimate?.reserve ??
     persistedReserve;
-  const suggested = hasDraft ? (serverEstimate?.selectedSkills ?? []) : [];
   const layers =
     liveLayers.length > 0
       ? liveLayers
@@ -215,7 +210,6 @@ export function useContextMeter(options: {
       approximate: extra > 0,
       layers,
       reserve: liveReserve,
-      selectedSkills: suggested,
       windowSource,
     };
   }
@@ -228,7 +222,6 @@ export function useContextMeter(options: {
       approximate: true,
       layers,
       reserve: liveReserve,
-      selectedSkills: suggested,
       windowSource,
     };
   }
@@ -241,7 +234,6 @@ export function useContextMeter(options: {
       approximate: composerTokens > 0,
       layers,
       reserve: liveReserve,
-      selectedSkills: suggested,
       windowSource,
     };
   }
@@ -254,7 +246,6 @@ export function useContextMeter(options: {
       approximate: true,
       layers: serverEstimate.layers,
       reserve: serverEstimate.reserve,
-      selectedSkills: serverEstimate.selectedSkills,
       windowSource,
     };
   }
@@ -266,7 +257,6 @@ export function useContextMeter(options: {
     approximate: true,
     layers: [],
     reserve: 0,
-    selectedSkills: [],
     windowSource,
   };
 }

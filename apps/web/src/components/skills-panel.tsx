@@ -6,7 +6,7 @@ import {
   useMemo,
   useState,
 } from 'react';
-import { Loader2, Pin, Search, Trash2 } from 'lucide-react';
+import { Loader2, Search, Trash2 } from 'lucide-react';
 import {
   deleteUserSkill,
   fetchSkillCatalogs,
@@ -78,43 +78,22 @@ function CatalogRow({
   overrides,
   expanded,
   onToggleExpand,
-  pinned,
-  matched,
-  onTogglePin,
   action,
 }: {
   skill: SkillCatalogItem;
   overrides: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
-  pinned?: boolean;
-  matched?: boolean;
-  onTogglePin?: () => void;
   action?: React.ReactNode;
 }) {
   return (
-    <li
-      className={cn(
-        'flex items-start gap-2 rounded-lg px-2 py-2.5 transition-colors',
-        matched && 'bg-muted/50',
-      )}
-    >
+    <li className="flex items-start gap-2 rounded-lg px-2 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="truncate text-sm font-medium text-foreground">
             {skill.name}
           </p>
           <OriginBadge source={skill.source} />
-          {pinned ? (
-            <Badge variant="secondary" className="font-normal">
-              Pinned
-            </Badge>
-          ) : null}
-          {matched && !pinned ? (
-            <Badge variant="outline" className="font-normal text-muted-foreground">
-              This send
-            </Badge>
-          ) : null}
         </div>
         <button
           type="button"
@@ -137,29 +116,9 @@ function CatalogRow({
           </p>
         ) : null}
       </div>
-      <div className="flex shrink-0 items-start gap-0.5 pt-0.5">
-        {onTogglePin ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={cn(
-              'size-7 text-muted-foreground hover:text-foreground',
-              pinned && 'text-foreground',
-            )}
-            aria-label={
-              pinned
-                ? `Unpin ${skill.name}`
-                : `Pin ${skill.name} for this thread`
-            }
-            aria-pressed={pinned}
-            onClick={onTogglePin}
-          >
-            <Pin className="size-3.5" />
-          </Button>
-        ) : null}
-        {action}
-      </div>
+      {action ? (
+        <div className="flex shrink-0 items-start gap-0.5 pt-0.5">{action}</div>
+      ) : null}
     </li>
   );
 }
@@ -210,19 +169,9 @@ function ImportRow({
 export function SkillsPanel({
   open,
   onOpenChange,
-  pinnedNames = [],
-  selectedNames = [],
-  onPin,
-  onUnpin,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Thread-pinned skill names (always candidates for the next send). */
-  pinnedNames?: string[];
-  /** Host-selected skill names for the current draft (context meter). */
-  selectedNames?: string[];
-  onPin?: (name: string) => void;
-  onUnpin?: (name: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>('catalog');
   const [catalogs, setCatalogs] = useState<SkillCatalogs>({
@@ -240,15 +189,6 @@ export function SkillsPanel({
   const [confirmFolder, setConfirmFolder] = useState<string | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  const pinnedSet = useMemo(
-    () => new Set(pinnedNames.map((name) => name.toLowerCase())),
-    [pinnedNames],
-  );
-  const selectedSet = useMemo(
-    () => new Set(selectedNames.map((name) => name.toLowerCase())),
-    [selectedNames],
-  );
 
   const loadCatalogs = useCallback(async () => {
     setLoading(true);
@@ -383,18 +323,6 @@ export function SkillsPanel({
     });
   }
 
-  function pinHandlers(skillName: string) {
-    if (!onPin || !onUnpin) return undefined;
-    const key = skillName.toLowerCase();
-    const pinned = pinnedSet.has(key);
-    return {
-      pinned,
-      onTogglePin: () => (pinned ? onUnpin(skillName) : onPin(skillName)),
-    };
-  }
-
-  const canPin = Boolean(onPin && onUnpin);
-
   return (
     <Dialog
       open={open}
@@ -416,9 +344,9 @@ export function SkillsPanel({
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/60 px-4 py-3.5 pr-12">
           <DialogTitle>Skills</DialogTitle>
           <DialogDescription>
-            Catalog of procedure packs. Pin ones for this thread; the host
-            suggests matches for the draft. The agent sees the full catalog and
-            loads a body with{' '}
+            Catalog of procedure packs. Import from GitHub into your home skills
+            folder. Type / in the composer to attach a pack to this send. The
+            agent always sees this catalog and loads a body with{' '}
             <span className="font-mono text-xs">load_skill</span> when intent
             fits.
           </DialogDescription>
@@ -534,9 +462,7 @@ export function SkillsPanel({
                                 Built-in · {filteredGlobal.length}
                               </h3>
                               <ul className="space-y-0.5">
-                                {filteredGlobal.map((skill) => {
-                                  const pin = pinHandlers(skill.name);
-                                  return (
+                                {filteredGlobal.map((skill) => (
                                     <CatalogRow
                                       key={`global:${skill.folder}`}
                                       skill={skill}
@@ -547,14 +473,8 @@ export function SkillsPanel({
                                       onToggleExpand={() =>
                                         toggleExpand(`global:${skill.folder}`)
                                       }
-                                      pinned={pin?.pinned}
-                                      matched={selectedSet.has(
-                                        skill.name.toLowerCase(),
-                                      )}
-                                      onTogglePin={pin?.onTogglePin}
                                     />
-                                  );
-                                })}
+                                  ))}
                               </ul>
                             </section>
                           ) : null}
@@ -584,7 +504,6 @@ export function SkillsPanel({
                             ) : (
                               <ul className="space-y-0.5">
                                 {filteredUser.map((skill) => {
-                                  const pin = pinHandlers(skill.name);
                                   const confirming =
                                     confirmFolder === skill.folder;
                                   return (
@@ -598,11 +517,6 @@ export function SkillsPanel({
                                       onToggleExpand={() =>
                                         toggleExpand(`user:${skill.folder}`)
                                       }
-                                      pinned={pin?.pinned}
-                                      matched={selectedSet.has(
-                                        skill.name.toLowerCase(),
-                                      )}
-                                      onTogglePin={pin?.onTogglePin}
                                       action={
                                         confirming ? (
                                           <div className="flex flex-col items-stretch gap-1 sm:flex-row">
@@ -659,12 +573,10 @@ export function SkillsPanel({
                       )}
                     </div>
                   </ScrollArea>
-                  {canPin ? (
-                    <p className="shrink-0 text-[11px] leading-4 text-muted-foreground">
-                      Pin keeps a skill on this thread. Composer chips above the
-                      input mirror the next send.
-                    </p>
-                  ) : null}
+                  <p className="shrink-0 text-[11px] leading-4 text-muted-foreground">
+                    Type / in the composer to attach a pack to this send. The
+                    agent can also load any catalog skill with load_skill.
+                  </p>
                 </>
               )}
             </div>

@@ -1,9 +1,6 @@
 ---
 name: patch-and-verify
 description: Retrieve, unique-span edit, then run that project's own check and repair from errors. Load before multi-file implementation in a workspace.
-when: patch, edit, implement, fix, refactor
-not: trivia, explain
-modes: workspace
 ---
 
 # Patch and verify

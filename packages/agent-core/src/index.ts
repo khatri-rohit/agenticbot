@@ -3,7 +3,6 @@
 // Domain types and modes live in @agent/agent-models — import them from there.
 
 export {
-  MAX_RUN_SKILLS,
   configureSkillRoots,
   formatSkillBodies,
   formatSkillsCatalog,
@@ -13,7 +12,6 @@ export {
   listSkills,
   parseSkillMarkdown,
   resolveSkillsRoot,
-  selectSkills,
 } from './lib/tools/skills';
 export type { SkillCatalogEntry } from './lib/tools/skills';
 

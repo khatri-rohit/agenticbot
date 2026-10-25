@@ -1,9 +1,6 @@
 ---
 name: diagnose-bug
 description: Disciplined bug loop — reproduce, minimize, hypothesize, fix, recheck. Load when debugging a failure, test, or crash in the open folder or from logs the user pasted.
-when: bug, crash, fail, error, diagnose, debug
-not: trivia
-modes: workspace
 ---
 
 # Diagnose bug

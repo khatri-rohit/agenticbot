@@ -21,8 +21,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 const PENDING_MSG_KEY = 'desk:pendingMessage';
 
 export type ComposerSkillHints = {
-  pinned?: string[];
-  dismissed?: string[];
+  requested?: string[];
 };
 
 export type ComposerOptions = {
@@ -34,7 +33,7 @@ export type ComposerOptions = {
   thinking?: ThinkingValue;
   /** Workspace-only Ask | Agent. Default agent. Ignored on Home. */
   posture?: RunPosture;
-  /** Soft skill hints for this send. Host owns matching. */
+  /** User-requested skills from `/` picks. */
   skills?: ComposerSkillHints;
 };
 
@@ -226,9 +225,6 @@ export type ContextEstimateResponse = {
   contextLength: number | null;
   source: 'estimate';
   contextReport: ContextReport;
-  skills?: {
-    selected: { name: string; description: string }[];
-  };
 };
 
 /** Same assembleContext path as /run: host ledger + memory + optional draft. */

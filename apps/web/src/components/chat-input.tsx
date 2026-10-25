@@ -15,7 +15,6 @@ import {
   Loader2,
   Mic,
   Pencil,
-  Pin,
   Plus,
   Square,
   X,
@@ -95,6 +94,15 @@ import {
   rankMentionThreads,
   threadToMention,
 } from '@/components/thread-mention-picker';
+import {
+  SkillSlashPicker,
+  filterSkillCatalog,
+  skillQueryAtCaret,
+} from '@/components/skill-slash-picker';
+import {
+  fetchSkillCatalogs,
+  type SkillCatalogItem,
+} from '@/features/agent/api/skills-client';
 
 type ComposerDraft = {
   content: string;
@@ -120,35 +128,6 @@ function isPersistedAttachment(value: unknown): value is MessageAttachment {
 
 function draftStorageKey(scope: string): string {
   return `agent:composerDraft:${scope}`;
-}
-
-function pinnedSkillsKey(scope: string): string {
-  return `agent:pinnedSkills:${scope}`;
-}
-
-function loadPinnedSkills(scope: string): string[] {
-  try {
-    const raw = localStorage.getItem(pinnedSkillsKey(scope));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string')
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function savePinnedSkills(scope: string, names: string[]): void {
-  try {
-    if (names.length === 0) {
-      localStorage.removeItem(pinnedSkillsKey(scope));
-      return;
-    }
-    localStorage.setItem(pinnedSkillsKey(scope), JSON.stringify(names));
-  } catch {
-    /* storage blocked */
-  }
 }
 
 function loadComposerDraft(scope: string): ComposerDraft | null {
@@ -272,6 +251,7 @@ export function ChatInput({
   onEditQueued: () => {
     content: string;
     attachments?: MessageAttachment[];
+    skills?: ComposerOptions['skills'];
   } | null;
   composerOptions: ComposerOptions;
   onComposerOptionsChange: (options: ComposerOptions) => void;
@@ -306,10 +286,13 @@ export function ChatInput({
     null,
   );
   const [skillsOpen, setSkillsOpen] = useState(false);
-  const [dismissedSkills, setDismissedSkills] = useState<string[]>([]);
-  const [pinnedSkills, setPinnedSkills] = useState<string[]>(() =>
-    loadPinnedSkills(draftScope),
+  const [requestedSkills, setRequestedSkills] = useState<SkillCatalogItem[]>(
+    [],
   );
+  const [skillSlashOpen, setSkillSlashOpen] = useState(false);
+  const [skillSlashQuery, setSkillSlashQuery] = useState('');
+  const [skillSlashActive, setSkillSlashActive] = useState(0);
+  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[]>([]);
   const catalog = useThreads() ?? [];
   const { workspaceRoot } = useAgentSpace();
   const mentionCandidates = rankMentionThreads(
@@ -485,67 +468,23 @@ export function ChatInput({
     liveEstimatedPromptTokens: estimatedPromptTokens,
     liveContextReport: contextReport,
     liveRunModel: runModel,
-    skillHints: { pinned: pinnedSkills, dismissed: dismissedSkills },
+    skillHints: { requested: requestedSkills.map((skill) => skill.name) },
   });
 
-  const skillChips = useMemo(() => {
-    const descriptions = new Map(
-      contextMeter.selectedSkills.map((skill) => [
-        skill.name,
-        skill.description,
-      ]),
-    );
-    const names: string[] = [];
-    for (const name of [
-      ...pinnedSkills,
-      ...contextMeter.selectedSkills.map((skill) => skill.name),
-    ]) {
-      if (dismissedSkills.includes(name) || names.includes(name)) continue;
-      names.push(name);
-    }
-    return names.map((name) => ({
-      name,
-      description:
-        descriptions.get(name) ??
-        (pinnedSkills.includes(name)
-          ? 'Pinned for this thread'
-          : 'Suggested for this send'),
-    }));
-  }, [pinnedSkills, dismissedSkills, contextMeter.selectedSkills]);
-
-  const pinSkill = useCallback(
-    (name: string) => {
-      setPinnedSkills((current) => {
-        if (current.includes(name)) return current;
-        const next = [...current, name];
-        savePinnedSkills(draftScope, next);
-        return next;
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSkillCatalogs()
+      .then((catalogs) => {
+        if (cancelled) return;
+        setSkillCatalog([...catalogs.global, ...catalogs.user]);
+      })
+      .catch(() => {
+        if (!cancelled) setSkillCatalog([]);
       });
-      setDismissedSkills((current) => current.filter((item) => item !== name));
-    },
-    [draftScope],
-  );
-
-  const unpinSkill = useCallback(
-    (name: string) => {
-      setPinnedSkills((current) => {
-        const next = current.filter((item) => item !== name);
-        savePinnedSkills(draftScope, next);
-        return next;
-      });
-    },
-    [draftScope],
-  );
-
-  const dismissSkill = useCallback(
-    (name: string) => {
-      unpinSkill(name);
-      setDismissedSkills((current) =>
-        current.includes(name) ? current : [...current, name],
-      );
-    },
-    [unpinSkill],
-  );
+    return () => {
+      cancelled = true;
+    };
+  }, [skillsOpen]);
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -643,14 +582,16 @@ export function ChatInput({
     setInput('');
     setPendingAttachments([]);
     setMentionOpen(false);
+    setSkillSlashOpen(false);
     setSelectedMentionId(null);
+    const requested = requestedSkills.map((skill) => skill.name);
+    setRequestedSkills([]);
     clearComposerDraft(draftScope);
-    setDismissedSkills([]);
     onSend(
       content,
       {
         ...composerOptions,
-        skills: { pinned: pinnedSkills, dismissed: dismissedSkills },
+        ...(requested.length > 0 ? { skills: { requested } } : {}),
       },
       attachments,
     );
@@ -668,8 +609,7 @@ export function ChatInput({
     onSend,
     composerOptions,
     draftScope,
-    pinnedSkills,
-    dismissedSkills,
+    requestedSkills,
   ]);
 
   const visibleMentions = useMemo(() => {
@@ -725,6 +665,43 @@ export function ChatInput({
     [input, mentionCandidates, pendingAttachments],
   );
 
+  const visibleSkills = useMemo(
+    () => filterSkillCatalog(skillCatalog, skillSlashQuery),
+    [skillCatalog, skillSlashQuery],
+  );
+
+  const pickSkill = useCallback(
+    (skill: SkillCatalogItem) => {
+      setRequestedSkills((current) => {
+        if (
+          current.some(
+            (item) => item.name.toLowerCase() === skill.name.toLowerCase(),
+          )
+        ) {
+          return current;
+        }
+        return [...current, skill];
+      });
+      const ta = textareaRef.current;
+      const caret = ta?.selectionStart ?? input.length;
+      const found = skillQueryAtCaret(input, caret);
+      const nextText = found
+        ? `${input.slice(0, found.start)}${input.slice(caret)}`
+        : input;
+      setInput(nextText);
+      setSkillSlashOpen(false);
+      setSkillSlashQuery('');
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        const pos = found ? found.start : nextText.length;
+        el.setSelectionRange(pos, pos);
+      });
+    },
+    [input],
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (mentionOpen && visibleMentions.length > 0) {
@@ -753,6 +730,33 @@ export function ChatInput({
         }
       }
 
+      if (skillSlashOpen) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (visibleSkills.length === 0) return;
+          setSkillSlashActive((index) =>
+            Math.min(index + 1, visibleSkills.length - 1),
+          );
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSkillSlashActive((index) => Math.max(index - 1, 0));
+          return;
+        }
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const skill = visibleSkills[skillSlashActive];
+          if (skill) pickSkill(skill);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setSkillSlashOpen(false);
+          return;
+        }
+      }
+
       if (e.key === 'Backspace') {
         const caret = e.currentTarget.selectionStart ?? 0;
         const end = e.currentTarget.selectionEnd ?? 0;
@@ -774,6 +778,11 @@ export function ChatInput({
             );
             return;
           }
+          if (requestedSkills.length > 0) {
+            e.preventDefault();
+            setRequestedSkills((current) => current.slice(0, -1));
+            return;
+          }
         }
       }
 
@@ -791,9 +800,14 @@ export function ChatInput({
       visibleMentions,
       mentionActive,
       pickMention,
+      skillSlashOpen,
+      visibleSkills,
+      skillSlashActive,
+      pickSkill,
       selectedMentionId,
       input,
       pendingAttachments,
+      requestedSkills.length,
       voiceLocked,
       handleSend,
     ],
@@ -842,8 +856,24 @@ export function ChatInput({
     if (!queued) return;
     setInput(queued.content);
     setPendingAttachments(queued.attachments ?? []);
+    const names = queued.skills?.requested ?? [];
+    setRequestedSkills(
+      names.map((name) => {
+        const hit = skillCatalog.find(
+          (skill) => skill.name.toLowerCase() === name.toLowerCase(),
+        );
+        return (
+          hit ?? {
+            name,
+            description: '',
+            folder: name,
+            source: 'global' as const,
+          }
+        );
+      }),
+    );
     textareaRef.current?.focus();
-  }, [onEditQueued]);
+  }, [onEditQueued, skillCatalog]);
 
   // When model config loads, pick a valid thinking value for that model.
   useEffect(() => {
@@ -1122,9 +1152,20 @@ export function ChatInput({
           setMentionOpen(true);
           setMentionQuery(found.query);
           setMentionActive(0);
+          setSkillSlashOpen(false);
+          setSkillSlashQuery('');
+          return;
+        }
+        setMentionOpen(false);
+        setMentionQuery('');
+        const skillFound = skillQueryAtCaret(value, caret);
+        if (skillFound) {
+          setSkillSlashOpen(true);
+          setSkillSlashQuery(skillFound.query);
+          setSkillSlashActive(0);
         } else {
-          setMentionOpen(false);
-          setMentionQuery('');
+          setSkillSlashOpen(false);
+          setSkillSlashQuery('');
         }
       }}
       onKeyDown={handleKeyDown}
@@ -1285,48 +1326,29 @@ export function ChatInput({
               </div>
             ) : null}
 
-            {skillChips.length > 0 ? (
+            {requestedSkills.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap gap-1 px-1">
-                {skillChips.map((chip) => {
-                  const pinned = pinnedSkills.includes(chip.name);
-                  return (
-                    <span
-                      key={chip.name}
-                      title={chip.description}
-                      className="inline-flex max-w-full items-center gap-0.5 rounded-full border border-border/60 bg-muted/40 py-0.5 pr-0.5 pl-2 text-[11px] text-foreground"
+                {requestedSkills.map((skill) => (
+                  <span
+                    key={`${skill.source}:${skill.folder}`}
+                    title={skill.description}
+                    className="inline-flex max-w-full items-center gap-0.5 rounded-full border border-border/60 bg-muted/40 py-0.5 pr-0.5 pl-2 text-[11px] text-foreground"
+                  >
+                    <span className="truncate">{skill.name}</span>
+                    <button
+                      type="button"
+                      className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                      aria-label={`Remove ${skill.name}`}
+                      onClick={() =>
+                        setRequestedSkills((current) =>
+                          current.filter((item) => item.name !== skill.name),
+                        )
+                      }
                     >
-                      <span className="truncate">{chip.name}</span>
-                      <button
-                        type="button"
-                        className={cn(
-                          'inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground',
-                          pinned && 'text-foreground',
-                        )}
-                        aria-label={
-                          pinned
-                            ? `Unpin ${chip.name}`
-                            : `Pin ${chip.name} on this thread`
-                        }
-                        aria-pressed={pinned}
-                        onClick={() =>
-                          pinned
-                            ? unpinSkill(chip.name)
-                            : pinSkill(chip.name)
-                        }
-                      >
-                        <Pin className="size-3" />
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                        aria-label={`Skip ${chip.name} this send`}
-                        onClick={() => dismissSkill(chip.name)}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </span>
-                  );
-                })}
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
               </div>
             ) : null}
 
@@ -1344,6 +1366,19 @@ export function ChatInput({
                   )
                 }
                 onPick={(thread) => pickMention(thread.id)}
+              />
+            ) : null}
+
+            {skillSlashOpen && !mentionOpen ? (
+              <SkillSlashPicker
+                skills={skillCatalog}
+                query={skillSlashQuery}
+                activeIndex={skillSlashActive}
+                onActiveIndexChange={setSkillSlashActive}
+                selectedNames={
+                  new Set(requestedSkills.map((skill) => skill.name))
+                }
+                onPick={pickSkill}
               />
             ) : null}
 
@@ -1397,14 +1432,7 @@ export function ChatInput({
           </p>
         )}
       </div>
-      <SkillsPanel
-        open={skillsOpen}
-        onOpenChange={setSkillsOpen}
-        pinnedNames={pinnedSkills}
-        selectedNames={skillChips.map((chip) => chip.name)}
-        onPin={pinSkill}
-        onUnpin={unpinSkill}
-      />
+      <SkillsPanel open={skillsOpen} onOpenChange={setSkillsOpen} />
     </div>
   );
 }

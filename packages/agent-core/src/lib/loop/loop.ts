@@ -38,10 +38,13 @@ const OPEN_PLAN_WORK_NUDGE =
 const USER_SKIPPED_CHOICE =
   'User skipped this choice. Stop. Do not assume a path or keep editing.';
 
-function isParallelSafeTool(tool: Tool | undefined): boolean {
-  if (!tool) return false;
-  const risk = tool.risk ?? 'read';
-  return risk === 'read' || risk === 'network';
+type ToolStage = 'skill' | 'read' | 'network' | 'mutate';
+
+function toolStage(name: string): ToolStage {
+  if (name === 'load_skill') return 'skill';
+  if (name === 'glob' || name === 'grep' || name === 'read_file') return 'read';
+  if (name === 'web_search' || name === 'web_fetch') return 'network';
+  return 'mutate';
 }
 
 export type {
@@ -1116,10 +1119,10 @@ export async function runLoop(
           durationMs,
         });
 
-        let index = 0;
-        while (index < turn.toolCalls.length) {
-          // The assistant tool_calls row above is already durable. On abort,
-          // every remaining call still needs a tool row or ledger replay breaks.
+        const ready: ReadyToolCall[] = [];
+        let halt: Extract<AdmitResult, { kind: 'halt' }> | null = null;
+        let haltIndex = 0;
+        for (let index = 0; index < turn.toolCalls.length; index++) {
           if (signal?.aborted) {
             await skipToolCalls(
               turn.toolCalls.slice(index),
@@ -1129,83 +1132,51 @@ export async function runLoop(
           }
 
           const toolCall = turn.toolCalls[index];
-          if (!toolCall || toolCall.type !== 'function') {
-            index += 1;
-            continue;
-          }
+          if (!toolCall || toolCall.type !== 'function') continue;
 
           const admitted = await admitToolCall(toolCall);
           if (admitted.kind === 'halt') {
-            return finishHalt(admitted, index, turn.toolCalls);
+            halt = admitted;
+            haltIndex = index;
+            break;
           }
-          if (admitted.kind === 'filled') {
-            index += 1;
-            continue;
-          }
+          if (admitted.kind === 'filled') continue;
+          ready.push(admitted.call);
+        }
 
-          if (isParallelSafeTool(admitted.call.tool)) {
-            const batch = [admitted.call];
-            let next = index + 1;
-            while (next < turn.toolCalls.length) {
-              const upcoming = turn.toolCalls[next];
-              if (!upcoming || upcoming.type !== 'function') break;
-              const upcomingTool = tools.byName.get(upcoming.function.name);
-              if (!isParallelSafeTool(upcomingTool)) break;
-              if (
-                posture === 'ask' &&
-                isAskStrippedTool(upcoming.function.name)
-              ) {
-                break;
-              }
-              try {
-                JSON.parse(upcoming.function.arguments);
-              } catch {
-                break;
-              }
-              const nextAdmitted = await admitToolCall(upcoming);
-              if (nextAdmitted.kind === 'halt') {
-                if ((await executeReadyBatch(batch, [])) === 'deferred') {
-                  return finishChoiceSkipped();
-                }
-                return finishHalt(nextAdmitted, next, turn.toolCalls);
-              }
-              if (nextAdmitted.kind === 'filled') {
-                if (
-                  (await executeReadyBatch(
-                    batch,
-                    turn.toolCalls.slice(next + 1),
-                  )) === 'deferred'
-                ) {
-                  return finishChoiceSkipped();
-                }
-                index = next + 1;
-                batch.length = 0;
-                break;
-              }
-              batch.push(nextAdmitted.call);
-              next += 1;
-            }
-            if (batch.length > 0) {
-              if (
-                (await executeReadyBatch(batch, turn.toolCalls.slice(next))) ===
-                'deferred'
-              ) {
-                return finishChoiceSkipped();
-              }
-              index = next;
-            }
-            continue;
-          }
+        const staged: Record<ToolStage, ReadyToolCall[]> = {
+          skill: [],
+          read: [],
+          network: [],
+          mutate: [],
+        };
+        for (const call of ready) {
+          staged[toolStage(call.toolName)].push(call);
+        }
 
-          if (
-            (await executeReadyCall(
-              admitted.call,
-              turn.toolCalls.slice(index),
-            )) === 'deferred'
-          ) {
-            return finishChoiceSkipped();
+        const runSerial = async (batch: ReadyToolCall[]) => {
+          for (let i = 0; i < batch.length; i++) {
+            const call = batch[i];
+            if (!call) continue;
+            const outcome = await executeReadyCall(
+              call,
+              batch.slice(i).map((item) => item.toolCall),
+            );
+            if (outcome === 'deferred') return 'deferred' as const;
           }
-          index += 1;
+          return 'ok' as const;
+        };
+
+        if (
+          (await executeReadyBatch(staged.skill, [])) === 'deferred' ||
+          (await executeReadyBatch(staged.read, [])) === 'deferred' ||
+          (await runSerial(staged.network)) === 'deferred' ||
+          (await runSerial(staged.mutate)) === 'deferred'
+        ) {
+          return finishChoiceSkipped();
+        }
+        if (halt) {
+          return finishHalt(halt, haltIndex, turn.toolCalls);
         }
 
         stubLiveToolResults(messages, contextBudget);

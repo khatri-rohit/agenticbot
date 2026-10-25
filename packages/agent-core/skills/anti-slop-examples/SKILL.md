@@ -1,7 +1,6 @@
 ---
 name: anti-slop-examples
 description: Extra examples of anti-slop code fixes. Load when reviewing a diff, rewriting generated code, or the user asks to de-slop. The short anti-slop law is already always-on.
-when: de-slop, rewrite, examples
 ---
 
 # Anti-slop examples

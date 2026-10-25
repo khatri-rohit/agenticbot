@@ -81,11 +81,10 @@ export function buildSystemPrompt(
     ? `
 # Skills
 
-Procedure packs. The skills layer lists the full catalog; * marks host suggestions. Suggested bodies are already in Loaded skills when the host matched this turn.
-On a new non-trivial task (implement, design, architecture, review, debug, write), match the catalog to the user intent before glob, grep, read_file, edit_file, or web_search.
-If a catalog skill fits and its body is not already loaded, call load_skill first (same turn as other read-only tools is fine after that). Follow the loaded guardrails.
-Prefer * suggestions when they fit. If several could apply and intent is unclear, ask briefly or load the closest match.
-If none apply, say so internally and continue. Trivia: skip. Loading does not approve steps or add tools. Respect modes tags.
+The skills layer lists every pack as name + description. Loaded skills (user-attached) already have bodies.
+On a new non-trivial task, match the catalog to the user intent, then call load_skill for each pack that fits and is not already loaded. Follow those bodies before glob, grep, read_file, or edit_file.
+If none apply, continue without a skill. Trivia: skip. Loading does not approve steps or add tools.
+Do not use offer_choice to pick a skill.
 `
     : '';
 
@@ -129,8 +128,9 @@ ${webSearchRule}
 - web_fetch returns a short source card (sha256 + teaser). Read more with the same tool using sha256+offset+limit — do not refetch the URL for additional text.
 - Do not repeat the same tool with the same arguments if it already failed or did not help.
 - Do not search in loops when results are not improving; answer with what you have and state uncertainty.
-- On a new non-trivial task, resolve skills (Loaded skills + load_skill) before glob, grep, read_file, or edit_file.
-- Independent read-only tools (glob, grep, read_file, web_search, web_fetch, load_skill) may be called together in one turn after skills are resolved. Writes, shell, plan, todo, memory, and offer_choice stay one-at-a-time.
+- On a new non-trivial task, call load_skill for matching catalog packs before glob, grep, read_file, or edit_file. The host runs load_skill first if you emit mixed tool calls.
+- glob, grep, and read_file may run together. web_search and web_fetch stay ordered (search then fetch). Writes, shell, plan, todo, memory, and offer_choice stay one-at-a-time.
+- offer_choice is only for approach or product decisions in the user task. Never for which tool or which skill to load.
 
 Thread plan:
 - This thread has a durable plan journal (\`plan\`) and checklist (\`todo\`). Both work in Ask and Agent. Do not wait for Ask mode to journal.
@@ -187,7 +187,7 @@ function workspaceAgentBehavior(hasWebSearch: boolean): string {
 You are bound to one opened project folder. File tools and the terminal cannot leave that folder.
 
 Act loop:
-1. Skills — match the catalog to this turn. Follow Loaded skills. load_skill any other pack that fits before you retrieve files.
+1. Skills — match the catalog. Follow Loaded skills. load_skill any other pack that fits.
 2. Retrieve — glob / grep / read_file until the working files are known. Do not invent paths.
    Never use run_terminal to read or search files.
    If the work is non-trivial and there is no Final plan, journal then finalize + todo before the first edit.

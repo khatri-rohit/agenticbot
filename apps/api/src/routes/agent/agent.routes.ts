@@ -30,7 +30,6 @@ import {
 } from '@agent/agent-models';
 import {
   ALL_TOOLS,
-  MAX_RUN_SKILLS,
   RUN_HANDLE_TTL_MS,
   RunManager,
   assembleContext,
@@ -45,7 +44,7 @@ import {
   loadWorkspaceRules,
   packMentionedThread,
   resolveReasoningEffort,
-  selectSkills,
+  getSkill,
   type MentionedThreadContext,
   type ToolRegistry,
 } from '@agent/agent-core';
@@ -181,42 +180,25 @@ function skillNameList(value: unknown): string[] | undefined {
   return names;
 }
 
-function parseSkillHints(raw: unknown): {
-  pinned?: string[];
-  dismissed?: string[];
-} {
-  if (!raw || typeof raw !== 'object') return {};
-  const body = raw as { pinned?: unknown; dismissed?: unknown };
-  const pinned = skillNameList(body.pinned);
-  const dismissed = skillNameList(body.dismissed);
-  return {
-    ...(pinned ? { pinned } : {}),
-    ...(dismissed ? { dismissed } : {}),
-  };
-}
-
-/** Soft suggestions for ledger / catalog * marks / UI chips. Not a load_skill jail. */
-function resolveSkillNames(input: {
-  query: string;
-  mode: string;
-  hints?: { pinned?: string[]; dismissed?: string[] };
-  stored?: string[];
-  /** New user text: always match. Retry with no message: reuse stored. */
-  hasNewMessage?: boolean;
-}): string[] {
-  if (input.hasNewMessage) {
-    return selectSkills({
-      query: input.query,
-      mode: input.mode,
-      pinned: input.hints?.pinned,
-      dismissed: input.hints?.dismissed,
-    }).selected.map((skill) => skill.name);
+function resolveRequestedSkills(raw: unknown, stored?: string[]): string[] {
+  const names =
+    skillNameList(
+      raw && typeof raw === 'object'
+        ? (raw as { requested?: unknown }).requested
+        : undefined,
+    ) ?? stored;
+  if (!names) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    const skill = getSkill(name);
+    if (!skill) continue;
+    const key = skill.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(skill.name);
   }
-  if (input.stored) return input.stored.slice(0, MAX_RUN_SKILLS);
-  return selectSkills({
-    query: input.query,
-    mode: input.mode,
-  }).selected.map((skill) => skill.name);
+  return out;
 }
 
 async function prepareRun(input: {
@@ -237,7 +219,6 @@ async function prepareRun(input: {
   report: ReturnType<typeof assembleContext>['report'];
   mode: ModeConfig;
   posture: RunPosture;
-  skillNames: string[];
 }> {
   const memory = getMemoryStore();
   const kind = normalizeThreadKind(input.thread?.kind);
@@ -342,7 +323,6 @@ async function prepareRun(input: {
     report: { ...report, windowSource },
     mode,
     posture,
-    skillNames,
   };
 }
 
@@ -366,11 +346,7 @@ async function maybeCompactThread(input: {
     envelopes,
     model: input.model,
     endpoint: input.endpoint,
-    skillNames: resolveSkillNames({
-      query: lastUser?.record.role === 'user' ? lastUser.record.content : '',
-      mode: modeForKind(normalizeThreadKind(thread.kind)).name,
-      stored: lastUser?.skills?.selected,
-    }),
+    skillNames: resolveRequestedSkills(undefined, lastUser?.skills?.selected),
   });
   if (!prepared.report.needsCompaction) return;
   const throughSeq = chooseCompactThroughSeq(
@@ -559,8 +535,6 @@ router.post('/run', async (req: Request, res: Response) => {
     skills: rawSkills,
   } = req.body as StartRunRequest;
   const posture = normalizeRunPosture(rawPosture);
-  const skillHints =
-    rawSkills !== undefined ? parseSkillHints(rawSkills) : undefined;
 
   if (!threadId) {
     return res.status(400).json({ error: 'threadId is required' });
@@ -607,15 +581,10 @@ router.post('/run', async (req: Request, res: Response) => {
   const ledgerBefore = await store.readLedger(threadId, 0);
   const isFirstUserTurn = ledgerBefore.length === 0 && Boolean(message);
   const priorUser = lastUserEnvelope(ledgerBefore);
-  const skillQuery = message?.content ??
-    (priorUser?.record.role === 'user' ? priorUser.record.content : '');
-  const skillNames = resolveSkillNames({
-    query: skillQuery,
-    mode: modeForKind(normalizeThreadKind(thread.kind)).name,
-    hints: skillHints,
-    stored: priorUser?.skills?.selected,
-    hasNewMessage: Boolean(message),
-  });
+  const skillNames = resolveRequestedSkills(
+    rawSkills,
+    message ? undefined : priorUser?.skills?.selected,
+  );
 
   if (message) {
     await store.append({
@@ -704,7 +673,6 @@ router.post('/run', async (req: Request, res: Response) => {
     estimatedPromptTokens: prepared.report.occupiedTokens,
     contextReport: prepared.report,
     contextBudget: prepared.report.budget,
-    skillNames: prepared.skillNames,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     putBlob: (text) => store.putBlob(threadId, text),
     readBlob: async (sha256, offset, length) => {
@@ -822,15 +790,6 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
 
   const estimateThread = id === 'draft' ? undefined : store.getThread(id);
   const useModel = model ?? estimateThread?.model ?? HOME_MODE.model;
-  const lastUser = lastUserEnvelope(envelopes);
-  const skillQuery =
-    trimmed ||
-    (lastUser?.record.role === 'user' ? lastUser.record.content : '');
-  const selected = selectSkills({
-    query: skillQuery,
-    mode: modeForKind(normalizeThreadKind(estimateThread?.kind)).name,
-    ...parseSkillHints(rawSkills),
-  }).selected;
   const { report } = await prepareRun({
     threadId: id,
     thread: estimateThread,
@@ -840,7 +799,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     envelopes,
     model: useModel,
     endpoint: endpointFromLocal(local),
-    skillNames: selected.map((skill) => skill.name),
+    skillNames: resolveRequestedSkills(rawSkills),
   });
 
   return res.json({
@@ -848,12 +807,6 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     contextLength: report.budget.windowTokens,
     source: 'estimate' as const,
     contextReport: report,
-    skills: {
-      selected: selected.map((skill) => ({
-        name: skill.name,
-        description: skill.description,
-      })),
-    },
   });
 });
 

@@ -55,8 +55,6 @@ export type StartRunOptions = {
   /** Heuristic size of the first request envelope (system + tools + messages). */
   estimatedPromptTokens?: number;
   contextReport?: ContextReport;
-  /** Soft suggestions for assemble * marks / ledger. Not a load_skill jail. */
-  skillNames?: string[];
   origin?: ToolOrigin;
   workspaceRoot?: string;
   putBlob?: (text: string) => Promise<string>;

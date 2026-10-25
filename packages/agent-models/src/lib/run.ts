@@ -112,12 +112,8 @@ export type StartRunRequest = {
    * Ignored for Home. Default agent.
    */
   posture?: RunPosture;
-  /**
-   * Soft skill hints for this send. Host runs selectSkills for suggestions
-   * (UI chips + catalog * marks). Does not gate load_skill.
-   */
+  /** User-requested catalog names from `/` picks. Bodies load for this send. */
   skills?: {
-    pinned?: string[];
-    dismissed?: string[];
+    requested?: string[];
   };
 };

@@ -54,9 +54,8 @@ export type AssembleContextInput = {
   /** Thread-scoped plan journal + todos. Injected when non-empty. */
   plan?: ThreadPlan | null;
   /**
-   * Host soft suggestions for this run (selectSkills, usually 0–3).
-   * Marked with * in the skills catalog; bodies are prefetched into
-   * Loaded skills. Does not gate load_skill.
+   * User-requested skill names for this send (`/` picks).
+   * Bodies go into Loaded skills. Catalog is always the full list.
    */
   skillNames?: string[];
 };
@@ -437,16 +436,14 @@ export function assembleContext(
   };
 
   const hasLoadSkill = input.tools.byName.has('load_skill');
-  const suggestedNames = input.skillNames ?? [];
-  const skillsText = hasLoadSkill
-    ? formatSkillsCatalog(listSkills(), suggestedNames)
-    : '';
+  const requestedNames = input.skillNames ?? [];
+  const skillsText = hasLoadSkill ? formatSkillsCatalog(listSkills()) : '';
   const skillsMessage: ChatCompletionMessageParam | null = skillsText
     ? { role: 'system', content: skillsText }
     : null;
   const bodiesText = hasLoadSkill
     ? formatSkillBodies(
-        suggestedNames,
+        requestedNames,
         loadedSkillNamesFromEnvelopes(input.envelopes),
       )
     : '';
@@ -597,7 +594,7 @@ export function assembleContext(
     },
     {
       id: 'skills_bodies',
-      label: 'Suggested skill bodies',
+      label: 'Attached skill bodies',
       tokens: bodiesText ? charsToTokens(bodiesText.length) + 4 : 0,
     },
     {

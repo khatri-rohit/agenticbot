@@ -90,6 +90,7 @@ export const offer_choice: Tool = {
     ],
     whenNotToUse: [
       'Do not use this to ask permission to edit files or run commands — those tools run without a pause.',
+      'Do not use this to pick a skill or a tool. Load skills with load_skill; call tools directly.',
       'Do not use this for trivia, or when one next step is already obvious.',
     ],
     usage: [

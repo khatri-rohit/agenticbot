@@ -66,7 +66,7 @@ export type LedgerEnvelope = {
   attachments?: MessageAttachment[];
   /** Assistant response wall-clock duration (model-call + stream); host-assigned like seq/ts. */
   durationMs?: number;
-  /** Soft skill suggestions for the run that consumed this user turn. */
+  /** User-requested skill names for the run that consumed this user turn. */
   skills?: { selected: string[] };
 };
 

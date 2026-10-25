@@ -7,6 +7,8 @@ import type { Skill, SkillMetadata, Tool } from './type';
  * Built-in packs: packages/agent-core/skills/<name>/SKILL.md.
  * Host may set a user root ($AGENT_HOME/skills). One catalog API;
  * user name wins on collision.
+ *
+ * Generic contract is name + description + body. Extra YAML is ignored.
  */
 
 export type SkillCatalogEntry = SkillMetadata & {
@@ -54,97 +56,11 @@ export function invalidateSkillCatalog(): void {
   cached = null;
 }
 
-export const MAX_RUN_SKILLS = 3;
-
-const TOKEN = /[a-z0-9][a-z0-9+._-]*/g;
-const MODE_NAMES = new Set(['home', 'workspace', 'thinking']);
-/** Generic SKILL.md has no `when`. Score name + description; skip filler. */
-const STOP = new Set([
-  'the',
-  'a',
-  'an',
-  'and',
-  'or',
-  'to',
-  'of',
-  'in',
-  'on',
-  'for',
-  'with',
-  'this',
-  'that',
-  'from',
-  'your',
-  'you',
-  'use',
-  'when',
-  'then',
-  'than',
-  'into',
-  'over',
-  'able',
-  'also',
-  'just',
-  'like',
-  'make',
-  'need',
-  'please',
-  'help',
-  'hi',
-  'hey',
-  'hello',
-  'thanks',
-  'there',
-]);
-
 export type ParsedSkill = {
   name: string;
   description: string;
   instructions: string;
-  when: string[];
-  not: string[];
-  modes: string[];
 };
-
-function csv(value: string): string[] {
-  return value
-    .replace(/^\[|\]$/g, '')
-    .split(',')
-    .map((part) => part.trim().toLowerCase().replace(/^['"]|['"]$/g, ''))
-    .filter(Boolean);
-}
-
-function tokens(text: string): string[] {
-  return text.toLowerCase().match(TOKEN) ?? [];
-}
-
-function indexTokens(text: string): string[] {
-  return tokens(text).filter(
-    (word) => word.length >= 3 && !STOP.has(word),
-  );
-}
-
-function tokenHits(queryToken: string, hay: string[]): boolean {
-  if (hay.includes(queryToken)) return true;
-  if (queryToken.length < 4) return false;
-  return hay.some(
-    (word) =>
-      word.length >= 4 &&
-      (word.startsWith(queryToken) || queryToken.startsWith(word)),
-  );
-}
-
-function metaFields(skill: {
-  when?: string[];
-  not?: string[];
-  modes?: string[];
-}): Pick<SkillMetadata, 'when' | 'not' | 'modes'> {
-  return {
-    ...(skill.when?.length ? { when: skill.when } : {}),
-    ...(skill.not?.length ? { not: skill.not } : {}),
-    ...(skill.modes?.length ? { modes: skill.modes } : {}),
-  };
-}
 
 export function parseSkillMarkdown(
   raw: string,
@@ -157,18 +73,12 @@ export function parseSkillMarkdown(
       name: fallbackName,
       description: fallbackName,
       instructions: trimmed.trim(),
-      when: [],
-      not: [],
-      modes: [],
     };
   }
   const fm = trimmed.slice(3, end).trim().replace(/\r/g, '');
   const body = trimmed.slice(end + 4).trim();
   let name = fallbackName;
   let description = fallbackName;
-  let when: string[] = [];
-  let not: string[] = [];
-  let modes: string[] = [];
   for (const line of fm.split('\n')) {
     const match = line.match(/^([A-Za-z][\w-]*)\s*:\s*(.*)$/);
     if (!match) continue;
@@ -176,13 +86,8 @@ export function parseSkillMarkdown(
     const value = match[2].trim().replace(/^['"]|['"]$/g, '');
     if (key === 'name' && value) name = value;
     if (key === 'description' && value) description = value;
-    if (key === 'when') when = csv(value);
-    if (key === 'not') not = csv(value);
-    if (key === 'modes') {
-      modes = csv(value).filter((mode) => MODE_NAMES.has(mode));
-    }
   }
-  return { name, description, instructions: body, when, not, modes };
+  return { name, description, instructions: body };
 }
 
 function readRoot(root: string): { folder: string; skill: Skill }[] {
@@ -206,7 +111,6 @@ function readRoot(root: string): { folder: string; skill: Skill }[] {
           name: parsed.name,
           description: parsed.description,
           instructions: parsed.instructions,
-          ...metaFields(parsed),
         },
       });
     } catch {
@@ -233,11 +137,7 @@ function catalog(): Skill[] {
 }
 
 export function listSkills(): SkillMetadata[] {
-  return catalog().map(({ name, description, when, not, modes }) => ({
-    name,
-    description,
-    ...metaFields({ when, not, modes }),
-  }));
+  return catalog().map(({ name, description }) => ({ name, description }));
 }
 
 export function getSkill(name: string): Skill | undefined {
@@ -246,7 +146,7 @@ export function getSkill(name: string): Skill | undefined {
   return catalog().find((item) => item.name.toLowerCase() === key);
 }
 
-/** Host-prefetch of suggested bodies. Cap is selectSkills / MAX_RUN_SKILLS. */
+/** User-requested bodies (`/` picks). Not host guesses. */
 export function formatSkillBodies(
   names: string[],
   alreadyLoaded: string[] = [],
@@ -265,146 +165,29 @@ export function formatSkillBodies(
   if (blocks.length === 0) return '';
   return [
     '# Loaded skills',
-    'Host placed these procedure packs in context for this turn.',
-    'Follow them before glob, grep, read_file, edit_file, or web_search.',
+    'The user attached these packs to this send. Follow them.',
     'Do not call load_skill again for these names.',
     '',
     blocks.join('\n\n'),
   ].join('\n');
 }
 
-/**
- * Compact catalog for the skills_catalog context layer.
- * `suggested` are host lexical hints (selectSkills); marked with `*`.
- */
-export function formatSkillsCatalog(
-  skills: SkillMetadata[],
-  suggested: string[] = [],
-): string {
-  const suggestedSet = new Set(
-    suggested.map((name) => name.toLowerCase()),
-  );
+export function formatSkillsCatalog(skills: SkillMetadata[]): string {
   const lines =
     skills.length === 0
       ? '- (none)'
       : skills
-          .map((skill) => {
-            const mark = suggestedSet.has(skill.name.toLowerCase())
-              ? '*'
-              : '';
-            const tags: string[] = [];
-            if (skill.when?.length) {
-              tags.push(`when: ${skill.when.join(', ')}`);
-            }
-            if (skill.modes?.length) {
-              tags.push(`modes: ${skill.modes.join(', ')}`);
-            }
-            const suffix = tags.length > 0 ? ` (${tags.join('; ')})` : '';
-            return `- ${mark}${skill.name}: ${skill.description}${suffix}`;
-          })
+          .map((skill) => `- ${skill.name}: ${skill.description}`)
           .join('\n');
   return [
     '# Skills',
-    'Catalog of procedure packs. * marks host suggestions; those bodies are in Loaded skills when they match.',
-    'On a new non-trivial task, match this catalog before glob, grep, read_file, or edit_file.',
-    'Call load_skill for a catalog name that fits and is not already loaded. Prefer * when they fit.',
-    'If none apply, continue without a skill. Loading does not approve steps or add tools.',
+    'Catalog of procedure packs (name + description).',
+    'On a new non-trivial task, match this list to the user intent before glob, grep, read_file, or edit_file.',
+    'Call load_skill with an exact catalog name to load a body. If none apply, continue without a skill.',
+    'Loading does not approve steps or add tools. Do not use offer_choice to pick a skill.',
     '',
     lines,
   ].join('\n');
-}
-
-/**
- * Deterministic suggestions from the generic skill contract: name +
- * description. Optional `when` / `not` / `modes` only boost or constrain.
- * Does not gate load_skill.
- */
-export function selectSkills(input: {
-  query: string;
-  mode?: string;
-  pinned?: string[];
-  dismissed?: string[];
-  catalog?: SkillMetadata[];
-  limit?: number;
-}): { selected: SkillMetadata[]; scores: { name: string; score: number }[] } {
-  const catalog = input.catalog ?? listSkills();
-  const limit = input.limit ?? MAX_RUN_SKILLS;
-  const dismissed = new Set(
-    (input.dismissed ?? []).map((name) => name.toLowerCase()),
-  );
-  const pinnedNames = (input.pinned ?? []).map((name) => name.toLowerCase());
-  const query = input.query.toLowerCase();
-  const queryTokens = indexTokens(query);
-  const queryTokenSet = new Set(tokens(query));
-
-  const byName = new Map(
-    catalog.map((skill) => [skill.name.toLowerCase(), skill]),
-  );
-  const selected: SkillMetadata[] = [];
-  const seen = new Set<string>();
-
-  for (const name of pinnedNames) {
-    if (selected.length >= limit) break;
-    const skill = byName.get(name);
-    if (!skill || dismissed.has(name) || seen.has(name)) continue;
-    selected.push(skill);
-    seen.add(name);
-  }
-
-  const scored: { skill: SkillMetadata; score: number }[] = [];
-  for (const skill of catalog) {
-    const key = skill.name.toLowerCase();
-    if (seen.has(key) || dismissed.has(key)) continue;
-    if (
-      skill.modes?.length &&
-      input.mode &&
-      !skill.modes.includes(input.mode)
-    ) {
-      continue;
-    }
-    if (skill.not?.some((word) => queryTokenSet.has(word))) continue;
-
-    const nameParts = skill.name
-      .toLowerCase()
-      .split(/[-_\s]+/)
-      .filter((part) => part.length >= 3);
-    const nameHit =
-      query.includes(key) ||
-      (nameParts.length > 0 &&
-        nameParts.every((part) => queryTokenSet.has(part)));
-
-    let score = nameHit ? 100 : 0;
-    const description = indexTokens(skill.description);
-    for (const word of queryTokens) {
-      if (tokenHits(word, nameParts)) score += 20;
-      if (tokenHits(word, description)) score += 8;
-    }
-    for (const word of skill.when ?? []) {
-      if (queryTokenSet.has(word) || queryTokens.includes(word)) score += 10;
-    }
-    if (score < 8 && !nameHit) continue;
-    scored.push({ skill, score });
-  }
-
-  scored.sort(
-    (a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
-  );
-  for (const row of scored) {
-    if (selected.length >= limit) break;
-    selected.push(row.skill);
-  }
-
-  return {
-    selected,
-    scores: [
-      ...selected
-        .filter((skill) =>
-          pinnedNames.includes(skill.name.toLowerCase()),
-        )
-        .map((skill) => ({ name: skill.name, score: Number.POSITIVE_INFINITY })),
-      ...scored.map((row) => ({ name: row.skill.name, score: row.score })),
-    ],
-  };
 }
 
 export function listSkillCatalogs(): {
@@ -436,7 +219,7 @@ export const load_skill: Tool = {
     function: {
       name: 'load_skill',
       description:
-        'Load the procedure body for a skill from the catalog. Optional. Built-in tools work without a skill.',
+        'Load the procedure body for a skill from the catalog. Built-in tools work without a skill.',
       parameters: {
         type: 'object',
         properties: {
@@ -459,17 +242,16 @@ export const load_skill: Tool = {
       'Do not load a skill on every turn.',
       'Do not load a skill instead of calling a built-in tool.',
       'Do not load a skill for small talk or a one-line factual answer.',
-      'Do not load a skill whose modes clearly exclude this run mode.',
+      'Do not use offer_choice to decide which skill to load.',
     ],
     usage: [
       'Pass skill_name exactly as listed in the skills catalog.',
-      'If several skills could apply and intent is unclear, ask briefly before loading.',
       'Follow the loaded steps; they do not grant extra tools or bypass the path jail.',
     ],
   },
   execute: async (args) => {
     const name = String(args.skill_name ?? '').trim();
-    const skill = catalog().find((item) => item.name === name);
+    const skill = getSkill(name);
     if (skill) return skill.instructions;
     const available = listSkills()
       .map((item) => item.name)

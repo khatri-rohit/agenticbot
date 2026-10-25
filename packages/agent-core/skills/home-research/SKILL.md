@@ -1,9 +1,6 @@
 ---
 name: home-research
 description: Multi-source web answer discipline for Home chats. Load for current-events, product, or version questions that need search. Not required before calling web_search.
-when: search, news, current, version, latest
-not: patch, implement
-modes: home
 ---
 
 # Home research

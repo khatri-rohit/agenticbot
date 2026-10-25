@@ -452,11 +452,12 @@ export function useAgentRun(threadId: string | null) {
   const editQueuedMessage = useCallback((): {
     content: string;
     attachments?: MessageAttachment[];
+    skills?: ComposerOptions['skills'];
   } | null => {
     if (!queuedMessage) return null;
-    const { content, attachments } = queuedMessage;
+    const { content, attachments, options } = queuedMessage;
     setQueuedMessage(null);
-    return { content, attachments };
+    return { content, attachments, skills: options.skills };
   }, [queuedMessage]);
 
   const clearQueuedMessage = useCallback(() => {
