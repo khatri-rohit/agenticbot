@@ -5,7 +5,9 @@
 export {
   MAX_RUN_SKILLS,
   configureSkillRoots,
+  formatSkillBodies,
   formatSkillsCatalog,
+  getSkill,
   invalidateSkillCatalog,
   listSkillCatalogs,
   listSkills,

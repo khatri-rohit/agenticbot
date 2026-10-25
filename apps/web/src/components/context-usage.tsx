@@ -35,6 +35,7 @@ const BUCKETS: {
     label: 'Rules & memory',
     layerIds: [
       'skills_catalog',
+      'skills_bodies',
       'memory',
       'rules',
       'plan',

@@ -58,6 +58,44 @@ export const MAX_RUN_SKILLS = 3;
 
 const TOKEN = /[a-z0-9][a-z0-9+._-]*/g;
 const MODE_NAMES = new Set(['home', 'workspace', 'thinking']);
+/** Generic SKILL.md has no `when`. Score name + description; skip filler. */
+const STOP = new Set([
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'to',
+  'of',
+  'in',
+  'on',
+  'for',
+  'with',
+  'this',
+  'that',
+  'from',
+  'your',
+  'you',
+  'use',
+  'when',
+  'then',
+  'than',
+  'into',
+  'over',
+  'able',
+  'also',
+  'just',
+  'like',
+  'make',
+  'need',
+  'please',
+  'help',
+  'hi',
+  'hey',
+  'hello',
+  'thanks',
+  'there',
+]);
 
 export type ParsedSkill = {
   name: string;
@@ -78,6 +116,22 @@ function csv(value: string): string[] {
 
 function tokens(text: string): string[] {
   return text.toLowerCase().match(TOKEN) ?? [];
+}
+
+function indexTokens(text: string): string[] {
+  return tokens(text).filter(
+    (word) => word.length >= 3 && !STOP.has(word),
+  );
+}
+
+function tokenHits(queryToken: string, hay: string[]): boolean {
+  if (hay.includes(queryToken)) return true;
+  if (queryToken.length < 4) return false;
+  return hay.some(
+    (word) =>
+      word.length >= 4 &&
+      (word.startsWith(queryToken) || queryToken.startsWith(word)),
+  );
 }
 
 function metaFields(skill: {
@@ -186,6 +240,39 @@ export function listSkills(): SkillMetadata[] {
   }));
 }
 
+export function getSkill(name: string): Skill | undefined {
+  const key = name.trim().toLowerCase();
+  if (!key) return undefined;
+  return catalog().find((item) => item.name.toLowerCase() === key);
+}
+
+/** Host-prefetch of suggested bodies. Cap is selectSkills / MAX_RUN_SKILLS. */
+export function formatSkillBodies(
+  names: string[],
+  alreadyLoaded: string[] = [],
+): string {
+  const skip = new Set(alreadyLoaded.map((name) => name.toLowerCase()));
+  const blocks: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    const skill = getSkill(name);
+    if (!skill) continue;
+    const key = skill.name.toLowerCase();
+    if (seen.has(key) || skip.has(key)) continue;
+    seen.add(key);
+    blocks.push(`## ${skill.name}\n${skill.instructions}`);
+  }
+  if (blocks.length === 0) return '';
+  return [
+    '# Loaded skills',
+    'Host placed these procedure packs in context for this turn.',
+    'Follow them before glob, grep, read_file, edit_file, or web_search.',
+    'Do not call load_skill again for these names.',
+    '',
+    blocks.join('\n\n'),
+  ].join('\n');
+}
+
 /**
  * Compact catalog for the skills_catalog context layer.
  * `suggested` are host lexical hints (selectSkills); marked with `*`.
@@ -218,18 +305,19 @@ export function formatSkillsCatalog(
           .join('\n');
   return [
     '# Skills',
-    'Catalog of procedure packs. Host suggestions for this turn are marked *.',
-    'Call load_skill with skill_name when that workflow matches the user intent.',
-    'Prefer suggested when they fit; if unsure which skill applies, ask briefly or load the closest match.',
-    'Built-in tools work without a skill. Loading does not approve steps or add tools.',
+    'Catalog of procedure packs. * marks host suggestions; those bodies are in Loaded skills when they match.',
+    'On a new non-trivial task, match this catalog before glob, grep, read_file, or edit_file.',
+    'Call load_skill for a catalog name that fits and is not already loaded. Prefer * when they fit.',
+    'If none apply, continue without a skill. Loading does not approve steps or add tools.',
     '',
     lines,
   ].join('\n');
 }
 
 /**
- * Deterministic soft suggestions for UI chips + catalog `*` marks. No LLM.
- * Does not gate load_skill — the model may load any catalog skill.
+ * Deterministic suggestions from the generic skill contract: name +
+ * description. Optional `when` / `not` / `modes` only boost or constrain.
+ * Does not gate load_skill.
  */
 export function selectSkills(input: {
   query: string;
@@ -246,7 +334,8 @@ export function selectSkills(input: {
   );
   const pinnedNames = (input.pinned ?? []).map((name) => name.toLowerCase());
   const query = input.query.toLowerCase();
-  const queryTokens = new Set(tokens(query));
+  const queryTokens = indexTokens(query);
+  const queryTokenSet = new Set(tokens(query));
 
   const byName = new Map(
     catalog.map((skill) => [skill.name.toLowerCase(), skill]),
@@ -273,24 +362,27 @@ export function selectSkills(input: {
     ) {
       continue;
     }
-    if (skill.not?.some((word) => queryTokens.has(word))) continue;
+    if (skill.not?.some((word) => queryTokenSet.has(word))) continue;
 
     const nameParts = skill.name
       .toLowerCase()
       .split(/[-_\s]+/)
-      .filter((part) => part.length >= 4);
+      .filter((part) => part.length >= 3);
     const nameHit =
       query.includes(key) ||
-      (nameParts.length > 0 && nameParts.every((part) => queryTokens.has(part)));
+      (nameParts.length > 0 &&
+        nameParts.every((part) => queryTokenSet.has(part)));
 
     let score = nameHit ? 100 : 0;
+    const description = indexTokens(skill.description);
+    for (const word of queryTokens) {
+      if (tokenHits(word, nameParts)) score += 20;
+      if (tokenHits(word, description)) score += 8;
+    }
     for (const word of skill.when ?? []) {
-      if (queryTokens.has(word)) score += 10;
+      if (queryTokenSet.has(word) || queryTokens.includes(word)) score += 10;
     }
-    for (const word of tokens(skill.description)) {
-      if (word.length >= 4 && queryTokens.has(word)) score += 1;
-    }
-    if (score < 10 && !nameHit) continue;
+    if (score < 8 && !nameHit) continue;
     scored.push({ skill, score });
   }
 
@@ -360,9 +452,10 @@ export const load_skill: Tool = {
   },
   guidance: {
     whenToUse: [
-      'A catalog skill (especially a * suggested one) matches the user intent and you need its procedure body.',
+      'A catalog skill matches the user intent and its body is not already in Loaded skills.',
     ],
     whenNotToUse: [
+      'Do not load a skill whose body is already in Loaded skills.',
       'Do not load a skill on every turn.',
       'Do not load a skill instead of calling a built-in tool.',
       'Do not load a skill for small talk or a one-line factual answer.',

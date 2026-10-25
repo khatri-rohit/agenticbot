@@ -489,6 +489,12 @@ export function ChatInput({
   });
 
   const skillChips = useMemo(() => {
+    const descriptions = new Map(
+      contextMeter.selectedSkills.map((skill) => [
+        skill.name,
+        skill.description,
+      ]),
+    );
     const names: string[] = [];
     for (const name of [
       ...pinnedSkills,
@@ -497,7 +503,14 @@ export function ChatInput({
       if (dismissedSkills.includes(name) || names.includes(name)) continue;
       names.push(name);
     }
-    return names;
+    return names.map((name) => ({
+      name,
+      description:
+        descriptions.get(name) ??
+        (pinnedSkills.includes(name)
+          ? 'Pinned for this thread'
+          : 'Suggested for this send'),
+    }));
   }, [pinnedSkills, dismissedSkills, contextMeter.selectedSkills]);
 
   const pinSkill = useCallback(
@@ -1274,14 +1287,15 @@ export function ChatInput({
 
             {skillChips.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap gap-1 px-1">
-                {skillChips.map((name) => {
-                  const pinned = pinnedSkills.includes(name);
+                {skillChips.map((chip) => {
+                  const pinned = pinnedSkills.includes(chip.name);
                   return (
                     <span
-                      key={name}
+                      key={chip.name}
+                      title={chip.description}
                       className="inline-flex max-w-full items-center gap-0.5 rounded-full border border-border/60 bg-muted/40 py-0.5 pr-0.5 pl-2 text-[11px] text-foreground"
                     >
-                      <span className="truncate">{name}</span>
+                      <span className="truncate">{chip.name}</span>
                       <button
                         type="button"
                         className={cn(
@@ -1289,11 +1303,15 @@ export function ChatInput({
                           pinned && 'text-foreground',
                         )}
                         aria-label={
-                          pinned ? `Unpin ${name}` : `Pin ${name} on this thread`
+                          pinned
+                            ? `Unpin ${chip.name}`
+                            : `Pin ${chip.name} on this thread`
                         }
                         aria-pressed={pinned}
                         onClick={() =>
-                          pinned ? unpinSkill(name) : pinSkill(name)
+                          pinned
+                            ? unpinSkill(chip.name)
+                            : pinSkill(chip.name)
                         }
                       >
                         <Pin className="size-3" />
@@ -1301,8 +1319,8 @@ export function ChatInput({
                       <button
                         type="button"
                         className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                        aria-label={`Skip ${name} this send`}
-                        onClick={() => dismissSkill(name)}
+                        aria-label={`Skip ${chip.name} this send`}
+                        onClick={() => dismissSkill(chip.name)}
                       >
                         <X className="size-3" />
                       </button>
@@ -1379,7 +1397,14 @@ export function ChatInput({
           </p>
         )}
       </div>
-      <SkillsPanel open={skillsOpen} onOpenChange={setSkillsOpen} />
+      <SkillsPanel
+        open={skillsOpen}
+        onOpenChange={setSkillsOpen}
+        pinnedNames={pinnedSkills}
+        selectedNames={skillChips.map((chip) => chip.name)}
+        onPin={pinSkill}
+        onUnpin={unpinSkill}
+      />
     </div>
   );
 }

@@ -81,10 +81,11 @@ export function buildSystemPrompt(
     ? `
 # Skills
 
-Optional procedure packs. The skills layer lists the full catalog; * marks host suggestions for this turn.
-Call load_skill with a catalog skill_name when that workflow matches the user intent.
-Prefer suggested skills when they fit. If several could apply and intent is unclear, ask briefly or load the closest match and follow its guardrails.
-Respect modes tags in the catalog. Built-in tools work without a skill. Loading does not approve steps or add tools.
+Procedure packs. The skills layer lists the full catalog; * marks host suggestions. Suggested bodies are already in Loaded skills when the host matched this turn.
+On a new non-trivial task (implement, design, architecture, review, debug, write), match the catalog to the user intent before glob, grep, read_file, edit_file, or web_search.
+If a catalog skill fits and its body is not already loaded, call load_skill first (same turn as other read-only tools is fine after that). Follow the loaded guardrails.
+Prefer * suggestions when they fit. If several could apply and intent is unclear, ask briefly or load the closest match.
+If none apply, say so internally and continue. Trivia: skip. Loading does not approve steps or add tools. Respect modes tags.
 `
     : '';
 
@@ -128,7 +129,8 @@ ${webSearchRule}
 - web_fetch returns a short source card (sha256 + teaser). Read more with the same tool using sha256+offset+limit — do not refetch the URL for additional text.
 - Do not repeat the same tool with the same arguments if it already failed or did not help.
 - Do not search in loops when results are not improving; answer with what you have and state uncertainty.
-- Independent read-only tools (glob, grep, read_file, web_search, web_fetch, load_skill) may be called together in one turn. Writes, shell, plan, todo, memory, and offer_choice stay one-at-a-time.
+- On a new non-trivial task, resolve skills (Loaded skills + load_skill) before glob, grep, read_file, or edit_file.
+- Independent read-only tools (glob, grep, read_file, web_search, web_fetch, load_skill) may be called together in one turn after skills are resolved. Writes, shell, plan, todo, memory, and offer_choice stay one-at-a-time.
 
 Thread plan:
 - This thread has a durable plan journal (\`plan\`) and checklist (\`todo\`). Both work in Ask and Agent. Do not wait for Ask mode to journal.
@@ -166,7 +168,8 @@ const HOME_BEHAVIOR = `
 
 This chat is not bound to a project folder. You cannot edit files or run a terminal.
 
-Think clearly. Answer as a peer. Use web_search and web_fetch when current facts matter.
+Think clearly. Answer as a peer. Match the skills catalog before web_search on a new non-trivial task.
+Use web_search and web_fetch when current facts matter.
 Cite source URLs inline when you used the web. Do not invent live facts.
 For a multi-step discussion, journal decisions with plan; finalize when they want a locked brief.
 If two reasonable paths would change what you do next, offer_choice with labeled options. They may check several and add extra text. If they skip, stop.
@@ -176,7 +179,7 @@ If the user wants you to change a repo, tell them to open a folder (start a work
 function workspaceAgentBehavior(hasWebSearch: boolean): string {
   const docsStep = hasWebSearch
     ? `
-5. Docs — if the folder and rules lack current library or API docs, web_search (then web_fetch if needed). Prefer project files first.`
+6. Docs — if the folder and rules lack current library or API docs, web_search (then web_fetch if needed). Prefer project files first.`
     : '';
   return `
 # Workspace behavior
@@ -184,13 +187,14 @@ function workspaceAgentBehavior(hasWebSearch: boolean): string {
 You are bound to one opened project folder. File tools and the terminal cannot leave that folder.
 
 Act loop:
-1. Retrieve — glob / grep / read_file until the working files are known. Do not invent paths.
+1. Skills — match the catalog to this turn. Follow Loaded skills. load_skill any other pack that fits before you retrieve files.
+2. Retrieve — glob / grep / read_file until the working files are known. Do not invent paths.
    Never use run_terminal to read or search files.
    If the work is non-trivial and there is no Final plan, journal then finalize + todo before the first edit.
    If a Final plan exists, execute it. Do not reopen locked decisions unless the user changes them.
-2. Patch — edit_file with a unique oldText span. Read the change report in the tool result.
-3. Verify — run_terminal with that project's real compile/test/build command (cwd is the folder).
-4. Repair — use command errors; edit again. Repeat until the check passes or you are stuck.${docsStep}
+3. Patch — edit_file with a unique oldText span. Read the change report in the tool result.
+4. Verify — run_terminal with that project's real compile/test/build command (cwd is the folder).
+5. Repair — use command errors; edit again. Repeat until the check passes or you are stuck.${docsStep}
 
 edit_file results tell you what changed (path, created or patched, line/byte delta, hunk). Do not assume the file matches your intent without that report. Re-read if the report is truncated.
 
@@ -213,6 +217,7 @@ function workspaceAskBehavior(hasWebSearch: boolean): string {
 You are bound to one opened project folder in read-only Ask posture.
 You can glob, grep, and read_file. You cannot edit files or run the terminal.
 
+Match the skills catalog before glob/grep/read_file on a new non-trivial question.
 Explain, locate, and reason from the open folder.${docs} If the user wants edits, tests, or
 commands, tell them to switch the composer to Agent.
 Do not claim you changed files. Do not invent tool names for write or exec.

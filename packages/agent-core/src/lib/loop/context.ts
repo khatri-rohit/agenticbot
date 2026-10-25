@@ -3,6 +3,7 @@ import type { ModeName, RunPosture } from '@agent/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
 import {
+  formatSkillBodies,
   formatSkillsCatalog,
   listSkills,
   selectSkills,
@@ -34,6 +35,14 @@ export function getContext(
             role: 'system' as const,
             content: formatSkillsCatalog(listSkills(), suggested),
           },
+          ...(suggested.length > 0
+            ? [
+                {
+                  role: 'system' as const,
+                  content: formatSkillBodies(suggested),
+                },
+              ]
+            : []),
         ]
       : []),
     {

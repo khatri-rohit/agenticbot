@@ -105,6 +105,8 @@ export function useContextMeter(options: {
   const persistedOccupied = persistedForModel?.occupiedTokens ?? null;
   const persistedWindowTokens = persistedForModel?.windowTokens ?? null;
   const persistedWindowSource = persistedForModel?.windowSource;
+  const persistedLayers = persistedForModel?.layers ?? [];
+  const persistedReserve = persistedForModel?.reserve ?? 0;
 
   const composerTokens = estimateDraftTokens(
     [draft, queuedContent].filter(Boolean).join('\n') || null,
@@ -114,22 +116,21 @@ export function useContextMeter(options: {
     ? 0
     : estimateDraftTokens(streamingContent);
 
-  const hasAnchor = liveOccupied != null || persistedOccupied != null;
   const combinedDraft = [draft, queuedContent].filter(Boolean).join('\n');
   const attachmentCount =
     pendingAttachments.length + queuedAttachments.length;
   const hasDraft = combinedDraft.length > 0 || attachmentCount > 0;
 
+  const hasLiveReport = liveLayers.length > 0;
+
   useEffect(() => {
-    // Occupancy can skip the token estimate; a non-empty draft still
-    // needs selectSkills so follow-up chips are not blank.
-    if (!hasDraft && (hasAnchor || liveEstimated != null)) {
+    // Idle home: nothing to assemble.
+    if (!threadId && !hasDraft) {
       setServerEstimate(null);
       return;
     }
-    // Idle home / empty composer: local char estimate is enough; skip hammering API.
-    if (!threadId && !hasDraft) {
-      setServerEstimate(null);
+    // Live run already has a layer split; skip until settle or a new draft.
+    if (hasLiveReport && !hasDraft) {
       return;
     }
 
@@ -167,8 +168,7 @@ export function useContextMeter(options: {
       window.clearTimeout(timer);
     };
   }, [
-    hasAnchor,
-    liveEstimated,
+    hasLiveReport,
     threadId,
     hasDraft,
     draft,
@@ -199,10 +199,12 @@ export function useContextMeter(options: {
   const liveReserve =
     liveContextReport?.budget.outputReserveTokens ??
     serverEstimate?.reserve ??
-    0;
-  const suggested = serverEstimate?.selectedSkills ?? [];
+    persistedReserve;
+  const suggested = hasDraft ? (serverEstimate?.selectedSkills ?? []) : [];
   const layers =
-    liveLayers.length > 0 ? liveLayers : (serverEstimate?.layers ?? []);
+    liveLayers.length > 0
+      ? liveLayers
+      : (serverEstimate?.layers ?? persistedLayers);
 
   if (liveOccupied != null) {
     const extra = composerTokens + streamingTokens;

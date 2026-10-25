@@ -64,7 +64,10 @@ export type WebSearchResults = {
 export interface SkillMetadata {
   name: string;
   description: string;
-  /** Retrieval hints from SKILL.md frontmatter. */
+  /**
+   * Optional extras. Generic SKILL.md is name + description + body.
+   * when/not/modes only boost or constrain host scoring when present.
+   */
   when?: string[];
   not?: string[];
   modes?: string[];

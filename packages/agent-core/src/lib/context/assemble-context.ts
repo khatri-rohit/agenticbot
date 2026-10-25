@@ -19,7 +19,11 @@ import {
 } from '@agent/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
-import { formatSkillsCatalog, listSkills } from '../tools/skills';
+import {
+  formatSkillBodies,
+  formatSkillsCatalog,
+  listSkills,
+} from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
 import { stubWebSourceCard } from '../tools/web-source';
 import { hostListedWebUrls } from '../tools/web-trust';
@@ -51,7 +55,8 @@ export type AssembleContextInput = {
   plan?: ThreadPlan | null;
   /**
    * Host soft suggestions for this run (selectSkills, usually 0–3).
-   * Marked with * in the skills catalog; does not gate load_skill.
+   * Marked with * in the skills catalog; bodies are prefetched into
+   * Loaded skills. Does not gate load_skill.
    */
   skillNames?: string[];
 };
@@ -111,6 +116,33 @@ function buildRulesPrompt(memory: MemoryFiles): string {
   return parts.join('\n\n');
 }
 
+function loadSkillNameFromArgs(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const name = (parsed as { skill_name?: unknown }).skill_name;
+    return typeof name === 'string' && name.trim() ? name.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function loadedSkillNamesFromEnvelopes(envelopes: LedgerEnvelope[]): string[] {
+  const names: string[] = [];
+  for (const envelope of envelopes) {
+    if (envelope.record.role !== 'assistant' || !envelope.record.tool_calls) {
+      continue;
+    }
+    for (const call of envelope.record.tool_calls) {
+      if (!('function' in call) || call.function.name !== 'load_skill') continue;
+      const name = loadSkillNameFromArgs(call.function.arguments);
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
 function loadSkillCallIds(
   source: LedgerEnvelope[] | ChatCompletionMessageParam[],
 ): Set<string> {
@@ -150,6 +182,7 @@ const PREFIX_LAYER_IDS = new Set([
   'system',
   'tools',
   'skills_catalog',
+  'skills_bodies',
   'memory',
   'rules',
   'plan',
@@ -403,11 +436,22 @@ export function assembleContext(
     content: systemText,
   };
 
-  const skillsText = input.tools.byName.has('load_skill')
-    ? formatSkillsCatalog(listSkills(), input.skillNames ?? [])
+  const hasLoadSkill = input.tools.byName.has('load_skill');
+  const suggestedNames = input.skillNames ?? [];
+  const skillsText = hasLoadSkill
+    ? formatSkillsCatalog(listSkills(), suggestedNames)
     : '';
   const skillsMessage: ChatCompletionMessageParam | null = skillsText
     ? { role: 'system', content: skillsText }
+    : null;
+  const bodiesText = hasLoadSkill
+    ? formatSkillBodies(
+        suggestedNames,
+        loadedSkillNamesFromEnvelopes(input.envelopes),
+      )
+    : '';
+  const bodiesMessage: ChatCompletionMessageParam | null = bodiesText
+    ? { role: 'system', content: bodiesText }
     : null;
 
   const memoryText = buildMemoryPrompt(input.memory);
@@ -509,6 +553,7 @@ export function assembleContext(
   const messages: ChatCompletionMessageParam[] = [
     systemMessage,
     ...(skillsMessage ? [skillsMessage] : []),
+    ...(bodiesMessage ? [bodiesMessage] : []),
     memoryMessage,
     ...(rulesMessage ? [rulesMessage] : []),
     ...(planMessage ? [planMessage] : []),
@@ -549,6 +594,11 @@ export function assembleContext(
       id: 'skills_catalog',
       label: 'Skill catalog',
       tokens: skillsText ? charsToTokens(skillsText.length) + 4 : 0,
+    },
+    {
+      id: 'skills_bodies',
+      label: 'Suggested skill bodies',
+      tokens: bodiesText ? charsToTokens(bodiesText.length) + 4 : 0,
     },
     {
       id: 'memory',

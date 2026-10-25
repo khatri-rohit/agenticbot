@@ -483,6 +483,8 @@ export async function persistChatEffects(
         ...(report
           ? {
               windowTokens: report.budget.windowTokens,
+              layers: report.layers,
+              reserve: report.budget.outputReserveTokens,
               ...(report.windowSource
                 ? { windowSource: report.windowSource }
                 : {}),

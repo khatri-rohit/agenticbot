@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ToolContext } from '@agent/agent-models';
 
 import {
+  formatSkillBodies,
   formatSkillsCatalog,
   load_skill,
   parseSkillMarkdown,
@@ -122,6 +123,20 @@ describe('selectSkills', () => {
     });
     expect(selected).toEqual([]);
   });
+
+  it('selects imported skills from name and description only', () => {
+    const imported: SkillMetadata = {
+      name: 'frontend-design',
+      description:
+        'Guides React UI implementation and layout in a Next.js app.',
+    };
+    const { selected } = selectSkills({
+      query: 'implement the settings page UI',
+      mode: 'workspace',
+      catalog: [...catalog, imported],
+    });
+    expect(selected.map((skill) => skill.name)).toContain('frontend-design');
+  });
 });
 
 describe('formatSkillsCatalog', () => {
@@ -132,6 +147,20 @@ describe('formatSkillsCatalog', () => {
     expect(text).toContain('when: patch, edit, implement');
     expect(text).toContain('modes: workspace');
     expect(text).toMatch(/Catalog of procedure packs/i);
+  });
+});
+
+describe('formatSkillBodies', () => {
+  it('inlines suggested bodies and skips already loaded names', () => {
+    const text = formatSkillBodies(
+      ['patch-and-verify', 'missing-skill'],
+      ['patch-and-verify'],
+    );
+    expect(text).toBe('');
+    const loaded = formatSkillBodies(['patch-and-verify']);
+    expect(loaded).toMatch(/# Loaded skills/);
+    expect(loaded).toContain('## patch-and-verify');
+    expect(loaded).toMatch(/Use this when the user asked you to change code/i);
   });
 });
 
