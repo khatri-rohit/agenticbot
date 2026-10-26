@@ -37,7 +37,10 @@ import {
   patchThread,
   pickWorkspaceFolder,
 } from '../features/agent/api/thread-client';
-import { refreshThreads } from '../features/agent/store/thread-cache';
+import {
+  areThreadsLoaded,
+  refreshThreads,
+} from '../features/agent/store/thread-cache';
 import { removeRecentThread } from '../features/agent/store/recent-threads-store';
 import { formatRelativeTime } from '../lib/format-relative-time';
 import { toastError } from '@/hooks/use-toast';
@@ -144,13 +147,17 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   }, [threads, workspaceOrder]);
 
   // Drop empties from persisted order; append newly discovered projects at the end.
+  // Skip until threads have loaded — otherwise we'd wipe the stored drag order
+  // before any workspace roots are known.
   const rootsWithThreads = useMemo(
     () => workspaceGroups.map((group) => group.root),
     [workspaceGroups],
   );
+  const threadsLoaded = areThreadsLoaded();
   useEffect(() => {
+    if (!threadsLoaded) return;
     syncWorkspaceOrder(rootsWithThreads);
-  }, [rootsWithThreads]);
+  }, [rootsWithThreads, threadsLoaded]);
 
   const railBtn =
     'flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';

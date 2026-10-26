@@ -35,3 +35,7 @@ export function ensureThreadsLoaded(): void {
     console.error('Failed to load threads', error);
   });
 }
+
+export function areThreadsLoaded(): boolean {
+  return loaded;
+}
