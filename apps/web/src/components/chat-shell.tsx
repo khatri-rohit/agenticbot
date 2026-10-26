@@ -19,6 +19,17 @@ function TypeToFocusListener() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isTypeToFocusKey(e)) return;
+      // Don't steal keystrokes from any focused editable surface (sidebar
+      // search, model picker filter, edit textarea, recent-threads switcher).
+      const active = document.activeElement;
+      const tag = (active?.tagName ?? '').toLowerCase();
+      if (
+        tag === 'input' ||
+        tag === 'textarea' ||
+        (active as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
       const composer = getComposerFocus();
       if (!composer || composer.isLocked()) return;
       e.preventDefault();

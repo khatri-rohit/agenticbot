@@ -230,7 +230,7 @@ function ToolCard({ row }: { row: ToolCallRow }) {
           action={summary.action}
           className="text-muted-foreground"
         />
-        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
+        <span className="type-caption shrink-0 font-medium text-muted-foreground/80">
           {summary.action}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
@@ -358,7 +358,7 @@ function PreviewHeader({
 }) {
   return (
     <div className="flex items-center justify-between gap-2 px-3 pt-2">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+      <p className="type-caption font-medium text-muted-foreground/70">
         {label}
       </p>
       {onCopy}

@@ -62,8 +62,35 @@ export function MessageList({
 
   const turns = useMemo(() => groupMessageTurns(messages ?? []), [messages]);
 
-  const userAnchors = useMemo(() => {
+  // Rail indexes turns (user prompt + agent work as a unit), not user messages
+  // alone. Each anchor carries a compact tool count so the rail can show what
+  // the agent actually did in that turn.
+  const turnAnchors = useMemo(() => {
     return turns.map((turn) => {
+      const isLastTurn = turn === turns[turns.length - 1];
+      const liveActivity = isLastTurn ? toolActivity : [];
+      const liveSnippets = isLastTurn ? assistantSnippets : [];
+      const liveStreaming = isLastTurn ? streaming : null;
+      const turnCompaction = turnOwnsCompaction(
+        turn.replies,
+        compactionNotice,
+        isLastTurn,
+      )
+        ? compactionNotice
+        : null;
+      const steps = buildTurnTimeline({
+        replies: turn.replies,
+        liveActivity,
+        snippets: liveSnippets,
+        activeRunId,
+        streaming: liveStreaming,
+        compaction: turnCompaction,
+      });
+      const toolCount = steps.reduce(
+        (sum, step) => (step.type === 'tools' ? sum + step.rows.length : sum),
+        0,
+      );
+
       const trimmed = turn.userMessage.content.trim();
       const attachmentCount = turn.userMessage.attachments?.length ?? 0;
       let label = trimmed;
@@ -75,11 +102,18 @@ export function MessageList({
               ? `${attachmentCount} images`
               : 'Message';
       }
-      return { id: turn.userMessage.id, label };
+      return { id: turn.userMessage.id, label, toolCount };
     });
-  }, [turns]);
+  }, [
+    turns,
+    toolActivity,
+    assistantSnippets,
+    streaming,
+    compactionNotice,
+    activeRunId,
+  ]);
 
-  const showRail = shouldShowConversationRail(userAnchors.length);
+  const showRail = shouldShowConversationRail(turnAnchors.length);
 
   const registerAnchor = useCallback(
     (id: string, el: HTMLDivElement | null) => {
@@ -163,7 +197,7 @@ export function MessageList({
       )}
       {showRail && (
         <ConversationRail
-          anchors={userAnchors}
+          anchors={turnAnchors}
           scrollContainerRef={scrollRef}
           getAnchorElement={getAnchorElement}
         />
@@ -214,12 +248,18 @@ export function MessageList({
               return (
                 <section
                   key={turn.userMessage.id}
-                  className="flex flex-col gap-3.5"
+                  ref={(el) =>
+                    registerAnchor(
+                      turn.userMessage.id,
+                      el as HTMLDivElement | null,
+                    )
+                  }
+                  id={`conversation-anchor-${turn.userMessage.id}`}
+                  className="flex flex-col gap-3.5 scroll-mt-6"
                   aria-label="Conversation turn"
                 >
                   <UserMessage
                     message={turn.userMessage}
-                    registerAnchor={registerAnchor}
                     canEdit={
                       isLastTurn && turn.userMessage.id === latestUserMessageId
                     }
@@ -270,10 +310,7 @@ export function MessageList({
                         }
                         if (step.type === 'tools') {
                           return (
-                            <ToolStepList
-                              key={step.key}
-                              rows={step.rows}
-                            />
+                            <ToolStepList key={step.key} rows={step.rows} />
                           );
                         }
                         if (step.type === 'compaction') {

@@ -57,7 +57,7 @@ export function CompactionCard({ notice }: { notice: CompactionNotice }) {
         <div className="space-y-2 border-t border-border/60 px-3 py-2">
           {notice.brief.trim() ? (
             <section className="min-w-0">
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Brief
               </p>
               <pre className="type-ui max-h-40 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">
@@ -67,7 +67,7 @@ export function CompactionCard({ notice }: { notice: CompactionNotice }) {
           ) : null}
           {notice.summary.trim() ? (
             <section className="min-w-0">
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Summary
               </p>
               <pre className="type-ui max-h-64 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">

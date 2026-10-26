@@ -12,13 +12,11 @@ import { formatMessageTime } from '@/lib/format-relative-time';
 
 export function UserMessage({
   message,
-  registerAnchor,
   canEdit,
   hasResponseBelow,
   onEditSubmit,
 }: {
   message: Message;
-  registerAnchor: (id: string, el: HTMLDivElement | null) => void;
   canEdit: boolean;
   hasResponseBelow: boolean;
   onEditSubmit: (messageId: string, content: string) => void | Promise<void>;
@@ -92,9 +90,7 @@ export function UserMessage({
 
   return (
     <div
-      ref={(el) => registerAnchor(message.id, el)}
-      id={`conversation-anchor-${message.id}`}
-      className="min-w-0 max-w-full scroll-mt-6"
+      className="min-w-0 max-w-full"
     >
       {isEditing ? (
         <div

@@ -140,7 +140,7 @@ export function ContextUsage({
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" side="top" className="w-64 p-2.5">
-        <p className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        <p className="type-caption mb-2 font-medium text-muted-foreground">
           Context
         </p>
         <div

@@ -61,7 +61,7 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
         <div className="max-h-56 space-y-2 overflow-y-auto border-t border-border/60 px-3 py-2">
           {plan.decisions.length > 0 ? (
             <section>
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Decisions
               </p>
               <ul className="space-y-0.5">
@@ -78,7 +78,7 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
           ) : null}
           {plan.final?.trim() ? (
             <section>
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Final plan
               </p>
               <pre className="type-ui max-h-36 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">
@@ -87,7 +87,7 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
             </section>
           ) : plan.notes.length > 0 ? (
             <section>
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Journal
               </p>
               <ul className="space-y-0.5">
@@ -105,7 +105,7 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
           ) : null}
           {plan.todos.length > 0 ? (
             <section>
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Todos
               </p>
               <ul className="space-y-1">
@@ -200,7 +200,7 @@ function PlanChipBody({ plan }: { plan: ThreadPlan }) {
       ) : null}
       {plan.decisions.length > 0 ? (
         <section>
-          <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          <p className="type-ui mb-1 font-medium text-muted-foreground">
             Decisions
           </p>
           <ul className="space-y-0.5">
@@ -217,7 +217,7 @@ function PlanChipBody({ plan }: { plan: ThreadPlan }) {
       ) : null}
       {plan.final?.trim() ? (
         <section>
-          <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          <p className="type-ui mb-1 font-medium text-muted-foreground">
             Final plan
           </p>
           <pre className="type-ui whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">
@@ -227,7 +227,7 @@ function PlanChipBody({ plan }: { plan: ThreadPlan }) {
       ) : null}
       {plan.todos.length > 0 ? (
         <section>
-          <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          <p className="type-ui mb-1 font-medium text-muted-foreground">
             Todos
           </p>
           <ul className="space-y-1">

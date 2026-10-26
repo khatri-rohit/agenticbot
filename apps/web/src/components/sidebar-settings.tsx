@@ -179,7 +179,7 @@ export function SidebarSettings({
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="flex items-center gap-1.5 leading-none">
                         {preset.label}
-                        <span className="rounded px-1 py-px text-[9px] font-medium tracking-wide text-muted-foreground uppercase ring-1 ring-border/50">
+                        <span className="type-caption rounded px-1 py-px font-medium text-muted-foreground ring-1 ring-border/50">
                           {preset.scheme}
                         </span>
                       </span>
@@ -619,17 +619,17 @@ function HistoryTab({
                   <div className="flex items-center gap-2">
                     <span
                       className={cn(
-                        'inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium uppercase tracking-wide',
+                        'inline-flex h-4 items-center rounded px-1.5 type-caption font-medium',
                         op.action === 'add' && 'bg-primary/10 text-primary',
                         op.action === 'patch' &&
-                          'bg-amber-500/15 text-amber-600',
+                          'bg-[var(--warning)]/15 text-[var(--warning-fg)]',
                         op.action === 'remove' &&
                           'bg-destructive/10 text-destructive',
                       )}
                     >
                       {op.action}
                     </span>
-                    <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <span className="type-caption font-medium text-muted-foreground">
                       {target}
                     </span>
                     <span className="ml-auto text-[11px] text-muted-foreground">

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -30,7 +30,7 @@ import {
   toggleFolderCollapsed,
   useAgentSpace,
 } from '@/features/agent/store/space-store';
-import { CHAT_TITLE_MAX_WORDS, clampChatTitle } from '@/lib/thread-title';
+import { clampChatTitle } from '@/lib/thread-title';
 import { useThreads } from '../features/agent/hooks/use-agent-run';
 import {
   deleteThread,
@@ -44,6 +44,7 @@ import { toastError } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import { SidebarSettings } from '@/components/sidebar-settings';
 import {
   DropdownMenu,
@@ -296,7 +297,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
             <div className="space-y-4 pb-2">
               <section>
                 <div className="mb-1.5 flex items-center justify-between gap-1 px-2">
-                  <p className="type-ui text-[11px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
+                  <p className="type-ui font-medium text-muted-foreground/80">
                     Home
                   </p>
                   <button
@@ -325,7 +326,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
 
               <section>
                 <div className="mb-1.5 flex items-center justify-between gap-1 px-2">
-                  <p className="type-ui text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
+                  <p className="type-ui font-medium text-muted-foreground/80">
                     Workspaces
                   </p>
                   <button
@@ -593,6 +594,20 @@ function ThreadItem({
   const displayTitle = isPending ? '' : clampChatTitle(thread.title);
   const isPinned = Boolean(thread.pinned);
 
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(displayTitle);
+  const renameRef = useRef<HTMLTextAreaElement>(null);
+
+  // Focus and select the title when entering edit mode so the user can type
+  // over it immediately.
+  useEffect(() => {
+    if (!isEditing) return;
+    const el = renameRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [isEditing]);
+
   const handleDelete = async () => {
     await deleteThread(thread.id);
     removeRecentThread(thread.id);
@@ -607,17 +622,82 @@ function ThreadItem({
     await refreshThreads();
   };
 
-  const handleRename = async () => {
-    const next = window.prompt(
-      `Rename chat (up to ${CHAT_TITLE_MAX_WORDS} words):`,
-      displayTitle || thread.title,
-    );
-    if (next === null) return;
-    const title = clampChatTitle(next);
-    if (!title || title === 'New Chat') return;
+  const startRename = () => {
+    if (isPending) return;
+    setDraft(displayTitle || thread.title);
+    setIsEditing(true);
+  };
+
+  const cancelRename = () => setIsEditing(false);
+
+  const commitRename = async () => {
+    if (!isEditing) return;
+    const title = clampChatTitle(draft);
+    // Empty or unchanged: treat as cancel, never write "New Chat" back.
+    if (!title || title === 'New Chat' || title === displayTitle) {
+      setIsEditing(false);
+      return;
+    }
+    setIsEditing(false);
     await patchThread(thread.id, { title });
     await refreshThreads();
   };
+
+  const handleRenameKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void commitRename();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelRename();
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <li className="w-full min-w-0">
+        <div
+          className={cn(
+            'flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-1',
+            dense ? 'pl-2' : 'pl-2.5',
+            'bg-accent/60 ring-1 ring-ring/40',
+          )}
+        >
+          <Textarea
+            ref={renameRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleRenameKey}
+            onBlur={() => void commitRename()}
+            rows={1}
+            aria-label="Rename chat"
+            className="type-ui min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-0.5 text-sm leading-snug shadow-none focus-visible:ring-0"
+          />
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={cancelRename}
+              aria-label="Cancel rename"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => void commitRename()}
+              aria-label="Save name"
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      </li>
+    );
+  }
 
   return (
     <li className="w-full min-w-0">
@@ -689,7 +769,7 @@ function ThreadItem({
               {isPinned ? 'Unpin' : 'Pin'}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => void handleRename()}
+              onSelect={startRename}
               disabled={isPending}
             >
               <Pencil className="size-4" />

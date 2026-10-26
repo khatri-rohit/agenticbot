@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { cn } from '../lib/utils';
 
 export type ConversationAnchor = {
   id: string;
   label: string;
+  toolCount?: number;
 };
 
 const MIN_TURNS = 3;
@@ -28,6 +29,7 @@ function truncateLabel(text: string, max = 56): string {
 
 export function ConversationRail({
   anchors,
+  scrollContainerRef,
   getAnchorElement,
 }: {
   anchors: ConversationAnchor[];
@@ -46,6 +48,41 @@ export function ConversationRail({
     },
     [getAnchorElement],
   );
+
+  // Scroll-spy: highlight the turn most visible in the scroll viewport.
+  // Observes each turn section and picks the entry with the highest
+  // intersection ratio as the active anchor.
+  useEffect(() => {
+    const root = scrollContainerRef.current;
+    if (!root || anchors.length < MIN_TURNS) return;
+    const ratios = new Map<string, number>();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = entry.target.id.replace(/^conversation-anchor-/, '');
+          ratios.set(id, entry.isIntersecting ? entry.intersectionRatio : 0);
+        }
+        let bestId: string | null = null;
+        let bestRatio = 0;
+        for (const anchor of anchors) {
+          const ratio = ratios.get(anchor.id) ?? 0;
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestId = anchor.id;
+          }
+        }
+        if (bestId) setActiveId(bestId);
+      },
+      { root, threshold: [0, 0.25, 0.5, 0.75, 1] },
+    );
+
+    for (const anchor of anchors) {
+      const el = getAnchorElement(anchor.id);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [anchors, scrollContainerRef, getAnchorElement]);
 
   if (anchors.length < MIN_TURNS) return null;
 
@@ -69,7 +106,7 @@ export function ConversationRail({
           className={cn(
             'relative rounded-md border border-transparent transition-colors',
             hovered &&
-              'border-border/50 px-2 py-2 shadow-sm backdrop-blur-md bg-card',
+              'border-border/50 px-2 py-2 bg-card',
           )}
         >
           {hovered ? (
@@ -93,30 +130,39 @@ export function ConversationRail({
                   >
                     <span className="line-clamp-1">
                       {truncateLabel(anchor.label)}
+                      {anchor.toolCount && anchor.toolCount > 0 ? (
+                        <span className="text-muted-foreground/70">
+                          {' · '}
+                          {anchor.toolCount}{' '}
+                          {anchor.toolCount === 1 ? 'tool' : 'tools'}
+                        </span>
+                      ) : null}
                     </span>
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <div className={cn('flex flex-col py-2')}>
-              {/* Always show 10 turns even if there are less than 10 for better UX */}
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((_, index) => (
+            <div className={cn('flex flex-col py-2', TURN_GAP_CLASS)}>
+              {anchors.map((anchor) => (
                 <div
-                  key={index}
-                  className={cn(
-                    'flex w-full items-center justify-end',
-                    'min-h-3',
-                  )}
+                  key={anchor.id}
+                  className="flex w-full min-h-3 items-center justify-end"
                 >
                   <button
                     type="button"
-                    className="shrink-0 rounded-[1px] bg-muted-foreground/40 transition-colors hover:bg-foreground/70"
+                    onClick={() => scrollToAnchor(anchor.id)}
+                    className={cn(
+                      'shrink-0 rounded-[1px] transition-colors hover:bg-foreground/70',
+                      activeId === anchor.id
+                        ? 'bg-foreground/80'
+                        : 'bg-muted-foreground/40',
+                    )}
                     style={{
                       width: MARKER_WIDTH_PX,
                       height: MARKER_HEIGHT_PX,
                     }}
-                    aria-label={truncateLabel(index.toString(), 120)}
+                    aria-label={truncateLabel(anchor.label)}
                   />
                 </div>
               ))}
