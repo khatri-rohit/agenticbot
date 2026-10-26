@@ -33,6 +33,7 @@ export {
   CHAT_TITLE_MAX_WORDS,
   clampChatTitle,
   normalizeThreadKind,
+  parseThreadKind,
   isWorkspaceKind,
   normalizeWorkspaceRoot,
   workspaceRootKey,
@@ -128,7 +129,7 @@ export type {
   MemoryGateVerdict,
   MemoryGateResult,
 } from './lib/memory.js';
-export { DEFAULT_MEMORY_CAPS } from './lib/memory.js';
+export { DEFAULT_MEMORY_CAPS, parseMemoryOp } from './lib/memory.js';
 
 export type {
   ThreadLastRun,

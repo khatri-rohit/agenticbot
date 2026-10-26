@@ -52,11 +52,6 @@ export type WebFetchResponse = {
   links: string[];
 };
 
-export type WebSearchResults = {
-  query: string;
-  results: WebFetchResponse[];
-};
-
 /**
  * Skill metadata for the agent.
  * This is the metadata for a skill that the agent can use.

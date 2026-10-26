@@ -24,6 +24,7 @@ import {
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
+  parseThreadKind,
   planHasOpenWork,
   threadMentions,
   type RunPosture,
@@ -83,18 +84,6 @@ async function resolveWorkspaceDir(
     return { ok: false, error: `workspaceRoot does not exist: ${root}` };
   }
   return { ok: true, root: path.normalize(root) };
-}
-
-function parseThreadKind(value: unknown): ThreadKind | undefined {
-  if (
-    value === 'home' ||
-    value === 'workspace' ||
-    value === 'research' ||
-    value === 'coding'
-  ) {
-    return normalizeThreadKind(value);
-  }
-  return undefined;
 }
 
 function endpointFromLocal(local: boolean | undefined): OllamaEndpoint {
@@ -482,11 +471,12 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
     if (!resolved.ok) return res.status(400).json({ error: resolved.error });
     workspaceRoot = resolved.root;
   }
+  const kind = parseThreadKind(body.kind);
   const thread = store.updateThread(req.params.id, {
     ...(typeof body.title === 'string' ? { title: body.title } : {}),
     ...(typeof body.model === 'string' ? { model: body.model } : {}),
     ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
-    ...(parseThreadKind(body.kind) ? { kind: parseThreadKind(body.kind) } : {}),
+    ...(kind ? { kind } : {}),
     ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
   });
   if (!thread) return res.status(404).json({ error: 'Thread not found' });

@@ -185,10 +185,12 @@ export function UserMessage({
         </div>
       ) : (
         <>
-          {/* Document-style prompt card: stronger fill so the prompt reads vs the reply document. */}
+          {/* Document-style prompt card: stronger fill + bright ring so the
+              user's prompt is visually distinct from assistant/code content
+              while scrolling the transcript. */}
           <div
             className={cn(
-              'type-user min-w-0 max-w-full overflow-hidden rounded-lg bg-muted/55 px-4 py-3 text-foreground ring-1 ring-border/50',
+              'type-user min-w-0 max-w-full overflow-hidden rounded-lg bg-muted/55 px-4 py-3 text-foreground ring-1 ring-foreground/25',
             )}
           >
             {message.attachments && message.attachments.length > 0 ? (

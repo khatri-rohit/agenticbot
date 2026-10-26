@@ -44,7 +44,6 @@ export {
   resolveLimits,
   type AgentLimits,
 } from './lib/loop/limits';
-export { getContext } from './lib/loop/context';
 export { createStreamModelCall } from './lib/loop/model-call';
 
 // Tools

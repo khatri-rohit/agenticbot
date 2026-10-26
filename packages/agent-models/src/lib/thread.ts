@@ -25,6 +25,23 @@ export function normalizeThreadKind(value: unknown): ThreadKind {
   return 'home';
 }
 
+/**
+ * Validate then normalize a thread kind from untrusted input (request body).
+ * Returns undefined for values outside the accept-list, so callers can skip
+ * the field instead of defaulting unknown input to home.
+ */
+export function parseThreadKind(value: unknown): ThreadKind | undefined {
+  if (
+    value === 'home' ||
+    value === 'workspace' ||
+    value === 'research' ||
+    value === 'coding'
+  ) {
+    return normalizeThreadKind(value);
+  }
+  return undefined;
+}
+
 export function isWorkspaceKind(kind: ThreadKind | undefined): boolean {
   return kind === 'workspace';
 }

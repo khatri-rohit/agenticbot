@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { MemoryFiles, MemoryOp, ProposedMemoryOp } from '@agent/agent-models';
-import { workspaceRootKey } from '@agent/agent-models';
+import { parseMemoryOp, workspaceRootKey } from '@agent/agent-models';
 import { applyMemoryText, gateMemoryOps } from '@agent/agent-core';
 
 export class MemoryStore {
@@ -72,7 +72,8 @@ export class MemoryStore {
     const ops: MemoryOp[] = [];
     for (const line of raw.split('\n')) {
       if (!line) continue;
-      ops.push(JSON.parse(line) as MemoryOp);
+      const op = parseMemoryOp(JSON.parse(line));
+      if (op) ops.push(op);
     }
     return ops;
   }

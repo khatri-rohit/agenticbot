@@ -122,7 +122,3 @@ export function ChatShell({
     </div>
   );
 }
-
-export function HomeHeader() {
-  return null;
-}
