@@ -93,9 +93,7 @@ export function useContextMeter(options: {
       ? liveContextReport.budget.windowTokens
       : null;
   const liveWindowSource =
-    sameModel && liveContextReport
-      ? liveContextReport.windowSource
-      : undefined;
+    sameModel && liveContextReport ? liveContextReport.windowSource : undefined;
 
   const persisted =
     liveOccupied == null && liveEstimated == null && threadId
@@ -118,64 +116,108 @@ export function useContextMeter(options: {
     : estimateDraftTokens(streamingContent);
 
   const combinedDraft = [draft, queuedContent].filter(Boolean).join('\n');
-  const attachmentCount =
-    pendingAttachments.length + queuedAttachments.length;
+  const attachmentCount = pendingAttachments.length + queuedAttachments.length;
   const hasDraft = combinedDraft.length > 0 || attachmentCount > 0;
 
   const hasLiveReport = liveLayers.length > 0;
-  const hasMeasuredAnchor =
-    liveOccupied != null || liveEstimated != null || persistedOccupied != null;
 
+  // Success-only hydrate mark — cancel/fail leaves thread unset so we retry.
   const lastEstimateDraftLen = useRef(0);
   const lastEstimateThreadId = useRef<string | undefined>(undefined);
+  // In-flight hydrate for this thread; blocks re-schedule while typing churns deps.
+  const hydrateRequestedThreadId = useRef<string | undefined>(undefined);
 
+  const estimateArgs = {
+    threadId,
+    draft: combinedDraft,
+    attachments: [...pendingAttachments, ...queuedAttachments],
+    model: composerOptions.model,
+    local: composerOptions.local,
+    webSearch: composerOptions.webSearch,
+    posture: composerOptions.posture,
+    skills: skillHints,
+  };
+
+  // Hydrate once per thread (success-gated). Not tied to draft keystrokes.
   useEffect(() => {
-    // Idle home: nothing to assemble.
     if (!threadId && !hasDraft) {
       setServerEstimate(null);
       return;
     }
-    // Live/measured usage already anchors the meter; skip until a large new draft.
-    if (hasLiveReport && !hasDraft) {
-      return;
-    }
+    if (hasLiveReport && !hasDraft) return;
 
-    const threadChanged = lastEstimateThreadId.current !== threadId;
-    if (threadChanged) {
-      lastEstimateThreadId.current = threadId;
-      lastEstimateDraftLen.current = 0;
-    }
+    const needsHydrate =
+      lastEstimateThreadId.current !== threadId &&
+      hydrateRequestedThreadId.current !== threadId;
+    if (!needsHydrate) return;
+
+    let cancelled = false;
+    hydrateRequestedThreadId.current = threadId;
+    const timer = window.setTimeout(() => {
+      void fetchContextEstimate(estimateArgs)
+        .then((res) => {
+          if (cancelled) return;
+          lastEstimateThreadId.current = threadId;
+          lastEstimateDraftLen.current = combinedDraft.length;
+          hydrateRequestedThreadId.current = undefined;
+          setServerEstimate({
+            tokens: res.estimatedPromptTokens,
+            layers: res.contextReport.layers,
+            reserve: res.contextReport.budget.outputReserveTokens,
+            windowTokens: res.contextReport.budget.windowTokens,
+            windowSource: res.contextReport.windowSource,
+          });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          hydrateRequestedThreadId.current = undefined;
+          setServerEstimate(null);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      // Allow retry when this attempt was aborted before success.
+      if (
+        hydrateRequestedThreadId.current === threadId &&
+        lastEstimateThreadId.current !== threadId
+      ) {
+        hydrateRequestedThreadId.current = undefined;
+      }
+    };
+    // Draft length intentionally omitted — threshold effect handles large pastes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate on thread/options only
+  }, [
+    hasLiveReport,
+    threadId,
+    hasDraft,
+    composerOptions.model,
+    composerOptions.local,
+    composerOptions.webSearch,
+    composerOptions.posture,
+    skillHints?.requested,
+  ]);
+
+  // Large-paste threshold only (no per-pause estimate on empty new chats).
+  useEffect(() => {
+    if (!threadId && !hasDraft) return;
+    if (hasLiveReport && !hasDraft) return;
 
     const draftLen = combinedDraft.length;
     const crossedThreshold =
       draftLen - lastEstimateDraftLen.current >= DRAFT_ESTIMATE_CHAR_THRESHOLD;
-    // Hydrate once per thread (or first draft on home). Large-paste threshold
-    // while typing. Continuous draft debounce is intentionally not used —
-    // measured turn usage is the source of truth for "used" context.
-    const shouldEstimate =
-      threadChanged ||
-      (!hasMeasuredAnchor && !hasLiveReport) ||
-      crossedThreshold;
-
-    if (!shouldEstimate) {
-      return;
-    }
+    if (!crossedThreshold) return;
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void fetchContextEstimate({
-        threadId,
-        draft: combinedDraft,
-        attachments: [...pendingAttachments, ...queuedAttachments],
-        model: composerOptions.model,
-        local: composerOptions.local,
-        webSearch: composerOptions.webSearch,
-        posture: composerOptions.posture,
-        skills: skillHints,
-      })
+      void fetchContextEstimate(estimateArgs)
         .then((res) => {
           if (cancelled) return;
           lastEstimateDraftLen.current = draftLen;
+          if (lastEstimateThreadId.current !== threadId) {
+            lastEstimateThreadId.current = threadId;
+          }
           setServerEstimate({
             tokens: res.estimatedPromptTokens,
             layers: res.contextReport.layers,
@@ -193,9 +235,9 @@ export function useContextMeter(options: {
       cancelled = true;
       window.clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- threshold watches draft size
   }, [
     hasLiveReport,
-    hasMeasuredAnchor,
     threadId,
     hasDraft,
     combinedDraft,

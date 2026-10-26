@@ -46,7 +46,7 @@ export function parseThreadLastRun(raw: unknown): ThreadLastRun | null {
 /** Tool result content that means the call was skipped by a loop gate. */
 export function isLimitSkipToolContent(content: string): boolean {
   return (
-    /^limit\.(repeat|tools|read_storm|terminal|unknown|outcome):/i.test(
+    /^limit\.(repeat|tools|read_storm|terminal|unknown|outcome|iterations|plan|finish):/i.test(
       content,
     ) || content.startsWith('Skipped: tool call limit')
   );

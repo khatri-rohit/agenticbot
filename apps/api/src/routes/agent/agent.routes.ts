@@ -302,6 +302,8 @@ async function prepareRun(input: {
   );
 
   const skillNames = input.skillNames ?? [];
+  const lastRun =
+    input.threadId === 'draft' ? null : await store.readLastRun(input.threadId);
   const { messages, report } = assembleContext(
     {
       tools,
@@ -313,6 +315,7 @@ async function prepareRun(input: {
       mentionedThreads,
       skillNames,
       ...(plan ? { plan } : {}),
+      ...(lastRun ? { lastRun } : {}),
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
@@ -700,14 +703,26 @@ router.post('/run', async (req: Request, res: Response) => {
       planHasOpenWork(await store.readPlan(threadId)),
     onFinished: async (result) => {
       try {
+        const cancelled =
+          result.status === 'error' && /run cancelled/i.test(result.content);
         await store.writeLastRun(threadId, {
           runId: result.runId,
-          status: result.status,
-          incomplete: result.status === 'incomplete',
+          status: cancelled
+            ? 'incomplete'
+            : result.status === 'incomplete'
+              ? 'incomplete'
+              : result.status === 'error'
+                ? 'error'
+                : 'completed',
+          incomplete: result.status === 'incomplete' || cancelled,
           iterations: result.iterations,
           toolCalls: result.toolCalls,
           finishedAt: new Date().toISOString(),
-          ...(result.limitReason ? { limitReason: result.limitReason } : {}),
+          ...(cancelled
+            ? { limitReason: 'Run cancelled' }
+            : result.limitReason
+              ? { limitReason: result.limitReason }
+              : {}),
         });
       } catch (error) {
         console.error(

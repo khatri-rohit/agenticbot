@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type {
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
@@ -156,14 +157,36 @@ function toolCallKey(toolName: string, args: unknown): string {
   return `${toolName}:${canonicalJson(args)}`;
 }
 
+/** Sync path key for admission/outcome maps — matches jail aliases like ./a vs a. */
+function canonicalizeToolPath(raw: string): string {
+  let normalized = raw.trim().replaceAll('\\', '/');
+  while (normalized.startsWith('./')) {
+    normalized = normalized.slice(2);
+  }
+  // path.normalize keeps OS separators; re-posix so Windows matches Unix keys.
+  return path.normalize(normalized || '.').split(path.sep).join('/');
+}
+
+function pathFromToolArgs(args: unknown): string | null {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    return null;
+  }
+  const raw = (args as Record<string, unknown>).path;
+  return typeof raw === 'string' && raw.trim() ? canonicalizeToolPath(raw) : null;
+}
+
 /**
- * Outcome key: same call AND same result means the model is stuck — varied
- * args that produce identical results are iteration theater, not progress.
- * Counted post-execution on mutate-stage only; read/terminal storms use
- * per-run admission ceilings below.
+ * Outcome key for mutate-stage stuck detection. edit_file keys on path+result
+ * so varied failing spans on the same file accumulate; other mutates keep
+ * call+result (repeat guard already covers identical args).
  */
 function outcomeKey(toolName: string, args: unknown, result: string): string {
-  return `${toolCallKey(toolName, args)}#${sha256Text(result.slice(0, 2000))}`;
+  const resultHash = sha256Text(result.slice(0, 2000));
+  if (toolName === 'edit_file') {
+    const filePath = pathFromToolArgs(args) ?? toolCallKey(toolName, args);
+    return `${toolName}:${filePath}#${resultHash}`;
+  }
+  return `${toolCallKey(toolName, args)}#${resultHash}`;
 }
 
 /** Invented tool names in one run before hard halt (I1 + I6). */
@@ -183,7 +206,10 @@ function limitMessage(
     | 'limit.read_storm'
     | 'limit.terminal'
     | 'limit.unknown'
-    | 'limit.outcome',
+    | 'limit.outcome'
+    | 'limit.iterations'
+    | 'limit.plan'
+    | 'limit.finish',
   detail: string,
 ): string {
   return `${code}: ${detail}`;
@@ -551,6 +577,9 @@ export async function runLoop(
       return { kind: 'filled' };
     }
 
+    // Valid tool breaks the unknown streak (lifetime total was ending runs early).
+    unknownToolCount = 0;
+
     if (posture === 'ask' && isAskStrippedTool(toolName)) {
       const blocked =
         'Blocked: this run is Ask (read-only). Switch the composer to Agent to edit files or run commands.';
@@ -677,9 +706,7 @@ export async function runLoop(
     }
 
     const readPath =
-      toolName === 'read_file' && typeof args.path === 'string'
-        ? args.path
-        : null;
+      toolName === 'read_file' ? pathFromToolArgs(args) : null;
     if (readPath !== null) {
       const pathCount = readFileByPath.get(readPath) ?? 0;
       if (pathCount >= MAX_READ_FILE_PER_PATH) {
@@ -1371,7 +1398,7 @@ export async function runLoop(
         }
 
         if (openPlanWork) {
-          noteLimit(limitMessage('limit.tools', 'Open plan todos remain'));
+          noteLimit(limitMessage('limit.plan', 'Open plan todos remain'));
           emitTurnCompleted(iterations, turn.usage);
           emit?.({
             type: 'run.completed',
@@ -1416,7 +1443,7 @@ export async function runLoop(
 
       noteLimit(
         limitMessage(
-          'limit.tools',
+          'limit.finish',
           `unexpected finish reason: ${turn.finishReason}`,
         ),
       );
@@ -1443,7 +1470,7 @@ export async function runLoop(
     // Max iterations exceeded — finalize without tools.
     noteLimit(
       limitMessage(
-        'limit.tools',
+        'limit.iterations',
         `max iterations exceeded (${limits.maxIterations})`,
       ),
     );

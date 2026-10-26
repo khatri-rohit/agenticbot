@@ -7,6 +7,7 @@ import type {
   ModeName,
   RunPosture,
   Snapshot,
+  ThreadLastRun,
   ThreadPlan,
 } from '@agent/agent-models';
 import {
@@ -58,7 +59,53 @@ export type AssembleContextInput = {
    * Bodies go into Loaded skills. Catalog is always the full list.
    */
   skillNames?: string[];
+  /** Prior run summary for resume; incomplete/cancelled inject a system note. */
+  lastRun?: ThreadLastRun | null;
 };
+
+/** Prompt-only fill for ledger orphans (pre-I1 / crash). Does not rewrite disk. */
+const INTERRUPTED_TOOL_RESULT = 'Skipped: interrupted before result.';
+
+function fillOrphanToolResults(
+  messages: ChatCompletionMessageParam[],
+): ChatCompletionMessageParam[] {
+  const answered = new Set<string>();
+  for (const message of messages) {
+    if (message.role === 'tool' && typeof message.tool_call_id === 'string') {
+      answered.add(message.tool_call_id);
+    }
+  }
+  const out: ChatCompletionMessageParam[] = [];
+  for (const message of messages) {
+    out.push(message);
+    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
+    for (const call of message.tool_calls) {
+      if (answered.has(call.id)) continue;
+      out.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        content: INTERRUPTED_TOOL_RESULT,
+      });
+      answered.add(call.id);
+    }
+  }
+  return out;
+}
+
+function formatLastRunPrompt(lastRun: ThreadLastRun): string | null {
+  if (!lastRun.incomplete && lastRun.status === 'completed') return null;
+  const reason =
+    lastRun.limitReason ??
+    (lastRun.status === 'error'
+      ? 'Run ended with an error'
+      : 'Run stopped early');
+  return [
+    '# Last run',
+    `The previous run on this thread ended early (status: ${lastRun.status}).`,
+    `Reason: ${reason}`,
+    'Workspace files may have changed since any tool results below. Re-read before editing or relying on those results.',
+  ].join('\n');
+}
 
 export type AssembleContextResult = {
   messages: ChatCompletionMessageParam[];
@@ -508,6 +555,11 @@ export function assembleContext(
         }
       : null;
 
+  const lastRunText = input.lastRun ? formatLastRunPrompt(input.lastRun) : null;
+  const lastRunMessage: ChatCompletionMessageParam | null = lastRunText
+    ? { role: 'system', content: lastRunText }
+    : null;
+
   const users = userSeqs(live);
   const keepToolsFrom = keepFromNthLast(users, budget.keepToolResultsForTurns);
   const keepImagesFrom = keepFromNthLast(users, budget.keepAttachmentsForTurns);
@@ -549,7 +601,7 @@ export function assembleContext(
     else tailMessages.push(message);
   }
 
-  const messages: ChatCompletionMessageParam[] = [
+  const messages: ChatCompletionMessageParam[] = fillOrphanToolResults([
     systemMessage,
     ...(skillsMessage ? [skillsMessage] : []),
     ...(bodiesMessage ? [bodiesMessage] : []),
@@ -558,9 +610,10 @@ export function assembleContext(
     ...(planMessage ? [planMessage] : []),
     ...(mentionsMessage ? [mentionsMessage] : []),
     ...(briefMessage ? [briefMessage] : []),
+    ...(lastRunMessage ? [lastRunMessage] : []),
     ...tailMessages,
     ...turnMessages,
-  ];
+  ]);
 
   const loadSkillIds = loadSkillCallIds(live);
   let skillsLoadedChars = 0;
@@ -627,6 +680,11 @@ export function assembleContext(
       tokens: briefMessage
         ? charsToTokens(String(briefMessage.content).length) + 4
         : 0,
+    },
+    {
+      id: 'last_run',
+      label: 'Last run',
+      tokens: lastRunText ? charsToTokens(lastRunText.length) + 4 : 0,
     },
     {
       id: 'conversation',
