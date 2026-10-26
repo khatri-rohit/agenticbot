@@ -273,7 +273,6 @@ export function MessageList({
                             <ToolStepList
                               key={step.key}
                               rows={step.rows}
-                              variant={threadKind}
                             />
                           );
                         }

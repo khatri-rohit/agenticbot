@@ -96,8 +96,11 @@ import {
 } from '@/components/thread-mention-picker';
 import {
   SkillSlashPicker,
+  SkillHighlightMirror,
+  completeSkillToken,
   filterSkillCatalog,
   skillQueryAtCaret,
+  skillTokensInText,
 } from '@/components/skill-slash-picker';
 import {
   fetchSkillCatalogs,
@@ -286,13 +289,15 @@ export function ChatInput({
     null,
   );
   const [skillsOpen, setSkillsOpen] = useState(false);
-  const [requestedSkills, setRequestedSkills] = useState<SkillCatalogItem[]>(
-    [],
-  );
   const [skillSlashOpen, setSkillSlashOpen] = useState(false);
   const [skillSlashQuery, setSkillSlashQuery] = useState('');
   const [skillSlashActive, setSkillSlashActive] = useState(0);
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[]>([]);
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
+  const knownSkillNames = useMemo(
+    () => new Set(skillCatalog.map((skill) => skill.name.toLowerCase())),
+    [skillCatalog],
+  );
   const catalog = useThreads() ?? [];
   const { workspaceRoot } = useAgentSpace();
   const mentionCandidates = rankMentionThreads(
@@ -468,9 +473,11 @@ export function ChatInput({
     liveEstimatedPromptTokens: estimatedPromptTokens,
     liveContextReport: contextReport,
     liveRunModel: runModel,
-    skillHints: { requested: requestedSkills.map((skill) => skill.name) },
+    skillHints: { requested: skillTokensInText(input) },
   });
 
+  // Catalog must be ready before the user types so inline `/name` tokens
+  // highlight immediately; not keyed on picker open.
   useEffect(() => {
     let cancelled = false;
     void fetchSkillCatalogs()
@@ -484,7 +491,7 @@ export function ChatInput({
     return () => {
       cancelled = true;
     };
-  }, [skillsOpen]);
+  }, []);
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -584,8 +591,7 @@ export function ChatInput({
     setMentionOpen(false);
     setSkillSlashOpen(false);
     setSelectedMentionId(null);
-    const requested = requestedSkills.map((skill) => skill.name);
-    setRequestedSkills([]);
+    const requested = skillTokensInText(content);
     clearComposerDraft(draftScope);
     onSend(
       content,
@@ -609,7 +615,6 @@ export function ChatInput({
     onSend,
     composerOptions,
     draftScope,
-    requestedSkills,
   ]);
 
   const visibleMentions = useMemo(() => {
@@ -672,31 +677,17 @@ export function ChatInput({
 
   const pickSkill = useCallback(
     (skill: SkillCatalogItem) => {
-      setRequestedSkills((current) => {
-        if (
-          current.some(
-            (item) => item.name.toLowerCase() === skill.name.toLowerCase(),
-          )
-        ) {
-          return current;
-        }
-        return [...current, skill];
-      });
       const ta = textareaRef.current;
       const caret = ta?.selectionStart ?? input.length;
-      const found = skillQueryAtCaret(input, caret);
-      const nextText = found
-        ? `${input.slice(0, found.start)}${input.slice(caret)}`
-        : input;
-      setInput(nextText);
+      const next = completeSkillToken(input, caret, skill.name);
+      setInput(next.text);
       setSkillSlashOpen(false);
       setSkillSlashQuery('');
       requestAnimationFrame(() => {
         const el = textareaRef.current;
         if (!el) return;
         el.focus();
-        const pos = found ? found.start : nextText.length;
-        el.setSelectionRange(pos, pos);
+        el.setSelectionRange(next.caret, next.caret);
       });
     },
     [input],
@@ -778,11 +769,6 @@ export function ChatInput({
             );
             return;
           }
-          if (requestedSkills.length > 0) {
-            e.preventDefault();
-            setRequestedSkills((current) => current.slice(0, -1));
-            return;
-          }
         }
       }
 
@@ -807,7 +793,6 @@ export function ChatInput({
       selectedMentionId,
       input,
       pendingAttachments,
-      requestedSkills.length,
       voiceLocked,
       handleSend,
     ],
@@ -854,26 +839,11 @@ export function ChatInput({
   const handleEditQueued = useCallback(() => {
     const queued = onEditQueued();
     if (!queued) return;
+    // Skill tokens live in the content itself; nothing to reconstruct.
     setInput(queued.content);
     setPendingAttachments(queued.attachments ?? []);
-    const names = queued.skills?.requested ?? [];
-    setRequestedSkills(
-      names.map((name) => {
-        const hit = skillCatalog.find(
-          (skill) => skill.name.toLowerCase() === name.toLowerCase(),
-        );
-        return (
-          hit ?? {
-            name,
-            description: '',
-            folder: name,
-            source: 'global' as const,
-          }
-        );
-      }),
-    );
     textareaRef.current?.focus();
-  }, [onEditQueued, skillCatalog]);
+  }, [onEditQueued]);
 
   // When model config loads, pick a valid thinking value for that model.
   useEffect(() => {
@@ -1139,51 +1109,67 @@ export function ChatInput({
   );
 
   const composerTextarea = (
-    <Textarea
-      ref={textareaRef}
-      value={input}
-      onChange={(e) => {
-        if (voiceLocked) return;
-        const value = e.target.value;
-        setInput(value);
-        const caret = e.target.selectionStart ?? value.length;
-        const found = mentionQueryAtCaret(value, caret);
-        if (found) {
-          setMentionOpen(true);
-          setMentionQuery(found.query);
-          setMentionActive(0);
-          setSkillSlashOpen(false);
-          setSkillSlashQuery('');
-          return;
-        }
-        setMentionOpen(false);
-        setMentionQuery('');
-        const skillFound = skillQueryAtCaret(value, caret);
-        if (skillFound) {
-          setSkillSlashOpen(true);
-          setSkillSlashQuery(skillFound.query);
-          setSkillSlashActive(0);
-        } else {
-          setSkillSlashOpen(false);
-          setSkillSlashQuery('');
-        }
-      }}
-      onKeyDown={handleKeyDown}
-      onPaste={handlePaste}
-      readOnly={voiceLocked}
-      aria-readonly={voiceLocked}
-      placeholder={composerPlaceholder({
-        voiceActive: voice.active,
-        voiceTranscribing: voice.transcribing,
-        isHero,
-      })}
-      rows={1}
-      className={cn(
-        'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0',
-        isHero && 'min-h-10',
-        voiceLocked && 'caret-transparent',
-      )}
-    />
+    <div className="relative min-w-0">
+      <SkillHighlightMirror
+        value={input}
+        knownNames={knownSkillNames}
+        mirrorRef={mirrorRef}
+      />
+      <Textarea
+        ref={textareaRef}
+        value={input}
+        onChange={(e) => {
+          if (voiceLocked) return;
+          const value = e.target.value;
+          setInput(value);
+          const caret = e.target.selectionStart ?? value.length;
+          const found = mentionQueryAtCaret(value, caret);
+          if (found) {
+            setMentionOpen(true);
+            setMentionQuery(found.query);
+            setMentionActive(0);
+            setSkillSlashOpen(false);
+            setSkillSlashQuery('');
+            return;
+          }
+          setMentionOpen(false);
+          setMentionQuery('');
+          const skillFound = skillQueryAtCaret(value, caret);
+          if (skillFound) {
+            setSkillSlashOpen(true);
+            setSkillSlashQuery(skillFound.query);
+            setSkillSlashActive(0);
+          } else {
+            setSkillSlashOpen(false);
+            setSkillSlashQuery('');
+          }
+        }}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoComplete="off"
+        autoCorrect="off"
+        onScroll={(e) => {
+          if (mirrorRef.current) {
+            mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+          }
+        }}
+        readOnly={voiceLocked}
+        aria-readonly={voiceLocked}
+        placeholder={composerPlaceholder({
+          voiceActive: voice.active,
+          voiceTranscribing: voice.transcribing,
+          isHero,
+        })}
+        rows={1}
+        className={cn(
+          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0',
+          isHero && 'min-h-10',
+          voiceLocked && 'caret-transparent',
+        )}
+      />
+    </div>
   );
 
   return (
@@ -1270,16 +1256,31 @@ export function ChatInput({
           </Card>
         )}
 
-        <Card
-          className={cn(
-            'min-w-0 gap-0 overflow-hidden border-0 bg-card/95 py-0 shadow-[0_4px_24px_oklch(0_0_0/0.12)] ring-1 ring-border/40 backdrop-blur-sm transition-[box-shadow,ring-color] focus-within:ring-border/65',
-            'rounded-[1.35rem]',
-            dragOver && 'ring-2 ring-ring/25',
-          )}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-        >
+        <div className="relative min-w-0">
+          {/* Detached popover: anchored above the composer with a gap so
+              opening/closing never shifts the composer layout. */}
+          {skillSlashOpen && !mentionOpen ? (
+            <SkillSlashPicker
+              skills={skillCatalog}
+              query={skillSlashQuery}
+              activeIndex={skillSlashActive}
+              onActiveIndexChange={setSkillSlashActive}
+              selectedNames={
+                new Set(skillTokensInText(input).map((n) => n.toLowerCase()))
+              }
+              onPick={pickSkill}
+            />
+          ) : null}
+          <Card
+            className={cn(
+              'min-w-0 gap-0 overflow-hidden border-0 bg-card/95 py-0 shadow-[0_4px_24px_oklch(0_0_0/0.12)] ring-1 ring-border/40 backdrop-blur-sm transition-[box-shadow,ring-color] focus-within:ring-border/65',
+              'rounded-[1.35rem]',
+              dragOver && 'ring-2 ring-ring/25',
+            )}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
           <CardContent className="relative min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
             {pendingAttachments.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap items-center gap-2 px-1 pt-0.5">
@@ -1326,32 +1327,6 @@ export function ChatInput({
               </div>
             ) : null}
 
-            {requestedSkills.length > 0 ? (
-              <div className="mb-1.5 flex flex-wrap gap-1 px-1">
-                {requestedSkills.map((skill) => (
-                  <span
-                    key={`${skill.source}:${skill.folder}`}
-                    title={skill.description}
-                    className="inline-flex max-w-full items-center gap-0.5 rounded-full border border-border/60 bg-muted/40 py-0.5 pr-0.5 pl-2 text-[11px] text-foreground"
-                  >
-                    <span className="truncate">{skill.name}</span>
-                    <button
-                      type="button"
-                      className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                      aria-label={`Remove ${skill.name}`}
-                      onClick={() =>
-                        setRequestedSkills((current) =>
-                          current.filter((item) => item.name !== skill.name),
-                        )
-                      }
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-
             {mentionOpen ? (
               <ThreadMentionPicker
                 threads={mentionCandidates}
@@ -1369,23 +1344,6 @@ export function ChatInput({
               />
             ) : null}
 
-            {skillSlashOpen && !mentionOpen ? (
-              <SkillSlashPicker
-                skills={skillCatalog}
-                query={skillSlashQuery}
-                activeIndex={skillSlashActive}
-                onActiveIndexChange={setSkillSlashActive}
-                selectedNames={
-                  new Set(requestedSkills.map((skill) => skill.name))
-                }
-                onPick={pickSkill}
-              />
-            ) : null}
-
-            {/*
-              Composer: textarea on top, controls on a bottom row. One layout,
-              no expand/collapse flip, so nothing can oscillate while typing.
-            */}
             <div className="grid min-w-0 gap-1 [grid-template-areas:'text_text'_'left_right'] grid-cols-[minmax(0,1fr)_auto]">
               <div className="flex min-w-0 flex-wrap items-center gap-1 [grid-area:left]">
                 {attachMenu}
@@ -1417,7 +1375,8 @@ export function ChatInput({
               </div>
             </div>
           </CardContent>
-        </Card>
+          </Card>
+        </div>
 
         {voice.enabled && voice.error ? (
           <p className="type-caption text-destructive" role="alert">

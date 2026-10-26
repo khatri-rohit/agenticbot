@@ -57,6 +57,14 @@ export type {
 
 /* ---------- internal helpers ---------- */
 
+/**
+ * Cap for `tool.completed` result previews carried on the live event stream.
+ * Large enough to carry a full read_file / run_terminal result for the UI's
+ * inline preview; the host ledger still holds the unbounded result. Short
+ * status strings (blocked, USER_SKIPPED_CHOICE) keep their own smaller caps.
+ */
+const RESULT_PREVIEW_MAX = 20_000;
+
 function preview(value: unknown, max = 300): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return text.length > max ? `${text.slice(0, max)}...` : text;
@@ -866,7 +874,7 @@ export async function runLoop(
         toolCallId: toolCall.id,
         toolName,
         durationMs,
-        resultPreview: preview(result, 200),
+        resultPreview: preview(result, RESULT_PREVIEW_MAX),
       });
       // Append before outcome halt so I1 always holds for the triggering call.
       await appendDurable({
@@ -1040,7 +1048,7 @@ export async function runLoop(
           toolCallId: call.toolCall.id,
           toolName: call.toolName,
           durationMs,
-          resultPreview: preview(item.result, 200),
+          resultPreview: preview(item.result, RESULT_PREVIEW_MAX),
         });
         await appendDurable({
           role: 'tool',

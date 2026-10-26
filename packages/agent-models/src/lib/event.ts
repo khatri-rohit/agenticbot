@@ -106,7 +106,7 @@ export interface ToolCompleted {
   toolCallId: string;
   toolName: string;
   durationMs: number;
-  /** Truncated result preview for UI display. Full result lives in the host ledger. */
+  /** Bounded preview (RESULT_PREVIEW_MAX, ~20KB) for UI display. Full result lives in the host ledger. */
   resultPreview: unknown;
 }
 
