@@ -144,7 +144,7 @@ export function SkillSlashPicker({
 
   return (
     <div
-      className="absolute inset-x-0 bottom-full z-40 mb-2 overflow-hidden rounded-xl bg-popover shadow-[0_8px_32px_oklch(0_0_0/0.35)] ring-1 ring-border/50"
+      className="absolute inset-x-0 bottom-full z-40 mb-2 overflow-hidden rounded-lg bg-popover shadow-[0_8px_32px_oklch(0_0_0/0.35)] ring-1 ring-border/50"
       role="listbox"
       aria-label="Load a skill"
     >
@@ -206,7 +206,7 @@ export function SkillSlashPicker({
                         : 'Built-in'}
                   </span>
                 </span>
-                <span className="line-clamp-2 text-[12px] leading-4 text-muted-foreground">
+                <span className="type-ui line-clamp-2 leading-4 text-muted-foreground">
                   {skill.description}
                 </span>
               </button>

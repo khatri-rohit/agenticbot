@@ -103,7 +103,7 @@ function CatalogRow({
         >
           <p
             className={cn(
-              'text-[13px] leading-5 text-muted-foreground',
+              'type-ui leading-5 text-muted-foreground',
               expanded ? 'whitespace-pre-wrap' : 'line-clamp-2',
             )}
           >
@@ -111,7 +111,7 @@ function CatalogRow({
           </p>
         </button>
         {overrides ? (
-          <p className="mt-1 text-xs text-amber-600 dark:text-amber-500">
+          <p className="mt-1 text-xs text-[var(--warning-fg)]">
             Overrides the built-in skill with this name
           </p>
         ) : null}
@@ -146,7 +146,7 @@ function ImportRow({
         <p className="truncate text-sm font-medium text-foreground">
           {skill.name}
         </p>
-        <p className="mt-0.5 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
+        <p className="type-ui mt-0.5 line-clamp-2 leading-5 text-muted-foreground">
           {skill.description}
         </p>
         <p className="mt-1 truncate font-mono text-xs text-muted-foreground/80">
@@ -156,7 +156,7 @@ function ImportRow({
             : ''}
         </p>
         {skill.folderCollision ? (
-          <p className="mt-1 text-xs text-amber-600 dark:text-amber-500">
+          <p className="mt-1 text-xs text-[var(--warning-fg)]">
             Folder name {skill.folderName} collides with another pack in this
             repo. Uncheck one before installing.
           </p>
@@ -573,7 +573,7 @@ export function SkillsPanel({
                       )}
                     </div>
                   </ScrollArea>
-                  <p className="shrink-0 text-[11px] leading-4 text-muted-foreground">
+                  <p className="type-caption shrink-0 leading-4 text-muted-foreground">
                     Type / in the composer to attach a pack to this send. The
                     agent can also load any catalog skill with load_skill.
                   </p>
@@ -667,7 +667,7 @@ export function SkillsPanel({
           <DialogFooter className="mt-0 shrink-0">
             <div className="flex w-full flex-col items-stretch gap-2">
               {selectedCollisions.length > 0 ? (
-                <p className="text-xs text-amber-600 dark:text-amber-500">
+                <p className="text-xs text-[var(--warning-fg)]">
                   Two packs flatten to {selectedCollisions.join(', ')}. Uncheck
                   one before installing.
                 </p>

@@ -184,7 +184,7 @@ export function MessageList({
                 type="button"
                 size="icon"
                 variant="secondary"
-                className="pointer-events-auto size-8 rounded-full border border-border/50 bg-card/95 shadow-sm backdrop-blur-sm"
+                className="pointer-events-auto size-8 rounded-full border border-border/50 bg-card shadow-sm"
                 onClick={jumpToBottomAndFollow}
                 aria-label="Scroll to latest messages"
               >

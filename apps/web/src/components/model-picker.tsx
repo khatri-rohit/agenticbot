@@ -188,7 +188,7 @@ export function ModelPicker({
                       {m.label}
                     </span>
                     {m.hint ? (
-                      <span className="block truncate text-[11px] text-muted-foreground">
+                      <span className="type-caption block truncate text-muted-foreground">
                         {m.hint}
                       </span>
                     ) : null}
@@ -197,7 +197,7 @@ export function ModelPicker({
                 <span className="flex shrink-0 items-center gap-1.5">
                   {m.contextLength != null ? (
                     <span
-                      className="text-[10px] font-medium tabular-nums text-muted-foreground"
+                      className="type-caption font-medium tabular-nums text-muted-foreground"
                       title={`${m.contextLength.toLocaleString()} token context`}
                     >
                       {m.contextLength >= 1_000_000

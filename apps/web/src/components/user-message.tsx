@@ -94,7 +94,7 @@ export function UserMessage({
     >
       {isEditing ? (
         <div
-          className="rounded-2xl bg-muted/45 p-3 ring-1 ring-border/40"
+          className="rounded-lg bg-muted/45 p-3 ring-1 ring-border/40"
           role="form"
           aria-label="Edit message"
         >
@@ -123,7 +123,7 @@ export function UserMessage({
           />
           {confirmClear ? (
             <div
-              className="mt-2 space-y-2 rounded-xl bg-background/60 px-3 py-2.5 ring-1 ring-border/50"
+              className="mt-2 space-y-2 rounded-lg bg-background/60 px-3 py-2.5 ring-1 ring-border/50"
               role="alertdialog"
               aria-labelledby={`edit-clear-title-${message.id}`}
             >
@@ -188,7 +188,7 @@ export function UserMessage({
           {/* Document-style prompt card: stronger fill so the prompt reads vs the reply document. */}
           <div
             className={cn(
-              'type-user min-w-0 max-w-full overflow-hidden rounded-2xl bg-muted/55 px-4 py-3 text-foreground ring-1 ring-border/50',
+              'type-user min-w-0 max-w-full overflow-hidden rounded-lg bg-muted/55 px-4 py-3 text-foreground ring-1 ring-border/50',
             )}
           >
             {message.attachments && message.attachments.length > 0 ? (

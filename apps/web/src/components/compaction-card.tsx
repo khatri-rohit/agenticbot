@@ -16,7 +16,7 @@ export function CompactionCard({ notice }: { notice: CompactionNotice }) {
 
   return (
     <section
-      className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/60 bg-muted/25"
+      className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-muted/25"
       aria-label={running ? 'Compacting context' : 'Context compacted'}
       aria-busy={running}
     >
@@ -39,7 +39,7 @@ export function CompactionCard({ notice }: { notice: CompactionNotice }) {
           {running ? 'Compacting context…' : 'Context compacted'}
         </span>
         {!running && notice.throughSeq > 0 ? (
-          <span className="type-ui shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          <span className="type-caption shrink-0 tabular-nums text-muted-foreground">
             through seq {notice.throughSeq}
           </span>
         ) : null}
@@ -60,7 +60,7 @@ export function CompactionCard({ notice }: { notice: CompactionNotice }) {
               <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Brief
               </p>
-              <pre className="type-ui max-h-40 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">
+              <pre className="type-ui max-h-40 overflow-auto whitespace-pre-wrap break-words leading-relaxed text-foreground/85">
                 {notice.brief}
               </pre>
             </section>
@@ -70,7 +70,7 @@ export function CompactionCard({ notice }: { notice: CompactionNotice }) {
               <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Summary
               </p>
-              <pre className="type-ui max-h-64 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">
+              <pre className="type-ui max-h-64 overflow-auto whitespace-pre-wrap break-words leading-relaxed text-foreground/85">
                 {notice.summary}
               </pre>
             </section>

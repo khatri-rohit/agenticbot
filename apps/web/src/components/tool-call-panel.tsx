@@ -216,7 +216,7 @@ function ToolCard({ row }: { row: ToolCallRow }) {
 
   return (
     <article
-      className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/50 bg-muted/30"
+      className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/50 bg-muted/30"
       aria-label={`${summary.action}: ${summary.title}`}
     >
       <button
@@ -237,17 +237,17 @@ function ToolCard({ row }: { row: ToolCallRow }) {
           {summary.title}
         </span>
         {summary.minus !== undefined ? (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-red-500/90">
+          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
             −{summary.minus}
           </span>
         ) : null}
         {summary.plus !== undefined ? (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-emerald-600 dark:text-emerald-400">
+          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
             +{summary.plus}
           </span>
         ) : null}
         {row.durationMs !== undefined && row.status !== 'running' ? (
-          <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground/70">
+          <span className="type-caption shrink-0 tabular-nums text-muted-foreground/70">
             {row.durationMs}ms
           </span>
         ) : null}
@@ -274,7 +274,7 @@ function ToolCard({ row }: { row: ToolCallRow }) {
           onClick={toggle}
           aria-expanded={open}
           aria-label={open ? 'Collapse' : 'Expand'}
-          className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          className="type-caption flex items-center gap-1 rounded-md px-2 py-0.5 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
         >
           <ChevronDown
             className={cn(
@@ -336,7 +336,7 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
       type="button"
       variant="ghost"
       size="sm"
-      className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground"
+      className="type-caption h-5 gap-1 px-1.5 text-muted-foreground"
       onClick={() => void copy()}
     >
       {copied ? (
@@ -371,7 +371,7 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
   const content = row.result ?? '';
   if (!content) {
     return (
-      <p className="px-3 py-2 text-[11px] italic text-muted-foreground/60">
+      <p className="type-caption px-3 py-2 italic text-muted-foreground/60">
         {row.status === 'running' ? 'Reading…' : 'No output captured.'}
       </p>
     );
@@ -386,7 +386,7 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
       <pre
         className={cn(
           PREVIEW_SCROLL,
-          'm-0 min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground/90',
+          'm-0 min-w-0 whitespace-pre-wrap break-words px-3 py-2 font-mono type-caption leading-relaxed text-foreground/90',
         )}
       >
         {lines.map((line, i) => (
@@ -419,7 +419,7 @@ function EditFilePreview({
 
   if (row.status === 'running' && !oldText && !newText) {
     return (
-      <p className="px-3 py-2 text-[11px] italic text-muted-foreground/60">
+      <p className="type-caption px-3 py-2 italic text-muted-foreground/60">
         Editing {path}…
       </p>
     );
@@ -439,12 +439,12 @@ function EditFilePreview({
           <pre
             className={cn(
               PREVIEW_SCROLL,
-              'm-0 min-w-0 whitespace-pre-wrap break-words rounded-lg bg-red-500/5 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-red-600 dark:text-red-400 ring-1 ring-red-500/20',
+              'm-0 min-w-0 whitespace-pre-wrap break-words rounded-lg bg-[var(--diff-removed-bg)] px-2.5 py-2 font-mono type-caption leading-relaxed text-[var(--diff-removed-fg)] ring-1 ring-[var(--diff-removed-ring)]',
             )}
           >
             {oldLines.map((line, i) => (
               <span key={i} className="block">
-                <span className="mr-2 select-none text-red-500/70">−</span>
+                <span className="mr-2 select-none text-[var(--diff-removed-fg)]/70">−</span>
                 {line}
               </span>
             ))}
@@ -460,12 +460,12 @@ function EditFilePreview({
           <pre
             className={cn(
               PREVIEW_SCROLL,
-              'm-0 min-w-0 whitespace-pre-wrap break-words rounded-lg bg-emerald-500/5 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-500/20',
+              'm-0 min-w-0 whitespace-pre-wrap break-words rounded-lg bg-[var(--diff-added-bg)] px-2.5 py-2 font-mono type-caption leading-relaxed text-[var(--diff-added-fg)] ring-1 ring-[var(--diff-added-ring)]',
             )}
           >
             {newLines.map((line, i) => (
               <span key={i} className="block">
-                <span className="mr-2 select-none text-emerald-500/70">+</span>
+                <span className="mr-2 select-none text-[var(--diff-added-fg)]/70">+</span>
                 {line}
               </span>
             ))}
@@ -473,7 +473,7 @@ function EditFilePreview({
         </div>
       ) : null}
       {oldLines.length === 0 && newLines.length === 0 ? (
-        <p className="text-[11px] italic text-muted-foreground/60">
+        <p className="type-caption italic text-muted-foreground/60">
           {row.result || 'No diff available.'}
         </p>
       ) : null}
@@ -502,22 +502,22 @@ function TerminalPreview({ row }: { row: ToolCallRow }) {
       <pre
         className={cn(
           PREVIEW_SCROLL,
-          'm-0 min-w-0 whitespace-pre-wrap break-words rounded-lg bg-zinc-950 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-zinc-200 ring-1 ring-zinc-800',
+          'm-0 min-w-0 whitespace-pre-wrap break-words rounded-lg bg-[var(--terminal-bg)] px-2.5 py-2 font-mono type-caption leading-relaxed text-[var(--terminal-fg)] ring-1 ring-[var(--terminal-ring)]',
         )}
       >
-        <span className="block text-emerald-400">
-          <span className="mr-1 select-none text-zinc-500">$</span>
+        <span className="block text-[var(--terminal-prompt)]">
+          <span className="mr-1 select-none text-[var(--terminal-muted)]">$</span>
           {command}
         </span>
         {row.status === 'running' ? (
-          <span className="mt-1 flex items-center gap-1.5 text-zinc-400">
+          <span className="mt-1 flex items-center gap-1.5 text-[var(--terminal-muted)]">
             <Loader2 className="size-3 animate-spin" />
             Running…
           </span>
         ) : output ? (
-          <span className="mt-1 block text-zinc-300">{output}</span>
+          <span className="mt-1 block text-[var(--terminal-fg)]/85">{output}</span>
         ) : (
-          <span className="mt-1 block text-zinc-500">No output.</span>
+          <span className="mt-1 block text-[var(--terminal-muted)]">No output.</span>
         )}
       </pre>
     </div>
@@ -542,15 +542,15 @@ function SearchPreview({ row }: { row: ToolCallRow }) {
         <pre
           className={cn(
             PREVIEW_SCROLL,
-            'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono text-[11px] leading-relaxed text-foreground/90',
+            'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono type-caption leading-relaxed text-foreground/90',
           )}
         >
           {result}
         </pre>
       ) : row.status === 'running' ? (
-        <p className="text-[11px] italic text-muted-foreground/60">Searching…</p>
+        <p className="type-caption italic text-muted-foreground/60">Searching…</p>
       ) : (
-        <p className="text-[11px] italic text-muted-foreground/60">
+        <p className="type-caption italic text-muted-foreground/60">
           No results.
         </p>
       )}
@@ -574,15 +574,15 @@ function WebFetchPreview({ row }: { row: ToolCallRow }) {
         <pre
           className={cn(
             PREVIEW_SCROLL,
-            'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono text-[11px] leading-relaxed text-foreground/90',
+            'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono type-caption leading-relaxed text-foreground/90',
           )}
         >
           {content}
         </pre>
       ) : row.status === 'running' ? (
-        <p className="text-[11px] italic text-muted-foreground/60">Fetching…</p>
+        <p className="type-caption italic text-muted-foreground/60">Fetching…</p>
       ) : (
-        <p className="text-[11px] italic text-muted-foreground/60">
+        <p className="type-caption italic text-muted-foreground/60">
           No content.
         </p>
       )}
@@ -604,7 +604,7 @@ function GenericPreview({ row }: { row: ToolCallRow }) {
           <pre
             className={cn(
               PREVIEW_SCROLL,
-              'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono text-[11px] leading-relaxed text-foreground/90',
+              'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono type-caption leading-relaxed text-foreground/90',
             )}
           >
             {args}
@@ -620,16 +620,16 @@ function GenericPreview({ row }: { row: ToolCallRow }) {
           <pre
             className={cn(
               PREVIEW_SCROLL,
-              'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono text-[11px] leading-relaxed text-foreground/90',
+              'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono type-caption leading-relaxed text-foreground/90',
             )}
           >
             {result}
           </pre>
         </div>
       ) : row.status === 'running' ? (
-        <p className="text-[11px] italic text-muted-foreground/60">Running…</p>
+        <p className="type-caption italic text-muted-foreground/60">Running…</p>
       ) : (
-        <p className="text-[11px] italic text-muted-foreground/60">
+        <p className="type-caption italic text-muted-foreground/60">
           No output captured.
         </p>
       )}

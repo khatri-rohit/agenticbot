@@ -1178,7 +1178,7 @@ export function ChatInput({
         'min-w-0 shrink-0',
         isHero
           ? 'w-full px-0 py-0'
-          : 'bg-gradient-to-t from-background via-background/95 to-background/0 px-4 pb-4 pt-2 sm:px-6',
+          : 'bg-background px-4 pb-4 pt-2 sm:px-6',
       )}
     >
       <div
@@ -1273,8 +1273,8 @@ export function ChatInput({
           ) : null}
           <Card
             className={cn(
-              'min-w-0 gap-0 overflow-hidden border-0 bg-card/95 py-0 shadow-[0_4px_24px_oklch(0_0_0/0.12)] ring-1 ring-border/40 backdrop-blur-sm transition-[box-shadow,ring-color] focus-within:ring-border/65',
-              'rounded-[1.35rem]',
+              'min-w-0 gap-0 overflow-hidden border-0 bg-card py-0 ring-1 ring-border/40 transition-[box-shadow,ring-color] focus-within:ring-border/65',
+              'rounded-lg',
               dragOver && 'ring-2 ring-ring/25',
             )}
             onDragOver={handleDragOver}

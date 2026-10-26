@@ -71,8 +71,8 @@ export const WORKSPACE_MODE: ModeConfig = {
     'offer_choice',
   ],
   limits: {
-    maxIterations: 50,
-    maxToolCalls: 100,
+    maxIterations: 100,
+    maxToolCalls: 200,
     maxRepeatedToolCalls: 3,
     toolTimeoutMs: 120_000,
   },

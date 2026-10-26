@@ -128,7 +128,7 @@ export function ContextUsage({
                 ratio >= 0.92
                   ? 'stroke-destructive'
                   : ratio >= 0.75
-                    ? 'stroke-amber-500'
+                    ? 'stroke-[var(--warning)]'
                     : 'stroke-foreground/70',
               )}
               strokeWidth={stroke}
@@ -213,11 +213,11 @@ export function ContextUsage({
           <dd className="text-right font-medium tabular-nums">{limitLabel}</dd>
         </dl>
         {defaultWindow ? (
-          <p className="mt-2 text-[11px] text-muted-foreground">
+          <p className="type-caption mt-2 text-muted-foreground">
             Using default window — model show unavailable
           </p>
         ) : null}
-        <p className="mt-2 text-[11px] text-muted-foreground tabular-nums">
+        <p className="type-caption mt-2 text-muted-foreground tabular-nums">
           {showTilde ? '~' : ''}
           {percent}% of window
         </p>

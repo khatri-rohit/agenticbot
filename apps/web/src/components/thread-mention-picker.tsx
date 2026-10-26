@@ -150,7 +150,7 @@ export function ThreadMentionPicker({
 
   return (
     <div
-      className="mb-1.5 w-full overflow-hidden rounded-xl bg-popover ring-1 ring-border/50"
+      className="mb-1.5 w-full overflow-hidden rounded-lg bg-popover ring-1 ring-border/50"
       role="listbox"
       aria-label="Attach a thread"
     >

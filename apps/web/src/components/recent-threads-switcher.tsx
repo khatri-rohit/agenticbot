@@ -226,9 +226,9 @@ export function RecentThreadsSwitcher() {
       <div
         role="listbox"
         aria-label="Recently viewed"
-        className="w-full max-w-md overflow-hidden rounded-xl bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
+        className="w-full max-w-md overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
       >
-        <div className="px-3 pt-2.5 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
+        <div className="type-caption px-3 pt-2.5 pb-1.5 font-medium text-muted-foreground">
           Recently Viewed
         </div>
         <ul className="max-h-[min(420px,60vh)] overflow-y-auto px-1.5 pb-1.5">
@@ -262,11 +262,11 @@ export function RecentThreadsSwitcher() {
                   )}
                   <span className="min-w-0 flex-1 truncate">{entry.title}</span>
                   {entry.updatedAt ? (
-                    <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                    <span className="type-caption shrink-0 tabular-nums text-muted-foreground">
                       {formatRelativeTime(entry.updatedAt)}
                     </span>
                   ) : null}
-                  <span className="shrink-0 text-[11px] text-muted-foreground/70">
+                  <span className="type-caption shrink-0 text-muted-foreground/70">
                     Agent
                   </span>
                 </button>

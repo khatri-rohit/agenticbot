@@ -38,7 +38,7 @@ export function ChatHeader({ threadId }: { threadId: string }) {
 
   return (
     <header className="shrink-0 border-b border-border/40 px-5 py-3">
-      <h1 className="truncate text-lg font-bold leading-snug tracking-tight text-pretty text-foreground">
+      <h1 className="truncate text-lg font-semibold leading-snug tracking-tight text-pretty text-foreground">
         {isPending ? (
           <span className="inline-flex items-center gap-2">
             <span className="text-muted-foreground">Untitled</span>
