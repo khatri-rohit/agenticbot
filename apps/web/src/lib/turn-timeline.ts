@@ -1,4 +1,8 @@
-import type { Message, PendingToolCall } from '@agent/agent-models';
+import {
+  isLimitSkipToolContent,
+  type Message,
+  type PendingToolCall,
+} from '@agent/agent-models';
 
 import type {
   AssistantSnippet,
@@ -11,7 +15,7 @@ export type ToolCallRow = {
   toolName: string;
   args?: string;
   result?: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'skipped';
   durationMs?: number;
 };
 
@@ -49,7 +53,16 @@ function rowFromCall(
   if (activity) {
     status = activity.status;
   } else if (toolMessage) {
-    status = toolMessage.status === 'interrupted' ? 'failed' : 'done';
+    if (toolMessage.status === 'interrupted') {
+      status = 'failed';
+    } else if (
+      typeof toolMessage.content === 'string' &&
+      isLimitSkipToolContent(toolMessage.content)
+    ) {
+      status = 'skipped';
+    } else {
+      status = 'done';
+    }
   }
 
   const liveArgs = previewToArgs(activity?.argsPreview);

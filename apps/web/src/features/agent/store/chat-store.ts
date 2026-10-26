@@ -1,4 +1,5 @@
 import {
+  isLimitSkipToolContent,
   occupiedFromUsage,
   type AgentEvent,
   type ChoiceOption,
@@ -18,7 +19,7 @@ import { setContextAnchor } from '../lib/context-anchor';
 export type ToolActivity = {
   toolCallId: string;
   toolName: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'skipped';
   /** Event seq — orders live tools against settled assistant snippets. */
   seq: number;
   durationMs?: number;
@@ -46,7 +47,7 @@ export type AssistantSnippet = {
 
 export type ChatRunState = {
   runId: string;
-  status: 'running' | 'completed' | 'error';
+  status: 'running' | 'completed' | 'incomplete' | 'error';
   model: string;
   /** Host-applied posture for this run (from run.started). */
   posture: RunPosture;
@@ -194,7 +195,11 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       // Tool-only turns emit completed with empty content; nothing to settle.
       const snippet =
         event.content && event.content.trim().length > 0
-          ? { messageId: event.messageId, content: event.content, seq: event.seq }
+          ? {
+              messageId: event.messageId,
+              content: event.content,
+              seq: event.seq,
+            }
           : null;
       return {
         ...state,
@@ -202,7 +207,12 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           ...state.activeRun,
           streamingMessage: null,
           ...(snippet
-            ? { assistantSnippets: [...state.activeRun.assistantSnippets, snippet] }
+            ? {
+                assistantSnippets: [
+                  ...state.activeRun.assistantSnippets,
+                  snippet,
+                ],
+              }
             : {}),
           lastSeq,
         },
@@ -232,6 +242,11 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'tool.completed': {
       if (!state.activeRun) return state;
+      const preview =
+        typeof event.resultPreview === 'string' ? event.resultPreview : '';
+      const doneStatus = isLimitSkipToolContent(preview)
+        ? ('skipped' as const)
+        : ('done' as const);
       const existing = state.activeRun.toolActivity.some(
         (t) => t.toolCallId === event.toolCallId,
       );
@@ -240,7 +255,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             t.toolCallId === event.toolCallId
               ? {
                   ...t,
-                  status: 'done' as const,
+                  status: doneStatus,
                   durationMs: event.durationMs,
                   resultPreview: event.resultPreview,
                 }
@@ -251,7 +266,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             {
               toolCallId: event.toolCallId,
               toolName: event.toolName,
-              status: 'done' as const,
+              status: doneStatus,
               seq: event.seq,
               durationMs: event.durationMs,
               resultPreview: event.resultPreview,
@@ -321,11 +336,27 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       // Model loop done — keep activeRun until run.settled so compaction
       // can appear in the turn trail like a late tool step.
       if (!state.activeRun) return state;
+      const incomplete = event.incomplete === true;
       return {
         ...state,
+        ...(incomplete && event.limitReason
+          ? {
+              limitNotice: {
+                runId: event.runId,
+                reason: event.limitReason,
+              },
+            }
+          : incomplete
+            ? {
+                limitNotice: {
+                  runId: event.runId,
+                  reason: 'Run stopped early (incomplete).',
+                },
+              }
+            : {}),
         activeRun: {
           ...state.activeRun,
-          status: 'completed',
+          status: incomplete ? 'incomplete' : 'completed',
           streamingMessage: null,
           lastSeq,
         },

@@ -507,6 +507,7 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
   const lastUserSeq = store.lastUserSeq(envelopes);
   const snapshot = await store.readSnapshot(req.params.id);
   const plan = await store.readPlan(req.params.id);
+  const lastRun = await store.readLastRun(req.params.id);
   const activeRunId = runManager.activeRunIdForThread(req.params.id);
   return res.json({
     messages,
@@ -514,6 +515,7 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
     lastUserSeq,
     snapshot,
     plan,
+    ...(lastRun ? { lastRun } : {}),
     ...(activeRunId ? { activeRunId } : {}),
   });
 });
@@ -696,7 +698,23 @@ router.post('/run', async (req: Request, res: Response) => {
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
-    onFinished: async () => {
+    onFinished: async (result) => {
+      try {
+        await store.writeLastRun(threadId, {
+          runId: result.runId,
+          status: result.status,
+          incomplete: result.status === 'incomplete',
+          iterations: result.iterations,
+          toolCalls: result.toolCalls,
+          finishedAt: new Date().toISOString(),
+          ...(result.limitReason ? { limitReason: result.limitReason } : {}),
+        });
+      } catch (error) {
+        console.error(
+          'writeLastRun failed:',
+          error instanceof Error ? error.message : error,
+        );
+      }
       try {
         await maybeCompactThread({
           threadId,

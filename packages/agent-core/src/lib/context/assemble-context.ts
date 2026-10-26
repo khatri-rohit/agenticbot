@@ -134,7 +134,8 @@ function loadedSkillNamesFromEnvelopes(envelopes: LedgerEnvelope[]): string[] {
       continue;
     }
     for (const call of envelope.record.tool_calls) {
-      if (!('function' in call) || call.function.name !== 'load_skill') continue;
+      if (!('function' in call) || call.function.name !== 'load_skill')
+        continue;
       const name = loadSkillNameFromArgs(call.function.arguments);
       if (name) names.push(name);
     }
@@ -200,7 +201,9 @@ export function refreshContextReport(
   tools: ToolRegistry,
   usage?: { promptTokens: number },
 ): ContextReport {
-  const prefix = report.layers.filter((layer) => PREFIX_LAYER_IDS.has(layer.id));
+  const prefix = report.layers.filter((layer) =>
+    PREFIX_LAYER_IDS.has(layer.id),
+  );
   const prefixSum = prefix.reduce((sum, layer) => sum + layer.tokens, 0);
   const skillsLoaded = loadSkillTokensFromMessages(messages);
   const occupied =
@@ -328,7 +331,7 @@ export function stubLiveToolResults(
           ? message.content
           : message.content
               .filter((part) => part.type === 'text')
-              .map((part) => part.text)
+              .map((part) => part.text ?? '')
               .join('\n');
       messages[i] = { role: 'user', content: stubbedUserText(text, n) };
       continue;
@@ -411,6 +414,8 @@ function layerTokens(
 /**
  * Pure assembler. Same envelopes + memory + snapshot → same messages.
  * Stubbing is free and deterministic; compaction is reported, not performed.
+ * The ContextReport here is the measured “used” meter source after turns —
+ * not a keystroke-hot estimate path (web must not spam assemble on typing).
  *
  * Cache contract: the returned messages are ordered stable-first (system,
  * memory, plan, mentions, brief) then volatile (tail, current turn). The
@@ -496,7 +501,7 @@ export function assembleContext(
           content: [
             '# Attached threads',
             'Other conversations the user attached to this turn. Use them as background.',
-            'They are not this thread\'s ledger. Do not treat them as files you edited here.',
+            "They are not this thread's ledger. Do not treat them as files you edited here.",
             '',
             mentionParts.join('\n\n'),
           ].join('\n'),
@@ -505,10 +510,7 @@ export function assembleContext(
 
   const users = userSeqs(live);
   const keepToolsFrom = keepFromNthLast(users, budget.keepToolResultsForTurns);
-  const keepImagesFrom = keepFromNthLast(
-    users,
-    budget.keepAttachmentsForTurns,
-  );
+  const keepImagesFrom = keepFromNthLast(users, budget.keepAttachmentsForTurns);
 
   const lastUserSeq = users.at(-1);
   const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
@@ -640,8 +642,7 @@ export function assembleContext(
 
   const occupiedTokens = layers.reduce((sum, layer) => sum + layer.tokens, 0);
   const inputBudget = budget.windowTokens - budget.outputReserveTokens;
-  const needsCompaction =
-    occupiedTokens > inputBudget * budget.compactAtRatio;
+  const needsCompaction = occupiedTokens > inputBudget * budget.compactAtRatio;
 
   const report: ContextReport = {
     budget,

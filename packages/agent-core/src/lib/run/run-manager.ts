@@ -124,6 +124,7 @@ export class RunManager {
       handle.emitter.emit({
         type: 'run.settled',
         runId,
+        ...(result.status === 'incomplete' ? { incomplete: true } : {}),
       });
     }
   }

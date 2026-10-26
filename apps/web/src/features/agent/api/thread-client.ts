@@ -3,6 +3,7 @@ import type {
   Snapshot,
   Thread,
   ThreadKind,
+  ThreadLastRun,
   ThreadPlan,
 } from '@agent/agent-models';
 
@@ -133,6 +134,8 @@ export type LedgerResponse = {
   snapshot?: Snapshot | null;
   /** Thread-scoped plan journal + todos. */
   plan?: ThreadPlan | null;
+  /** Last finished run outcome (survives SSE TTL; rebuilds limitNotice). */
+  lastRun?: ThreadLastRun | null;
   /** Live run to reattach after reload (in-flight turn, offer_choice pause). */
   activeRunId?: string;
 };

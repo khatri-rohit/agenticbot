@@ -20,6 +20,7 @@ import {
   parseThreadPlan,
   sameWorkspaceRoot,
   selectPlanForRewind,
+  parseThreadLastRun,
   type ChatMessage,
   type LedgerAppendMeta,
   type LedgerEnvelope,
@@ -29,6 +30,7 @@ import {
   type Snapshot,
   type Thread,
   type ThreadKind,
+  type ThreadLastRun,
   type ThreadPlan,
 } from '@agent/agent-models';
 
@@ -423,6 +425,26 @@ export class ThreadStore {
     await rm(this.snapshotPath(threadId), { force: true });
   }
 
+  async readLastRun(threadId: string): Promise<ThreadLastRun | null> {
+    try {
+      const raw = await readFile(this.lastRunPath(threadId), 'utf8');
+      return parseThreadLastRun(JSON.parse(raw));
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') return null;
+      if (error instanceof SyntaxError) return null;
+      throw error;
+    }
+  }
+
+  async writeLastRun(threadId: string, lastRun: ThreadLastRun): Promise<void> {
+    await writeFile(
+      this.lastRunPath(threadId),
+      `${JSON.stringify(lastRun, null, 2)}\n`,
+      'utf8',
+    );
+  }
+
   async readPlan(threadId: string): Promise<ThreadPlan> {
     try {
       const raw = await readFile(this.planPath(threadId), 'utf8');
@@ -563,6 +585,10 @@ export class ThreadStore {
 
   private planLogPath(threadId: string): string {
     return path.join(this.threadDir(threadId), 'plan-log.json');
+  }
+
+  private lastRunPath(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'last-run.json');
   }
 }
 

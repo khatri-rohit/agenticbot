@@ -30,10 +30,7 @@ import {
   persistChatEffects,
   type ChatState,
 } from '../store/chat-store';
-import {
-  isThreadPlanEmpty,
-  type ThreadPlan,
-} from '@agent/agent-models';
+import { isThreadPlanEmpty, type ThreadPlan } from '@agent/agent-models';
 import {
   startRun,
   subscribeRun,
@@ -79,10 +76,10 @@ function planIsCurrent(
 }
 
 /** Ledger plan → live state, or null when the plan predates the last turn. */
-function planFromLedger(
-  ledger: LedgerResponse,
-): ThreadPlan | null {
-  return planIsCurrent(ledger.plan, ledger.lastUserSeq) ? ledger.plan ?? null : null;
+function planFromLedger(ledger: LedgerResponse): ThreadPlan | null {
+  return planIsCurrent(ledger.plan, ledger.lastUserSeq)
+    ? (ledger.plan ?? null)
+    : null;
 }
 
 const defaultComposerOptions = (): ComposerOptions => {
@@ -153,12 +150,29 @@ export function useAgentRun(threadId: string | null) {
     void fetchLedger(threadId)
       .then((ledger) => {
         if (cancelled) return;
+        const lastRun = ledger.lastRun;
         setChatState((prev) => ({
           ...prev,
           ...(ledger.snapshot
             ? { compactionNotice: noticeFromSnapshot(ledger.snapshot) }
             : {}),
           plan: planFromLedger(ledger),
+          // Rebuild stop caption from durable last-run (SSE limitNotice is ephemeral).
+          ...(lastRun?.incomplete && lastRun.limitReason
+            ? {
+                limitNotice: {
+                  runId: lastRun.runId,
+                  reason: lastRun.limitReason,
+                },
+              }
+            : lastRun?.incomplete
+              ? {
+                  limitNotice: {
+                    runId: lastRun.runId,
+                    reason: 'Run stopped early (incomplete).',
+                  },
+                }
+              : {}),
         }));
         if (ledger.activeRunId && !chatStateRef.current.activeRun) {
           subscribeToRunRef.current(ledger.activeRunId);

@@ -137,6 +137,8 @@ export interface RunCompleted {
   toolCalls: number;
   /** True when the loop stopped on a limit, not a clean model stop. */
   incomplete?: boolean;
+  /** Stable limit reason when incomplete (e.g. `limit.terminal: …`). */
+  limitReason?: string;
 }
 
 export interface RunError {
@@ -223,6 +225,8 @@ export interface RunSettled {
   seq: number;
   type: 'run.settled';
   runId: string;
+  /** True when the loop finished incomplete (limit / open plan / etc.). */
+  incomplete?: boolean;
 }
 
 /** Union of event types for filtering. */

@@ -84,4 +84,6 @@ export type RunLoopResult = {
   iterations: number;
   toolCalls: number;
   status: RunLoopStatus;
+  /** Present when status is incomplete due to a loop gate. */
+  limitReason?: string;
 };

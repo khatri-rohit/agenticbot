@@ -131,6 +131,15 @@ export type {
 export { DEFAULT_MEMORY_CAPS } from './lib/memory.js';
 
 export type {
+  ThreadLastRun,
+  ThreadLastRunStatus,
+} from './lib/thread-last-run.js';
+export {
+  isLimitSkipToolContent,
+  parseThreadLastRun,
+} from './lib/thread-last-run.js';
+
+export type {
   PlanAction,
   PlanDecision,
   PlanNote,

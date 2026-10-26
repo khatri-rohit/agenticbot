@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  Ban,
   Check,
   ChevronDown,
   Copy,
@@ -176,6 +177,9 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
   if (status === 'failed') {
     return <X className="size-3.5 shrink-0 text-destructive" />;
   }
+  if (status === 'skipped') {
+    return <Ban className="size-3.5 shrink-0 text-muted-foreground/70" />;
+  }
   return <Check className="size-3.5 shrink-0 text-muted-foreground/70" />;
 }
 
@@ -204,6 +208,7 @@ function ToolTrail({
 }) {
   const runningCount = rows.filter((row) => row.status === 'running').length;
   const failedCount = rows.filter((row) => row.status === 'failed').length;
+  const skippedCount = rows.filter((row) => row.status === 'skipped').length;
   const [expanded, setExpanded] = useState(true);
   const [userToggled, setUserToggled] = useState(false);
 
@@ -233,7 +238,13 @@ function ToolTrail({
       >
         <StatusIcon
           status={
-            runningCount > 0 ? 'running' : failedCount > 0 ? 'failed' : 'done'
+            runningCount > 0
+              ? 'running'
+              : failedCount > 0
+                ? 'failed'
+                : skippedCount > 0
+                  ? 'skipped'
+                  : 'done'
           }
         />
         <span className="min-w-0 truncate">
@@ -242,6 +253,7 @@ function ToolTrail({
             {rows.length}
             {runningCount > 0 ? ` · ${runningCount} running` : ''}
             {failedCount > 0 ? ` · ${failedCount} failed` : ''}
+            {skippedCount > 0 ? ` · ${skippedCount} skipped` : ''}
           </span>
         </span>
         <ChevronDown

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   ContextReport,
   ContextReportLayer,
@@ -17,6 +17,9 @@ import { estimateDraftTokens } from '@/lib/estimate-tokens';
 
 /** Stable empty list — never use `= []` in hook args (new ref every render → effect loop). */
 const EMPTY_ATTACHMENTS: MessageAttachment[] = [];
+
+/** Backend assemble only when draft grows by this much since the last estimate. */
+const DRAFT_ESTIMATE_CHAR_THRESHOLD = 2000;
 
 export type ContextMeterSource = 'estimate' | 'measured';
 
@@ -120,6 +123,11 @@ export function useContextMeter(options: {
   const hasDraft = combinedDraft.length > 0 || attachmentCount > 0;
 
   const hasLiveReport = liveLayers.length > 0;
+  const hasMeasuredAnchor =
+    liveOccupied != null || liveEstimated != null || persistedOccupied != null;
+
+  const lastEstimateDraftLen = useRef(0);
+  const lastEstimateThreadId = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     // Idle home: nothing to assemble.
@@ -127,8 +135,29 @@ export function useContextMeter(options: {
       setServerEstimate(null);
       return;
     }
-    // Live run already has a layer split; skip until settle or a new draft.
+    // Live/measured usage already anchors the meter; skip until a large new draft.
     if (hasLiveReport && !hasDraft) {
+      return;
+    }
+
+    const threadChanged = lastEstimateThreadId.current !== threadId;
+    if (threadChanged) {
+      lastEstimateThreadId.current = threadId;
+      lastEstimateDraftLen.current = 0;
+    }
+
+    const draftLen = combinedDraft.length;
+    const crossedThreshold =
+      draftLen - lastEstimateDraftLen.current >= DRAFT_ESTIMATE_CHAR_THRESHOLD;
+    // Hydrate once per thread (or first draft on home). Large-paste threshold
+    // while typing. Continuous draft debounce is intentionally not used —
+    // measured turn usage is the source of truth for "used" context.
+    const shouldEstimate =
+      threadChanged ||
+      (!hasMeasuredAnchor && !hasLiveReport) ||
+      crossedThreshold;
+
+    if (!shouldEstimate) {
       return;
     }
 
@@ -145,15 +174,15 @@ export function useContextMeter(options: {
         skills: skillHints,
       })
         .then((res) => {
-          if (!cancelled) {
-            setServerEstimate({
-              tokens: res.estimatedPromptTokens,
-              layers: res.contextReport.layers,
-              reserve: res.contextReport.budget.outputReserveTokens,
-              windowTokens: res.contextReport.budget.windowTokens,
-              windowSource: res.contextReport.windowSource,
-            });
-          }
+          if (cancelled) return;
+          lastEstimateDraftLen.current = draftLen;
+          setServerEstimate({
+            tokens: res.estimatedPromptTokens,
+            layers: res.contextReport.layers,
+            reserve: res.contextReport.budget.outputReserveTokens,
+            windowTokens: res.contextReport.budget.windowTokens,
+            windowSource: res.contextReport.windowSource,
+          });
         })
         .catch(() => {
           if (!cancelled) setServerEstimate(null);
@@ -166,11 +195,11 @@ export function useContextMeter(options: {
     };
   }, [
     hasLiveReport,
+    hasMeasuredAnchor,
     threadId,
     hasDraft,
-    draft,
+    combinedDraft,
     pendingAttachments,
-    queuedContent,
     queuedAttachments,
     composerOptions.model,
     composerOptions.local,

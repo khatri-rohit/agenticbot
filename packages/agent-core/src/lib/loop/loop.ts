@@ -175,9 +175,28 @@ const MAX_TERMINAL_CALLS = 25;
 /** Identical mutate call+result before stuck halt. */
 const MAX_IDENTICAL_OUTCOMES = 3;
 
-const SKIP_LIMIT_REACHED = 'Skipped: tool call limit reached.';
-const REPEAT_BLOCKED =
-  'This exact tool call has already been attempted multiple times. Do not repeat it.';
+/** Coded tool rows so UI/ledger can tell skips from real results (I1 + observability). */
+function limitMessage(
+  code:
+    | 'limit.repeat'
+    | 'limit.tools'
+    | 'limit.read_storm'
+    | 'limit.terminal'
+    | 'limit.unknown'
+    | 'limit.outcome',
+  detail: string,
+): string {
+  return `${code}: ${detail}`;
+}
+
+const SKIP_LIMIT_REACHED = limitMessage(
+  'limit.tools',
+  'Skipped: tool call limit reached.',
+);
+const REPEAT_BLOCKED = limitMessage(
+  'limit.repeat',
+  'This exact tool call has already been attempted multiple times. Do not repeat it.',
+);
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) return;
@@ -263,9 +282,10 @@ function withTimeout<T>(
 /**
  * The agent state machine. Iterates: model call → tool execution → next model call.
  *
+ * Contract: observe tools per *turn* (batch → append every tool_call_id → next
+ * model call). Never model-after-each-tool. Gates dispose; prompts do not.
  * Emits AgentEvents via config.emit (for SSE/UI) AND traces via config.trace
- * (for eval/console). Both are optional — the loop works with either or both.
- * Durable turns go through config.onMessage (host persistence seam).
+ * (for eval/console). Durable turns go through config.onMessage (host ledger).
  */
 export async function runLoop(
   modelCall: ModelCallFn,
@@ -286,9 +306,21 @@ export async function runLoop(
   let planWorkNudges = 0;
   let unknownToolCount = 0;
   let terminalCalls = 0;
+  let lastLimitReason: string | undefined;
   const readFileByPath = new Map<string, number>();
   const repeatedCalls = new Map<string, number>();
   const repeatedOutcomes = new Map<string, number>();
+
+  function noteLimit(reason: string): void {
+    lastLimitReason = reason;
+    trace({
+      type: 'limit',
+      runId,
+      iteration: iterations,
+      reason,
+    });
+    emit?.({ type: 'limit.hit', runId, reason });
+  }
   const contextBudget = config.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
   const trustedWebUrls = new Set<string>();
   const trustedWebShas = new Set<string>();
@@ -508,14 +540,12 @@ export async function runLoop(
       });
       unknownToolCount += 1;
       if (unknownToolCount >= MAX_UNKNOWN_TOOL_STREAK) {
-        const reason = `unknown tool streak exceeded (${MAX_UNKNOWN_TOOL_STREAK})`;
-        trace({
-          type: 'limit',
-          runId,
-          iteration: iterations,
-          reason,
-        });
-        emit?.({ type: 'limit.hit', runId, reason });
+        noteLimit(
+          limitMessage(
+            'limit.unknown',
+            `unknown tool streak exceeded (${MAX_UNKNOWN_TOOL_STREAK})`,
+          ),
+        );
         return { kind: 'halt', reason: 'limit', toolCall };
       }
       return { kind: 'filled' };
@@ -653,27 +683,23 @@ export async function runLoop(
     if (readPath !== null) {
       const pathCount = readFileByPath.get(readPath) ?? 0;
       if (pathCount >= MAX_READ_FILE_PER_PATH) {
-        const reason = `read_file path storm blocked (${MAX_READ_FILE_PER_PATH} per path)`;
-        trace({
-          type: 'limit',
-          runId,
-          iteration: iterations,
-          reason,
-        });
-        emit?.({ type: 'limit.hit', runId, reason });
+        noteLimit(
+          limitMessage(
+            'limit.read_storm',
+            `read_file path storm blocked (${MAX_READ_FILE_PER_PATH} per path)`,
+          ),
+        );
         return { kind: 'halt', reason: 'limit', toolCall };
       }
     }
 
     if (toolName === 'run_terminal' && terminalCalls >= MAX_TERMINAL_CALLS) {
-      const reason = `run_terminal storm blocked (${MAX_TERMINAL_CALLS} per run)`;
-      trace({
-        type: 'limit',
-        runId,
-        iteration: iterations,
-        reason,
-      });
-      emit?.({ type: 'limit.hit', runId, reason });
+      noteLimit(
+        limitMessage(
+          'limit.terminal',
+          `run_terminal storm blocked (${MAX_TERMINAL_CALLS} per run)`,
+        ),
+      );
       return { kind: 'halt', reason: 'limit', toolCall };
     }
 
@@ -681,17 +707,12 @@ export async function runLoop(
       limits.maxToolCalls !== undefined &&
       totalToolCalls >= limits.maxToolCalls
     ) {
-      trace({
-        type: 'limit',
-        runId,
-        iteration: iterations,
-        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
-      });
-      emit?.({
-        type: 'limit.hit',
-        runId,
-        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
-      });
+      noteLimit(
+        limitMessage(
+          'limit.tools',
+          `max tool calls exceeded (${limits.maxToolCalls})`,
+        ),
+      );
       return { kind: 'halt', reason: 'limit', toolCall };
     }
 
@@ -700,17 +721,9 @@ export async function runLoop(
     repeatedCalls.set(callKey, repeatCount);
 
     if (repeatCount > limits.maxRepeatedToolCalls) {
-      trace({
-        type: 'limit',
-        runId,
-        iteration: iterations,
-        reason: `repeated tool call blocked: ${toolName}`,
-      });
-      emit?.({
-        type: 'limit.hit',
-        runId,
-        reason: `repeated tool call blocked: ${toolName}`,
-      });
+      noteLimit(
+        limitMessage('limit.repeat', `repeated tool call blocked: ${toolName}`),
+      );
       return { kind: 'halt', reason: 'repeat', toolCall };
     }
 
@@ -805,8 +818,7 @@ export async function runLoop(
     try {
       // exec tools own their timeout + process-tree kill (workspace.ts).
       // The loop's withTimeout would race the tool's timer and leak the child.
-      const ownsTimeout =
-        toolName === 'offer_choice' || tool.risk === 'exec';
+      const ownsTimeout = toolName === 'offer_choice' || tool.risk === 'exec';
       const result = await withTimeout(
         tool.execute(args, toolCtx),
         ownsTimeout ? 0 : limits.toolTimeoutMs,
@@ -841,14 +853,12 @@ export async function runLoop(
         const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
         repeatedOutcomes.set(key, outcomeCount);
         if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
-          const reason = `repeated identical tool outcome blocked: ${toolName}`;
-          trace({
-            type: 'limit',
-            runId,
-            iteration: iterations,
-            reason,
-          });
-          emit?.({ type: 'limit.hit', runId, reason });
+          noteLimit(
+            limitMessage(
+              'limit.outcome',
+              `repeated identical tool outcome blocked: ${toolName}`,
+            ),
+          );
           return 'halted';
         }
       }
@@ -1016,14 +1026,12 @@ export async function runLoop(
           const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
           repeatedOutcomes.set(key, outcomeCount);
           if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
-            const reason = `repeated identical tool outcome blocked: ${call.toolName}`;
-            trace({
-              type: 'limit',
-              runId,
-              iteration: iterations,
-              reason,
-            });
-            emit?.({ type: 'limit.hit', runId, reason });
+            noteLimit(
+              limitMessage(
+                'limit.outcome',
+                `repeated identical tool outcome blocked: ${call.toolName}`,
+              ),
+            );
             outcomeHalted = true;
           }
         }
@@ -1158,6 +1166,7 @@ export async function runLoop(
       iterations,
       toolCalls: totalToolCalls,
       incomplete: true,
+      ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
     });
     return {
       runId,
@@ -1165,6 +1174,7 @@ export async function runLoop(
       iterations,
       toolCalls: totalToolCalls,
       status: 'incomplete',
+      ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
     };
   }
 
@@ -1295,7 +1305,8 @@ export async function runLoop(
           return 'ok' as const;
         };
 
-        // Sequential stages: never short-circuit on truthy 'ok' (I4).
+        // I4 staging: skill → read → network → mutate. Abort only on
+        // deferred|halted — never short-circuit on truthy 'ok'.
         let batchOutcome: 'ok' | 'deferred' | 'halted' = 'ok';
         for (const stageBatch of [staged.skill, staged.read] as const) {
           batchOutcome = await executeReadyBatch(stageBatch, []);
@@ -1311,10 +1322,10 @@ export async function runLoop(
           return finishChoiceSkipped();
         }
         if (batchOutcome === 'halted') {
-          await skipToolCalls(
-            unansweredToolCalls(turn.toolCalls),
-            SKIP_LIMIT_REACHED,
-          );
+          const skipDetail = lastLimitReason?.startsWith('limit.outcome:')
+            ? limitMessage('limit.outcome', 'Skipped: tool call limit reached.')
+            : SKIP_LIMIT_REACHED;
+          await skipToolCalls(unansweredToolCalls(turn.toolCalls), skipDetail);
           return completeAfterLimit();
         }
         if (halt) {
@@ -1360,18 +1371,7 @@ export async function runLoop(
         }
 
         if (openPlanWork) {
-          const reason = 'Open plan todos remain';
-          trace({
-            type: 'limit',
-            runId,
-            iteration: iterations,
-            reason,
-          });
-          emit?.({
-            type: 'limit.hit',
-            runId,
-            reason,
-          });
+          noteLimit(limitMessage('limit.tools', 'Open plan todos remain'));
           emitTurnCompleted(iterations, turn.usage);
           emit?.({
             type: 'run.completed',
@@ -1379,6 +1379,7 @@ export async function runLoop(
             iterations,
             toolCalls: totalToolCalls,
             incomplete: true,
+            ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
           });
           return {
             runId,
@@ -1386,6 +1387,7 @@ export async function runLoop(
             iterations,
             toolCalls: totalToolCalls,
             status: 'incomplete',
+            ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
           };
         }
 
@@ -1412,17 +1414,12 @@ export async function runLoop(
         };
       }
 
-      trace({
-        type: 'limit',
-        runId,
-        iteration: iterations,
-        reason: `unexpected finish reason: ${turn.finishReason}`,
-      });
-      emit?.({
-        type: 'limit.hit',
-        runId,
-        reason: `unexpected finish reason: ${turn.finishReason}`,
-      });
+      noteLimit(
+        limitMessage(
+          'limit.tools',
+          `unexpected finish reason: ${turn.finishReason}`,
+        ),
+      );
       emitTurnCompleted(iterations, turn.usage);
       emit?.({
         type: 'run.completed',
@@ -1430,6 +1427,7 @@ export async function runLoop(
         iterations,
         toolCalls: totalToolCalls,
         incomplete: true,
+        ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
       });
 
       return {
@@ -1438,21 +1436,17 @@ export async function runLoop(
         iterations,
         toolCalls: totalToolCalls,
         status: 'incomplete',
+        ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
       };
     }
 
     // Max iterations exceeded — finalize without tools.
-    trace({
-      type: 'limit',
-      runId,
-      iteration: iterations,
-      reason: `max iterations exceeded (${limits.maxIterations})`,
-    });
-    emit?.({
-      type: 'limit.hit',
-      runId,
-      reason: `max iterations exceeded (${limits.maxIterations})`,
-    });
+    noteLimit(
+      limitMessage(
+        'limit.tools',
+        `max iterations exceeded (${limits.maxIterations})`,
+      ),
+    );
 
     return completeAfterLimit();
   } catch (error) {
