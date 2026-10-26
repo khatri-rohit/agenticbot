@@ -156,6 +156,29 @@ function toolCallKey(toolName: string, args: unknown): string {
   return `${toolName}:${canonicalJson(args)}`;
 }
 
+/**
+ * Outcome key: same call AND same result means the model is stuck — varied
+ * args that produce identical results are iteration theater, not progress.
+ * Counted post-execution on mutate-stage only; read/terminal storms use
+ * per-run admission ceilings below.
+ */
+function outcomeKey(toolName: string, args: unknown, result: string): string {
+  return `${toolCallKey(toolName, args)}#${sha256Text(result.slice(0, 2000))}`;
+}
+
+/** Invented tool names in one run before hard halt (I1 + I6). */
+const MAX_UNKNOWN_TOOL_STREAK = 2;
+/** Distinct read_file admits per path per run (stops offset paging storms). */
+const MAX_READ_FILE_PER_PATH = 30;
+/** run_terminal admits per run (stops shell flood). */
+const MAX_TERMINAL_CALLS = 25;
+/** Identical mutate call+result before stuck halt. */
+const MAX_IDENTICAL_OUTCOMES = 3;
+
+const SKIP_LIMIT_REACHED = 'Skipped: tool call limit reached.';
+const REPEAT_BLOCKED =
+  'This exact tool call has already been attempted multiple times. Do not repeat it.';
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) return;
   throw signal.reason instanceof Error
@@ -261,7 +284,11 @@ export async function runLoop(
   let iterations = 0;
   let totalToolCalls = 0;
   let planWorkNudges = 0;
+  let unknownToolCount = 0;
+  let terminalCalls = 0;
+  const readFileByPath = new Map<string, number>();
   const repeatedCalls = new Map<string, number>();
+  const repeatedOutcomes = new Map<string, number>();
   const contextBudget = config.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
   const trustedWebUrls = new Set<string>();
   const trustedWebShas = new Set<string>();
@@ -362,11 +389,28 @@ export async function runLoop(
     }
   }
 
+  function isToolAnswered(toolCallId: string): boolean {
+    return messages.some(
+      (message) =>
+        message.role === 'tool' &&
+        'tool_call_id' in message &&
+        message.tool_call_id === toolCallId,
+    );
+  }
+
+  function unansweredToolCalls(
+    toolCalls: ChatCompletionMessageToolCall[],
+  ): ChatCompletionMessageToolCall[] {
+    return toolCalls.filter((toolCall) => !isToolAnswered(toolCall.id));
+  }
+
+  /** I1: every tool_call_id gets one durable tool row; never double-answer. */
   async function skipToolCalls(
     toolCalls: ChatCompletionMessageToolCall[],
     reason: string,
   ): Promise<void> {
     for (const toolCall of toolCalls) {
+      if (isToolAnswered(toolCall.id)) continue;
       await appendDurable({
         role: 'tool',
         tool_call_id: toolCall.id,
@@ -452,35 +496,28 @@ export async function runLoop(
       return { kind: 'filled' };
     }
 
-    totalToolCalls++;
-
-    if (
-      limits.maxToolCalls !== undefined &&
-      totalToolCalls > limits.maxToolCalls
-    ) {
-      trace({
-        type: 'limit',
-        runId,
-        iteration: iterations,
-        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
-      });
-      emit?.({
-        type: 'limit.hit',
-        runId,
-        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
-      });
-      return { kind: 'halt', reason: 'limit', toolCall };
-    }
-
     const toolName = toolCall.function.name;
     const tool = tools.byName.get(toolName);
 
+    // Rejects always get a tool row (I1) but do not burn maxToolCalls (D10).
     if (!tool) {
       await appendDurable({
         role: 'tool',
         tool_call_id: toolCall.id,
         content: `Tool "${toolName}" does not exist.`,
       });
+      unknownToolCount += 1;
+      if (unknownToolCount >= MAX_UNKNOWN_TOOL_STREAK) {
+        const reason = `unknown tool streak exceeded (${MAX_UNKNOWN_TOOL_STREAK})`;
+        trace({
+          type: 'limit',
+          runId,
+          iteration: iterations,
+          reason,
+        });
+        emit?.({ type: 'limit.hit', runId, reason });
+        return { kind: 'halt', reason: 'limit', toolCall };
+      }
       return { kind: 'filled' };
     }
 
@@ -609,6 +646,55 @@ export async function runLoop(
       }
     }
 
+    const readPath =
+      toolName === 'read_file' && typeof args.path === 'string'
+        ? args.path
+        : null;
+    if (readPath !== null) {
+      const pathCount = readFileByPath.get(readPath) ?? 0;
+      if (pathCount >= MAX_READ_FILE_PER_PATH) {
+        const reason = `read_file path storm blocked (${MAX_READ_FILE_PER_PATH} per path)`;
+        trace({
+          type: 'limit',
+          runId,
+          iteration: iterations,
+          reason,
+        });
+        emit?.({ type: 'limit.hit', runId, reason });
+        return { kind: 'halt', reason: 'limit', toolCall };
+      }
+    }
+
+    if (toolName === 'run_terminal' && terminalCalls >= MAX_TERMINAL_CALLS) {
+      const reason = `run_terminal storm blocked (${MAX_TERMINAL_CALLS} per run)`;
+      trace({
+        type: 'limit',
+        runId,
+        iteration: iterations,
+        reason,
+      });
+      emit?.({ type: 'limit.hit', runId, reason });
+      return { kind: 'halt', reason: 'limit', toolCall };
+    }
+
+    if (
+      limits.maxToolCalls !== undefined &&
+      totalToolCalls >= limits.maxToolCalls
+    ) {
+      trace({
+        type: 'limit',
+        runId,
+        iteration: iterations,
+        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
+      });
+      emit?.({
+        type: 'limit.hit',
+        runId,
+        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
+      });
+      return { kind: 'halt', reason: 'limit', toolCall };
+    }
+
     const callKey = toolCallKey(toolName, args);
     const repeatCount = (repeatedCalls.get(callKey) ?? 0) + 1;
     repeatedCalls.set(callKey, repeatCount);
@@ -628,6 +714,14 @@ export async function runLoop(
       return { kind: 'halt', reason: 'repeat', toolCall };
     }
 
+    totalToolCalls += 1;
+    if (readPath !== null) {
+      readFileByPath.set(readPath, (readFileByPath.get(readPath) ?? 0) + 1);
+    }
+    if (toolName === 'run_terminal') {
+      terminalCalls += 1;
+    }
+
     return {
       kind: 'ready',
       call: { toolCall, toolName, tool, args },
@@ -639,22 +733,20 @@ export async function runLoop(
     fromIndex: number,
     toolCalls: ChatCompletionMessageToolCall[],
   ): Promise<RunLoopResult> {
+    const triggerAnswered = isToolAnswered(halt.toolCall.id);
     if (halt.reason === 'repeat') {
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: halt.toolCall.id,
-        content:
-          'This exact tool call has already been attempted multiple times. Do not repeat it.',
-      });
-      await skipToolCalls(
-        toolCalls.slice(fromIndex + 1),
-        'Skipped: tool call limit reached.',
-      );
+      if (!triggerAnswered) {
+        await appendDurable({
+          role: 'tool',
+          tool_call_id: halt.toolCall.id,
+          content: REPEAT_BLOCKED,
+        });
+      }
+      await skipToolCalls(toolCalls.slice(fromIndex + 1), SKIP_LIMIT_REACHED);
+    } else if (triggerAnswered) {
+      await skipToolCalls(toolCalls.slice(fromIndex + 1), SKIP_LIMIT_REACHED);
     } else {
-      await skipToolCalls(
-        toolCalls.slice(fromIndex),
-        'Skipped: tool call limit reached.',
-      );
+      await skipToolCalls(toolCalls.slice(fromIndex), SKIP_LIMIT_REACHED);
     }
     return completeAfterLimit();
   }
@@ -689,7 +781,7 @@ export async function runLoop(
   async function executeReadyCall(
     call: ReadyToolCall,
     remainingOnAbort: ChatCompletionMessageToolCall[],
-  ): Promise<'ok' | 'deferred'> {
+  ): Promise<'ok' | 'deferred' | 'halted'> {
     const { toolCall, toolName, tool, args } = call;
     const toolCtx = buildToolContext();
 
@@ -737,11 +829,29 @@ export async function runLoop(
         durationMs,
         resultPreview: preview(result, 200),
       });
+      // Append before outcome halt so I1 always holds for the triggering call.
       await appendDurable({
         role: 'tool',
         tool_call_id: toolCall.id,
         content: result,
       });
+      // Mutate-stage only: same call + same result = stuck (e.g. write theater).
+      if (toolStage(toolName) === 'mutate') {
+        const key = outcomeKey(toolName, args, result);
+        const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
+        repeatedOutcomes.set(key, outcomeCount);
+        if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
+          const reason = `repeated identical tool outcome blocked: ${toolName}`;
+          trace({
+            type: 'limit',
+            runId,
+            iteration: iterations,
+            reason,
+          });
+          emit?.({ type: 'limit.hit', runId, reason });
+          return 'halted';
+        }
+      }
       return 'ok';
     } catch (error) {
       if (signal?.aborted) {
@@ -795,7 +905,7 @@ export async function runLoop(
   async function executeReadyBatch(
     batch: ReadyToolCall[],
     remainingAfter: ChatCompletionMessageToolCall[],
-  ): Promise<'ok' | 'deferred'> {
+  ): Promise<'ok' | 'deferred' | 'halted'> {
     // write/exec and interactive tools stay serial even if they slip into a batch.
     if (
       batch.length === 1 ||
@@ -815,7 +925,7 @@ export async function runLoop(
           ...batch.slice(i).map((item) => item.toolCall),
           ...remainingAfter,
         ]);
-        if (outcome === 'deferred') return 'deferred';
+        if (outcome !== 'ok') return outcome;
       }
       return 'ok';
     }
@@ -875,6 +985,7 @@ export async function runLoop(
       throwIfAborted(signal);
     }
 
+    let outcomeHalted = false;
     for (const item of settled) {
       const { call, durationMs } = item;
       if (item.ok) {
@@ -899,6 +1010,23 @@ export async function runLoop(
           tool_call_id: call.toolCall.id,
           content: item.result,
         });
+        // Mutate-stage only; finish appending the batch before returning halted.
+        if (toolStage(call.toolName) === 'mutate') {
+          const key = outcomeKey(call.toolName, call.args, item.result);
+          const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
+          repeatedOutcomes.set(key, outcomeCount);
+          if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
+            const reason = `repeated identical tool outcome blocked: ${call.toolName}`;
+            trace({
+              type: 'limit',
+              runId,
+              iteration: iterations,
+              reason,
+            });
+            emit?.({ type: 'limit.hit', runId, reason });
+            outcomeHalted = true;
+          }
+        }
         continue;
       }
 
@@ -963,7 +1091,7 @@ export async function runLoop(
         content: `Tool execution failed: ${errorMessage}`,
       });
     }
-    return 'ok';
+    return outcomeHalted ? 'halted' : 'ok';
   }
 
   /** Fresh message lifecycle for limit finalization (never reuse the tool-turn id). */
@@ -1162,18 +1290,32 @@ export async function runLoop(
               call,
               batch.slice(i).map((item) => item.toolCall),
             );
-            if (outcome === 'deferred') return 'deferred' as const;
+            if (outcome !== 'ok') return outcome;
           }
           return 'ok' as const;
         };
 
-        if (
-          (await executeReadyBatch(staged.skill, [])) === 'deferred' ||
-          (await executeReadyBatch(staged.read, [])) === 'deferred' ||
-          (await runSerial(staged.network)) === 'deferred' ||
-          (await runSerial(staged.mutate)) === 'deferred'
-        ) {
+        // Sequential stages: never short-circuit on truthy 'ok' (I4).
+        let batchOutcome: 'ok' | 'deferred' | 'halted' = 'ok';
+        for (const stageBatch of [staged.skill, staged.read] as const) {
+          batchOutcome = await executeReadyBatch(stageBatch, []);
+          if (batchOutcome !== 'ok') break;
+        }
+        if (batchOutcome === 'ok') {
+          for (const stageBatch of [staged.network, staged.mutate] as const) {
+            batchOutcome = await runSerial(stageBatch);
+            if (batchOutcome !== 'ok') break;
+          }
+        }
+        if (batchOutcome === 'deferred') {
           return finishChoiceSkipped();
+        }
+        if (batchOutcome === 'halted') {
+          await skipToolCalls(
+            unansweredToolCalls(turn.toolCalls),
+            SKIP_LIMIT_REACHED,
+          );
+          return completeAfterLimit();
         }
         if (halt) {
           return finishHalt(halt, haltIndex, turn.toolCalls);

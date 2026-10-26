@@ -10,9 +10,9 @@ import { isWorkspaceKind } from './thread.js';
 export type ModeName = 'home' | 'workspace' | 'thinking';
 
 export type ModeLimits = {
-  /** Model round-trips. Omitted = uncapped (Workspace). */
+  /** Model round-trips. Omitted = uncapped. */
   maxIterations?: number;
-  /** Total tool invocations. Omitted = uncapped (Workspace). */
+  /** Successful ready-tool admits. Omitted = uncapped. */
   maxToolCalls?: number;
   maxRepeatedToolCalls: number;
   toolTimeoutMs: number;
@@ -71,6 +71,8 @@ export const WORKSPACE_MODE: ModeConfig = {
     'offer_choice',
   ],
   limits: {
+    maxIterations: 50,
+    maxToolCalls: 100,
     maxRepeatedToolCalls: 3,
     toolTimeoutMs: 120_000,
   },

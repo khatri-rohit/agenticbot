@@ -1,8 +1,9 @@
 /**
  * Loop execution limits. These bound the agent's autonomy per run.
  *
- * Defaults are the Home profile. Workspace omits iteration/tool caps so
- * long-horizon coding is bounded by the repeat detector and cancel.
+ * Defaults are the Home profile. Workspace sets its own finite iteration/tool
+ * caps via WORKSPACE_MODE; omitted caps stay uncapped only when the host
+ * passes a partial limits object without those fields.
  */
 export const DEFAULT_LIMITS = {
   maxIterations: 40,
