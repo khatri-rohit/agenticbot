@@ -33,6 +33,7 @@ export {
   CHAT_TITLE_MAX_WORDS,
   clampChatTitle,
   normalizeThreadKind,
+  parseThreadKind,
   isWorkspaceKind,
   normalizeWorkspaceRoot,
   workspaceRootKey,
@@ -119,6 +120,8 @@ export {
   ChoiceSkipped,
 } from './lib/choice.js';
 
+export type { TraceEvent } from './lib/trace.js';
+
 export type {
   MemoryTarget,
   MemoryOp,
@@ -128,7 +131,16 @@ export type {
   MemoryGateVerdict,
   MemoryGateResult,
 } from './lib/memory.js';
-export { DEFAULT_MEMORY_CAPS } from './lib/memory.js';
+export { DEFAULT_MEMORY_CAPS, parseMemoryOp } from './lib/memory.js';
+
+export type {
+  ThreadLastRun,
+  ThreadLastRunStatus,
+} from './lib/thread-last-run.js';
+export {
+  isLimitSkipToolContent,
+  parseThreadLastRun,
+} from './lib/thread-last-run.js';
 
 export type {
   PlanAction,
@@ -160,8 +172,9 @@ export {
 
 export type {
   ContextBudget,
+  ContextWindowSource,
   ContextReportLayer,
   ContextReport,
   Snapshot,
 } from './lib/context.js';
-export { DEFAULT_CONTEXT_BUDGET } from './lib/context.js';
+export { DEFAULT_CONTEXT_BUDGET, parseSnapshot } from './lib/context.js';

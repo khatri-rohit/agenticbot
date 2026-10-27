@@ -2,12 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
   FolderOpen,
-  GripVertical,
   MoreHorizontal,
   PanelLeft,
   PanelLeftClose,
@@ -17,7 +16,11 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
-import { isWorkspaceKind, type Thread } from '@agent/agent-models';
+import {
+  isWorkspaceKind,
+  workspaceRootKey,
+  type Thread,
+} from '@agent/agent-models';
 import {
   folderNameFromRoot,
   reorderWorkspaces,
@@ -27,20 +30,24 @@ import {
   toggleFolderCollapsed,
   useAgentSpace,
 } from '@/features/agent/store/space-store';
-import { CHAT_TITLE_MAX_WORDS, clampChatTitle } from '@/lib/thread-title';
+import { clampChatTitle } from '@/lib/thread-title';
 import { useThreads } from '../features/agent/hooks/use-agent-run';
 import {
   deleteThread,
   patchThread,
   pickWorkspaceFolder,
 } from '../features/agent/api/thread-client';
-import { refreshThreads } from '../features/agent/store/thread-cache';
+import {
+  areThreadsLoaded,
+  refreshThreads,
+} from '../features/agent/store/thread-cache';
 import { removeRecentThread } from '../features/agent/store/recent-threads-store';
 import { formatRelativeTime } from '../lib/format-relative-time';
 import { toastError } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import { SidebarSettings } from '@/components/sidebar-settings';
 import {
   DropdownMenu,
@@ -102,7 +109,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
     const byKey = new Map<string, FolderGroup>();
 
     const ensure = (root: string) => {
-      const key = root.replace(/[\\/]+$/, '').toLowerCase();
+      const key = workspaceRootKey(root);
       let group = byKey.get(key);
       if (!group) {
         group = {
@@ -126,17 +133,12 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
     }
 
     const orderIndex = new Map(
-      workspaceOrder.map((root, index) => [
-        root.replace(/[\\/]+$/, '').toLowerCase(),
-        index,
-      ]),
+      workspaceOrder.map((root, index) => [workspaceRootKey(root), index]),
     );
 
     return Array.from(byKey.values()).sort((a, b) => {
-      const aKey = a.root.replace(/[\\/]+$/, '').toLowerCase();
-      const bKey = b.root.replace(/[\\/]+$/, '').toLowerCase();
-      const aIndex = orderIndex.get(aKey);
-      const bIndex = orderIndex.get(bKey);
+      const aIndex = orderIndex.get(workspaceRootKey(a.root));
+      const bIndex = orderIndex.get(workspaceRootKey(b.root));
       if (aIndex !== undefined && bIndex !== undefined) return aIndex - bIndex;
       if (aIndex !== undefined) return -1;
       if (bIndex !== undefined) return 1;
@@ -145,13 +147,17 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   }, [threads, workspaceOrder]);
 
   // Drop empties from persisted order; append newly discovered projects at the end.
+  // Skip until threads have loaded — otherwise we'd wipe the stored drag order
+  // before any workspace roots are known.
   const rootsWithThreads = useMemo(
     () => workspaceGroups.map((group) => group.root),
     [workspaceGroups],
   );
+  const threadsLoaded = areThreadsLoaded();
   useEffect(() => {
+    if (!threadsLoaded) return;
     syncWorkspaceOrder(rootsWithThreads);
-  }, [rootsWithThreads]);
+  }, [rootsWithThreads, threadsLoaded]);
 
   const railBtn =
     'flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
@@ -159,6 +165,29 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
   const openBlankHome = () => {
     setWorkspaceRoot(null);
     router.push('/');
+  };
+
+  // Re-entry guard: the folder picker POST opens a native dialog on the API
+  // host; repeated clicks must not stack requests.
+  const pickingRef = useRef(false);
+  const pickWorkspaceFolderAction = async () => {
+    if (pickingRef.current) return;
+    pickingRef.current = true;
+    try {
+      const selected = await pickWorkspaceFolder(workspaceRoot);
+      if (!selected) return;
+      setWorkspaceRoot(selected);
+      router.push('/');
+    } catch (error) {
+      toastError(
+        error instanceof Error
+          ? error.message
+          : 'Could not open the folder picker. The dialog runs on the API host — start @agent/api on this machine and try again.',
+        'Folder picker failed',
+      );
+    } finally {
+      pickingRef.current = false;
+    }
   };
 
   const openBlankForFolder = (root: string) => {
@@ -228,7 +257,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
             <header className="flex items-center justify-between gap-2 px-1 pb-2.5">
               <Link
                 href="/"
-                className="type-ui truncate text-[13px] font-semibold tracking-tight text-foreground hover:text-foreground"
+                className="type-ui truncate text-sm font-semibold tracking-tight text-foreground hover:text-foreground"
               >
                 Personal Assistant
               </Link>
@@ -276,19 +305,18 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                 </TooltipContent>
               </Tooltip>
             </div>
-            <OpenFolderButton className="mb-2" />
           </div>
 
           <ScrollArea className="min-h-0 flex-1 px-2">
             <div className="space-y-4 pb-2">
               <section>
                 <div className="mb-1.5 flex items-center justify-between gap-1 px-2">
-                  <p className="type-ui text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
+                  <p className="type-ui font-medium text-muted-foreground/80">
                     Home
                   </p>
                   <button
                     type="button"
-                    className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/80 hover:text-foreground"
                     aria-label="New home chat"
                     onClick={openBlankHome}
                   >
@@ -308,10 +336,22 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                 )}
               </section>
 
+              <Separator className="my-1 bg-border/30" />
+
               <section>
-                <p className="type-ui mb-1.5 px-2 text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">
-                  Workspaces
-                </p>
+                <div className="mb-1.5 flex items-center justify-between gap-1 px-2">
+                  <p className="type-ui font-medium text-muted-foreground/80">
+                    Workspaces
+                  </p>
+                  <button
+                    type="button"
+                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+                    aria-label="Open folder"
+                    onClick={() => void pickWorkspaceFolderAction()}
+                  >
+                    <Plus className="size-3.5" strokeWidth={2} />
+                  </button>
+                </div>
                 {workspaceGroups.length === 0 ? (
                   <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
                     Open a folder to start project chats
@@ -398,16 +438,9 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                               setDropTargetRoot(null);
                             }}
                           >
-                            <span
-                              className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground/60 active:cursor-grabbing"
-                              aria-hidden
-                              title="Drag to reorder workspace"
-                            >
-                              <GripVertical className="size-3.5" />
-                            </span>
                             <button
                               type="button"
-                              className="flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-accent/80"
+                              className="flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent/80"
                               aria-label={
                                 collapsedFolder
                                   ? `Expand ${group.name}`
@@ -415,15 +448,21 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                               }
                               onClick={() => toggleFolderCollapsed(group.root)}
                             >
+                              {/* Folder icon by default; chevron on hover signals the
+                                  same corner is the collapse toggle. */}
+                              <FolderOpen
+                                className="size-3.5 shrink-0 opacity-80 group-hover/folder:hidden"
+                                strokeWidth={1.75}
+                              />
                               {collapsedFolder ? (
-                                <ChevronRight className="size-3.5" />
+                                <ChevronRight className="size-3.5 hidden shrink-0 opacity-80 group-hover/folder:block" />
                               ) : (
-                                <ChevronDown className="size-3.5" />
+                                <ChevronDown className="size-3.5 hidden shrink-0 opacity-80 group-hover/folder:block" />
                               )}
                             </button>
                             <button
                               type="button"
-                              className="type-ui flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-base! font-medium"
+                              className="type-ui flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md px-1 text-left text-base! font-medium"
                               title={group.root}
                               onClick={() => {
                                 setWorkspaceRoot(group.root);
@@ -432,17 +471,13 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                                 }
                               }}
                             >
-                              <FolderOpen
-                                className="size-3.5 shrink-0 opacity-80"
-                                strokeWidth={1.75}
-                              />
                               <span className="truncate">{group.name}</span>
                             </button>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
                                   type="button"
-                                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100"
+                                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100"
                                   aria-label={`New chat in ${group.name}`}
                                   onClick={() => openBlankForFolder(group.root)}
                                 >
@@ -457,7 +492,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                               <DropdownMenuTrigger asChild>
                                 <button
                                   type="button"
-                                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100 data-[state=open]:opacity-100"
+                                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100 data-[state=open]:opacity-100"
                                   aria-label={`${group.name} options`}
                                 >
                                   <MoreHorizontal className="size-3.5" />
@@ -487,7 +522,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                               pathname={pathname}
                               listKey={group.root}
                               dense
-                              className="mt-0.5 pl-3"
+                              className="mt-1 pl-3"
                             />
                           ) : null}
                         </div>
@@ -534,7 +569,7 @@ function PagedThreadList({
 
   return (
     <div className={cn('w-full min-w-0', className)}>
-      <ul className="w-full min-w-0 space-y-0.5">
+      <ul className="w-full min-w-0 space-y-1">
         {visible.map((thread) => (
           <ThreadItem
             key={thread.id}
@@ -558,50 +593,6 @@ function PagedThreadList({
   );
 }
 
-function OpenFolderButton({ className }: { className?: string }) {
-  const { workspaceRoot } = useAgentSpace();
-  const [picking, setPicking] = useState(false);
-  const router = useRouter();
-
-  const pick = async () => {
-    if (picking) return;
-    setPicking(true);
-    try {
-      const selected = await pickWorkspaceFolder(workspaceRoot);
-      if (!selected) return;
-      setWorkspaceRoot(selected);
-      router.push('/');
-    } catch (error) {
-      toastError(
-        error instanceof Error
-          ? error.message
-          : 'Could not open the folder picker. The dialog runs on the API host — start @agent/api on this machine and try again.',
-        'Folder picker failed',
-      );
-    } finally {
-      setPicking(false);
-    }
-  };
-
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      title="Opens a native folder dialog on the machine running the API"
-      className={cn(
-        'type-ui h-8 w-full justify-start gap-2 border-border/40 bg-background/50 text-xs font-medium text-foreground/90 hover:bg-accent/50',
-        className,
-      )}
-      disabled={picking}
-      onClick={() => void pick()}
-    >
-      <FolderOpen className="size-3.5 opacity-85" strokeWidth={1.75} />
-      {picking ? 'Choose a folder…' : 'Open folder'}
-    </Button>
-  );
-}
-
 function ThreadItem({
   thread,
   active,
@@ -617,6 +608,20 @@ function ThreadItem({
   const displayTitle = isPending ? '' : clampChatTitle(thread.title);
   const isPinned = Boolean(thread.pinned);
 
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(displayTitle);
+  const renameRef = useRef<HTMLTextAreaElement>(null);
+
+  // Focus and select the title when entering edit mode so the user can type
+  // over it immediately.
+  useEffect(() => {
+    if (!isEditing) return;
+    const el = renameRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [isEditing]);
+
   const handleDelete = async () => {
     await deleteThread(thread.id);
     removeRecentThread(thread.id);
@@ -631,17 +636,95 @@ function ThreadItem({
     await refreshThreads();
   };
 
-  const handleRename = async () => {
-    const next = window.prompt(
-      `Rename chat (up to ${CHAT_TITLE_MAX_WORDS} words):`,
-      displayTitle || thread.title,
-    );
-    if (next === null) return;
-    const title = clampChatTitle(next);
-    if (!title || title === 'New Chat') return;
+  const startRename = () => {
+    if (isPending) return;
+    setDraft(displayTitle || thread.title);
+    setIsEditing(true);
+  };
+
+  const cancelRename = () => setIsEditing(false);
+
+  const commitRename = async () => {
+    if (!isEditing) return;
+    const title = clampChatTitle(draft);
+    // Empty or unchanged: treat as cancel, never write "New Chat" back.
+    if (!title || title === 'New Chat' || title === displayTitle) {
+      setIsEditing(false);
+      return;
+    }
+    setIsEditing(false);
     await patchThread(thread.id, { title });
     await refreshThreads();
   };
+
+  const handleRenameKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void commitRename();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelRename();
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <li className="w-full min-w-0">
+        <div
+          className={cn(
+            'flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-1',
+            dense ? 'pl-2' : 'pl-2.5',
+            'bg-accent/60 ring-1 ring-ring/40',
+          )}
+        >
+          <Textarea
+            ref={renameRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleRenameKey}
+            onBlur={(e) => {
+              // Skip commit when focus moves to the Save/Cancel button inside
+              // this editor; otherwise Cancel's click never fires (the button
+              // unmounts on blur-commit) and Tab-to-Cancel saves the draft.
+              if (
+                e.relatedTarget instanceof Node &&
+                e.currentTarget.parentElement?.contains(e.relatedTarget)
+              ) {
+                return;
+              }
+              void commitRename();
+            }}
+            rows={1}
+            aria-label="Rename chat"
+            className="type-ui min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-0.5 text-sm leading-snug shadow-none focus-visible:ring-0"
+          />
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={cancelRename}
+              aria-label="Cancel rename"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => void commitRename()}
+              aria-label="Save name"
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      </li>
+    );
+  }
 
   return (
     <li className="w-full min-w-0">
@@ -658,8 +741,8 @@ function ThreadItem({
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
             dense
-              ? 'py-1 pl-2 pr-9 text-[13px]'
-              : 'py-1.5 pl-2.5 pr-9 text-[13px]',
+              ? 'py-1 pl-2 pr-9 text-sm'
+              : 'py-1.5 pl-2.5 pr-9 text-sm',
             active && 'font-medium text-foreground',
           )}
           title={displayTitle || undefined}
@@ -685,7 +768,7 @@ function ThreadItem({
         </Link>
         <span
           className={cn(
-            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/70 transition-opacity',
+            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/60 transition-opacity',
             'group-focus-within:opacity-100',
             active && 'opacity-100',
             'group-has-[[data-state=open]]:opacity-0',
@@ -713,7 +796,7 @@ function ThreadItem({
               {isPinned ? 'Unpin' : 'Pin'}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => void handleRename()}
+              onSelect={startRename}
               disabled={isPending}
             >
               <Pencil className="size-4" />

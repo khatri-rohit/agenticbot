@@ -2,15 +2,17 @@ import type { ThreadKind } from './thread.js';
 import { isWorkspaceKind } from './thread.js';
 
 /**
- * A profile is a policy bundle: model, temperature, tools, and loop limits.
- * Home vs workspace is binding; thinking is reserved.
+ * A profile is a policy bundle: temperature, tools, and loop limits.
+ * Home vs workspace is binding.
+ * `model` is a harness/CLI default only — web chat model id is UI/thread-owned
+ * (`body.model ?? thread.model ?? HOME_MODE.model`), not modeForKind().model.
  */
-export type ModeName = 'home' | 'workspace' | 'thinking';
+export type ModeName = 'home' | 'workspace';
 
 export type ModeLimits = {
-  /** Model round-trips. Omitted = uncapped (Workspace). */
+  /** Model round-trips. Omitted = uncapped. */
   maxIterations?: number;
-  /** Total tool invocations. Omitted = uncapped (Workspace). */
+  /** Successful ready-tool admits. Omitted = uncapped. */
   maxToolCalls?: number;
   maxRepeatedToolCalls: number;
   toolTimeoutMs: number;
@@ -18,6 +20,7 @@ export type ModeLimits = {
 
 export interface ModeConfig {
   name: ModeName;
+  /** Default model id for CLI/harness; not applied by API chat resolution. */
   model: string;
   temperature: number;
   /** Profile-optional tools (e.g. web_search); gated by client webSearch flag. */
@@ -43,7 +46,7 @@ export const HOME_MODE: ModeConfig = {
   limits: {
     maxIterations: 40,
     maxToolCalls: 80,
-    maxRepeatedToolCalls: 2,
+    maxRepeatedToolCalls: 4,
     toolTimeoutMs: 45_000,
   },
 };
@@ -68,7 +71,9 @@ export const WORKSPACE_MODE: ModeConfig = {
     'offer_choice',
   ],
   limits: {
-    maxRepeatedToolCalls: 3,
+    maxIterations: 200,
+    maxToolCalls: 450,
+    maxRepeatedToolCalls: 8,
     toolTimeoutMs: 120_000,
   },
 };

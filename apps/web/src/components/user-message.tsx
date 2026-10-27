@@ -12,13 +12,11 @@ import { formatMessageTime } from '@/lib/format-relative-time';
 
 export function UserMessage({
   message,
-  registerAnchor,
   canEdit,
   hasResponseBelow,
   onEditSubmit,
 }: {
   message: Message;
-  registerAnchor: (id: string, el: HTMLDivElement | null) => void;
   canEdit: boolean;
   hasResponseBelow: boolean;
   onEditSubmit: (messageId: string, content: string) => void | Promise<void>;
@@ -92,13 +90,11 @@ export function UserMessage({
 
   return (
     <div
-      ref={(el) => registerAnchor(message.id, el)}
-      id={`conversation-anchor-${message.id}`}
-      className="min-w-0 max-w-full scroll-mt-6"
+      className="min-w-0 max-w-full"
     >
       {isEditing ? (
         <div
-          className="rounded-2xl bg-muted/45 p-3 ring-1 ring-border/40"
+          className="rounded-lg bg-muted/45 p-3 ring-1 ring-border/40"
           role="form"
           aria-label="Edit message"
         >
@@ -127,7 +123,7 @@ export function UserMessage({
           />
           {confirmClear ? (
             <div
-              className="mt-2 space-y-2 rounded-xl bg-background/60 px-3 py-2.5 ring-1 ring-border/50"
+              className="mt-2 space-y-2 rounded-lg bg-background/60 px-3 py-2.5 ring-1 ring-border/50"
               role="alertdialog"
               aria-labelledby={`edit-clear-title-${message.id}`}
             >
@@ -189,10 +185,12 @@ export function UserMessage({
         </div>
       ) : (
         <>
-          {/* Document-style prompt card: stronger fill so the prompt reads vs the reply document. */}
+          {/* Document-style prompt card: stronger fill + bright ring so the
+              user's prompt is visually distinct from assistant/code content
+              while scrolling the transcript. */}
           <div
             className={cn(
-              'type-user min-w-0 max-w-full overflow-hidden rounded-2xl bg-muted/55 px-4 py-3 text-foreground ring-1 ring-border/50',
+              'type-user min-w-0 max-w-full overflow-hidden rounded-lg bg-muted/55 px-4 py-3 text-foreground ring-1 ring-foreground/25',
             )}
           >
             {message.attachments && message.attachments.length > 0 ? (

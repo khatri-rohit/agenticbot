@@ -10,6 +10,7 @@ import {
 } from 'react';
 import {
   ArrowUp,
+  BookMarked,
   ImagePlus,
   Loader2,
   Mic,
@@ -30,6 +31,7 @@ import {
   threadMentions,
 } from '@agent/agent-models';
 import {
+  fetchCloudOllamaModels,
   fetchLocalOllamaModels,
   type ComposerOptions,
 } from '@/features/agent/api/agent-client';
@@ -48,6 +50,7 @@ import {
   CLOUD_OLLAMA_MODELS,
   DEFAULT_OLLAMA_MODEL,
   listedModelToPickerModel,
+  mergeCloudModels,
   modelSupportsVision,
   readStoredComposerModel,
   type OllamaModel,
@@ -56,9 +59,14 @@ import { ModelPicker } from '@/components/model-picker';
 import { WorkspacePicker } from '@/components/workspace-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
-import { VoiceModePill } from '@/components/voice-mode-pill';
+import { SkillsPanel } from '@/components/skills-panel';
 import { registerComposerFocus } from '@/components/composer-focus';
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -86,6 +94,18 @@ import {
   rankMentionThreads,
   threadToMention,
 } from '@/components/thread-mention-picker';
+import {
+  SkillSlashPicker,
+  SkillHighlightMirror,
+  completeSkillToken,
+  filterSkillCatalog,
+  skillQueryAtCaret,
+  skillTokensInText,
+} from '@/components/skill-slash-picker';
+import {
+  fetchSkillCatalogs,
+  type SkillCatalogItem,
+} from '@/features/agent/api/skills-client';
 
 type ComposerDraft = {
   content: string;
@@ -177,6 +197,28 @@ function composerPlaceholder(opts: {
   return 'Send a follow-up…';
 }
 
+const WAVE_BAR_COUNT = 5;
+
+/** Compact waveform that fits inside the mic button while voice is active. */
+function MicWaveform({ level }: { level: number }) {
+  const clamped = Math.max(0, Math.min(1, level));
+  return (
+    <span className="flex h-4 items-end gap-0.5" aria-hidden>
+      {Array.from({ length: WAVE_BAR_COUNT }, (_, i) => {
+        const weight = 1 - Math.abs(i - (WAVE_BAR_COUNT - 1) / 2) * 0.28;
+        const h = 22 + clamped * weight * 78;
+        return (
+          <span
+            key={i}
+            className="w-0.5 rounded-full bg-current transition-[height] duration-75 ease-out"
+            style={{ height: `${h}%` }}
+          />
+        );
+      })}
+    </span>
+  );
+}
+
 export function ChatInput({
   onSend,
   isRunning,
@@ -212,6 +254,7 @@ export function ChatInput({
   onEditQueued: () => {
     content: string;
     attachments?: MessageAttachment[];
+    skills?: ComposerOptions['skills'];
   } | null;
   composerOptions: ComposerOptions;
   onComposerOptionsChange: (options: ComposerOptions) => void;
@@ -245,6 +288,16 @@ export function ChatInput({
   const [selectedMentionId, setSelectedMentionId] = useState<string | null>(
     null,
   );
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [skillSlashOpen, setSkillSlashOpen] = useState(false);
+  const [skillSlashQuery, setSkillSlashQuery] = useState('');
+  const [skillSlashActive, setSkillSlashActive] = useState(0);
+  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[]>([]);
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
+  const knownSkillNames = useMemo(
+    () => new Set(skillCatalog.map((skill) => skill.name.toLowerCase())),
+    [skillCatalog],
+  );
   const catalog = useThreads() ?? [];
   const { workspaceRoot } = useAgentSpace();
   const mentionCandidates = rankMentionThreads(
@@ -264,6 +317,28 @@ export function ChatInput({
   const [localModels, setLocalModels] = useState<OllamaModel[]>([]);
   const [localModelsLoading, setLocalModelsLoading] = useState(false);
   const [localModelsError, setLocalModelsError] = useState<string | null>(null);
+  const [cloudModels, setCloudModels] = useState<OllamaModel[]>(CLOUD_OLLAMA_MODELS);
+
+  // Discover cloud models from Ollama Cloud on mount; fall back to the
+  // static catalog on error so cloud chat still works with known models.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCloudOllamaModels()
+      .then((res) => {
+        if (cancelled) return;
+        const merged = mergeCloudModels(
+          res.models.map((m) => ({ id: m.id, family: m.family, size: m.size })),
+        );
+        if (merged.length > 0) setCloudModels(merged);
+      })
+      .catch((err) => {
+        // Keep the static catalog — cloud chat still works with known models.
+        console.warn('[chat-input] live cloud models fetch failed, using catalog fallback', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Discover installed models from the API host's Ollama when Local is on.
   useEffect(() => {
@@ -374,9 +449,10 @@ export function ChatInput({
   }, [draftScope, input, pendingAttachments]);
 
   const modelConfig = useOllamaModelConfig(composerOptions.model, localMode);
+  // Soft fallback until /context/estimate or live ContextReport supplies windowTokens.
   const contextLimit =
     modelConfig?.contextLength ??
-    CLOUD_OLLAMA_MODELS.find((m) => m.id === composerOptions.model)
+    cloudModels.find((m) => m.id === composerOptions.model)
       ?.contextLength ??
     null;
   const visionOk = modelSupportsVision(
@@ -397,7 +473,25 @@ export function ChatInput({
     liveEstimatedPromptTokens: estimatedPromptTokens,
     liveContextReport: contextReport,
     liveRunModel: runModel,
+    skillHints: { requested: skillTokensInText(input) },
   });
+
+  // Catalog must be ready before the user types so inline `/name` tokens
+  // highlight immediately; not keyed on picker open.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSkillCatalogs()
+      .then((catalogs) => {
+        if (cancelled) return;
+        setSkillCatalog([...catalogs.global, ...catalogs.user]);
+      })
+      .catch(() => {
+        if (!cancelled) setSkillCatalog([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -495,9 +589,18 @@ export function ChatInput({
     setInput('');
     setPendingAttachments([]);
     setMentionOpen(false);
+    setSkillSlashOpen(false);
     setSelectedMentionId(null);
+    const requested = skillTokensInText(content);
     clearComposerDraft(draftScope);
-    onSend(content, composerOptions, attachments);
+    onSend(
+      content,
+      {
+        ...composerOptions,
+        ...(requested.length > 0 ? { skills: { requested } } : {}),
+      },
+      attachments,
+    );
   }, [
     input,
     pendingAttachments,
@@ -528,7 +631,9 @@ export function ChatInput({
 
   const pickMention = useCallback(
     (threadIdToAdd: string) => {
-      const thread = mentionCandidates.find((item) => item.id === threadIdToAdd);
+      const thread = mentionCandidates.find(
+        (item) => item.id === threadIdToAdd,
+      );
       if (!thread) return;
       const existing = threadMentions(pendingAttachments);
       if (existing.some((item) => item.threadId === thread.id)) {
@@ -565,6 +670,29 @@ export function ChatInput({
     [input, mentionCandidates, pendingAttachments],
   );
 
+  const visibleSkills = useMemo(
+    () => filterSkillCatalog(skillCatalog, skillSlashQuery),
+    [skillCatalog, skillSlashQuery],
+  );
+
+  const pickSkill = useCallback(
+    (skill: SkillCatalogItem) => {
+      const ta = textareaRef.current;
+      const caret = ta?.selectionStart ?? input.length;
+      const next = completeSkillToken(input, caret, skill.name);
+      setInput(next.text);
+      setSkillSlashOpen(false);
+      setSkillSlashQuery('');
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(next.caret, next.caret);
+      });
+    },
+    [input],
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (mentionOpen && visibleMentions.length > 0) {
@@ -591,6 +719,40 @@ export function ChatInput({
           setMentionOpen(false);
           return;
         }
+      }
+
+      if (skillSlashOpen && visibleSkills.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSkillSlashActive((index) =>
+            Math.min(index + 1, visibleSkills.length - 1),
+          );
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSkillSlashActive((index) => Math.max(index - 1, 0));
+          return;
+        }
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const skill = visibleSkills[skillSlashActive];
+          if (skill) pickSkill(skill);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setSkillSlashOpen(false);
+          return;
+        }
+      }
+
+      // Picker is open but empty: still let Escape close it, but let other
+      // keys (Enter, arrows) fall through to normal input handling.
+      if (skillSlashOpen && e.key === 'Escape') {
+        e.preventDefault();
+        setSkillSlashOpen(false);
+        return;
       }
 
       if (e.key === 'Backspace') {
@@ -631,6 +793,10 @@ export function ChatInput({
       visibleMentions,
       mentionActive,
       pickMention,
+      skillSlashOpen,
+      visibleSkills,
+      skillSlashActive,
+      pickSkill,
       selectedMentionId,
       input,
       pendingAttachments,
@@ -680,6 +846,7 @@ export function ChatInput({
   const handleEditQueued = useCallback(() => {
     const queued = onEditQueued();
     if (!queued) return;
+    // Skill tokens live in the content itself; nothing to reconstruct.
     setInput(queued.content);
     setPendingAttachments(queued.attachments ?? []);
     textareaRef.current?.focus();
@@ -727,9 +894,6 @@ export function ChatInput({
 
   const attachMenu = (
     <>
-      {voice.enabled && (voice.active || voice.transcribing) ? (
-        <VoiceModePill level={voice.level} className="mr-0.5" />
-      ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -753,6 +917,14 @@ export function ChatInput({
           >
             <ImagePlus className="size-4" />
             Attach image
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              setSkillsOpen(true);
+            }}
+          >
+            <BookMarked className="size-4" />
+            Skills
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuCheckboxItem
@@ -861,7 +1033,7 @@ export function ChatInput({
         }
         disabled={isRunning}
         local={localMode}
-        models={localMode ? localModels : CLOUD_OLLAMA_MODELS}
+        models={localMode ? localModels : cloudModels}
         loading={localMode && localModelsLoading}
         emptyMessage={
           localMode
@@ -886,6 +1058,8 @@ export function ChatInput({
         source={contextMeter.source}
         approximate={contextMeter.approximate}
         layers={contextMeter.layers}
+        reserve={contextMeter.reserve}
+        windowSource={contextMeter.windowSource}
       />
     </>
   );
@@ -898,10 +1072,6 @@ export function ChatInput({
           size="icon-sm"
           variant={voice.active || voice.transcribing ? 'secondary' : 'ghost'}
           onClick={() => voice.toggle()}
-          className={cn(
-            'shrink-0 rounded-full',
-            (voice.active || voice.transcribing) && 'text-foreground',
-          )}
           aria-label={
             voice.transcribing
               ? 'Transcribing voice'
@@ -911,9 +1081,16 @@ export function ChatInput({
           }
           aria-pressed={voice.active}
           aria-busy={voice.transcribing}
-          title={voice.transcribing ? 'Transcribing…' : 'Voice mode (Alt+A)'}
+          title={voice.transcribing ? 'Transcribing…' : 'Voice mode'}
+          className={cn(
+            'shrink-0 rounded-full',
+            (voice.active || voice.transcribing) && 'text-foreground',
+            voice.active && 'w-auto px-2',
+          )}
         >
-          {voice.transcribing ? (
+          {voice.active ? (
+            <MicWaveform level={voice.level} />
+          ) : voice.transcribing ? (
             <Loader2 className="size-4 animate-spin" strokeWidth={2.25} />
           ) : (
             <Mic className="size-4" strokeWidth={2.25} />
@@ -939,40 +1116,67 @@ export function ChatInput({
   );
 
   const composerTextarea = (
-    <Textarea
-      ref={textareaRef}
-      value={input}
-      onChange={(e) => {
-        if (voiceLocked) return;
-        const value = e.target.value;
-        setInput(value);
-        const caret = e.target.selectionStart ?? value.length;
-        const found = mentionQueryAtCaret(value, caret);
-        if (found) {
-          setMentionOpen(true);
-          setMentionQuery(found.query);
-          setMentionActive(0);
-        } else {
+    <div className="relative min-w-0">
+      <SkillHighlightMirror
+        value={input}
+        knownNames={knownSkillNames}
+        mirrorRef={mirrorRef}
+      />
+      <Textarea
+        ref={textareaRef}
+        value={input}
+        onChange={(e) => {
+          if (voiceLocked) return;
+          const value = e.target.value;
+          setInput(value);
+          const caret = e.target.selectionStart ?? value.length;
+          const found = mentionQueryAtCaret(value, caret);
+          if (found) {
+            setMentionOpen(true);
+            setMentionQuery(found.query);
+            setMentionActive(0);
+            setSkillSlashOpen(false);
+            setSkillSlashQuery('');
+            return;
+          }
           setMentionOpen(false);
           setMentionQuery('');
-        }
-      }}
-      onKeyDown={handleKeyDown}
-      onPaste={handlePaste}
-      readOnly={voiceLocked}
-      aria-readonly={voiceLocked}
-      placeholder={composerPlaceholder({
-        voiceActive: voice.active,
-        voiceTranscribing: voice.transcribing,
-        isHero,
-      })}
-      rows={1}
-      className={cn(
-        'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0',
-        isHero && 'min-h-10',
-        voiceLocked && 'caret-transparent',
-      )}
-    />
+          const skillFound = skillQueryAtCaret(value, caret);
+          if (skillFound) {
+            setSkillSlashOpen(true);
+            setSkillSlashQuery(skillFound.query);
+            setSkillSlashActive(0);
+          } else {
+            setSkillSlashOpen(false);
+            setSkillSlashQuery('');
+          }
+        }}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoComplete="off"
+        autoCorrect="off"
+        onScroll={(e) => {
+          if (mirrorRef.current) {
+            mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+          }
+        }}
+        readOnly={voiceLocked}
+        aria-readonly={voiceLocked}
+        placeholder={composerPlaceholder({
+          voiceActive: voice.active,
+          voiceTranscribing: voice.transcribing,
+          isHero,
+        })}
+        rows={1}
+        className={cn(
+          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0',
+          isHero && 'min-h-10',
+          voiceLocked && 'caret-transparent',
+        )}
+      />
+    </div>
   );
 
   return (
@@ -981,13 +1185,13 @@ export function ChatInput({
         'min-w-0 shrink-0',
         isHero
           ? 'w-full px-0 py-0'
-          : 'bg-gradient-to-t from-background via-background/95 to-background/0 px-4 pb-4 pt-2 sm:px-6',
+          : 'bg-background px-4 pb-4 pt-2 sm:px-6',
       )}
     >
       <div
         className={cn(
           'mx-auto w-full min-w-0 space-y-2',
-          isHero ? 'max-w-none' : 'max-w-3xl',
+          isHero ? 'max-w-none' : 'max-w-4xl',
         )}
       >
         {queuedMessage && (
@@ -1059,16 +1263,31 @@ export function ChatInput({
           </Card>
         )}
 
-        <Card
-          className={cn(
-            'min-w-0 gap-0 overflow-hidden border-0 bg-card/95 py-0 shadow-[0_4px_24px_oklch(0_0_0/0.12)] ring-1 ring-border/40 backdrop-blur-sm transition-[box-shadow,ring-color] focus-within:ring-border/65',
-            'rounded-[1.35rem]',
-            dragOver && 'ring-2 ring-ring/25',
-          )}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-        >
+        <div className="relative min-w-0">
+          {/* Detached popover: anchored above the composer with a gap so
+              opening/closing never shifts the composer layout. */}
+          {skillSlashOpen && !mentionOpen ? (
+            <SkillSlashPicker
+              skills={skillCatalog}
+              query={skillSlashQuery}
+              activeIndex={skillSlashActive}
+              onActiveIndexChange={setSkillSlashActive}
+              selectedNames={
+                new Set(skillTokensInText(input).map((n) => n.toLowerCase()))
+              }
+              onPick={pickSkill}
+            />
+          ) : null}
+          <Card
+            className={cn(
+              'min-w-0 gap-0 overflow-hidden border-0 bg-card py-0 ring-1 ring-border/40 transition-[box-shadow,ring-color] focus-within:ring-border/65',
+              'rounded-lg',
+              dragOver && 'ring-2 ring-ring/25',
+            )}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
           <CardContent className="relative min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
             {pendingAttachments.length > 0 ? (
               <div className="mb-1.5 flex flex-wrap items-center gap-2 px-1 pt-0.5">
@@ -1132,13 +1351,26 @@ export function ChatInput({
               />
             ) : null}
 
-            {/*
-              Composer: textarea on top, controls on a bottom row. One layout,
-              no expand/collapse flip, so nothing can oscillate while typing.
-            */}
             <div className="grid min-w-0 gap-1 [grid-template-areas:'text_text'_'left_right'] grid-cols-[minmax(0,1fr)_auto]">
               <div className="flex min-w-0 flex-wrap items-center gap-1 [grid-area:left]">
                 {attachMenu}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                      aria-label="Skills"
+                      aria-haspopup="dialog"
+                      aria-expanded={skillsOpen}
+                      onClick={() => setSkillsOpen(true)}
+                    >
+                      <BookMarked className="size-4" strokeWidth={2.25} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Skills</TooltipContent>
+                </Tooltip>
                 {showWorkspacePicker ? (
                   <WorkspacePicker disabled={isRunning} />
                 ) : null}
@@ -1150,7 +1382,8 @@ export function ChatInput({
               </div>
             </div>
           </CardContent>
-        </Card>
+          </Card>
+        </div>
 
         {voice.enabled && voice.error ? (
           <p className="type-caption text-destructive" role="alert">
@@ -1165,6 +1398,7 @@ export function ChatInput({
           </p>
         )}
       </div>
+      <SkillsPanel open={skillsOpen} onOpenChange={setSkillsOpen} />
     </div>
   );
 }

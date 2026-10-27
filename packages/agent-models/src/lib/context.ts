@@ -17,6 +17,9 @@ export type ContextBudget = {
   keepAttachmentsForTurns: number;
 };
 
+/** Provenance of ContextReport.budget.windowTokens (host sets after assemble). */
+export type ContextWindowSource = 'show' | 'default';
+
 export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   windowTokens: 128_000,
   outputReserveTokens: 20_000,
@@ -41,6 +44,11 @@ export type ContextReport = {
   occupiedTokens: number;
   stubbedToolResults: number;
   needsCompaction: boolean;
+  /**
+   * Where budget.windowTokens came from for this assembly.
+   * Hosts set this after assembleContext; refresh preserves it.
+   */
+  windowSource?: ContextWindowSource;
 };
 
 /**
@@ -60,3 +68,26 @@ export type Snapshot = {
   summary: string;
   createdAt: string;
 };
+
+/** Parse a snapshot from persisted JSON. Rejects malformed files. */
+export function parseSnapshot(raw: unknown): Snapshot | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.threadId !== 'string') return null;
+  if (typeof r.throughSeq !== 'number' || !Number.isInteger(r.throughSeq) || r.throughSeq < 0) {
+    return null;
+  }
+  if (typeof r.model !== 'string') return null;
+  if (typeof r.brief !== 'string') return null;
+  if (typeof r.summary !== 'string') return null;
+  if (typeof r.createdAt !== 'string') return null;
+  return {
+    threadId: r.threadId,
+    throughSeq: r.throughSeq,
+    model: r.model,
+    brief: r.brief,
+    summary: r.summary,
+    createdAt: r.createdAt,
+    ...(typeof r.promptVersion === 'string' ? { promptVersion: r.promptVersion } : {}),
+  };
+}

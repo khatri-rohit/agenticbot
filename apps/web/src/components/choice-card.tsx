@@ -62,7 +62,7 @@ export function ChoiceCard({
 
   return (
     <section
-      className="mb-2 min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
+      className="mb-2 min-w-0 overflow-hidden rounded-lg border border-border/60 bg-card shadow-sm"
       aria-label="Waiting for a choice"
       aria-live="polite"
     >
@@ -71,7 +71,7 @@ export function ChoiceCard({
           className="mt-0.5 size-4 shrink-0 text-foreground/80"
           strokeWidth={1.75}
         />
-        <p className="type-ui min-w-0 flex-1 text-[13px] font-medium leading-relaxed text-foreground">
+        <p className="type-ui min-w-0 flex-1 font-medium leading-relaxed text-foreground">
           {choice.question}
         </p>
       </div>
@@ -86,7 +86,7 @@ export function ChoiceCard({
             <label
               key={option.id}
               className={cn(
-                'flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-[13px] leading-relaxed transition-colors',
+                'flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 type-ui leading-relaxed transition-colors',
                 checked
                   ? 'border-primary/50 bg-primary/5 text-foreground'
                   : 'border-border/60 bg-background text-foreground/90 hover:border-border hover:bg-accent/40',
@@ -120,7 +120,7 @@ export function ChoiceCard({
           maxLength={MAX_CHOICE_TEXT_CHARS}
           placeholder="Anything else? (optional)"
           rows={2}
-          className="mt-1 min-h-12 border-border/60 bg-background text-[13px]"
+          className="mt-1 min-h-12 border-border/60 bg-background type-ui"
           onChange={(event) => setText(event.target.value)}
         />
       </fieldset>

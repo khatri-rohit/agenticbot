@@ -179,11 +179,11 @@ export function SidebarSettings({
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="flex items-center gap-1.5 leading-none">
                         {preset.label}
-                        <span className="rounded px-1 py-px text-[9px] font-medium tracking-wide text-muted-foreground uppercase ring-1 ring-border/50">
+                        <span className="type-caption rounded px-1 py-px font-medium text-muted-foreground ring-1 ring-border/50">
                           {preset.scheme}
                         </span>
                       </span>
-                      <span className="text-[11px] leading-snug text-muted-foreground">
+                      <span className="type-caption leading-snug text-muted-foreground">
                         {preset.description}
                       </span>
                     </span>
@@ -497,7 +497,7 @@ function ProfileTab({
         </p>
       ) : null}
 
-      <Label htmlFor="about-user" className="text-[11px] text-muted-foreground">
+      <Label htmlFor="about-user" className="type-caption text-muted-foreground">
         About you
       </Label>
       <Textarea
@@ -514,13 +514,13 @@ function ProfileTab({
       <CharBudgetBar used={draft.length} cap={cap} />
 
       {overCap ? (
-        <p className="text-[11px] text-destructive">
+        <p className="type-caption text-destructive">
           Over cap by {overBy} chars — consolidate first.
         </p>
       ) : isDirty ? (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="type-caption text-muted-foreground">
           Unsaved changes — Save to persist to{' '}
-          <code className="text-[11px]">USER.md</code>.
+          <code className="type-caption">USER.md</code>.
         </p>
       ) : null}
     </div>
@@ -530,7 +530,7 @@ function ProfileTab({
 function CharBudgetBar({ used, cap }: { used: number; cap: number }) {
   const ratio = Math.min(used / Math.max(cap, 1), 1);
   const barColor =
-    used > cap ? 'bg-destructive' : ratio > 0.8 ? 'bg-amber-500' : 'bg-primary';
+    used > cap ? 'bg-destructive' : ratio > 0.8 ? 'bg-[var(--warning)]' : 'bg-primary';
   return (
     <div className="flex flex-col gap-1">
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -540,7 +540,7 @@ function CharBudgetBar({ used, cap }: { used: number; cap: number }) {
           aria-hidden
         />
       </div>
-      <p className="text-[11px] text-muted-foreground" aria-live="polite">
+      <p className="type-caption text-muted-foreground" aria-live="polite">
         {used}/{cap} chars · ~{Math.ceil(used / 4)} tokens
       </p>
     </div>
@@ -619,26 +619,26 @@ function HistoryTab({
                   <div className="flex items-center gap-2">
                     <span
                       className={cn(
-                        'inline-flex h-4 items-center rounded px-1.5 text-[10px] font-medium uppercase tracking-wide',
+                        'inline-flex h-4 items-center rounded px-1.5 type-caption font-medium',
                         op.action === 'add' && 'bg-primary/10 text-primary',
                         op.action === 'patch' &&
-                          'bg-amber-500/15 text-amber-600',
+                          'bg-[var(--warning)]/15 text-[var(--warning-fg)]',
                         op.action === 'remove' &&
                           'bg-destructive/10 text-destructive',
                       )}
                     >
                       {op.action}
                     </span>
-                    <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <span className="type-caption font-medium text-muted-foreground">
                       {target}
                     </span>
-                    <span className="ml-auto text-[11px] text-muted-foreground">
+                    <span className="type-caption ml-auto text-muted-foreground">
                       {formatRelativeTime(op.ts)}
                     </span>
                   </div>
                   <p className="text-xs text-foreground">{op.reason}</p>
                   {op.content ? (
-                    <p className="line-clamp-2 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                    <p className="type-caption line-clamp-2 whitespace-pre-wrap text-muted-foreground">
                       {op.content}
                     </p>
                   ) : null}
@@ -648,14 +648,14 @@ function HistoryTab({
                         className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1"
                         role="status"
                       >
-                        <span className="text-[11px] text-muted-foreground">
+                        <span className="type-caption text-muted-foreground">
                           Revert?
                         </span>
                         <Button
                           type="button"
                           variant="destructive"
                           size="sm"
-                          className="h-6 px-2 text-[11px]"
+                          className="type-caption h-6 px-2"
                           disabled={isReverting}
                           onClick={() => onRevert(op.id)}
                         >
@@ -665,7 +665,7 @@ function HistoryTab({
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="h-6 px-2 text-[11px]"
+                          className="type-caption h-6 px-2"
                           onClick={() => onConfirmRevert(null)}
                         >
                           Cancel
@@ -676,7 +676,7 @@ function HistoryTab({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-6 px-2 text-[11px] text-muted-foreground"
+                        className="type-caption h-6 px-2 text-muted-foreground"
                         disabled={isReverting}
                         aria-label={`Revert: ${op.reason}`}
                         onClick={() => onConfirmRevert(op.id)}

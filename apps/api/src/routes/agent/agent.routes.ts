@@ -24,6 +24,7 @@ import {
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
+  parseThreadKind,
   planHasOpenWork,
   threadMentions,
   type RunPosture,
@@ -44,16 +45,26 @@ import {
   loadWorkspaceRules,
   packMentionedThread,
   resolveReasoningEffort,
+  getSkill,
+  traceCompactionEvent,
   type MentionedThreadContext,
   type ToolRegistry,
 } from '@agent/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
+import { createJsonlTraceSink } from '../../lib/trace-sink.js';
+import { skillsRouter } from './skills.routes';
 import type { ThreadStore } from '../../lib/thread-store';
 
 const router = Router();
+router.use(skillsRouter);
 const runManager = new RunManager();
+
+/** Per-run JSONL trace files for offline replay / eval debugging. */
+const traceSink = createJsonlTraceSink(
+  path.join(__dirname, '..', '..', '..', 'traces'),
+);
 
 function toolAllowList(
   mode: ModeConfig,
@@ -82,20 +93,35 @@ async function resolveWorkspaceDir(
   return { ok: true, root: path.normalize(root) };
 }
 
-function parseThreadKind(value: unknown): ThreadKind | undefined {
-  if (
-    value === 'home' ||
-    value === 'workspace' ||
-    value === 'research' ||
-    value === 'coding'
-  ) {
-    return normalizeThreadKind(value);
-  }
-  return undefined;
-}
-
 function endpointFromLocal(local: boolean | undefined): OllamaEndpoint {
   return local === true ? 'local' : 'cloud';
+}
+
+/** Map a RunLoopResult into the persisted last-run status + limit reason. */
+function lastRunStatusFrom(
+  result: {
+    status: string;
+    content: string;
+    limitReason?: string;
+    runId: string;
+  },
+  runManager: RunManager,
+): {
+  status: 'completed' | 'incomplete' | 'error';
+  incomplete: boolean;
+  limitReason?: string;
+} {
+  // Detect cancellation from the RunHandle flag, not from error text — the
+  // string is produced elsewhere and coupling to it breaks if it changes.
+  const cancelled =
+    result.status === 'error' &&
+    runManager.get(result.runId)?.cancelled === true;
+  if (cancelled) return { status: 'incomplete', incomplete: true, limitReason: 'Run cancelled' };
+  if (result.status === 'incomplete') {
+    return { status: 'incomplete', incomplete: true, limitReason: result.limitReason };
+  }
+  if (result.status === 'error') return { status: 'error', incomplete: false };
+  return { status: 'completed', incomplete: false };
 }
 
 async function loadMentionedThreads(
@@ -122,7 +148,7 @@ async function loadMentionedThreads(
     const other = await store.hydrateEnvelopes(mention.threadId);
     const snapshot = await store.readSnapshot(mention.threadId);
     const sourceLabel = isWorkspaceKind(thread.kind)
-      ? thread.workspaceRoot ?? 'Workspace'
+      ? (thread.workspaceRoot ?? 'Workspace')
       : 'Home';
     segments.push({
       threadId: thread.id,
@@ -159,6 +185,45 @@ type PlanUpdatedPayload = {
   plan: ThreadPlan;
 };
 
+function lastUserEnvelope(
+  envelopes: LedgerEnvelope[],
+): LedgerEnvelope | undefined {
+  for (let i = envelopes.length - 1; i >= 0; i--) {
+    if (envelopes[i].record.role === 'user') return envelopes[i];
+  }
+  return undefined;
+}
+
+function skillNameList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const names = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return names;
+}
+
+function resolveRequestedSkills(raw: unknown, stored?: string[]): string[] {
+  const names =
+    skillNameList(
+      raw && typeof raw === 'object'
+        ? (raw as { requested?: unknown }).requested
+        : undefined,
+    ) ?? stored;
+  if (!names) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    const skill = getSkill(name);
+    if (!skill) continue;
+    const key = skill.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(skill.name);
+  }
+  return out;
+}
+
 async function prepareRun(input: {
   threadId: string;
   thread?: Thread;
@@ -168,6 +233,7 @@ async function prepareRun(input: {
   envelopes: LedgerEnvelope[];
   model: string;
   endpoint?: OllamaEndpoint;
+  skillNames?: string[];
   onMemoryUpdated?: (payload: MemoryUpdatedPayload) => void;
   onPlanUpdated?: (payload: PlanUpdatedPayload) => void;
 }): Promise<{
@@ -193,9 +259,7 @@ async function prepareRun(input: {
   }
   const store = await getThreadStore();
   const plan =
-    input.threadId === 'draft'
-      ? null
-      : await store.readPlan(input.threadId);
+    input.threadId === 'draft' ? null : await store.readPlan(input.threadId);
   const planTools =
     input.threadId === 'draft'
       ? []
@@ -235,12 +299,16 @@ async function prepareRun(input: {
   );
 
   let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
+  let windowSource: 'show' | 'default' = 'default';
   try {
     const config = await getOllamaModelConfig(
       input.model,
       input.endpoint ?? 'cloud',
     );
-    if (config.contextLength) windowTokens = config.contextLength;
+    if (config.contextLength) {
+      windowTokens = config.contextLength;
+      windowSource = 'show';
+    }
   } catch {
     // Keep the default window when /api/show is unavailable.
   }
@@ -256,6 +324,9 @@ async function prepareRun(input: {
     input.threadId,
   );
 
+  const skillNames = input.skillNames ?? [];
+  const lastRun =
+    input.threadId === 'draft' ? null : await store.readLastRun(input.threadId);
   const { messages, report } = assembleContext(
     {
       tools,
@@ -265,12 +336,20 @@ async function prepareRun(input: {
       mode: mode.name,
       posture,
       mentionedThreads,
+      skillNames,
       ...(plan ? { plan } : {}),
+      ...(lastRun ? { lastRun } : {}),
     },
     { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
   );
 
-  return { tools, messages, report, mode, posture };
+  return {
+    tools,
+    messages,
+    report: { ...report, windowSource },
+    mode,
+    posture,
+  };
 }
 
 async function maybeCompactThread(input: {
@@ -284,6 +363,7 @@ async function maybeCompactThread(input: {
   const thread = store.getThread(input.threadId);
   if (!thread) return;
   const envelopes = await store.hydrateEnvelopes(input.threadId);
+  const lastUser = lastUserEnvelope(envelopes);
   const prepared = await prepareRun({
     threadId: input.threadId,
     thread,
@@ -292,6 +372,7 @@ async function maybeCompactThread(input: {
     envelopes,
     model: input.model,
     endpoint: input.endpoint,
+    skillNames: resolveRequestedSkills(undefined, lastUser?.skills?.selected),
   });
   if (!prepared.report.needsCompaction) return;
   const throughSeq = chooseCompactThroughSeq(
@@ -325,6 +406,13 @@ async function maybeCompactThread(input: {
     summary: snapshot.summary,
     createdAt: snapshot.createdAt,
   });
+  traceSink(
+    traceCompactionEvent({
+      runId: input.runId,
+      threadId: input.threadId,
+      snapshot,
+    }),
+  );
 }
 
 /**
@@ -424,11 +512,12 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
     if (!resolved.ok) return res.status(400).json({ error: resolved.error });
     workspaceRoot = resolved.root;
   }
+  const kind = parseThreadKind(body.kind);
   const thread = store.updateThread(req.params.id, {
     ...(typeof body.title === 'string' ? { title: body.title } : {}),
     ...(typeof body.model === 'string' ? { model: body.model } : {}),
     ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
-    ...(parseThreadKind(body.kind) ? { kind: parseThreadKind(body.kind) } : {}),
+    ...(kind ? { kind } : {}),
     ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
   });
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
@@ -452,6 +541,7 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
   const lastUserSeq = store.lastUserSeq(envelopes);
   const snapshot = await store.readSnapshot(req.params.id);
   const plan = await store.readPlan(req.params.id);
+  const lastRun = await store.readLastRun(req.params.id);
   const activeRunId = runManager.activeRunIdForThread(req.params.id);
   return res.json({
     messages,
@@ -459,6 +549,7 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
     lastUserSeq,
     snapshot,
     plan,
+    ...(lastRun ? { lastRun } : {}),
     ...(activeRunId ? { activeRunId } : {}),
   });
 });
@@ -477,6 +568,7 @@ router.post('/run', async (req: Request, res: Response) => {
     webSearch,
     thinking,
     posture: rawPosture,
+    skills: rawSkills,
   } = req.body as StartRunRequest;
   const posture = normalizeRunPosture(rawPosture);
 
@@ -503,27 +595,22 @@ router.post('/run', async (req: Request, res: Response) => {
     });
   }
 
-  // Workspace mutex: one agent-posture run per folder. Ask runs are
-  // read-only and exempt; research threads have no workspaceRoot.
-  if (thread.workspaceRoot && posture === 'agent') {
-    const conflictingRunId = runManager.hasActiveWorkspaceRun(
-      thread.workspaceRoot,
-    );
-    if (conflictingRunId) {
-      return res.status(409).json({
-        error: 'A run is already active in this workspace',
-        runId: conflictingRunId,
-        reason: 'workspace',
-      });
-    }
-  }
-
   if (typeof rewindThroughSeq === 'number') {
+    if (!Number.isInteger(rewindThroughSeq) || rewindThroughSeq < 0) {
+      return res
+        .status(400)
+        .json({ error: 'rewindThroughSeq must be a non-negative integer' });
+    }
     await store.rewind(threadId, rewindThroughSeq);
   }
 
   const ledgerBefore = await store.readLedger(threadId, 0);
   const isFirstUserTurn = ledgerBefore.length === 0 && Boolean(message);
+  const priorUser = lastUserEnvelope(ledgerBefore);
+  const skillNames = resolveRequestedSkills(
+    rawSkills,
+    message ? undefined : priorUser?.skills?.selected,
+  );
 
   if (message) {
     await store.append({
@@ -533,6 +620,7 @@ router.post('/run', async (req: Request, res: Response) => {
       ...(message.attachments?.length
         ? { attachments: message.attachments }
         : {}),
+      skills: { selected: skillNames },
     });
   }
 
@@ -571,6 +659,7 @@ router.post('/run', async (req: Request, res: Response) => {
     envelopes,
     model: useModel,
     endpoint,
+    skillNames,
     onMemoryUpdated: (payload) => {
       const handle = runManager.get(assignedRunId);
       handle?.emitter.emit({
@@ -617,15 +706,41 @@ router.post('/run', async (req: Request, res: Response) => {
       const text = buf.toString('utf8');
       if (offset === undefined && length === undefined) return text;
       const start = offset ?? 0;
-      return text.slice(start, length === undefined ? undefined : start + length);
+      return text.slice(
+        start,
+        length === undefined ? undefined : start + length,
+      );
     },
     onMessage: async (record, meta) => {
       if (record.role === 'system') return;
-      await store.append({ threadId, runId: assignedRunId, record, ...(meta ? { meta } : {}) });
+      await store.append({
+        threadId,
+        runId: assignedRunId,
+        record,
+        ...(meta ? { meta } : {}),
+      });
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
-    onFinished: async () => {
+    trace: traceSink,
+    onFinished: async (result) => {
+      try {
+        const runStatus = lastRunStatusFrom(result, runManager);
+        await store.writeLastRun(threadId, {
+          runId: result.runId,
+          status: runStatus.status,
+          incomplete: runStatus.incomplete,
+          iterations: result.iterations,
+          toolCalls: result.toolCalls,
+          finishedAt: new Date().toISOString(),
+          ...(runStatus.limitReason ? { limitReason: runStatus.limitReason } : {}),
+        });
+      } catch (error) {
+        console.error(
+          'writeLastRun failed:',
+          error instanceof Error ? error.message : error,
+        );
+      }
       try {
         await maybeCompactThread({
           threadId,
@@ -669,16 +784,25 @@ router.post('/run', async (req: Request, res: Response) => {
  * Same assembler as /run: host ledger + memory files + optional draft.
  */
 router.post('/context/estimate', async (req: Request, res: Response) => {
-  const { threadId, draft, attachments, model, webSearch, local, posture } =
-    req.body as {
-      threadId?: string;
-      draft?: string;
-      attachments?: MessageAttachment[];
-      model?: string;
-      webSearch?: boolean;
-      local?: boolean;
-      posture?: RunPosture;
-    };
+  const {
+    threadId,
+    draft,
+    attachments,
+    model,
+    webSearch,
+    local,
+    posture,
+    skills: rawSkills,
+  } = req.body as {
+    threadId?: string;
+    draft?: string;
+    attachments?: MessageAttachment[];
+    model?: string;
+    webSearch?: boolean;
+    local?: boolean;
+    posture?: RunPosture;
+    skills?: StartRunRequest['skills'];
+  };
 
   const store = await getThreadStore();
   let envelopes: LedgerEnvelope[] = [];
@@ -719,6 +843,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     envelopes,
     model: useModel,
     endpoint: endpointFromLocal(local),
+    skillNames: resolveRequestedSkills(rawSkills),
   });
 
   return res.json({
@@ -875,7 +1000,9 @@ router.post('/run/:runId/choice', (req: Request, res: Response) => {
   }
 
   if (body.skipped === true) {
-    const skipped = runManager.resolveChoice(runId, choiceId, { skipped: true });
+    const skipped = runManager.resolveChoice(runId, choiceId, {
+      skipped: true,
+    });
     if (skipped !== 'ok') {
       return res.status(404).json({
         error: 'Choice not found or already resolved',
@@ -895,7 +1022,8 @@ router.post('/run/:runId/choice', (req: Request, res: Response) => {
 
   if (result === 'invalid') {
     return res.status(400).json({
-      error: 'Select at least one option or enter text, with matching option ids',
+      error:
+        'Select at least one option or enter text, with matching option ids',
     });
   }
   if (result !== 'ok') {
@@ -937,7 +1065,9 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   });
 
-  // If the run is already complete, send a final ping and close
+  // Already-finished run: send `done` so the client can close without
+  // waiting for run.settled/run.error replay. Live runs close client-side
+  // on those events; `done` is the fallback for the late-subscriber case.
   if (handle.status !== 'running') {
     res.write('event: done\ndata: {}\n\n');
     res.end();

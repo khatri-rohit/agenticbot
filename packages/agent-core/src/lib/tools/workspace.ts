@@ -128,6 +128,36 @@ function deniedTerminalCommand(command: string): string | null {
       pattern: /(^|[;&|]\s*)type\s+\S+/i,
       reason: 'use read_file instead of type',
     },
+    // Write via shell bypasses path-jailed edit_file and its change report.
+    {
+      pattern:
+        /\bnode\b[^;&|]*\s-(e|p)\b[^;&|]*(writeFile|writeFileSync|appendFile|appendFileSync|rmSync|unlinkSync|mkdirSync|rmdirSync)/i,
+      reason: 'writes go through edit_file, not shell scripts',
+    },
+    {
+      pattern: /\bsed\s+(-[a-zA-Z]*i[a-zA-Z]*\s|--in-place)/,
+      reason: 'writes go through edit_file, not sed -i',
+    },
+    {
+      pattern: /(^|[;&|]\s*)tee\s+[^;&|]*>/,
+      reason: 'writes go through edit_file, not tee',
+    },
+    {
+      pattern: /(^|[;&|]\s*)tee\s+(-a\s+)?\S+/,
+      reason: 'writes go through edit_file, not tee',
+    },
+    {
+      pattern: /(^|[;&|]\s*)out-file\s+\S+/i,
+      reason: 'writes go through edit_file, not Out-File',
+    },
+    {
+      pattern: /(^|[;&|]\s*)set-content\s+\S+/i,
+      reason: 'writes go through edit_file, not Set-Content',
+    },
+    {
+      pattern: /(^|[;&|]\s*)add-content\s+\S+/i,
+      reason: 'writes go through edit_file, not Add-Content',
+    },
   ];
   for (const test of tests) {
     if (test.pattern.test(compact)) return test.reason;
@@ -499,14 +529,51 @@ export const editFileTool: Tool = {
     if (!oldText) {
       return 'oldText is required to patch an existing file (must match exactly once)';
     }
-    const count = existing.split(oldText).length - 1;
+    // EOL-flexible match: the model's span may use LF while the file on disk
+    // is CRLF (git autocrlf). Match on normalized text, splice in the file's
+    // own EOL style so the edit never rewrites line endings.
+    const hasCrlf = existing.includes('\r\n');
+    // Detect a bare LF that is not part of a CRLF pair (mixed line endings).
+    const hasBareLf = hasCrlf
+      ? existing.replace(/\r\n/g, '').includes('\n')
+      : existing.includes('\n');
+    // Mixed-EOL file: normalizing then re-expanding would rewrite every line
+    // to one style. Fall back to exact match on the original string.
+    if (hasCrlf && hasBareLf) {
+      const exactCount = existing.split(oldText).length - 1;
+      if (exactCount === 0) {
+        return `oldText span not found in ${relPath}. Re-read the file and copy an exact unique span.`;
+      }
+      if (exactCount > 1) {
+        return `oldText span matches ${exactCount} times in ${relPath}. Re-read the file and use a longer unique span.`;
+      }
+      const next = replaceOnce(existing, oldText, newText);
+      await writeFile(resolved.abs, next, 'utf8');
+      return formatEditReport({
+        action: 'patched',
+        relPath,
+        before: existing,
+        after: next,
+        removed: oldText,
+        added: newText,
+      });
+    }
+    const fileEol = hasCrlf ? '\r\n' : '\n';
+    const normalized = existing.replace(/\r\n/g, '\n');
+    const normalizedOld = oldText.replace(/\r\n/g, '\n');
+    const normalizedNew = newText.replace(/\r\n/g, '\n');
+    const count = normalized.split(normalizedOld).length - 1;
     if (count === 0) {
       return `oldText span not found in ${relPath}. Re-read the file and copy an exact unique span.`;
     }
     if (count > 1) {
       return `oldText span matches ${count} times in ${relPath}. Re-read the file and use a longer unique span.`;
     }
-    const next = replaceOnce(existing, oldText, newText);
+    const next = replaceOnce(
+      normalized,
+      normalizedOld,
+      normalizedNew,
+    ).replace(/\n/g, fileEol);
     await writeFile(resolved.abs, next, 'utf8');
     return formatEditReport({
       action: 'patched',

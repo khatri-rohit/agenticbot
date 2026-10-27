@@ -1,4 +1,7 @@
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
+} from 'openai/resources/chat/completions';
 import type {
   ContextBudget,
   ContextReport,
@@ -7,6 +10,7 @@ import type {
   ModeName,
   RunPosture,
   Snapshot,
+  ThreadLastRun,
   ThreadPlan,
 } from '@agent/agent-models';
 import {
@@ -19,6 +23,11 @@ import {
 } from '@agent/agent-models';
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
+import {
+  formatSkillBodies,
+  formatSkillsCatalog,
+  listSkills,
+} from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
 import { stubWebSourceCard } from '../tools/web-source';
 import { hostListedWebUrls } from '../tools/web-trust';
@@ -48,7 +57,58 @@ export type AssembleContextInput = {
   mentionedThreads?: MentionedThreadContext[];
   /** Thread-scoped plan journal + todos. Injected when non-empty. */
   plan?: ThreadPlan | null;
+  /**
+   * User-requested skill names for this send (`/` picks).
+   * Bodies go into Loaded skills. Catalog is always the full list.
+   */
+  skillNames?: string[];
+  /** Prior run summary for resume; incomplete/cancelled inject a system note. */
+  lastRun?: ThreadLastRun | null;
 };
+
+/** Prompt-only fill for ledger orphans (pre-I1 / crash). Does not rewrite disk. */
+const INTERRUPTED_TOOL_RESULT = 'Skipped: interrupted before result.';
+
+function fillOrphanToolResults(
+  messages: ChatCompletionMessageParam[],
+): ChatCompletionMessageParam[] {
+  const answered = new Set<string>();
+  for (const message of messages) {
+    if (message.role === 'tool' && typeof message.tool_call_id === 'string') {
+      answered.add(message.tool_call_id);
+    }
+  }
+  const out: ChatCompletionMessageParam[] = [];
+  for (const message of messages) {
+    out.push(message);
+    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
+    for (const call of message.tool_calls) {
+      if (answered.has(call.id)) continue;
+      out.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        content: INTERRUPTED_TOOL_RESULT,
+      });
+      answered.add(call.id);
+    }
+  }
+  return out;
+}
+
+function formatLastRunPrompt(lastRun: ThreadLastRun): string | null {
+  if (!lastRun.incomplete && lastRun.status === 'completed') return null;
+  const reason =
+    lastRun.limitReason ??
+    (lastRun.status === 'error'
+      ? 'Run ended with an error'
+      : 'Run stopped early');
+  return [
+    '# Last run',
+    `The previous run on this thread ended early (status: ${lastRun.status}).`,
+    `Reason: ${reason}`,
+    'Workspace files may have changed since any tool results below. Re-read before editing or relying on those results.',
+  ].join('\n');
+}
 
 export type AssembleContextResult = {
   messages: ChatCompletionMessageParam[];
@@ -63,9 +123,6 @@ function charsToTokens(length: number): number {
 function buildMemoryPrompt(memory: MemoryFiles): string {
   const user = memory.user.trim();
   const notes = memory.notes.trim();
-  const project = memory.project?.trim() ?? '';
-  const agents = memory.agentsMd?.trim() ?? '';
-
   const parts: string[] = [];
   if (user) {
     parts.push(
@@ -85,7 +142,6 @@ function buildMemoryPrompt(memory: MemoryFiles): string {
       ].join('\n'),
     );
   }
-
   if (notes) {
     const notesTitle =
       memory.agentsMd || memory.project
@@ -93,14 +149,132 @@ function buildMemoryPrompt(memory: MemoryFiles): string {
         : '# Agent notes (MEMORY.md)';
     parts.push([notesTitle, notes].join('\n'));
   }
+  return parts.join('\n\n');
+}
+
+function buildRulesPrompt(memory: MemoryFiles): string {
+  const parts: string[] = [];
+  const agents = memory.agentsMd?.trim() ?? '';
+  const project = memory.project?.trim() ?? '';
   if (agents) {
     parts.push(['# Project instructions (AGENTS.md)', agents].join('\n'));
   }
   if (project) {
     parts.push(['# Project notes (PROJECT.md)', project].join('\n'));
   }
-
   return parts.join('\n\n');
+}
+
+function loadSkillNameFromArgs(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const name = (parsed as { skill_name?: unknown }).skill_name;
+    return typeof name === 'string' && name.trim() ? name.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function loadedSkillNamesFromEnvelopes(envelopes: LedgerEnvelope[]): string[] {
+  const names: string[] = [];
+  for (const envelope of envelopes) {
+    if (envelope.record.role !== 'assistant' || !envelope.record.tool_calls) {
+      continue;
+    }
+    for (const call of envelope.record.tool_calls) {
+      if (!('function' in call) || call.function.name !== 'load_skill')
+        continue;
+      const name = loadSkillNameFromArgs(call.function.arguments);
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
+function toolCallsFromMessage(
+  item: LedgerEnvelope | ChatCompletionMessageParam,
+): ChatCompletionMessageToolCall[] | undefined {
+  if ('record' in item) {
+    return item.record.role === 'assistant' ? item.record.tool_calls : undefined;
+  }
+  return item.role === 'assistant' ? item.tool_calls : undefined;
+}
+
+function loadSkillCallIds(
+  source: LedgerEnvelope[] | ChatCompletionMessageParam[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const item of source) {
+    const calls = toolCallsFromMessage(item);
+    if (!calls) continue;
+    for (const call of calls) {
+      const name = 'function' in call ? call.function.name : undefined;
+      if (name === 'load_skill') ids.add(call.id);
+    }
+  }
+  return ids;
+}
+
+function loadSkillTokensFromMessages(
+  messages: ChatCompletionMessageParam[],
+): number {
+  const ids = loadSkillCallIds(messages);
+  if (ids.size === 0) return 0;
+  let chars = 0;
+  for (const message of messages) {
+    if (message.role !== 'tool' || !ids.has(message.tool_call_id)) continue;
+    chars += String(message.content ?? '').length;
+  }
+  return charsToTokens(chars);
+}
+
+const PREFIX_LAYER_IDS = new Set([
+  'system',
+  'tools',
+  'skills_catalog',
+  'skills_bodies',
+  'memory',
+  'rules',
+  'plan',
+  'mentions',
+  'brief',
+  'last_run',
+]);
+
+/**
+ * Rebuild conversation / loaded-skill layers after a model turn.
+ * Prefix layer sizes stay the assemble-time estimates; occupied follows
+ * provider promptTokens when present.
+ */
+export function refreshContextReport(
+  report: ContextReport,
+  messages: ChatCompletionMessageParam[],
+  tools: ToolRegistry,
+  usage?: { promptTokens: number },
+): ContextReport {
+  const prefix = report.layers.filter((layer) =>
+    PREFIX_LAYER_IDS.has(layer.id),
+  );
+  const prefixSum = prefix.reduce((sum, layer) => sum + layer.tokens, 0);
+  const skillsLoaded = loadSkillTokensFromMessages(messages);
+  const occupied =
+    usage?.promptTokens ?? layerTokens(messages, tools.definitions);
+  const conversation = Math.max(0, occupied - prefixSum - skillsLoaded);
+  const layers = [
+    ...prefix,
+    { id: 'conversation', label: 'Conversation', tokens: conversation },
+    { id: 'skills_loaded', label: 'Loaded skills', tokens: skillsLoaded },
+  ];
+  const inputBudget =
+    report.budget.windowTokens - report.budget.outputReserveTokens;
+  return {
+    ...report,
+    layers,
+    occupiedTokens: occupied,
+    needsCompaction: occupied > inputBudget * report.budget.compactAtRatio,
+  };
 }
 
 function userSeqs(envelopes: LedgerEnvelope[]): number[] {
@@ -210,7 +384,7 @@ export function stubLiveToolResults(
           ? message.content
           : message.content
               .filter((part) => part.type === 'text')
-              .map((part) => part.text)
+              .map((part) => part.text ?? '')
               .join('\n');
       messages[i] = { role: 'user', content: stubbedUserText(text, n) };
       continue;
@@ -293,6 +467,8 @@ function layerTokens(
 /**
  * Pure assembler. Same envelopes + memory + snapshot → same messages.
  * Stubbing is free and deterministic; compaction is reported, not performed.
+ * The ContextReport here is the measured “used” meter source after turns —
+ * not a keystroke-hot estimate path (web must not spam assemble on typing).
  *
  * Cache contract: the returned messages are ordered stable-first (system,
  * memory, plan, mentions, brief) then volatile (tail, current turn). The
@@ -317,11 +493,25 @@ export function assembleContext(
     content: systemText,
   };
 
+  const hasLoadSkill = input.tools.byName.has('load_skill');
+  const requestedNames = input.skillNames ?? [];
+  const skillsText = hasLoadSkill ? formatSkillsCatalog(listSkills()) : '';
+  const skillsMessage: ChatCompletionMessageParam | null = skillsText
+    ? { role: 'system', content: skillsText }
+    : null;
+  // bodiesText is computed after keepToolsFrom (below) so loaded-skill names
+  // come only from live, unstubbed tool results — not the whole ledger.
+
   const memoryText = buildMemoryPrompt(input.memory);
   const memoryMessage: ChatCompletionMessageParam = {
     role: 'system',
     content: memoryText,
   };
+
+  const rulesText = buildRulesPrompt(input.memory);
+  const rulesMessage: ChatCompletionMessageParam | null = rulesText
+    ? { role: 'system', content: rulesText }
+    : null;
 
   const plan = input.plan ?? null;
   const planText =
@@ -357,19 +547,36 @@ export function assembleContext(
           content: [
             '# Attached threads',
             'Other conversations the user attached to this turn. Use them as background.',
-            'They are not this thread\'s ledger. Do not treat them as files you edited here.',
+            "They are not this thread's ledger. Do not treat them as files you edited here.",
             '',
             mentionParts.join('\n\n'),
           ].join('\n'),
         }
       : null;
 
+  const lastRunText = input.lastRun ? formatLastRunPrompt(input.lastRun) : null;
+  const lastRunMessage: ChatCompletionMessageParam | null = lastRunText
+    ? { role: 'system', content: lastRunText }
+    : null;
+
   const users = userSeqs(live);
   const keepToolsFrom = keepFromNthLast(users, budget.keepToolResultsForTurns);
-  const keepImagesFrom = keepFromNthLast(
-    users,
-    budget.keepAttachmentsForTurns,
-  );
+  const keepImagesFrom = keepFromNthLast(users, budget.keepAttachmentsForTurns);
+
+  // Count a skill as loaded only when its load_skill call is in live and its
+  // result is not stubbed; otherwise an explicit /skill pick after compaction
+  // sends no body and no body is in the prompt.
+  const bodiesText = hasLoadSkill
+    ? formatSkillBodies(
+        requestedNames,
+        loadedSkillNamesFromEnvelopes(
+          live.filter((envelope) => envelope.seq >= keepToolsFrom),
+        ),
+      )
+    : '';
+  const bodiesMessage: ChatCompletionMessageParam | null = bodiesText
+    ? { role: 'system', content: bodiesText }
+    : null;
 
   const lastUserSeq = users.at(-1);
   const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
@@ -408,26 +615,62 @@ export function assembleContext(
     else tailMessages.push(message);
   }
 
-  const messages: ChatCompletionMessageParam[] = [
+  const messages: ChatCompletionMessageParam[] = fillOrphanToolResults([
     systemMessage,
+    ...(skillsMessage ? [skillsMessage] : []),
+    ...(bodiesMessage ? [bodiesMessage] : []),
     memoryMessage,
+    ...(rulesMessage ? [rulesMessage] : []),
     ...(planMessage ? [planMessage] : []),
     ...(mentionsMessage ? [mentionsMessage] : []),
     ...(briefMessage ? [briefMessage] : []),
+    ...(lastRunMessage ? [lastRunMessage] : []),
     ...tailMessages,
     ...turnMessages,
-  ];
+  ]);
+
+  // Use the assembled messages, not raw ledger content: the prompt may hold
+  // stubbed or capped versions of load_skill results, and conversationTokens
+  // subtracts this from a total built from those same messages.
+  const skillsLoadedTokens = loadSkillTokensFromMessages([
+    ...tailMessages,
+    ...turnMessages,
+  ]);
+  const conversationTokens = Math.max(
+    0,
+    layerTokens([...tailMessages, ...turnMessages]) - skillsLoadedTokens,
+  );
 
   const layers = [
     {
       id: 'system',
       label: 'System',
-      tokens: layerTokens([systemMessage], input.tools.definitions),
+      tokens: layerTokens([systemMessage]),
+    },
+    {
+      id: 'tools',
+      label: 'Tools',
+      tokens: layerTokens([], input.tools.definitions),
+    },
+    {
+      id: 'skills_catalog',
+      label: 'Skill catalog',
+      tokens: skillsText ? charsToTokens(skillsText.length) + 4 : 0,
+    },
+    {
+      id: 'skills_bodies',
+      label: 'Attached skill bodies',
+      tokens: bodiesText ? charsToTokens(bodiesText.length) + 4 : 0,
     },
     {
       id: 'memory',
       label: 'Memory',
       tokens: charsToTokens(memoryText.length) + 4,
+    },
+    {
+      id: 'rules',
+      label: 'Rules',
+      tokens: rulesText ? charsToTokens(rulesText.length) + 4 : 0,
     },
     {
       id: 'plan',
@@ -449,26 +692,25 @@ export function assembleContext(
         : 0,
     },
     {
-      id: 'tail',
-      label: 'Recent tail',
-      tokens: layerTokens(tailMessages),
+      id: 'last_run',
+      label: 'Last run',
+      tokens: lastRunText ? charsToTokens(lastRunText.length) + 4 : 0,
     },
     {
-      id: 'turn',
-      label: 'Current turn',
-      tokens: layerTokens(turnMessages),
+      id: 'conversation',
+      label: 'Conversation',
+      tokens: conversationTokens,
     },
     {
-      id: 'scratch',
-      label: 'Run scratch',
-      tokens: 0,
+      id: 'skills_loaded',
+      label: 'Loaded skills',
+      tokens: skillsLoadedTokens,
     },
   ];
 
   const occupiedTokens = layers.reduce((sum, layer) => sum + layer.tokens, 0);
   const inputBudget = budget.windowTokens - budget.outputReserveTokens;
-  const needsCompaction =
-    occupiedTokens > inputBudget * budget.compactAtRatio;
+  const needsCompaction = occupiedTokens > inputBudget * budget.compactAtRatio;
 
   const report: ContextReport = {
     budget,

@@ -229,115 +229,6 @@ export const OLLAMA_MODELS: OllamaModel[] = [
     contextLength: 128_000,
     hint: 'OpenAI open-weight reasoning',
   },
-
-  // ── Local: Qwen ──
-  {
-    id: 'qwen3.8:27b',
-    label: 'Qwen 3.8 27B',
-    family: 'Qwen',
-    cloud: false,
-    vision: true,
-    thinking: true,
-    tools: true,
-    contextLength: null,
-    hint: 'Coding & agentic tasks',
-  },
-  {
-    id: 'qwen3.6:27b',
-    label: 'Qwen 3.6 27B',
-    family: 'Qwen',
-    cloud: false,
-    vision: true,
-    thinking: true,
-    tools: true,
-    contextLength: null,
-    hint: 'Agentic coding & thinking',
-  },
-  {
-    id: 'qwen3.8-flash-next',
-    label: 'Qwen 3.8 Flash Next',
-    family: 'Qwen',
-    cloud: false,
-    vision: true,
-    thinking: true,
-    tools: true,
-    contextLength: null,
-    hint: 'Qwen4 architecture preview',
-  },
-
-  // ── Local: Mistral ──
-  {
-    id: 'mistral-medium-3.5:128b',
-    label: 'Mistral Medium 3.5 128B',
-    family: 'Mistral',
-    cloud: false,
-    vision: true,
-    thinking: true,
-    tools: true,
-    contextLength: null,
-    hint: 'Instruction-following & coding',
-  },
-
-  // ── Local: Meta ──
-  {
-    id: 'muse-glimmer:30b',
-    label: 'Muse Glimmer 30B',
-    family: 'Meta',
-    cloud: false,
-    vision: true,
-    thinking: true,
-    tools: true,
-    contextLength: null,
-    hint: 'Always-on local agents',
-  },
-  {
-    id: 'llama3.1:8b',
-    label: 'Llama 3.1 8B',
-    family: 'Meta',
-    cloud: false,
-    vision: false,
-    thinking: false,
-    tools: true,
-    contextLength: 128_000,
-    hint: 'Fast local general-purpose',
-  },
-
-  // ── Local: NVIDIA ──
-  {
-    id: 'nemotron3:33b',
-    label: 'Nemotron 3 Nano Omni 33B',
-    family: 'NVIDIA',
-    cloud: false,
-    vision: true,
-    thinking: true,
-    tools: true,
-    contextLength: null,
-    hint: 'Video, audio, image & text',
-  },
-  {
-    id: 'nemotron-3.5-lightning:30b',
-    label: 'Nemotron 3.5 Lightning 30B',
-    family: 'NVIDIA',
-    cloud: false,
-    vision: false,
-    thinking: true,
-    tools: true,
-    contextLength: null,
-    hint: 'Efficient always-on agents',
-  },
-
-  // ── Local: IBM ──
-  {
-    id: 'granite4.1:8b',
-    label: 'Granite 4.1 8B',
-    family: 'IBM',
-    cloud: false,
-    vision: false,
-    thinking: false,
-    tools: true,
-    contextLength: null,
-    hint: 'Enterprise, RAG & JSON output',
-  },
 ];
 
 const MODEL_BY_ID = new Map(OLLAMA_MODELS.map((m) => [m.id, m]));
@@ -348,7 +239,7 @@ export const CLOUD_OLLAMA_MODELS: OllamaModel[] = OLLAMA_MODELS.filter(
 );
 
 function getOllamaModel(id: string): OllamaModel | undefined {
-  return MODEL_BY_ID.get(id);
+  return MODEL_BY_ID.get(id) ?? MODEL_BY_ID.get(`${id}:cloud`);
 }
 
 /**
@@ -366,7 +257,9 @@ export function modelSupportsVision(
 export function resolveOllamaModel(id: string, local = false): string {
   const trimmed = id.trim();
   if (local) return trimmed;
-  return MODEL_BY_ID.has(trimmed) ? trimmed : DEFAULT_OLLAMA_MODEL;
+  // Cloud models come from the live /api/tags list; accept any non-empty id.
+  // The Ollama API rejects unknown models at call time.
+  return trimmed || DEFAULT_OLLAMA_MODEL;
 }
 
 export function getOllamaModelLabel(id: string): string {
@@ -401,6 +294,32 @@ function formatModelSize(bytes: number): string {
   if (gib >= 1) return `${gib.toFixed(1)} GB on disk`;
   const mib = bytes / 1024 ** 2;
   return `${Math.max(1, Math.round(mib))} MB on disk`;
+}
+
+/**
+ * Merge live `/api/tags` cloud models with the catalog for metadata
+ * (vision/thinking/tools/hints/labels). Live models not in the catalog
+ * get minimal metadata; catalog models not returned live are dropped.
+ */
+export function mergeCloudModels(
+  live: { id: string; family: string | null; size: number | null }[],
+): OllamaModel[] {
+  return live.map((entry) => {
+    // Live /api/tags returns bare IDs ("glm-5.2"); the catalog stores
+    // ":cloud"-suffixed IDs ("glm-5.2:cloud"). Match either way so
+    // catalog metadata (vision/thinking/tools/labels) enriches live rows.
+    const known =
+      MODEL_BY_ID.get(entry.id) ?? MODEL_BY_ID.get(`${entry.id}:cloud`);
+    if (known) return { ...known, cloud: true };
+    return {
+      ...listedModelToPickerModel({
+        id: entry.id,
+        family: entry.family,
+        size: entry.size,
+      }),
+      cloud: true,
+    };
+  });
 }
 
 const MODEL_STORAGE_KEY = 'agent:composerModel';

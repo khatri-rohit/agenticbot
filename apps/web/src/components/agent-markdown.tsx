@@ -86,7 +86,7 @@ function CitationChips({
           <li key={`${citation.path}:${citation.start}:${citation.end}`}>
             <button
               type="button"
-              className="type-caption rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+              className="type-caption rounded-md bg-muted/40 px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
               title={`Copy ${citation.path}`}
               aria-label={`Copy path ${citation.path}`}
               onClick={() => void navigator.clipboard.writeText(citation.path)}
@@ -136,7 +136,7 @@ export function AgentMarkdown({
           {...shared}
           mode="streaming"
           animated={reducedMotion ? false : STREAM_ANIMATION}
-          caret={reducedMotion ? undefined : 'block'}
+          caret={reducedMotion ? undefined : 'circle'}
           isAnimating={!reducedMotion}
           parseIncompleteMarkdown
           plugins={codePlugins}

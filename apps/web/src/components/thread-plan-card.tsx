@@ -27,7 +27,7 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
 
   return (
     <section
-      className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
+      className="min-w-0 overflow-hidden rounded-lg border border-border/60 bg-card shadow-sm"
       aria-label={label}
     >
       <button
@@ -41,11 +41,11 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
           {plan.goal.trim() || label}
         </span>
         {todoHint ? (
-          <span className="type-ui shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          <span className="type-caption shrink-0 tabular-nums text-muted-foreground">
             {todoHint}
           </span>
         ) : (
-          <span className="type-ui shrink-0 text-[11px] text-muted-foreground">
+          <span className="type-caption shrink-0 text-muted-foreground">
             {locked ? 'Final' : 'Journal'}
           </span>
         )}
@@ -61,14 +61,14 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
         <div className="max-h-56 space-y-2 overflow-y-auto border-t border-border/60 px-3 py-2">
           {plan.decisions.length > 0 ? (
             <section>
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Decisions
               </p>
               <ul className="space-y-0.5">
                 {plan.decisions.map((decision) => (
                   <li
                     key={decision.id}
-                    className="type-ui text-[12px] leading-relaxed text-foreground/85"
+                    className="type-ui leading-relaxed text-foreground/85"
                   >
                     {decision.text}
                   </li>
@@ -78,23 +78,23 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
           ) : null}
           {plan.final?.trim() ? (
             <section>
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Final plan
               </p>
-              <pre className="type-ui max-h-36 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">
+              <pre className="type-ui max-h-36 overflow-auto whitespace-pre-wrap break-words leading-relaxed text-foreground/85">
                 {plan.final}
               </pre>
             </section>
           ) : plan.notes.length > 0 ? (
             <section>
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Journal
               </p>
               <ul className="space-y-0.5">
                 {plan.notes.slice(-6).map((note) => (
                   <li
                     key={note.id}
-                    className="type-ui text-[12px] leading-relaxed text-foreground/85"
+                    className="type-ui leading-relaxed text-foreground/85"
                   >
                     <span className="text-muted-foreground">{note.kind}: </span>
                     {note.text}
@@ -105,14 +105,14 @@ export function ThreadPlanCard({ plan }: { plan: ThreadPlan | null }) {
           ) : null}
           {plan.todos.length > 0 ? (
             <section>
-              <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="type-ui mb-1 font-medium text-muted-foreground">
                 Todos
               </p>
               <ul className="space-y-1">
                 {plan.todos.map((todo) => (
                   <li
                     key={todo.id}
-                    className="flex items-start gap-2 text-[12px] leading-relaxed"
+                    className="type-ui flex items-start gap-2 leading-relaxed"
                   >
                     <TodoMark status={todo.status} />
                     <span
@@ -150,7 +150,7 @@ export function PlanChip({ plan }: { plan: ThreadPlan | null }) {
 
   return (
     <section
-      className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-muted/25"
+      className="min-w-0 overflow-hidden rounded-lg border border-border/60 bg-muted/25"
       aria-label="Plan"
     >
       <button
@@ -194,20 +194,20 @@ function PlanChipBody({ plan }: { plan: ThreadPlan }) {
   return (
     <div className="max-h-72 space-y-2 overflow-y-auto border-t border-border/60 px-3 py-2">
       {plan.goal.trim() ? (
-        <p className="type-ui text-[12px] leading-relaxed text-foreground/85">
+        <p className="type-ui leading-relaxed text-foreground/85">
           {plan.goal}
         </p>
       ) : null}
       {plan.decisions.length > 0 ? (
         <section>
-          <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          <p className="type-ui mb-1 font-medium text-muted-foreground">
             Decisions
           </p>
           <ul className="space-y-0.5">
             {plan.decisions.map((decision) => (
               <li
                 key={decision.id}
-                className="type-ui text-[12px] leading-relaxed text-foreground/85"
+                className="type-ui leading-relaxed text-foreground/85"
               >
                 {decision.text}
               </li>
@@ -217,24 +217,24 @@ function PlanChipBody({ plan }: { plan: ThreadPlan }) {
       ) : null}
       {plan.final?.trim() ? (
         <section>
-          <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          <p className="type-ui mb-1 font-medium text-muted-foreground">
             Final plan
           </p>
-          <pre className="type-ui whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/85">
+          <pre className="type-ui whitespace-pre-wrap break-words leading-relaxed text-foreground/85">
             {plan.final}
           </pre>
         </section>
       ) : null}
       {plan.todos.length > 0 ? (
         <section>
-          <p className="type-ui mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          <p className="type-ui mb-1 font-medium text-muted-foreground">
             Todos
           </p>
           <ul className="space-y-1">
             {plan.todos.map((todo) => (
               <li
                 key={todo.id}
-                className="flex items-start gap-2 text-[12px] leading-relaxed"
+                className="type-ui flex items-start gap-2 leading-relaxed"
               >
                 <TodoMark status={todo.status} />
                 <span

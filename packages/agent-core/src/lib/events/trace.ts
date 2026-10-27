@@ -1,3 +1,5 @@
+import type { Snapshot, TokenUsage } from '@agent/agent-models';
+
 import type { TraceEvent } from './trace-types';
 
 export type { TraceEvent } from './trace-types';
@@ -22,6 +24,9 @@ export function consoleTrace(event: TraceEvent): void {
       );
       if (event.contentPreview) {
         console.log(`${prefix} content=${event.contentPreview}`);
+      }
+      if (event.usage) {
+        console.log(`${prefix} usage=${formatUsage(event.usage)}`);
       }
       break;
 
@@ -54,5 +59,65 @@ export function consoleTrace(event: TraceEvent): void {
           ` toolCalls=${event.toolCalls}`,
       );
       break;
+
+    case 'memory_gate':
+      console.log(
+        `${prefix} MEMORY GATE ${event.target} → ${event.verdict}` +
+          ` (${event.why})`,
+      );
+      break;
+
+    case 'context_compacted':
+      console.log(
+        `${prefix} COMPACTED throughSeq=${event.throughSeq}` +
+          ` brief=${event.briefPreview}`,
+      );
+      break;
   }
+}
+
+function formatUsage(usage: TokenUsage): string {
+  const total =
+    usage.totalTokens ??
+    usage.promptTokens + usage.completionTokens;
+  return `prompt=${usage.promptTokens} completion=${usage.completionTokens} total=${total}`;
+}
+
+/**
+ * Fan a TraceEvent to multiple sinks. Null/undefined sinks are dropped so
+ * hosts can compose `teeTrace(consoleTrace, jsonlSink)` without conditionals.
+ */
+export function teeTrace(
+  ...sinks: (((event: TraceEvent) => void) | null | undefined)[]
+): (event: TraceEvent) => void {
+  const live = sinks.filter(
+    (sink): sink is (event: TraceEvent) => void => typeof sink === 'function',
+  );
+  return (event) => {
+    for (const sink of live) sink(event);
+  };
+}
+
+const BRIEF_PREVIEW_MAX = 200;
+
+/**
+ * Build the `context_compacted` trace event from a host-written snapshot.
+ * Hosts call this with their trace sink after `buildExtractiveSnapshot`.
+ */
+export function traceCompactionEvent(input: {
+  runId: string;
+  threadId: string;
+  snapshot: Snapshot;
+}): TraceEvent {
+  const brief = input.snapshot.brief ?? '';
+  return {
+    type: 'context_compacted',
+    runId: input.runId,
+    threadId: input.threadId,
+    throughSeq: input.snapshot.throughSeq,
+    briefPreview:
+      brief.length > BRIEF_PREVIEW_MAX
+        ? `${brief.slice(0, BRIEF_PREVIEW_MAX)}…`
+        : brief,
+  };
 }

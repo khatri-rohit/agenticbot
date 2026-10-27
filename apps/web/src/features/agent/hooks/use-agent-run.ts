@@ -26,14 +26,12 @@ import {
   applyChatEvent,
   hasSseSeqGap,
   initialChatState,
+  limitNoticeFromIncomplete,
   noticeFromSnapshot,
   persistChatEffects,
   type ChatState,
 } from '../store/chat-store';
-import {
-  isThreadPlanEmpty,
-  type ThreadPlan,
-} from '@agent/agent-models';
+import { isThreadPlanEmpty, type ThreadPlan } from '@agent/agent-models';
 import {
   startRun,
   subscribeRun,
@@ -41,6 +39,7 @@ import {
   resolveChoice,
   type ComposerOptions,
 } from '../api/agent-client';
+import { skillTokensInText } from '@/components/skill-slash-picker';
 import {
   fetchLedger,
   fetchThread,
@@ -79,10 +78,10 @@ function planIsCurrent(
 }
 
 /** Ledger plan → live state, or null when the plan predates the last turn. */
-function planFromLedger(
-  ledger: LedgerResponse,
-): ThreadPlan | null {
-  return planIsCurrent(ledger.plan, ledger.lastUserSeq) ? ledger.plan ?? null : null;
+function planFromLedger(ledger: LedgerResponse): ThreadPlan | null {
+  return planIsCurrent(ledger.plan, ledger.lastUserSeq)
+    ? (ledger.plan ?? null)
+    : null;
 }
 
 const defaultComposerOptions = (): ComposerOptions => {
@@ -153,12 +152,17 @@ export function useAgentRun(threadId: string | null) {
     void fetchLedger(threadId)
       .then((ledger) => {
         if (cancelled) return;
+        const lastRun = ledger.lastRun;
         setChatState((prev) => ({
           ...prev,
           ...(ledger.snapshot
             ? { compactionNotice: noticeFromSnapshot(ledger.snapshot) }
             : {}),
           plan: planFromLedger(ledger),
+          // Rebuild stop caption from durable last-run (SSE limitNotice is ephemeral).
+          ...(limitNoticeFromIncomplete(lastRun)
+            ? { limitNotice: limitNoticeFromIncomplete(lastRun) }
+            : {}),
         }));
         if (ledger.activeRunId && !chatStateRef.current.activeRun) {
           subscribeToRunRef.current(ledger.activeRunId);
@@ -250,6 +254,9 @@ export function useAgentRun(threadId: string | null) {
                     const withPlan = {
                       ...prev,
                       plan: planFromLedger(ledger),
+                      // Ledger has the committed messages now — drop the bridge.
+                      settledSnippets: [],
+                      settledToolActivity: [],
                     };
                     if (ledger.snapshot) {
                       const fromDisk = noticeFromSnapshot(ledger.snapshot);
@@ -307,10 +314,8 @@ export function useAgentRun(threadId: string | null) {
         return;
       }
 
-      if (chatStateRef.current.activeRun) {
-        if (!skipQueue) {
-          setQueuedMessage({ content, options, attachments });
-        }
+      if (chatStateRef.current.activeRun && !skipQueue) {
+        setQueuedMessage({ content, options, attachments });
         return;
       }
 
@@ -322,6 +327,7 @@ export function useAgentRun(threadId: string | null) {
         local,
         thinking: options.thinking,
         posture: normalizeRunPosture(options.posture),
+        ...(options.skills ? { skills: options.skills } : {}),
       });
 
       setChatState((prev) => ({
@@ -384,10 +390,14 @@ export function useAgentRun(threadId: string | null) {
     }
 
     disconnect();
-    setChatState((prev) => ({
+    const next: ChatState = {
       ...initialChatState(),
-      compactionNotice: prev.compactionNotice,
-    }));
+      compactionNotice: chatStateRef.current.compactionNotice,
+    };
+    // Ref must clear in this turn — setState alone leaves sendQueuedNow
+    // seeing a stale activeRun and dropping the flushed message.
+    chatStateRef.current = next;
+    setChatState(next);
   }, [disconnect]);
 
   const sendMessage = useCallback(
@@ -408,6 +418,7 @@ export function useAgentRun(threadId: string | null) {
         posture: normalizeRunPosture(
           options.posture ?? composerOptions.posture,
         ),
+        ...(options.skills ? { skills: options.skills } : {}),
       };
 
       if (chatStateRef.current.activeRun) {
@@ -430,6 +441,12 @@ export function useAgentRun(threadId: string | null) {
     };
     setQueuedMessage(null);
     await interruptActiveRun();
+    if (chatStateRef.current.activeRun) {
+      // Stop failed; the run is still active. Restore the queued message so
+      // the user's text and attachments are not silently lost.
+      setQueuedMessage({ content, options, attachments });
+      return;
+    }
     await startRunForMessages(content, flushOptions, {
       skipQueue: true,
       attachments,
@@ -444,11 +461,12 @@ export function useAgentRun(threadId: string | null) {
   const editQueuedMessage = useCallback((): {
     content: string;
     attachments?: MessageAttachment[];
+    skills?: ComposerOptions['skills'];
   } | null => {
     if (!queuedMessage) return null;
-    const { content, attachments } = queuedMessage;
+    const { content, attachments, options } = queuedMessage;
     setQueuedMessage(null);
-    return { content, attachments };
+    return { content, attachments, skills: options.skills };
   }, [queuedMessage]);
 
   const clearQueuedMessage = useCallback(() => {
@@ -509,6 +527,7 @@ export function useAgentRun(threadId: string | null) {
       if (userSeq === undefined) return;
 
       const local = composerOptions.local === true;
+      const requested = skillTokensInText(trimmed);
       const runId = await startRun(threadId, {
         rewindThroughSeq: userSeq - 1,
         message: { content: trimmed, attachments: lastUser.attachments },
@@ -517,6 +536,7 @@ export function useAgentRun(threadId: string | null) {
         local,
         thinking: composerOptions.thinking,
         posture: normalizeRunPosture(composerOptions.posture),
+        ...(requested.length > 0 ? { skills: { requested } } : {}),
       });
 
       const restored = await fetchLedger(threadId);

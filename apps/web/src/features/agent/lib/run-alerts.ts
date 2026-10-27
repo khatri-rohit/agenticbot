@@ -79,7 +79,10 @@ function classifyAlert(event: AgentEvent): RunAlertKind | null {
   if (event.type === 'choice.requested') {
     return 'attention';
   }
-  if (event.type === 'run.settled') return 'finished_ok';
+  // Incomplete (limit/gate) is not a success chime — same class as soft failure.
+  if (event.type === 'run.settled') {
+    return event.incomplete ? 'finished_fail' : 'finished_ok';
+  }
   if (event.type === 'run.error' && event.error !== CANCELLED_ERROR) {
     return 'finished_fail';
   }

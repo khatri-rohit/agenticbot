@@ -1,21 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   ContextReport,
   ContextReportLayer,
+  ContextWindowSource,
   MessageAttachment,
 } from '@agent/agent-models';
 import {
   fetchContextEstimate,
   type ComposerOptions,
+  type ComposerSkillHints,
 } from '@/features/agent/api/agent-client';
 import { getContextAnchor } from '@/features/agent/lib/context-anchor';
 import { estimateDraftTokens } from '@/lib/estimate-tokens';
-import { OLLAMA_MODELS } from '@/lib/ollama-models';
 
 /** Stable empty list — never use `= []` in hook args (new ref every render → effect loop). */
 const EMPTY_ATTACHMENTS: MessageAttachment[] = [];
+
+/** Backend assemble only when draft grows by this much since the last estimate. */
+const DRAFT_ESTIMATE_CHAR_THRESHOLD = 2000;
 
 export type ContextMeterSource = 'estimate' | 'measured';
 
@@ -25,6 +29,9 @@ export type ContextMeter = {
   source: ContextMeterSource;
   approximate: boolean;
   layers: ContextReportLayer[];
+  reserve: number;
+  /** Assembler window provenance when known; catalog soft-fallback leaves this unset. */
+  windowSource?: ContextWindowSource;
 };
 
 export function useContextMeter(options: {
@@ -35,6 +42,7 @@ export function useContextMeter(options: {
   queuedAttachments?: MessageAttachment[];
   streamingContent?: string | null;
   composerOptions: ComposerOptions;
+  /** Soft fallback only until live report or /context/estimate returns. */
   contextLimit: number | null;
   liveOccupiedTokens?: number;
   /** Last measured usage already includes the current streaming text. */
@@ -42,6 +50,7 @@ export function useContextMeter(options: {
   liveEstimatedPromptTokens?: number;
   liveContextReport?: ContextReport;
   liveRunModel?: string;
+  skillHints?: ComposerSkillHints;
 }): ContextMeter {
   const {
     threadId,
@@ -57,12 +66,16 @@ export function useContextMeter(options: {
     liveEstimatedPromptTokens,
     liveContextReport,
     liveRunModel,
+    skillHints,
   } = options;
   const queuedAttachments = queuedAttachmentsOption ?? EMPTY_ATTACHMENTS;
 
   const [serverEstimate, setServerEstimate] = useState<{
     tokens: number;
     layers: ContextReportLayer[];
+    reserve: number;
+    windowTokens: number;
+    windowSource?: ContextWindowSource;
   } | null>(null);
 
   const sameModel =
@@ -75,15 +88,24 @@ export function useContextMeter(options: {
       : null;
   const liveLayers =
     sameModel && liveContextReport ? liveContextReport.layers : [];
+  const liveWindowTokens =
+    sameModel && liveContextReport
+      ? liveContextReport.budget.windowTokens
+      : null;
+  const liveWindowSource =
+    sameModel && liveContextReport ? liveContextReport.windowSource : undefined;
 
   const persisted =
     liveOccupied == null && liveEstimated == null && threadId
       ? getContextAnchor(threadId)
       : null;
-  const persistedOccupied =
-    persisted && persisted.model === composerOptions.model
-      ? persisted.occupiedTokens
-      : null;
+  const persistedForModel =
+    persisted && persisted.model === composerOptions.model ? persisted : null;
+  const persistedOccupied = persistedForModel?.occupiedTokens ?? null;
+  const persistedWindowTokens = persistedForModel?.windowTokens ?? null;
+  const persistedWindowSource = persistedForModel?.windowSource;
+  const persistedLayers = persistedForModel?.layers ?? [];
+  const persistedReserve = persistedForModel?.reserve ?? 0;
 
   const composerTokens = estimateDraftTokens(
     [draft, queuedContent].filter(Boolean).join('\n') || null,
@@ -93,41 +115,120 @@ export function useContextMeter(options: {
     ? 0
     : estimateDraftTokens(streamingContent);
 
-  const hasAnchor = liveOccupied != null || persistedOccupied != null;
+  const combinedDraft = [draft, queuedContent].filter(Boolean).join('\n');
+  const attachmentCount = pendingAttachments.length + queuedAttachments.length;
+  const hasDraft = combinedDraft.length > 0 || attachmentCount > 0;
 
+  const hasLiveReport = liveLayers.length > 0;
+
+  // Success-only hydrate mark — cancel/fail leaves thread unset so we retry.
+  const lastEstimateDraftLen = useRef(0);
+  // Key by thread + the options that change the estimate (model, local,
+  // webSearch, posture, skills). A model or posture change after a successful
+  // hydrate must re-fetch, not serve a stale windowTokens from the old config.
+  const estimateKey = `${threadId ?? ''}|${composerOptions.model ?? ''}|${composerOptions.local ?? ''}|${composerOptions.webSearch ?? ''}|${composerOptions.posture ?? ''}|${skillHints?.requested?.join(',') ?? ''}`;
+  const lastEstimateKey = useRef<string | undefined>(undefined);
+  // In-flight hydrate for this key; blocks re-schedule while typing churns deps.
+  const hydrateRequestedKey = useRef<string | undefined>(undefined);
+
+  const estimateArgs = {
+    threadId,
+    draft: combinedDraft,
+    attachments: [...pendingAttachments, ...queuedAttachments],
+    model: composerOptions.model,
+    local: composerOptions.local,
+    webSearch: composerOptions.webSearch,
+    posture: composerOptions.posture,
+    skills: skillHints,
+  };
+
+  // Hydrate once per thread (success-gated). Not tied to draft keystrokes.
   useEffect(() => {
-    if (hasAnchor || liveEstimated != null) {
+    if (!threadId && !hasDraft) {
       setServerEstimate(null);
       return;
     }
+    if (hasLiveReport && !hasDraft) return;
 
-    const combinedDraft = [draft, queuedContent].filter(Boolean).join('\n');
-    const attachmentCount =
-      pendingAttachments.length + queuedAttachments.length;
-    // Idle home / empty composer: local char estimate is enough; skip hammering API.
-    if (!threadId && !combinedDraft && attachmentCount === 0) {
-      setServerEstimate(null);
-      return;
-    }
+    const needsHydrate =
+      lastEstimateKey.current !== estimateKey &&
+      hydrateRequestedKey.current !== estimateKey;
+    if (!needsHydrate) return;
+
+    let cancelled = false;
+    hydrateRequestedKey.current = estimateKey;
+    const timer = window.setTimeout(() => {
+      void fetchContextEstimate(estimateArgs)
+        .then((res) => {
+          if (cancelled) return;
+          lastEstimateKey.current = estimateKey;
+          lastEstimateDraftLen.current = combinedDraft.length;
+          hydrateRequestedKey.current = undefined;
+          setServerEstimate({
+            tokens: res.estimatedPromptTokens,
+            layers: res.contextReport.layers,
+            reserve: res.contextReport.budget.outputReserveTokens,
+            windowTokens: res.contextReport.budget.windowTokens,
+            windowSource: res.contextReport.windowSource,
+          });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          hydrateRequestedKey.current = undefined;
+          setServerEstimate(null);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      // Allow retry when this attempt was aborted before success.
+      if (
+        hydrateRequestedKey.current === estimateKey &&
+        lastEstimateKey.current !== estimateKey
+      ) {
+        hydrateRequestedKey.current = undefined;
+      }
+    };
+    // Draft length intentionally omitted — threshold effect handles large pastes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate on thread/options only
+  }, [
+    hasLiveReport,
+    threadId,
+    hasDraft,
+    composerOptions.model,
+    composerOptions.local,
+    composerOptions.webSearch,
+    composerOptions.posture,
+    skillHints?.requested,
+  ]);
+
+  // Large-paste threshold only (no per-pause estimate on empty new chats).
+  useEffect(() => {
+    if (!threadId && !hasDraft) return;
+    if (hasLiveReport && !hasDraft) return;
+
+    const draftLen = combinedDraft.length;
+    const crossedThreshold =
+      draftLen - lastEstimateDraftLen.current >= DRAFT_ESTIMATE_CHAR_THRESHOLD;
+    if (!crossedThreshold) return;
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void fetchContextEstimate({
-        threadId,
-        draft: combinedDraft,
-        attachments: [...pendingAttachments, ...queuedAttachments],
-        model: composerOptions.model,
-        local: composerOptions.local,
-        webSearch: composerOptions.webSearch,
-        posture: composerOptions.posture,
-      })
+      void fetchContextEstimate(estimateArgs)
         .then((res) => {
-          if (!cancelled) {
-            setServerEstimate({
-              tokens: res.estimatedPromptTokens,
-              layers: res.contextReport.layers,
-            });
+          if (cancelled) return;
+          lastEstimateDraftLen.current = draftLen;
+          if (lastEstimateKey.current !== estimateKey) {
+            lastEstimateKey.current = estimateKey;
           }
+          setServerEstimate({
+            tokens: res.estimatedPromptTokens,
+            layers: res.contextReport.layers,
+            reserve: res.contextReport.budget.outputReserveTokens,
+            windowTokens: res.contextReport.budget.windowTokens,
+            windowSource: res.contextReport.windowSource,
+          });
         })
         .catch(() => {
           if (!cancelled) setServerEstimate(null);
@@ -138,24 +239,42 @@ export function useContextMeter(options: {
       cancelled = true;
       window.clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- threshold watches draft size
   }, [
-    hasAnchor,
-    liveEstimated,
+    hasLiveReport,
     threadId,
-    draft,
+    hasDraft,
+    combinedDraft,
     pendingAttachments,
-    queuedContent,
     queuedAttachments,
     composerOptions.model,
     composerOptions.local,
     composerOptions.webSearch,
     composerOptions.posture,
+    skillHints?.requested,
   ]);
 
+  // Assembler/report window first; catalog contextLimit only until estimate lands.
   const limit =
+    liveWindowTokens ??
+    serverEstimate?.windowTokens ??
+    persistedWindowTokens ??
     contextLimit ??
-    OLLAMA_MODELS.find((m) => m.id === composerOptions.model)?.contextLength ??
     null;
+  const windowSource =
+    liveWindowSource ??
+    serverEstimate?.windowSource ??
+    persistedWindowSource ??
+    undefined;
+
+  const liveReserve =
+    liveContextReport?.budget.outputReserveTokens ??
+    serverEstimate?.reserve ??
+    persistedReserve;
+  const layers =
+    liveLayers.length > 0
+      ? liveLayers
+      : (serverEstimate?.layers ?? persistedLayers);
 
   if (liveOccupied != null) {
     const extra = composerTokens + streamingTokens;
@@ -164,7 +283,9 @@ export function useContextMeter(options: {
       limit,
       source: 'measured',
       approximate: extra > 0,
-      layers: liveLayers,
+      layers,
+      reserve: liveReserve,
+      windowSource,
     };
   }
 
@@ -174,7 +295,9 @@ export function useContextMeter(options: {
       limit,
       source: 'estimate',
       approximate: true,
-      layers: liveLayers,
+      layers,
+      reserve: liveReserve,
+      windowSource,
     };
   }
 
@@ -184,7 +307,9 @@ export function useContextMeter(options: {
       limit,
       source: 'measured',
       approximate: composerTokens > 0,
-      layers: liveLayers,
+      layers,
+      reserve: liveReserve,
+      windowSource,
     };
   }
 
@@ -195,6 +320,8 @@ export function useContextMeter(options: {
       source: 'estimate',
       approximate: true,
       layers: serverEstimate.layers,
+      reserve: serverEstimate.reserve,
+      windowSource,
     };
   }
 
@@ -204,5 +331,7 @@ export function useContextMeter(options: {
     source: 'estimate',
     approximate: true,
     layers: [],
+    reserve: 0,
+    windowSource,
   };
 }

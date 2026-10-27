@@ -1,4 +1,5 @@
 import {
+  isLimitSkipToolContent,
   occupiedFromUsage,
   type AgentEvent,
   type ChoiceOption,
@@ -18,7 +19,7 @@ import { setContextAnchor } from '../lib/context-anchor';
 export type ToolActivity = {
   toolCallId: string;
   toolName: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'skipped';
   /** Event seq — orders live tools against settled assistant snippets. */
   seq: number;
   durationMs?: number;
@@ -46,7 +47,7 @@ export type AssistantSnippet = {
 
 export type ChatRunState = {
   runId: string;
-  status: 'running' | 'completed' | 'error';
+  status: 'running' | 'completed' | 'incomplete' | 'error';
   model: string;
   /** Host-applied posture for this run (from run.started). */
   posture: RunPosture;
@@ -58,7 +59,7 @@ export type ChatRunState = {
   /** Heuristic from run.started until provider usage arrives. */
   estimatedPromptTokens?: number;
   contextReport?: ContextReport;
-  /** Latest prompt+completion from turn.completed in this run. */
+  /** Last prompt tokens from turn.completed in this run. */
   occupiedTokens?: number;
   /** True when occupiedTokens already includes the current streamingMessage. */
   occupiedCoversStream?: boolean;
@@ -68,6 +69,14 @@ export type LimitNotice = {
   runId: string;
   reason: string;
 };
+
+/** Build a limitNotice from an incomplete run, or undefined if the run completed. */
+export function limitNoticeFromIncomplete(
+  run: { runId: string; incomplete?: boolean; limitReason?: string } | null | undefined,
+): LimitNotice | undefined {
+  if (!run?.incomplete) return undefined;
+  return { runId: run.runId, reason: run.limitReason ?? 'Run stopped early (incomplete).' };
+}
 
 export type PendingChoice = {
   choiceId: string;
@@ -87,11 +96,18 @@ export type ChatState = {
   plan: ThreadPlan | null;
   /** Live pauses; cleared on resolve / run end. */
   pendingChoices: PendingChoice[];
+  /** Snippets from the just-settled run, kept until the ledger refetch
+   *  lands so the response doesn't flash off→on at run.settled. */
+  settledSnippets: AssistantSnippet[];
+  /** Tool activity from the just-settled run, same lifetime as settledSnippets. */
+  settledToolActivity: ToolActivity[];
 };
 
 export function initialChatState(): ChatState {
   return {
     activeRun: null,
+    settledSnippets: [],
+    settledToolActivity: [],
     compactionNotice: null,
     limitNotice: null,
     plan: null,
@@ -145,6 +161,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             ? { contextReport: event.contextReport }
             : {}),
         },
+        settledSnippets: [],
+        settledToolActivity: [],
         compactionNotice: state.compactionNotice,
         limitNotice: null,
         plan: state.plan,
@@ -185,7 +203,11 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       // Tool-only turns emit completed with empty content; nothing to settle.
       const snippet =
         event.content && event.content.trim().length > 0
-          ? { messageId: event.messageId, content: event.content, seq: event.seq }
+          ? {
+              messageId: event.messageId,
+              content: event.content,
+              seq: event.seq,
+            }
           : null;
       return {
         ...state,
@@ -193,7 +215,12 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           ...state.activeRun,
           streamingMessage: null,
           ...(snippet
-            ? { assistantSnippets: [...state.activeRun.assistantSnippets, snippet] }
+            ? {
+                assistantSnippets: [
+                  ...state.activeRun.assistantSnippets,
+                  snippet,
+                ],
+              }
             : {}),
           lastSeq,
         },
@@ -223,6 +250,11 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'tool.completed': {
       if (!state.activeRun) return state;
+      const preview =
+        typeof event.resultPreview === 'string' ? event.resultPreview : '';
+      const doneStatus = isLimitSkipToolContent(preview)
+        ? ('skipped' as const)
+        : ('done' as const);
       const existing = state.activeRun.toolActivity.some(
         (t) => t.toolCallId === event.toolCallId,
       );
@@ -231,7 +263,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             t.toolCallId === event.toolCallId
               ? {
                   ...t,
-                  status: 'done' as const,
+                  status: doneStatus,
                   durationMs: event.durationMs,
                   resultPreview: event.resultPreview,
                 }
@@ -242,7 +274,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
             {
               toolCallId: event.toolCallId,
               toolName: event.toolName,
-              status: 'done' as const,
+              status: doneStatus,
               seq: event.seq,
               durationMs: event.durationMs,
               resultPreview: event.resultPreview,
@@ -274,6 +306,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'context.compacting': {
       return {
+        ...state,
         activeRun: state.activeRun
           ? { ...state.activeRun, lastSeq }
           : state.activeRun,
@@ -286,14 +319,12 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           summary: state.compactionNotice?.summary ?? '',
           createdAt: state.compactionNotice?.createdAt ?? '',
         },
-        limitNotice: state.limitNotice,
-        plan: state.plan,
-        pendingChoices: state.pendingChoices,
       };
     }
 
     case 'context.compacted': {
       return {
+        ...state,
         activeRun: state.activeRun
           ? { ...state.activeRun, lastSeq }
           : state.activeRun,
@@ -306,9 +337,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           summary: event.summary,
           createdAt: event.createdAt,
         },
-        limitNotice: state.limitNotice,
-        plan: state.plan,
-        pendingChoices: state.pendingChoices,
       };
     }
 
@@ -316,11 +344,18 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       // Model loop done — keep activeRun until run.settled so compaction
       // can appear in the turn trail like a late tool step.
       if (!state.activeRun) return state;
+      const incomplete = event.incomplete === true;
+      const notice = limitNoticeFromIncomplete({
+        runId: event.runId,
+        incomplete,
+        limitReason: event.limitReason,
+      });
       return {
         ...state,
+        ...(notice ? { limitNotice: notice } : {}),
         activeRun: {
           ...state.activeRun,
-          status: 'completed',
+          status: incomplete ? 'incomplete' : 'completed',
           streamingMessage: null,
           lastSeq,
         },
@@ -328,8 +363,12 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     }
 
     case 'run.settled': {
+      // Keep snippets/tools alive until the ledger refetch lands — otherwise
+      // the response flashes off→on between activeRun nulling and messages update.
       return {
         activeRun: null,
+        settledSnippets: state.activeRun?.assistantSnippets ?? [],
+        settledToolActivity: state.activeRun?.toolActivity ?? [],
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         plan: state.plan,
@@ -340,6 +379,8 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'run.error': {
       return {
         activeRun: null,
+        settledSnippets: state.activeRun?.assistantSnippets ?? [],
+        settledToolActivity: state.activeRun?.toolActivity ?? [],
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         plan: state.plan,
@@ -376,6 +417,9 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
                   state.activeRun.streamingMessage?.content,
                 ),
               }
+            : {}),
+          ...(event.contextReport
+            ? { contextReport: event.contextReport }
             : {}),
         },
       };
@@ -461,10 +505,21 @@ export async function persistChatEffects(
     const usage = event.usage;
     const occupied = usage ? occupiedFromUsage(usage) : undefined;
     if (occupied !== undefined) {
+      const report = event.contextReport ?? prev.activeRun.contextReport;
       setContextAnchor(threadId, {
         occupiedTokens: occupied,
         model: prev.activeRun.model,
         measuredAt: new Date().toISOString(),
+        ...(report
+          ? {
+              windowTokens: report.budget.windowTokens,
+              layers: report.layers,
+              reserve: report.budget.outputReserveTokens,
+              ...(report.windowSource
+                ? { windowSource: report.windowSource }
+                : {}),
+            }
+          : {}),
       });
     }
   }

@@ -1,4 +1,5 @@
 import type { ChoiceRequest, ChoiceResult } from './choice.js';
+import type { TraceEvent } from './trace.js';
 
 /**
  * Risk class for a tool. Loop parallelization and host policy key off this.
@@ -53,4 +54,10 @@ export type ToolContext = {
   >;
   /** Resolve sha for a URL already fetched this run. */
   getWebSourceByUrl?: (url: string) => string | undefined;
+  /**
+   * Loop trace sink. Tools that run a core gate (e.g. memory) emit a
+   * TraceEvent here so eval/offline replay sees the gate verdict without
+   * reading the tool result string. Undefined when the host passes no trace.
+   */
+  trace?: (event: TraceEvent) => void;
 };

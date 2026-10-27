@@ -1,4 +1,8 @@
-import type { Message, PendingToolCall } from '@agent/agent-models';
+import {
+  isLimitSkipToolContent,
+  type Message,
+  type PendingToolCall,
+} from '@agent/agent-models';
 
 import type {
   AssistantSnippet,
@@ -11,7 +15,7 @@ export type ToolCallRow = {
   toolName: string;
   args?: string;
   result?: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'skipped';
   durationMs?: number;
 };
 
@@ -45,11 +49,21 @@ function rowFromCall(
   toolMessage: Message | undefined,
   activity: ToolActivity | undefined,
 ): ToolCallRow {
-  let status: ToolCallRow['status'] = 'running';
+  // Settled ledger with no tool row = interrupted (pre-I1 / crash), not in-flight.
+  let status: ToolCallRow['status'] = 'failed';
   if (activity) {
     status = activity.status;
   } else if (toolMessage) {
-    status = toolMessage.status === 'interrupted' ? 'failed' : 'done';
+    if (toolMessage.status === 'interrupted') {
+      status = 'failed';
+    } else if (
+      typeof toolMessage.content === 'string' &&
+      isLimitSkipToolContent(toolMessage.content)
+    ) {
+      status = 'skipped';
+    } else {
+      status = 'done';
+    }
   }
 
   const liveArgs = previewToArgs(activity?.argsPreview);
@@ -59,7 +73,10 @@ function rowFromCall(
     toolCallId: call.id,
     toolName: call.function.name,
     args: call.function.arguments || liveArgs,
-    result: toolMessage?.content ?? liveResult,
+    result:
+      toolMessage?.content ??
+      liveResult ??
+      (status === 'failed' ? 'Skipped: interrupted before result.' : undefined),
     status,
     durationMs: activity?.durationMs,
   };
@@ -147,7 +164,11 @@ export function buildTurnTimeline(input: {
 
       const rows = calls.map((call) => {
         seenToolIds.add(call.id);
-        return rowFromCall(call, results.get(call.id), activityMap.get(call.id));
+        return rowFromCall(
+          call,
+          results.get(call.id),
+          activityMap.get(call.id),
+        );
       });
       steps.push({
         type: 'tools',

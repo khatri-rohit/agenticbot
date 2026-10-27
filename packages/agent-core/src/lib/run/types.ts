@@ -9,6 +9,7 @@ import type {
   LedgerRecord,
   RunPosture,
   ToolOrigin,
+  TraceEvent,
 } from '@agent/agent-models';
 
 import type { EventEmitter } from '../events/emitter';
@@ -36,9 +37,7 @@ export type RunHandle = {
   emitter: EventEmitter;
   result: RunLoopResult | null;
   pendingChoices: Map<string, PendingChoiceWaiter>;
-  /** Workspace root for mutex enforcement (coding runs only). */
-  workspaceRoot?: string;
-  /** Posture: ask runs are read-only and don't need the workspace mutex. */
+  /** Posture: ask runs are read-only. */
   posture?: RunPosture;
 };
 
@@ -69,4 +68,6 @@ export type StartRunOptions = {
   onFinished?: (result: RunLoopResult) => void | Promise<void>;
   hasOpenPlanWork?: () => boolean | Promise<boolean>;
   contextBudget?: ContextBudget;
+  /** Trace sink for offline replay / eval debugging. Optional. */
+  trace?: (event: TraceEvent) => void;
 };

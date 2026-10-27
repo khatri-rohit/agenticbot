@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type {
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
@@ -13,7 +14,10 @@ import {
   type ToolContext,
 } from '@agent/agent-models';
 
-import { stubLiveToolResults } from '../context/assemble-context';
+import {
+  refreshContextReport,
+  stubLiveToolResults,
+} from '../context/assemble-context';
 import { consoleTrace, type TraceEvent } from '../events/trace';
 import { resolveLimits } from './limits';
 import type { ModelTurn } from '../model/types';
@@ -35,10 +39,14 @@ const OPEN_PLAN_WORK_NUDGE =
 const USER_SKIPPED_CHOICE =
   'User skipped this choice. Stop. Do not assume a path or keep editing.';
 
-function isParallelSafeTool(tool: Tool | undefined): boolean {
-  if (!tool) return false;
-  const risk = tool.risk ?? 'read';
-  return risk === 'read' || risk === 'network';
+type ToolStage = 'skill' | 'read' | 'network' | 'exec' | 'mutate';
+
+function toolStage(name: string): ToolStage {
+  if (name === 'load_skill') return 'skill';
+  if (name === 'glob' || name === 'grep' || name === 'read_file') return 'read';
+  if (name === 'web_search' || name === 'web_fetch') return 'network';
+  if (name === 'run_terminal') return 'exec';
+  return 'mutate';
 }
 
 export type {
@@ -49,6 +57,14 @@ export type {
 } from './types';
 
 /* ---------- internal helpers ---------- */
+
+/**
+ * Cap for `tool.completed` result previews carried on the live event stream.
+ * Large enough to carry a full read_file / run_terminal result for the UI's
+ * inline preview; the host ledger still holds the unbounded result. Short
+ * status strings (blocked, USER_SKIPPED_CHOICE) keep their own smaller caps.
+ */
+const RESULT_PREVIEW_MAX = 20_000;
 
 function preview(value: unknown, max = 300): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
@@ -150,6 +166,91 @@ function toolCallKey(toolName: string, args: unknown): string {
   return `${toolName}:${canonicalJson(args)}`;
 }
 
+/** Sync path key for admission/outcome maps — matches jail aliases like ./a vs a. */
+function canonicalizeToolPath(raw: string): string {
+  let normalized = raw.trim().replaceAll('\\', '/');
+  while (normalized.startsWith('./')) {
+    normalized = normalized.slice(2);
+  }
+  // path.normalize keeps OS separators; re-posix so Windows matches Unix keys.
+  return path.normalize(normalized || '.').split(path.sep).join('/');
+}
+
+function pathFromToolArgs(args: unknown): string | null {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    return null;
+  }
+  const raw = (args as Record<string, unknown>).path;
+  return typeof raw === 'string' && raw.trim() ? canonicalizeToolPath(raw) : null;
+}
+
+/**
+ * Outcome key for mutate/exec stuck detection. edit_file keys on path+result
+ * so varied failing spans on the same file accumulate; run_terminal keys on
+ * the exit-code prefix (cwd + exit/signal line) so two builds with the same
+ * first error but different file counts don't falsely match; other tools keep
+ * call+result (repeat guard already covers identical args).
+ */
+function outcomeKey(toolName: string, args: unknown, result: string): string {
+  if (toolName === 'edit_file') {
+    const filePath = pathFromToolArgs(args) ?? toolCallKey(toolName, args);
+    return `${toolName}:${filePath}#${sha256Text(result.slice(0, 2000))}`;
+  }
+  if (toolName === 'run_terminal') {
+    // Result format: "cwd: <path>\nexit <code>\n<body>" / "cwd: <path>\nsignal <n>\n<body>"
+    // Hash the first two lines (cwd + status) — the exit-code-bearing prefix.
+    // Two runs with the same exit code but different output bodies are progress
+    // (different errors being fixed); same exit code + same cwd 3× = stuck.
+    const newlineIdx = result.indexOf('\n');
+    const prefix =
+      newlineIdx === -1
+        ? result
+        : result.slice(0, result.indexOf('\n', newlineIdx + 1));
+    return `${toolCallKey(toolName, args)}#${sha256Text(prefix)}`;
+  }
+  return `${toolCallKey(toolName, args)}#${sha256Text(result.slice(0, 2000))}`;
+}
+
+/** edit_file results start with "Created" or "Patched" on success. */
+function isEditSuccess(result: string): boolean {
+  return result.startsWith('Created') || result.startsWith('Patched');
+}
+
+/** Invented tool names in one run before hard halt (I1 + I6). */
+const MAX_UNKNOWN_TOOL_STREAK = 2;
+/** Distinct read_file admits per path per run (stops offset paging storms). */
+const MAX_READ_FILE_PER_PATH = 30;
+/** run_terminal admits per run (stops shell flood; migrations run 40+ builds). */
+const MAX_TERMINAL_CALLS = 60;
+/** Identical mutate call+result before stuck halt. */
+const MAX_IDENTICAL_OUTCOMES = 3;
+
+/** Coded tool rows so UI/ledger can tell skips from real results (I1 + observability). */
+function limitMessage(
+  code:
+    | 'limit.repeat'
+    | 'limit.tools'
+    | 'limit.read_storm'
+    | 'limit.terminal'
+    | 'limit.unknown'
+    | 'limit.outcome'
+    | 'limit.iterations'
+    | 'limit.plan'
+    | 'limit.finish',
+  detail: string,
+): string {
+  return `${code}: ${detail}`;
+}
+
+const SKIP_LIMIT_REACHED = limitMessage(
+  'limit.tools',
+  'Skipped: tool call limit reached.',
+);
+const REPEAT_BLOCKED = limitMessage(
+  'limit.repeat',
+  'This exact tool call has already been attempted multiple times. Do not repeat it.',
+);
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) return;
   throw signal.reason instanceof Error
@@ -234,9 +335,10 @@ function withTimeout<T>(
 /**
  * The agent state machine. Iterates: model call → tool execution → next model call.
  *
+ * Contract: observe tools per *turn* (batch → append every tool_call_id → next
+ * model call). Never model-after-each-tool. Gates dispose; prompts do not.
  * Emits AgentEvents via config.emit (for SSE/UI) AND traces via config.trace
- * (for eval/console). Both are optional — the loop works with either or both.
- * Durable turns go through config.onMessage (host persistence seam).
+ * (for eval/console). Durable turns go through config.onMessage (host ledger).
  */
 export async function runLoop(
   modelCall: ModelCallFn,
@@ -255,7 +357,26 @@ export async function runLoop(
   let iterations = 0;
   let totalToolCalls = 0;
   let planWorkNudges = 0;
+  let unknownToolCount = 0;
+  let terminalCalls = 0;
+  let lastLimitReason: string | undefined;
+  const readFileByPath = new Map<string, number>();
   const repeatedCalls = new Map<string, number>();
+  const repeatedOutcomes = new Map<string, number>();
+  // Exec-stage outcome keys tracked so a successful edit_file can clear them:
+  // an edit between identical build exits is progress, not stuck-ness.
+  const execOutcomeKeys = new Set<string>();
+
+  function noteLimit(reason: string): void {
+    lastLimitReason = reason;
+    trace({
+      type: 'limit',
+      runId,
+      iteration: iterations,
+      reason,
+    });
+    emit?.({ type: 'limit.hit', runId, reason });
+  }
   const contextBudget = config.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
   const trustedWebUrls = new Set<string>();
   const trustedWebShas = new Set<string>();
@@ -356,11 +477,28 @@ export async function runLoop(
     }
   }
 
+  function isToolAnswered(toolCallId: string): boolean {
+    return messages.some(
+      (message) =>
+        message.role === 'tool' &&
+        'tool_call_id' in message &&
+        message.tool_call_id === toolCallId,
+    );
+  }
+
+  function unansweredToolCalls(
+    toolCalls: ChatCompletionMessageToolCall[],
+  ): ChatCompletionMessageToolCall[] {
+    return toolCalls.filter((toolCall) => !isToolAnswered(toolCall.id));
+  }
+
+  /** I1: every tool_call_id gets one durable tool row; never double-answer. */
   async function skipToolCalls(
     toolCalls: ChatCompletionMessageToolCall[],
     reason: string,
   ): Promise<void> {
     for (const toolCall of toolCalls) {
+      if (isToolAnswered(toolCall.id)) continue;
       await appendDurable({
         role: 'tool',
         tool_call_id: toolCall.id,
@@ -402,15 +540,20 @@ export async function runLoop(
       noteWebSource,
       getWebSource,
       getWebSourceByUrl,
+      trace,
     };
   }
 
   function emitTurnCompleted(iteration: number, usage?: TokenUsage): void {
+    const contextReport = config.contextReport
+      ? refreshContextReport(config.contextReport, messages, tools, usage)
+      : undefined;
     emit?.({
       type: 'turn.completed',
       runId,
       iteration,
       ...(usage ? { usage } : {}),
+      ...(contextReport ? { contextReport } : {}),
     });
   }
 
@@ -442,37 +585,31 @@ export async function runLoop(
       return { kind: 'filled' };
     }
 
-    totalToolCalls++;
-
-    if (
-      limits.maxToolCalls !== undefined &&
-      totalToolCalls > limits.maxToolCalls
-    ) {
-      trace({
-        type: 'limit',
-        runId,
-        iteration: iterations,
-        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
-      });
-      emit?.({
-        type: 'limit.hit',
-        runId,
-        reason: `max tool calls exceeded (${limits.maxToolCalls})`,
-      });
-      return { kind: 'halt', reason: 'limit', toolCall };
-    }
-
     const toolName = toolCall.function.name;
     const tool = tools.byName.get(toolName);
 
+    // Rejects always get a tool row (I1) but do not burn maxToolCalls (D10).
     if (!tool) {
       await appendDurable({
         role: 'tool',
         tool_call_id: toolCall.id,
         content: `Tool "${toolName}" does not exist.`,
       });
+      unknownToolCount += 1;
+      if (unknownToolCount >= MAX_UNKNOWN_TOOL_STREAK) {
+        noteLimit(
+          limitMessage(
+            'limit.unknown',
+            `unknown tool streak exceeded (${MAX_UNKNOWN_TOOL_STREAK})`,
+          ),
+        );
+        return { kind: 'halt', reason: 'limit', toolCall };
+      }
       return { kind: 'filled' };
     }
+
+    // Valid tool breaks the unknown streak (lifetime total was ending runs early).
+    unknownToolCount = 0;
 
     if (posture === 'ask' && isAskStrippedTool(toolName)) {
       const blocked =
@@ -599,23 +736,68 @@ export async function runLoop(
       }
     }
 
+    const readPath =
+      toolName === 'read_file' ? pathFromToolArgs(args) : null;
+    if (readPath !== null) {
+      const pathCount = readFileByPath.get(readPath) ?? 0;
+      if (pathCount >= MAX_READ_FILE_PER_PATH) {
+        noteLimit(
+          limitMessage(
+            'limit.read_storm',
+            `read_file path storm blocked (${MAX_READ_FILE_PER_PATH} per path)`,
+          ),
+        );
+        return { kind: 'halt', reason: 'limit', toolCall };
+      }
+    }
+
+    if (toolName === 'run_terminal' && terminalCalls >= MAX_TERMINAL_CALLS) {
+      noteLimit(
+        limitMessage(
+          'limit.terminal',
+          `run_terminal storm blocked (${MAX_TERMINAL_CALLS} per run)`,
+        ),
+      );
+      return { kind: 'halt', reason: 'limit', toolCall };
+    }
+
+    if (
+      limits.maxToolCalls !== undefined &&
+      totalToolCalls >= limits.maxToolCalls
+    ) {
+      noteLimit(
+        limitMessage(
+          'limit.tools',
+          `max tool calls exceeded (${limits.maxToolCalls})`,
+        ),
+      );
+      return { kind: 'halt', reason: 'limit', toolCall };
+    }
+
     const callKey = toolCallKey(toolName, args);
     const repeatCount = (repeatedCalls.get(callKey) ?? 0) + 1;
     repeatedCalls.set(callKey, repeatCount);
 
-    if (repeatCount > limits.maxRepeatedToolCalls) {
-      trace({
-        type: 'limit',
-        runId,
-        iteration: iterations,
-        reason: `repeated tool call blocked: ${toolName}`,
-      });
-      emit?.({
-        type: 'limit.hit',
-        runId,
-        reason: `repeated tool call blocked: ${toolName}`,
-      });
+    // Exec tools (run_terminal) are exempt from the arg-repeat guard: re-running
+    // the same build after an edit is legitimate verification, and outcome dedup
+    // (MAX_IDENTICAL_OUTCOMES) catches true stuck-ness. The arg-repeat guard
+    // stays for mutate/read/network/skill.
+    if (
+      repeatCount > limits.maxRepeatedToolCalls &&
+      toolStage(toolName) !== 'exec'
+    ) {
+      noteLimit(
+        limitMessage('limit.repeat', `repeated tool call blocked: ${toolName}`),
+      );
       return { kind: 'halt', reason: 'repeat', toolCall };
+    }
+
+    totalToolCalls += 1;
+    if (readPath !== null) {
+      readFileByPath.set(readPath, (readFileByPath.get(readPath) ?? 0) + 1);
+    }
+    if (toolName === 'run_terminal') {
+      terminalCalls += 1;
     }
 
     return {
@@ -629,22 +811,20 @@ export async function runLoop(
     fromIndex: number,
     toolCalls: ChatCompletionMessageToolCall[],
   ): Promise<RunLoopResult> {
+    const triggerAnswered = isToolAnswered(halt.toolCall.id);
     if (halt.reason === 'repeat') {
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: halt.toolCall.id,
-        content:
-          'This exact tool call has already been attempted multiple times. Do not repeat it.',
-      });
-      await skipToolCalls(
-        toolCalls.slice(fromIndex + 1),
-        'Skipped: tool call limit reached.',
-      );
+      if (!triggerAnswered) {
+        await appendDurable({
+          role: 'tool',
+          tool_call_id: halt.toolCall.id,
+          content: REPEAT_BLOCKED,
+        });
+      }
+      await skipToolCalls(toolCalls.slice(fromIndex + 1), SKIP_LIMIT_REACHED);
+    } else if (triggerAnswered) {
+      await skipToolCalls(toolCalls.slice(fromIndex + 1), SKIP_LIMIT_REACHED);
     } else {
-      await skipToolCalls(
-        toolCalls.slice(fromIndex),
-        'Skipped: tool call limit reached.',
-      );
+      await skipToolCalls(toolCalls.slice(fromIndex), SKIP_LIMIT_REACHED);
     }
     return completeAfterLimit();
   }
@@ -679,7 +859,7 @@ export async function runLoop(
   async function executeReadyCall(
     call: ReadyToolCall,
     remainingOnAbort: ChatCompletionMessageToolCall[],
-  ): Promise<'ok' | 'deferred'> {
+  ): Promise<'ok' | 'deferred' | 'halted'> {
     const { toolCall, toolName, tool, args } = call;
     const toolCtx = buildToolContext();
 
@@ -703,8 +883,7 @@ export async function runLoop(
     try {
       // exec tools own their timeout + process-tree kill (workspace.ts).
       // The loop's withTimeout would race the tool's timer and leak the child.
-      const ownsTimeout =
-        toolName === 'offer_choice' || tool.risk === 'exec';
+      const ownsTimeout = toolName === 'offer_choice' || tool.risk === 'exec';
       const result = await withTimeout(
         tool.execute(args, toolCtx),
         ownsTimeout ? 0 : limits.toolTimeoutMs,
@@ -725,13 +904,39 @@ export async function runLoop(
         toolCallId: toolCall.id,
         toolName,
         durationMs,
-        resultPreview: preview(result, 200),
+        resultPreview: preview(result, RESULT_PREVIEW_MAX),
       });
+      // Append before outcome halt so I1 always holds for the triggering call.
       await appendDurable({
         role: 'tool',
         tool_call_id: toolCall.id,
         content: result,
       });
+      // Mutate + exec: same call + same result = stuck (e.g. write theater,
+      // or run_terminal producing the same exit code with no edit between).
+      const stage = toolStage(toolName);
+      if (stage === 'mutate' || stage === 'exec') {
+        const key = outcomeKey(toolName, args, result);
+        const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
+        repeatedOutcomes.set(key, outcomeCount);
+        if (stage === 'exec') execOutcomeKeys.add(key);
+        if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
+          noteLimit(
+            limitMessage(
+              'limit.outcome',
+              `repeated identical tool outcome blocked: ${toolName}`,
+            ),
+          );
+          return 'halted';
+        }
+      }
+      // A successful edit_file is progress: prior exec outcomes (build/lint
+      // exits) are now stale. Clear them so the next verification cycle starts
+      // fresh instead of accumulating toward a false stuck-ness halt.
+      if (toolName === 'edit_file' && isEditSuccess(result)) {
+        for (const k of execOutcomeKeys) repeatedOutcomes.delete(k);
+        execOutcomeKeys.clear();
+      }
       return 'ok';
     } catch (error) {
       if (signal?.aborted) {
@@ -785,7 +990,7 @@ export async function runLoop(
   async function executeReadyBatch(
     batch: ReadyToolCall[],
     remainingAfter: ChatCompletionMessageToolCall[],
-  ): Promise<'ok' | 'deferred'> {
+  ): Promise<'ok' | 'deferred' | 'halted'> {
     // write/exec and interactive tools stay serial even if they slip into a batch.
     if (
       batch.length === 1 ||
@@ -805,7 +1010,7 @@ export async function runLoop(
           ...batch.slice(i).map((item) => item.toolCall),
           ...remainingAfter,
         ]);
-        if (outcome === 'deferred') return 'deferred';
+        if (outcome !== 'ok') return outcome;
       }
       return 'ok';
     }
@@ -865,6 +1070,7 @@ export async function runLoop(
       throwIfAborted(signal);
     }
 
+    let outcomeHalted = false;
     for (const item of settled) {
       const { call, durationMs } = item;
       if (item.ok) {
@@ -882,13 +1088,28 @@ export async function runLoop(
           toolCallId: call.toolCall.id,
           toolName: call.toolName,
           durationMs,
-          resultPreview: preview(item.result, 200),
+          resultPreview: preview(item.result, RESULT_PREVIEW_MAX),
         });
         await appendDurable({
           role: 'tool',
           tool_call_id: call.toolCall.id,
           content: item.result,
         });
+        // Mutate-stage only; finish appending the batch before returning halted.
+        if (toolStage(call.toolName) === 'mutate') {
+          const key = outcomeKey(call.toolName, call.args, item.result);
+          const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
+          repeatedOutcomes.set(key, outcomeCount);
+          if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
+            noteLimit(
+              limitMessage(
+                'limit.outcome',
+                `repeated identical tool outcome blocked: ${call.toolName}`,
+              ),
+            );
+            outcomeHalted = true;
+          }
+        }
         continue;
       }
 
@@ -953,7 +1174,7 @@ export async function runLoop(
         content: `Tool execution failed: ${errorMessage}`,
       });
     }
-    return 'ok';
+    return outcomeHalted ? 'halted' : 'ok';
   }
 
   /** Fresh message lifecycle for limit finalization (never reuse the tool-turn id). */
@@ -1020,6 +1241,7 @@ export async function runLoop(
       iterations,
       toolCalls: totalToolCalls,
       incomplete: true,
+      ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
     });
     return {
       runId,
@@ -1027,6 +1249,7 @@ export async function runLoop(
       iterations,
       toolCalls: totalToolCalls,
       status: 'incomplete',
+      ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
     };
   }
 
@@ -1045,6 +1268,10 @@ export async function runLoop(
     ...(config.contextReport ? { contextReport: config.contextReport } : {}),
   });
 
+  // Hoisted so the outer catch can skip any unanswered tool calls of the
+  // turn in progress when the loop throws — upholds I1 (every tool_call_id
+  // gets one durable tool row) on the error path.
+  let turnToolCalls: ChatCompletionMessageToolCall[] = [];
   try {
     while (
       limits.maxIterations === undefined ||
@@ -1087,6 +1314,7 @@ export async function runLoop(
         finishReason: turn.finishReason,
         hasToolCalls: Boolean(turn.toolCalls.length),
         contentPreview: turn.content ? preview(turn.content) : undefined,
+        ...(turn.usage ? { usage: turn.usage } : {}),
       });
 
       if (turn.toolCalls.length > 0) {
@@ -1098,6 +1326,7 @@ export async function runLoop(
           },
           { durationMs },
         );
+        turnToolCalls = turn.toolCalls;
 
         // Tool turns end like any other: the ledger row is durable, so the
         // client can settle this assistant message before tools run.
@@ -1109,10 +1338,10 @@ export async function runLoop(
           durationMs,
         });
 
-        let index = 0;
-        while (index < turn.toolCalls.length) {
-          // The assistant tool_calls row above is already durable. On abort,
-          // every remaining call still needs a tool row or ledger replay breaks.
+        const ready: ReadyToolCall[] = [];
+        let halt: Extract<AdmitResult, { kind: 'halt' }> | null = null;
+        let haltIndex = 0;
+        for (let index = 0; index < turn.toolCalls.length; index++) {
           if (signal?.aborted) {
             await skipToolCalls(
               turn.toolCalls.slice(index),
@@ -1122,83 +1351,71 @@ export async function runLoop(
           }
 
           const toolCall = turn.toolCalls[index];
-          if (!toolCall || toolCall.type !== 'function') {
-            index += 1;
-            continue;
-          }
+          if (!toolCall || toolCall.type !== 'function') continue;
 
           const admitted = await admitToolCall(toolCall);
           if (admitted.kind === 'halt') {
-            return finishHalt(admitted, index, turn.toolCalls);
+            halt = admitted;
+            haltIndex = index;
+            break;
           }
-          if (admitted.kind === 'filled') {
-            index += 1;
-            continue;
-          }
+          if (admitted.kind === 'filled') continue;
+          ready.push(admitted.call);
+        }
 
-          if (isParallelSafeTool(admitted.call.tool)) {
-            const batch = [admitted.call];
-            let next = index + 1;
-            while (next < turn.toolCalls.length) {
-              const upcoming = turn.toolCalls[next];
-              if (!upcoming || upcoming.type !== 'function') break;
-              const upcomingTool = tools.byName.get(upcoming.function.name);
-              if (!isParallelSafeTool(upcomingTool)) break;
-              if (
-                posture === 'ask' &&
-                isAskStrippedTool(upcoming.function.name)
-              ) {
-                break;
-              }
-              try {
-                JSON.parse(upcoming.function.arguments);
-              } catch {
-                break;
-              }
-              const nextAdmitted = await admitToolCall(upcoming);
-              if (nextAdmitted.kind === 'halt') {
-                if ((await executeReadyBatch(batch, [])) === 'deferred') {
-                  return finishChoiceSkipped();
-                }
-                return finishHalt(nextAdmitted, next, turn.toolCalls);
-              }
-              if (nextAdmitted.kind === 'filled') {
-                if (
-                  (await executeReadyBatch(
-                    batch,
-                    turn.toolCalls.slice(next + 1),
-                  )) === 'deferred'
-                ) {
-                  return finishChoiceSkipped();
-                }
-                index = next + 1;
-                batch.length = 0;
-                break;
-              }
-              batch.push(nextAdmitted.call);
-              next += 1;
-            }
-            if (batch.length > 0) {
-              if (
-                (await executeReadyBatch(batch, turn.toolCalls.slice(next))) ===
-                'deferred'
-              ) {
-                return finishChoiceSkipped();
-              }
-              index = next;
-            }
-            continue;
-          }
+        const staged: Record<ToolStage, ReadyToolCall[]> = {
+          skill: [],
+          read: [],
+          network: [],
+          exec: [],
+          mutate: [],
+        };
+        for (const call of ready) {
+          staged[toolStage(call.toolName)].push(call);
+        }
 
-          if (
-            (await executeReadyCall(
-              admitted.call,
-              turn.toolCalls.slice(index),
-            )) === 'deferred'
-          ) {
-            return finishChoiceSkipped();
+        const runSerial = async (batch: ReadyToolCall[]) => {
+          for (let i = 0; i < batch.length; i++) {
+            const call = batch[i];
+            if (!call) continue;
+            const outcome = await executeReadyCall(
+              call,
+              batch.slice(i).map((item) => item.toolCall),
+            );
+            if (outcome !== 'ok') return outcome;
           }
-          index += 1;
+          return 'ok' as const;
+        };
+
+        // I4 staging: skill → read → network → exec → mutate. Abort only on
+        // deferred|halted — never short-circuit on truthy 'ok'.
+        let batchOutcome: 'ok' | 'deferred' | 'halted' = 'ok';
+        for (const stageBatch of [staged.skill, staged.read] as const) {
+          batchOutcome = await executeReadyBatch(stageBatch, []);
+          if (batchOutcome !== 'ok') break;
+        }
+        if (batchOutcome === 'ok') {
+          for (const stageBatch of [
+            staged.network,
+            staged.exec,
+            staged.mutate,
+          ] as const) {
+            batchOutcome = await runSerial(stageBatch);
+            if (batchOutcome !== 'ok') break;
+          }
+        }
+        if (batchOutcome === 'deferred') {
+          return finishChoiceSkipped();
+        }
+        if (batchOutcome === 'halted') {
+          const skipDetail = lastLimitReason?.startsWith('limit.outcome:')
+            ? limitMessage('limit.outcome', 'Skipped: tool call limit reached.')
+            : SKIP_LIMIT_REACHED;
+          await skipToolCalls(unansweredToolCalls(turn.toolCalls), skipDetail);
+          return completeAfterLimit();
+        }
+        if (halt) {
+          return finishHalt(halt, haltIndex, turn.toolCalls);
         }
 
         stubLiveToolResults(messages, contextBudget);
@@ -1240,18 +1457,7 @@ export async function runLoop(
         }
 
         if (openPlanWork) {
-          const reason = 'Open plan todos remain';
-          trace({
-            type: 'limit',
-            runId,
-            iteration: iterations,
-            reason,
-          });
-          emit?.({
-            type: 'limit.hit',
-            runId,
-            reason,
-          });
+          noteLimit(limitMessage('limit.plan', 'Open plan todos remain'));
           emitTurnCompleted(iterations, turn.usage);
           emit?.({
             type: 'run.completed',
@@ -1259,6 +1465,7 @@ export async function runLoop(
             iterations,
             toolCalls: totalToolCalls,
             incomplete: true,
+            ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
           });
           return {
             runId,
@@ -1266,6 +1473,7 @@ export async function runLoop(
             iterations,
             toolCalls: totalToolCalls,
             status: 'incomplete',
+            ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
           };
         }
 
@@ -1292,17 +1500,12 @@ export async function runLoop(
         };
       }
 
-      trace({
-        type: 'limit',
-        runId,
-        iteration: iterations,
-        reason: `unexpected finish reason: ${turn.finishReason}`,
-      });
-      emit?.({
-        type: 'limit.hit',
-        runId,
-        reason: `unexpected finish reason: ${turn.finishReason}`,
-      });
+      noteLimit(
+        limitMessage(
+          'limit.finish',
+          `unexpected finish reason: ${turn.finishReason}`,
+        ),
+      );
       emitTurnCompleted(iterations, turn.usage);
       emit?.({
         type: 'run.completed',
@@ -1310,6 +1513,7 @@ export async function runLoop(
         iterations,
         toolCalls: totalToolCalls,
         incomplete: true,
+        ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
       });
 
       return {
@@ -1318,25 +1522,34 @@ export async function runLoop(
         iterations,
         toolCalls: totalToolCalls,
         status: 'incomplete',
+        ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
       };
     }
 
     // Max iterations exceeded — finalize without tools.
-    trace({
-      type: 'limit',
-      runId,
-      iteration: iterations,
-      reason: `max iterations exceeded (${limits.maxIterations})`,
-    });
-    emit?.({
-      type: 'limit.hit',
-      runId,
-      reason: `max iterations exceeded (${limits.maxIterations})`,
-    });
+    noteLimit(
+      limitMessage(
+        'limit.iterations',
+        `max iterations exceeded (${limits.maxIterations})`,
+      ),
+    );
 
     return completeAfterLimit();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
+    // I1: close the gap on the error path. A throw mid-turn can leave
+    // tool_call_ids without a durable tool row; the ledger is the truth.
+    if (turnToolCalls.length > 0) {
+      try {
+        await skipToolCalls(
+          unansweredToolCalls(turnToolCalls),
+          'Skipped: run errored.',
+        );
+      } catch {
+        /* best-effort; the run is already failing */
+      }
+    }
 
     trace({
       type: 'tool_error',

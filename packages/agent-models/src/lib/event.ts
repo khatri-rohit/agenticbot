@@ -106,7 +106,7 @@ export interface ToolCompleted {
   toolCallId: string;
   toolName: string;
   durationMs: number;
-  /** Truncated result preview for UI display. Full result lives in the host ledger. */
+  /** Bounded preview (RESULT_PREVIEW_MAX, ~20KB) for UI display. Full result lives in the host ledger. */
   resultPreview: unknown;
 }
 
@@ -125,6 +125,8 @@ export interface TurnCompleted {
   iteration: number;
   /** Provider usage for the model call that finished this iteration. */
   usage?: TokenUsage;
+  /** Layers rebuilt from the live prompt after this iteration. */
+  contextReport?: ContextReport;
 }
 
 export interface RunCompleted {
@@ -135,6 +137,8 @@ export interface RunCompleted {
   toolCalls: number;
   /** True when the loop stopped on a limit, not a clean model stop. */
   incomplete?: boolean;
+  /** Stable limit reason when incomplete (e.g. `limit.terminal: …`). */
+  limitReason?: string;
 }
 
 export interface RunError {
@@ -221,6 +225,8 @@ export interface RunSettled {
   seq: number;
   type: 'run.settled';
   runId: string;
+  /** True when the loop finished incomplete (limit / open plan / etc.). */
+  incomplete?: boolean;
 }
 
 /** Union of event types for filtering. */

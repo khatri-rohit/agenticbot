@@ -5,7 +5,11 @@ import {
   buildExtractiveSnapshot,
   chooseCompactThroughSeq,
 } from './compact-snapshot';
-import { assembleContext, stubLiveToolResults } from './assemble-context';
+import {
+  assembleContext,
+  refreshContextReport,
+  stubLiveToolResults,
+} from './assemble-context';
 import { createToolRegistry } from '../tools/registry';
 
 function envelope(
@@ -245,6 +249,21 @@ describe('compact snapshot', () => {
     if (last?.role === 'user') {
       expect(last.content).toBe('now?');
     }
+  });
+
+  it('refreshContextReport uses promptTokens as occupied', () => {
+    const tools = createToolRegistry([]);
+    const { report, messages } = assembleContext({
+      tools,
+      memory: { user: '', notes: '' },
+      snapshot: null,
+      envelopes: [envelope(1, 'user', 'hello')],
+    });
+    const next = refreshContextReport(report, messages, tools, {
+      promptTokens: 42,
+    });
+    expect(next.occupiedTokens).toBe(42);
+    expect(next.layers.find((layer) => layer.id === 'scratch')).toBeUndefined();
   });
 
   it('stubLiveToolResults drops old vision parts in the live prompt', () => {

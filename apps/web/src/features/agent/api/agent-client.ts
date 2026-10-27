@@ -20,6 +20,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
 const PENDING_MSG_KEY = 'desk:pendingMessage';
 
+export type ComposerSkillHints = {
+  requested?: string[];
+};
+
 export type ComposerOptions = {
   webSearch: boolean;
   model: string;
@@ -29,6 +33,8 @@ export type ComposerOptions = {
   thinking?: ThinkingValue;
   /** Workspace-only Ask | Agent. Default agent. Ignored on Home. */
   posture?: RunPosture;
+  /** User-requested skills from `/` picks. */
+  skills?: ComposerSkillHints;
 };
 
 export type PendingMessage = {
@@ -39,6 +45,7 @@ export type PendingMessage = {
   thinking?: ThinkingValue;
   posture?: RunPosture;
   attachments?: MessageAttachment[];
+  skills?: ComposerSkillHints;
 };
 
 /**
@@ -75,6 +82,7 @@ export async function startRun(
     webSearch?: boolean;
     thinking?: ThinkingValue;
     posture?: RunPosture;
+    skills?: ComposerSkillHints;
   } = {},
 ): Promise<string> {
   const body: StartRunRequest = {
@@ -86,6 +94,7 @@ export async function startRun(
     webSearch: options.webSearch,
     thinking: options.thinking,
     posture: normalizeRunPosture(options.posture),
+    ...(options.skills ? { skills: options.skills } : {}),
   };
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
@@ -201,6 +210,16 @@ export async function fetchLocalOllamaModels(): Promise<LocalOllamaModelsRespons
   return res.json() as Promise<LocalOllamaModelsResponse>;
 }
 
+/** Discover cloud models from Ollama Cloud (`/api/tags` at ollama.com). */
+export async function fetchCloudOllamaModels(): Promise<LocalOllamaModelsResponse> {
+  const res = await fetch(`${API_BASE}/api/agent/models?endpoint=cloud`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to list cloud models: ${res.status}`);
+  }
+  return res.json() as Promise<LocalOllamaModelsResponse>;
+}
+
 export type ContextEstimateResponse = {
   estimatedPromptTokens: number;
   contextLength: number | null;
@@ -217,6 +236,7 @@ export async function fetchContextEstimate(options: {
   local?: boolean;
   webSearch?: boolean;
   posture?: RunPosture;
+  skills?: ComposerSkillHints;
 }): Promise<ContextEstimateResponse> {
   const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
     method: 'POST',
@@ -229,6 +249,7 @@ export async function fetchContextEstimate(options: {
       local: options.local,
       webSearch: options.webSearch,
       posture: normalizeRunPosture(options.posture),
+      ...(options.skills ? { skills: options.skills } : {}),
     }),
   });
   if (!res.ok) {

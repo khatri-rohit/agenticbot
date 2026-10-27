@@ -19,6 +19,17 @@ function TypeToFocusListener() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isTypeToFocusKey(e)) return;
+      // Don't steal keystrokes from any focused editable surface (sidebar
+      // search, model picker filter, edit textarea, recent-threads switcher).
+      const active = document.activeElement;
+      const tag = (active?.tagName ?? '').toLowerCase();
+      if (
+        tag === 'input' ||
+        tag === 'textarea' ||
+        (active as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
       const composer = getComposerFocus();
       if (!composer || composer.isLocked()) return;
       e.preventDefault();
@@ -47,6 +58,12 @@ export function ChatShell({
   const sidebarRef = useRef<ImperativePanelHandle>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  // Sync collapsed state from the restored panel size on mount. The library
+  // fires onCollapse/onExpand after mount, but onResize gives us the actual
+  // size on every layout change including the initial restore — so we
+  // converge to the correct state even if onCollapse is delayed.
+  const COLLAPSED_SIZE = 4;
+
   return (
     <div className="flex min-h-[100dvh] h-[100dvh] w-full bg-background">
       <ResizablePanelGroup
@@ -62,9 +79,16 @@ export function ChatShell({
           minSize={14}
           maxSize={30}
           collapsible
-          collapsedSize={4}
+          collapsedSize={COLLAPSED_SIZE}
           onCollapse={() => setSidebarCollapsed(true)}
           onExpand={() => setSidebarCollapsed(false)}
+          onResize={(size) => {
+            if (size <= COLLAPSED_SIZE && !sidebarCollapsed) {
+              setSidebarCollapsed(true);
+            } else if (size > COLLAPSED_SIZE && sidebarCollapsed) {
+              setSidebarCollapsed(false);
+            }
+          }}
           className="flex min-h-0 flex-col bg-sidebar"
         >
           <Sidebar
@@ -97,8 +121,4 @@ export function ChatShell({
       <TypeToFocusListener />
     </div>
   );
-}
-
-export function HomeHeader() {
-  return null;
 }

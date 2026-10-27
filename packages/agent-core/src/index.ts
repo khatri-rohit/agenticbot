@@ -2,7 +2,18 @@
 // Pure library: no HTTP, no DOM, no database.
 // Domain types and modes live in @agent/agent-models — import them from there.
 
-export { listSkills } from './lib/tools/skills';
+export {
+  configureSkillRoots,
+  formatSkillBodies,
+  formatSkillsCatalog,
+  getSkill,
+  invalidateSkillCatalog,
+  listSkillCatalogs,
+  listSkills,
+  parseSkillMarkdown,
+  resolveSkillsRoot,
+} from './lib/tools/skills';
+export type { SkillCatalogEntry } from './lib/tools/skills';
 
 // Model layer
 export {
@@ -33,7 +44,6 @@ export {
   resolveLimits,
   type AgentLimits,
 } from './lib/loop/limits';
-export { getContext } from './lib/loop/context';
 export { createStreamModelCall } from './lib/loop/model-call';
 
 // Tools
@@ -48,6 +58,7 @@ export {
 } from './lib/tools/workspace-path';
 export {
   assembleContext,
+  refreshContextReport,
   stubLiveToolResults,
 } from './lib/context/assemble-context';
 export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
@@ -76,7 +87,7 @@ export type { PlanStore } from './lib/tools/plan';
 export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
 // Events / trace
-export { consoleTrace } from './lib/events/trace';
+export { consoleTrace, teeTrace, traceCompactionEvent } from './lib/events/trace';
 export type { TraceEvent } from './lib/events/trace-types';
 export { EventEmitter } from './lib/events/emitter';
 export type { EventSubscriber } from './lib/events/types';

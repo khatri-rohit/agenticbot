@@ -112,4 +112,8 @@ export type StartRunRequest = {
    * Ignored for Home. Default agent.
    */
   posture?: RunPosture;
+  /** User-requested catalog names from `/` picks. Bodies load for this send. */
+  skills?: {
+    requested?: string[];
+  };
 };

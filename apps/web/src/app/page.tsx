@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { MessageAttachment } from '@agent/agent-models';
 import { ChatInput } from '../components/chat-input';
@@ -13,6 +14,7 @@ import {
   createThread,
   deleteThread,
 } from '../features/agent/api/thread-client';
+import { useThreads } from '../features/agent/hooks/use-agent-run';
 import { refreshThreads } from '../features/agent/store/thread-cache';
 import { toastError } from '@/hooks/use-toast';
 import {
@@ -21,6 +23,8 @@ import {
   writeStoredComposerLocal,
   writeStoredComposerModel,
 } from '@/lib/ollama-models';
+import { clampChatTitle } from '@/lib/thread-title';
+import { formatRelativeTime } from '../lib/format-relative-time';
 import {
   folderNameFromRoot,
   ensureWorkspaceInOrder,
@@ -59,12 +63,20 @@ export default function HomePage() {
   const router = useRouter();
   const { workspaceRoot } = useAgentSpace();
   const bound = Boolean(workspaceRoot);
+  const threads = useThreads();
   const [pendingContent, setPendingContent] = useState(false);
   /** Remount ChatInput after a failed send so it reloads the restored draft. */
   const [draftEpoch, setDraftEpoch] = useState(0);
   const [composerOptions, setComposerOptions] = useState<ComposerOptions>(() =>
     defaultOptions(true),
   );
+
+  const recentThreads = useMemo(() => {
+    return (threads ?? [])
+      .filter((t) => t.title !== 'New Chat')
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 5);
+  }, [threads]);
 
   return (
     <ChatShell layout="home">
@@ -81,6 +93,30 @@ export default function HomePage() {
               : 'Start a conversation, or pick a workspace in the composer.'}
           </p>
         </div>
+        {recentThreads.length > 0 ? (
+          <section aria-label="Recent threads" className="w-full">
+            <p className="type-ui mb-2 font-medium text-muted-foreground">
+              Recent
+            </p>
+            <ul className="flex flex-col gap-0.5">
+              {recentThreads.map((thread) => (
+                <li key={thread.id}>
+                  <Link
+                    href={`/chat/${thread.id}`}
+                    className="flex items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/45 hover:text-foreground"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {clampChatTitle(thread.title)}
+                    </span>
+                    <span className="type-caption shrink-0 tabular-nums text-muted-foreground/60">
+                      {formatRelativeTime(thread.updatedAt)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <ChatInput
           key={`${HOME_DRAFT_SCOPE}-${draftEpoch}`}
           draftScope={HOME_DRAFT_SCOPE}
@@ -111,6 +147,7 @@ export default function HomePage() {
                     : 'agent'
                   : undefined,
                 attachments,
+                ...(options.skills ? { skills: options.skills } : {}),
               });
               if (!stashed) {
                 await deleteThread(thread.id);
