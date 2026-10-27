@@ -26,6 +26,7 @@ import {
   applyChatEvent,
   hasSseSeqGap,
   initialChatState,
+  limitNoticeFromIncomplete,
   noticeFromSnapshot,
   persistChatEffects,
   type ChatState,
@@ -158,21 +159,9 @@ export function useAgentRun(threadId: string | null) {
             : {}),
           plan: planFromLedger(ledger),
           // Rebuild stop caption from durable last-run (SSE limitNotice is ephemeral).
-          ...(lastRun?.incomplete && lastRun.limitReason
-            ? {
-                limitNotice: {
-                  runId: lastRun.runId,
-                  reason: lastRun.limitReason,
-                },
-              }
-            : lastRun?.incomplete
-              ? {
-                  limitNotice: {
-                    runId: lastRun.runId,
-                    reason: 'Run stopped early (incomplete).',
-                  },
-                }
-              : {}),
+          ...(limitNoticeFromIncomplete(lastRun)
+            ? { limitNotice: limitNoticeFromIncomplete(lastRun) }
+            : {}),
         }));
         if (ledger.activeRunId && !chatStateRef.current.activeRun) {
           subscribeToRunRef.current(ledger.activeRunId);

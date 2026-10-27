@@ -1,4 +1,7 @@
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
+} from 'openai/resources/chat/completions';
 import type {
   ContextBudget,
   ContextReport,
@@ -190,19 +193,21 @@ function loadedSkillNamesFromEnvelopes(envelopes: LedgerEnvelope[]): string[] {
   return names;
 }
 
+function toolCallsFromMessage(
+  item: LedgerEnvelope | ChatCompletionMessageParam,
+): ChatCompletionMessageToolCall[] | undefined {
+  if ('record' in item) {
+    return item.record.role === 'assistant' ? item.record.tool_calls : undefined;
+  }
+  return item.role === 'assistant' ? item.tool_calls : undefined;
+}
+
 function loadSkillCallIds(
   source: LedgerEnvelope[] | ChatCompletionMessageParam[],
 ): Set<string> {
   const ids = new Set<string>();
   for (const item of source) {
-    const calls =
-      'record' in item
-        ? item.record.role === 'assistant'
-          ? item.record.tool_calls
-          : undefined
-        : item.role === 'assistant'
-          ? item.tool_calls
-          : undefined;
+    const calls = toolCallsFromMessage(item);
     if (!calls) continue;
     for (const call of calls) {
       const name = 'function' in call ? call.function.name : undefined;

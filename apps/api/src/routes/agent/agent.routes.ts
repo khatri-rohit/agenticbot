@@ -90,6 +90,25 @@ function endpointFromLocal(local: boolean | undefined): OllamaEndpoint {
   return local === true ? 'local' : 'cloud';
 }
 
+/** Map a RunLoopResult into the persisted last-run status + limit reason. */
+function lastRunStatusFrom(result: {
+  status: string;
+  content: string;
+  limitReason?: string;
+}): {
+  status: 'completed' | 'incomplete' | 'error';
+  incomplete: boolean;
+  limitReason?: string;
+} {
+  const cancelled = result.status === 'error' && /run cancelled/i.test(result.content);
+  if (cancelled) return { status: 'incomplete', incomplete: true, limitReason: 'Run cancelled' };
+  if (result.status === 'incomplete') {
+    return { status: 'incomplete', incomplete: true, limitReason: result.limitReason };
+  }
+  if (result.status === 'error') return { status: 'error', incomplete: false };
+  return { status: 'completed', incomplete: false };
+}
+
 async function loadMentionedThreads(
   store: ThreadStore,
   envelopes: LedgerEnvelope[],
@@ -698,26 +717,15 @@ router.post('/run', async (req: Request, res: Response) => {
       planHasOpenWork(await store.readPlan(threadId)),
     onFinished: async (result) => {
       try {
-        const cancelled =
-          result.status === 'error' && /run cancelled/i.test(result.content);
+        const runStatus = lastRunStatusFrom(result);
         await store.writeLastRun(threadId, {
           runId: result.runId,
-          status: cancelled
-            ? 'incomplete'
-            : result.status === 'incomplete'
-              ? 'incomplete'
-              : result.status === 'error'
-                ? 'error'
-                : 'completed',
-          incomplete: result.status === 'incomplete' || cancelled,
+          status: runStatus.status,
+          incomplete: runStatus.incomplete,
           iterations: result.iterations,
           toolCalls: result.toolCalls,
           finishedAt: new Date().toISOString(),
-          ...(cancelled
-            ? { limitReason: 'Run cancelled' }
-            : result.limitReason
-              ? { limitReason: result.limitReason }
-              : {}),
+          ...(runStatus.limitReason ? { limitReason: runStatus.limitReason } : {}),
         });
       } catch (error) {
         console.error(
@@ -1049,7 +1057,9 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   });
 
-  // If the run is already complete, send a final ping and close
+  // Already-finished run: send `done` so the client can close without
+  // waiting for run.settled/run.error replay. Live runs close client-side
+  // on those events; `done` is the fallback for the late-subscriber case.
   if (handle.status !== 'running') {
     res.write('event: done\ndata: {}\n\n');
     res.end();

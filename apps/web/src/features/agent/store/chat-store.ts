@@ -70,6 +70,14 @@ export type LimitNotice = {
   reason: string;
 };
 
+/** Build a limitNotice from an incomplete run, or undefined if the run completed. */
+export function limitNoticeFromIncomplete(
+  run: { runId: string; incomplete?: boolean; limitReason?: string } | null | undefined,
+): LimitNotice | undefined {
+  if (!run?.incomplete) return undefined;
+  return { runId: run.runId, reason: run.limitReason ?? 'Run stopped early (incomplete).' };
+}
+
 export type PendingChoice = {
   choiceId: string;
   runId: string;
@@ -337,23 +345,14 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       // can appear in the turn trail like a late tool step.
       if (!state.activeRun) return state;
       const incomplete = event.incomplete === true;
+      const notice = limitNoticeFromIncomplete({
+        runId: event.runId,
+        incomplete,
+        limitReason: event.limitReason,
+      });
       return {
         ...state,
-        ...(incomplete && event.limitReason
-          ? {
-              limitNotice: {
-                runId: event.runId,
-                reason: event.limitReason,
-              },
-            }
-          : incomplete
-            ? {
-                limitNotice: {
-                  runId: event.runId,
-                  reason: 'Run stopped early (incomplete).',
-                },
-              }
-            : {}),
+        ...(notice ? { limitNotice: notice } : {}),
         activeRun: {
           ...state.activeRun,
           status: incomplete ? 'incomplete' : 'completed',
