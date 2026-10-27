@@ -518,6 +518,7 @@ export async function runLoop(
       noteWebSource,
       getWebSource,
       getWebSourceByUrl,
+      trace,
     };
   }
 
@@ -1270,6 +1271,7 @@ export async function runLoop(
         finishReason: turn.finishReason,
         hasToolCalls: Boolean(turn.toolCalls.length),
         contentPreview: turn.content ? preview(turn.content) : undefined,
+        ...(turn.usage ? { usage: turn.usage } : {}),
       });
 
       if (turn.toolCalls.length > 0) {

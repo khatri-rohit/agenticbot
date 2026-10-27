@@ -98,6 +98,15 @@ export function createMemoryTool(store: MemoryToolStore): Tool {
       const [gated] = gateMemoryOps(current, [proposed], DEFAULT_MEMORY_CAPS);
       if (!gated) return 'Memory gate returned no verdict.';
 
+      ctx.trace?.({
+        type: 'memory_gate',
+        runId: ctx.runId,
+        toolName: 'memory',
+        target,
+        verdict: gated.verdict,
+        why: gated.why,
+      });
+
       if (gated.verdict === 'reject') {
         return `Rejected: ${gated.why}`;
       }

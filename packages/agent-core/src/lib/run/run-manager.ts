@@ -100,6 +100,7 @@ export class RunManager {
       onMessage: opts.onMessage,
       hasOpenPlanWork: opts.hasOpenPlanWork,
       contextBudget: opts.contextBudget,
+      ...(opts.trace ? { trace: opts.trace } : {}),
       emit: (event) => {
         if (handle.cancelled) return;
         handle.emitter.emit(event);

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import 'dotenv/config';
 import path from 'node:path';
 
@@ -16,11 +17,13 @@ import {
   createToolRegistry,
   ALL_TOOLS,
   consoleTrace,
+  teeTrace,
   createInMemoryPlanStore,
   createPlanTools,
   loadWorkspaceRules,
   type ModelCallFn,
 } from '@agent/agent-core';
+import { createJsonlTraceSink } from './trace-sink.js';
 
 
 function parseHarnessArgs(argv: string[]): {
@@ -126,6 +129,9 @@ async function main() {
     const modelCall: ModelCallFn = (model, msgs, t, onDelta) =>
       streamModelTurn(model, msgs, t, onDelta, callOptions);
 
+    const runId = randomUUID();
+    const tracesDir = path.join(__dirname, '..', 'traces');
+
     console.log(
       `Profile: ${mode.name} / ${posture} (streaming)`,
     );
@@ -133,6 +139,7 @@ async function main() {
     console.log('================================================');
 
     const result = await runLoop(modelCall, messages, tools, {
+      runId,
       model: mode.model,
       mode: mode.name,
       posture,
@@ -145,7 +152,7 @@ async function main() {
         console.log(`[auto-choice] ${request.question} → ${first.label}`);
         return { optionIds: [first.id] };
       },
-      trace: consoleTrace,
+      trace: teeTrace(consoleTrace, createJsonlTraceSink(tracesDir)),
       emit: (event) => {
         events.push({ seq: 0, ...event } as AgentEvent);
         if (event.type === 'assistant.delta') {

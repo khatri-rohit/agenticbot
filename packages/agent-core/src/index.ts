@@ -87,7 +87,7 @@ export type { PlanStore } from './lib/tools/plan';
 export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
 // Events / trace
-export { consoleTrace } from './lib/events/trace';
+export { consoleTrace, teeTrace, traceCompactionEvent } from './lib/events/trace';
 export type { TraceEvent } from './lib/events/trace-types';
 export { EventEmitter } from './lib/events/emitter';
 export type { EventSubscriber } from './lib/events/types';

@@ -9,6 +9,7 @@ import type {
   LedgerRecord,
   RunPosture,
   ToolOrigin,
+  TraceEvent,
 } from '@agent/agent-models';
 
 import type { EventEmitter } from '../events/emitter';
@@ -69,4 +70,6 @@ export type StartRunOptions = {
   onFinished?: (result: RunLoopResult) => void | Promise<void>;
   hasOpenPlanWork?: () => boolean | Promise<boolean>;
   contextBudget?: ContextBudget;
+  /** Trace sink for offline replay / eval debugging. Optional. */
+  trace?: (event: TraceEvent) => void;
 };

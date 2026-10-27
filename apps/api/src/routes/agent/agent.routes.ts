@@ -46,18 +46,25 @@ import {
   packMentionedThread,
   resolveReasoningEffort,
   getSkill,
+  traceCompactionEvent,
   type MentionedThreadContext,
   type ToolRegistry,
 } from '@agent/agent-core';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
+import { createJsonlTraceSink } from '../../lib/trace-sink.js';
 import { skillsRouter } from './skills.routes';
 import type { ThreadStore } from '../../lib/thread-store';
 
 const router = Router();
 router.use(skillsRouter);
 const runManager = new RunManager();
+
+/** Per-run JSONL trace files for offline replay / eval debugging. */
+const traceSink = createJsonlTraceSink(
+  path.join(__dirname, '..', '..', '..', 'traces'),
+);
 
 function toolAllowList(
   mode: ModeConfig,
@@ -391,6 +398,13 @@ async function maybeCompactThread(input: {
     summary: snapshot.summary,
     createdAt: snapshot.createdAt,
   });
+  traceSink(
+    traceCompactionEvent({
+      runId: input.runId,
+      threadId: input.threadId,
+      snapshot,
+    }),
+  );
 }
 
 /**
@@ -715,6 +729,7 @@ router.post('/run', async (req: Request, res: Response) => {
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
+    trace: traceSink,
     onFinished: async (result) => {
       try {
         const runStatus = lastRunStatusFrom(result);

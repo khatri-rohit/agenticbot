@@ -120,6 +120,8 @@ export {
   ChoiceSkipped,
 } from './lib/choice.js';
 
+export type { TraceEvent } from './lib/trace.js';
+
 export type {
   MemoryTarget,
   MemoryOp,
