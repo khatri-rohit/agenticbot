@@ -1,4 +1,4 @@
-import { mkdir, writeFile, cp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdir, writeFile, rename, cp, readdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -189,7 +189,11 @@ async function downloadTarball(
     );
   }
   await mkdir(path.dirname(dest), { recursive: true });
-  await writeFile(dest, buf);
+  // Write to a temp file in the same dir, then rename, so a crash mid-write
+  // cannot leave a truncated archive cached at dest.
+  const tmp = `${dest}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmp, buf);
+  await rename(tmp, dest);
   return dest;
 }
 
@@ -216,19 +220,28 @@ async function skillsInArchive(
           entry.on('data', (chunk: Buffer) => chunks.push(chunk));
           entry.on('error', reject);
           entry.on('end', () => {
-            const pathInRepo =
-              posix === 'SKILL.md' ? '.' : path.posix.dirname(posix);
-            const dir = folderName(pathInRepo, repo);
-            const parsed = parseSkillMarkdown(
-              Buffer.concat(chunks).toString('utf8'),
-              dir,
-            );
-            found.push({
-              name: parsed.name,
-              description: parsed.description,
-              folderName: dir,
-              pathInRepo,
-            });
+            // folderName() throws SkillImportError on invalid dirs; the throw
+            // would escape stream internals as an uncaughtException or leave
+            // this promise pending. Skip the entry instead.
+            try {
+              const pathInRepo =
+                posix === 'SKILL.md' ? '.' : path.posix.dirname(posix);
+              const dir = folderName(pathInRepo, repo);
+              const parsed = parseSkillMarkdown(
+                Buffer.concat(chunks).toString('utf8'),
+                dir,
+              );
+              found.push({
+                name: parsed.name,
+                description: parsed.description,
+                folderName: dir,
+                pathInRepo,
+              });
+            } catch (error) {
+              if (error instanceof SkillImportError) resolve();
+              else reject(error as Error);
+              return;
+            }
             resolve();
           });
         }),
@@ -286,10 +299,18 @@ export async function installGitHubSkills(input: {
   if (!/^[a-f0-9]{7,40}$/i.test(commit)) {
     throw new SkillImportError('Invalid commit.', 400);
   }
-  const selected = input.skills.map((skill) => ({
-    pathInRepo: skill.pathInRepo.replace(/\\/g, '/'),
-    folderName: folderName(skill.folderName, parsed.repo),
-  }));
+  const selected = input.skills.map((skill) => {
+    const pathInRepo = skill.pathInRepo.replace(/\\/g, '/');
+    // pathInRepo is HTTP input; reject traversal segments before path.join
+    // resolves them out of staging.
+    if (pathInRepo.split('/').some((seg) => seg === '..')) {
+      throw new SkillImportError('Invalid skill path.', 400);
+    }
+    return {
+      pathInRepo,
+      folderName: folderName(skill.folderName, parsed.repo),
+    };
+  });
   const collisions = collidingFolderNames(selected);
   if (collisions.length > 0) {
     throw new SkillImportError(
@@ -312,9 +333,17 @@ export async function installGitHubSkills(input: {
       gzip: true,
       cwd: staging,
       strip: 1,
-      filter(p) {
+      filter(path, entry) {
+        // Reject symlinks/hardlinks from untrusted archives: a link target
+        // inside staging is still followed by cp/readFileSync and can leak
+        // host files into the model prompt. Accept only files and dirs.
+        // In extraction the entry is a ReadEntry with a .type string; Stats
+        // (archive creation) never reaches this code path.
+        if ('type' in entry) {
+          if (entry.type !== 'File' && entry.type !== 'Directory') return false;
+        }
         // Archive paths are `repo-sha/...`; match the same relative paths as Check.
-        const rel = relPath(p);
+        const rel = relPath(path);
         if (!rel || ignored(rel)) return false;
         return selected.some((skill) =>
           skill.pathInRepo === '.'
@@ -333,6 +362,12 @@ export async function installGitHubSkills(input: {
         skill.pathInRepo === '.'
           ? staging
           : path.join(staging, ...skill.pathInRepo.split('/'));
+      // Defense in depth: the `..` segment check above should have caught
+      // traversal, but confirm the resolved path stays inside staging.
+      const rel = path.relative(staging, from);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        throw new SkillImportError('Invalid skill path.', 400);
+      }
       const to = path.join(destRoot, skill.folderName);
       await rm(to, { recursive: true, force: true });
       if (skill.pathInRepo === '.') {

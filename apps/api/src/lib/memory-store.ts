@@ -72,7 +72,15 @@ export class MemoryStore {
     const ops: MemoryOp[] = [];
     for (const line of raw.split('\n')) {
       if (!line) continue;
-      const op = parseMemoryOp(JSON.parse(line));
+      // A truncated record (crash mid-append) must not fail the whole list;
+      // skip it like parseMemoryOp rejects a structurally invalid op.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const op = parseMemoryOp(parsed);
       if (op) ops.push(op);
     }
     return ops;

@@ -104,11 +104,13 @@ export function MessageList({
       }
       return { id: turn.userMessage.id, label, toolCount };
     });
+    // toolCount only sums `tools` steps, which come from toolActivity.
+    // streaming/assistantSnippets produce snippet/stream steps that do not
+    // affect the anchor, so they are excluded to avoid rebuilding every
+    // anchor on every assistant.delta during streaming.
   }, [
     turns,
     toolActivity,
-    assistantSnippets,
-    streaming,
     compactionNotice,
     activeRunId,
   ]);

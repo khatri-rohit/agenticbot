@@ -240,6 +240,7 @@ const PREFIX_LAYER_IDS = new Set([
   'plan',
   'mentions',
   'brief',
+  'last_run',
 ]);
 
 /**
@@ -498,15 +499,8 @@ export function assembleContext(
   const skillsMessage: ChatCompletionMessageParam | null = skillsText
     ? { role: 'system', content: skillsText }
     : null;
-  const bodiesText = hasLoadSkill
-    ? formatSkillBodies(
-        requestedNames,
-        loadedSkillNamesFromEnvelopes(input.envelopes),
-      )
-    : '';
-  const bodiesMessage: ChatCompletionMessageParam | null = bodiesText
-    ? { role: 'system', content: bodiesText }
-    : null;
+  // bodiesText is computed after keepToolsFrom (below) so loaded-skill names
+  // come only from live, unstubbed tool results — not the whole ledger.
 
   const memoryText = buildMemoryPrompt(input.memory);
   const memoryMessage: ChatCompletionMessageParam = {
@@ -569,6 +563,21 @@ export function assembleContext(
   const keepToolsFrom = keepFromNthLast(users, budget.keepToolResultsForTurns);
   const keepImagesFrom = keepFromNthLast(users, budget.keepAttachmentsForTurns);
 
+  // Count a skill as loaded only when its load_skill call is in live and its
+  // result is not stubbed; otherwise an explicit /skill pick after compaction
+  // sends no body and no body is in the prompt.
+  const bodiesText = hasLoadSkill
+    ? formatSkillBodies(
+        requestedNames,
+        loadedSkillNamesFromEnvelopes(
+          live.filter((envelope) => envelope.seq >= keepToolsFrom),
+        ),
+      )
+    : '';
+  const bodiesMessage: ChatCompletionMessageParam | null = bodiesText
+    ? { role: 'system', content: bodiesText }
+    : null;
+
   const lastUserSeq = users.at(-1);
   const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
 
@@ -620,17 +629,13 @@ export function assembleContext(
     ...turnMessages,
   ]);
 
-  const loadSkillIds = loadSkillCallIds(live);
-  let skillsLoadedChars = 0;
-  for (const envelope of live) {
-    if (
-      envelope.record.role === 'tool' &&
-      loadSkillIds.has(envelope.record.tool_call_id)
-    ) {
-      skillsLoadedChars += envelope.record.content.length;
-    }
-  }
-  const skillsLoadedTokens = charsToTokens(skillsLoadedChars);
+  // Use the assembled messages, not raw ledger content: the prompt may hold
+  // stubbed or capped versions of load_skill results, and conversationTokens
+  // subtracts this from a total built from those same messages.
+  const skillsLoadedTokens = loadSkillTokensFromMessages([
+    ...tailMessages,
+    ...turnMessages,
+  ]);
   const conversationTokens = Math.max(
     0,
     layerTokens([...tailMessages, ...turnMessages]) - skillsLoadedTokens,

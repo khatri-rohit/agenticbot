@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Brain, Check, ChevronDown, ImageIcon, Search } from 'lucide-react';
 import {
   CLOUD_OLLAMA_MODELS,
@@ -63,23 +63,25 @@ export function ModelPicker({
   // Keep activeIndex in bounds when the filter changes.
   const clampedIndex = Math.min(activeIndex, Math.max(0, filteredModels.length - 1));
 
-  const scrollActiveIntoView = useCallback(() => {
+  // Scroll the active option into view after the index update commits, so
+  // rAF does not capture the previous clampedIndex. With aria-activedescendant
+  // the browser does not scroll automatically.
+  useEffect(() => {
+    if (!open) return;
     const list = listRef.current;
     if (!list) return;
     const item = list.children[clampedIndex] as HTMLElement | undefined;
     item?.scrollIntoView({ block: 'nearest' });
-  }, [clampedIndex]);
+  }, [clampedIndex, open]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (filteredModels.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setActiveIndex((i) => Math.min(i + 1, filteredModels.length - 1));
-      requestAnimationFrame(scrollActiveIntoView);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
-      requestAnimationFrame(scrollActiveIntoView);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const selected = filteredModels[clampedIndex];
@@ -161,7 +163,7 @@ export function ModelPicker({
                 key={m.id}
                 id={`model-option-${m.id}`}
                 role="option"
-                aria-selected={m.id === modelId}
+                aria-selected={index === clampedIndex}
                 type="button"
                 className={cn(
                   'flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent',

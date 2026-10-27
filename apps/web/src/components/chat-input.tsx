@@ -721,10 +721,9 @@ export function ChatInput({
         }
       }
 
-      if (skillSlashOpen) {
+      if (skillSlashOpen && visibleSkills.length > 0) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          if (visibleSkills.length === 0) return;
           setSkillSlashActive((index) =>
             Math.min(index + 1, visibleSkills.length - 1),
           );
@@ -746,6 +745,14 @@ export function ChatInput({
           setSkillSlashOpen(false);
           return;
         }
+      }
+
+      // Picker is open but empty: still let Escape close it, but let other
+      // keys (Enter, arrows) fall through to normal input handling.
+      if (skillSlashOpen && e.key === 'Escape') {
+        e.preventDefault();
+        setSkillSlashOpen(false);
+        return;
       }
 
       if (e.key === 'Backspace') {

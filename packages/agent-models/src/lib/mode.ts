@@ -46,7 +46,7 @@ export const HOME_MODE: ModeConfig = {
   limits: {
     maxIterations: 40,
     maxToolCalls: 80,
-    maxRepeatedToolCalls: 2,
+    maxRepeatedToolCalls: 4,
     toolTimeoutMs: 45_000,
   },
 };
@@ -71,9 +71,9 @@ export const WORKSPACE_MODE: ModeConfig = {
     'offer_choice',
   ],
   limits: {
-    maxIterations: 100,
-    maxToolCalls: 200,
-    maxRepeatedToolCalls: 3,
+    maxIterations: 200,
+    maxToolCalls: 450,
+    maxRepeatedToolCalls: 8,
     toolTimeoutMs: 120_000,
   },
 };

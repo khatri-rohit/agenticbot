@@ -532,7 +532,33 @@ export const editFileTool: Tool = {
     // EOL-flexible match: the model's span may use LF while the file on disk
     // is CRLF (git autocrlf). Match on normalized text, splice in the file's
     // own EOL style so the edit never rewrites line endings.
-    const fileEol = existing.includes('\r\n') ? '\r\n' : '\n';
+    const hasCrlf = existing.includes('\r\n');
+    // Detect a bare LF that is not part of a CRLF pair (mixed line endings).
+    const hasBareLf = hasCrlf
+      ? existing.replace(/\r\n/g, '').includes('\n')
+      : existing.includes('\n');
+    // Mixed-EOL file: normalizing then re-expanding would rewrite every line
+    // to one style. Fall back to exact match on the original string.
+    if (hasCrlf && hasBareLf) {
+      const exactCount = existing.split(oldText).length - 1;
+      if (exactCount === 0) {
+        return `oldText span not found in ${relPath}. Re-read the file and copy an exact unique span.`;
+      }
+      if (exactCount > 1) {
+        return `oldText span matches ${exactCount} times in ${relPath}. Re-read the file and use a longer unique span.`;
+      }
+      const next = replaceOnce(existing, oldText, newText);
+      await writeFile(resolved.abs, next, 'utf8');
+      return formatEditReport({
+        action: 'patched',
+        relPath,
+        before: existing,
+        after: next,
+        removed: oldText,
+        added: newText,
+      });
+    }
+    const fileEol = hasCrlf ? '\r\n' : '\n';
     const normalized = existing.replace(/\r\n/g, '\n');
     const normalizedOld = oldText.replace(/\r\n/g, '\n');
     const normalizedNew = newText.replace(/\r\n/g, '\n');

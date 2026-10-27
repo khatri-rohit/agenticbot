@@ -260,7 +260,7 @@ function ToolCard({ row }: { row: ToolCallRow }) {
         </div>
       ) : (
         <div className="relative min-w-0 max-h-24 overflow-hidden border-t border-border/40 bg-background/40">
-          <ToolPreview row={row} summary={summary} />
+          <ToolPreview row={teaserRow(row)} summary={summary} />
           {/* Fade-to-edge so the clipped teaser reads as "more below — expand". */}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-background/90 to-transparent" />
         </div>
@@ -290,6 +290,15 @@ function ToolCard({ row }: { row: ToolCallRow }) {
 
 /** Per-type preview body. Picks a renderer by tool name; falls back to a
  *  generic args + result view. All renderers share the 60vh scroll cap. */
+
+// Collapsed cards mount the preview too; cap result text so a large ledger
+// tool row does not build tens of thousands of hidden DOM nodes by default.
+const TEASER_MAX_CHARS = 2000;
+function teaserRow(row: ToolCallRow): ToolCallRow {
+  if (!row.result || row.result.length <= TEASER_MAX_CHARS) return row;
+  return { ...row, result: row.result.slice(0, TEASER_MAX_CHARS) };
+}
+
 function ToolPreview({
   row,
   summary,

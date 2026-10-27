@@ -123,9 +123,13 @@ export function useContextMeter(options: {
 
   // Success-only hydrate mark — cancel/fail leaves thread unset so we retry.
   const lastEstimateDraftLen = useRef(0);
-  const lastEstimateThreadId = useRef<string | undefined>(undefined);
-  // In-flight hydrate for this thread; blocks re-schedule while typing churns deps.
-  const hydrateRequestedThreadId = useRef<string | undefined>(undefined);
+  // Key by thread + the options that change the estimate (model, local,
+  // webSearch, posture, skills). A model or posture change after a successful
+  // hydrate must re-fetch, not serve a stale windowTokens from the old config.
+  const estimateKey = `${threadId ?? ''}|${composerOptions.model ?? ''}|${composerOptions.local ?? ''}|${composerOptions.webSearch ?? ''}|${composerOptions.posture ?? ''}|${skillHints?.requested?.join(',') ?? ''}`;
+  const lastEstimateKey = useRef<string | undefined>(undefined);
+  // In-flight hydrate for this key; blocks re-schedule while typing churns deps.
+  const hydrateRequestedKey = useRef<string | undefined>(undefined);
 
   const estimateArgs = {
     threadId,
@@ -147,19 +151,19 @@ export function useContextMeter(options: {
     if (hasLiveReport && !hasDraft) return;
 
     const needsHydrate =
-      lastEstimateThreadId.current !== threadId &&
-      hydrateRequestedThreadId.current !== threadId;
+      lastEstimateKey.current !== estimateKey &&
+      hydrateRequestedKey.current !== estimateKey;
     if (!needsHydrate) return;
 
     let cancelled = false;
-    hydrateRequestedThreadId.current = threadId;
+    hydrateRequestedKey.current = estimateKey;
     const timer = window.setTimeout(() => {
       void fetchContextEstimate(estimateArgs)
         .then((res) => {
           if (cancelled) return;
-          lastEstimateThreadId.current = threadId;
+          lastEstimateKey.current = estimateKey;
           lastEstimateDraftLen.current = combinedDraft.length;
-          hydrateRequestedThreadId.current = undefined;
+          hydrateRequestedKey.current = undefined;
           setServerEstimate({
             tokens: res.estimatedPromptTokens,
             layers: res.contextReport.layers,
@@ -170,7 +174,7 @@ export function useContextMeter(options: {
         })
         .catch(() => {
           if (cancelled) return;
-          hydrateRequestedThreadId.current = undefined;
+          hydrateRequestedKey.current = undefined;
           setServerEstimate(null);
         });
     }, 250);
@@ -180,10 +184,10 @@ export function useContextMeter(options: {
       window.clearTimeout(timer);
       // Allow retry when this attempt was aborted before success.
       if (
-        hydrateRequestedThreadId.current === threadId &&
-        lastEstimateThreadId.current !== threadId
+        hydrateRequestedKey.current === estimateKey &&
+        lastEstimateKey.current !== estimateKey
       ) {
-        hydrateRequestedThreadId.current = undefined;
+        hydrateRequestedKey.current = undefined;
       }
     };
     // Draft length intentionally omitted — threshold effect handles large pastes.
@@ -215,8 +219,8 @@ export function useContextMeter(options: {
         .then((res) => {
           if (cancelled) return;
           lastEstimateDraftLen.current = draftLen;
-          if (lastEstimateThreadId.current !== threadId) {
-            lastEstimateThreadId.current = threadId;
+          if (lastEstimateKey.current !== estimateKey) {
+            lastEstimateKey.current = estimateKey;
           }
           setServerEstimate({
             tokens: res.estimatedPromptTokens,

@@ -35,7 +35,7 @@ User message (apps/web)
 
 How to think about this system when changing it or prompting it. (Response branching is not in the tree; rewind stays.)
 
-1. **The loop is a budget machine.** Home caps iterations and tool calls; Workspace omits those caps and relies on the repeat detector, tool timeouts, cancel, and context residency (`packages/agent-core/src/lib/loop/limits.ts`). Tune budgets and residency when the model loops — almost never the system prompt.
+1. **The loop is a budget machine.** Home caps iterations and tool calls; Workspace sets its own finite iteration/tool caps via `WORKSPACE_MODE` and also relies on the repeat detector, tool timeouts, cancel, and context residency (`packages/agent-core/src/lib/loop/limits.ts`). Tune budgets and residency when the model loops — almost never the system prompt.
 
 2. **Context is a cache; stubbing is eviction.** `assembleContext` evicts by role: old tool results stub first, old image attachments stub next (`keepAttachmentsForTurns`), large bodies spill to blobs, the tape compact last. Judge new capabilities by cache residency.
 

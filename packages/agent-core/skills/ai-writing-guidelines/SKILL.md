@@ -1,11 +1,9 @@
 ---
 name: ai-writing-guidelines
-description: Default anti-slop prose direction for this agent — rules, banned-phrase list, prompt template, and review loop so user-facing writing stays specific, human, and vocabulary-safe. Load when drafting or rewriting docs, explanations, posts, emails, product copy, or any reply the user will read as finished prose; also when the user asks to de-slop, sound less AI, or check writing quality. Short house style in identity is always-on; load this for the full guided checklist so long exposure to the agent does not flatten the reader's vocabulary into AI defaults.
+description: Anti-slop prose direction — rules, banned-phrase list, prompt template, and review loop so user-facing writing stays specific, human, and vocabulary-safe. Load when drafting or rewriting docs, explanations, posts, emails, product copy, or any reply the user will read as finished prose; also when the user asks to de-slop, sound less AI, or check writing quality.
 ---
 
 # The Anti-Slop Writing Guide
-
-By Louis-Francois Bouchard ([LinkedIn](https://www.linkedin.com/in/whats-ai/), [X](https://twitter.com/Whats_AI), [YouTube](https://youtube.com/whats_ai), [other AI resources here](https://links.louisbouchard.ai/))
 
 **Rules, copy-paste prompts, and a review loop for writing with AI that doesn't read like AI.**
 
@@ -14,10 +12,6 @@ By Louis-Francois Bouchard ([LinkedIn](https://www.linkedin.com/in/whats-ai/), [
 Treat this pack as the default writing bar for finished prose. Identity already sets short house style; load this when substance, phrases, structure, or a review pass matters. Goal: the user can work with the agent for a long time without absorbing predictable AI vocabulary and formulas.
 
 This edition (October 2026) is built from [ToneBench](https://benchmark.towardsai.com/), our writing benchmark: a 10,000-word judge rubric refined over four months, a deterministic slop detector, and 6,750 judged drafts from 135 model configurations. We removed everything specific to one author's voice. What's left applies to any writer and any format.
-
-Watch the free accompanying video: [https://youtu.be/bMlvTbg1hVk](https://youtu.be/bMlvTbg1hVk)
-
-**New from the same team:** [_AI Engineering For Production_](https://www.louisbouchard.ai/book/?utm_source=github-lf&utm_medium=antislop-top&utm_campaign=book), our book on making LLMs and agents reliable with prompting, RAG, evaluation, and harnesses. It comes out before the end of 2026; [join the waitlist](https://www.louisbouchard.ai/book/?utm_source=github-lf&utm_medium=antislop-top&utm_campaign=book) to hear the date first.
 
 ---
 
@@ -561,26 +555,3 @@ Over-correction produces its own slop. Keep these in mind before you cut.
 
 ---
 
-## Go further: AI Engineering For Production
-
-<a href="https://www.louisbouchard.ai/book/?utm_source=github-lf&utm_medium=antislop-end&utm_campaign=book"><img src="https://www.louisbouchard.ai/media/book/ai-engineering-for-production-front-cover-700.webp" alt="AI Engineering For Production book cover" width="180" align="right"></a>
-
-This guide gets good writing out of a model. Shipping an AI product takes the same care at every layer: the prompts, the context the model sees, the agent's tools and permissions, and the tests that tell you whether a change helped.
-
-That's the subject of our new book, _**AI Engineering For Production**: Making LLMs and agents reliable with Prompting, RAG, Evaluation, and Harnesses_, from the authors of the best-selling _Building LLMs for Production_.
-
-- **Prompting and context:** specify behavior and boundaries, and give the model the inputs it actually needs.
-- **Change a prompt and know if it helped:** representative cases and graders, the production version of the review loop above.
-- **Agents that stay inside their limits:** tools, state, permissions, checkpoints, and human approval where a mistake costs the most.
-- **Know why it failed:** traces and failure categories that turn a bad output into a specific fix.
-- **Harnesses and recovery:** retries, fallbacks, and the loops that improve the system over time.
-
-You can vibe code an app in a weekend. Keeping it working is the skill this book teaches.
-
-It comes out before the end of 2026. **[Join the waitlist →](https://www.louisbouchard.ai/book/?utm_source=github-lf&utm_medium=antislop-end&utm_campaign=book)** to get the release date first and an invite to the live launch.
-
----
-
-This guide (and the writing patterns behind it) is what we teach in the Towards AI courses.
-
-**Learn more in our full course:** [AI for Business Professionals](https://academy.towardsai.net/courses/ai-business-professionals?ref=1f9b29)

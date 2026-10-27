@@ -39,6 +39,7 @@ import {
   resolveChoice,
   type ComposerOptions,
 } from '../api/agent-client';
+import { skillTokensInText } from '@/components/skill-slash-picker';
 import {
   fetchLedger,
   fetchThread,
@@ -440,7 +441,12 @@ export function useAgentRun(threadId: string | null) {
     };
     setQueuedMessage(null);
     await interruptActiveRun();
-    if (chatStateRef.current.activeRun) return;
+    if (chatStateRef.current.activeRun) {
+      // Stop failed; the run is still active. Restore the queued message so
+      // the user's text and attachments are not silently lost.
+      setQueuedMessage({ content, options, attachments });
+      return;
+    }
     await startRunForMessages(content, flushOptions, {
       skipQueue: true,
       attachments,
@@ -521,6 +527,7 @@ export function useAgentRun(threadId: string | null) {
       if (userSeq === undefined) return;
 
       const local = composerOptions.local === true;
+      const requested = skillTokensInText(trimmed);
       const runId = await startRun(threadId, {
         rewindThroughSeq: userSeq - 1,
         message: { content: trimmed, attachments: lastUser.attachments },
@@ -529,6 +536,7 @@ export function useAgentRun(threadId: string | null) {
         local,
         thinking: composerOptions.thinking,
         posture: normalizeRunPosture(composerOptions.posture),
+        ...(requested.length > 0 ? { skills: { requested } } : {}),
       });
 
       const restored = await fetchLedger(threadId);

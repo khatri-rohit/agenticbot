@@ -98,16 +98,24 @@ function endpointFromLocal(local: boolean | undefined): OllamaEndpoint {
 }
 
 /** Map a RunLoopResult into the persisted last-run status + limit reason. */
-function lastRunStatusFrom(result: {
-  status: string;
-  content: string;
-  limitReason?: string;
-}): {
+function lastRunStatusFrom(
+  result: {
+    status: string;
+    content: string;
+    limitReason?: string;
+    runId: string;
+  },
+  runManager: RunManager,
+): {
   status: 'completed' | 'incomplete' | 'error';
   incomplete: boolean;
   limitReason?: string;
 } {
-  const cancelled = result.status === 'error' && /run cancelled/i.test(result.content);
+  // Detect cancellation from the RunHandle flag, not from error text — the
+  // string is produced elsewhere and coupling to it breaks if it changes.
+  const cancelled =
+    result.status === 'error' &&
+    runManager.get(result.runId)?.cancelled === true;
   if (cancelled) return { status: 'incomplete', incomplete: true, limitReason: 'Run cancelled' };
   if (result.status === 'incomplete') {
     return { status: 'incomplete', incomplete: true, limitReason: result.limitReason };
@@ -717,7 +725,7 @@ router.post('/run', async (req: Request, res: Response) => {
     trace: traceSink,
     onFinished: async (result) => {
       try {
-        const runStatus = lastRunStatusFrom(result);
+        const runStatus = lastRunStatusFrom(result, runManager);
         await store.writeLastRun(threadId, {
           runId: result.runId,
           status: runStatus.status,

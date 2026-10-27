@@ -167,7 +167,12 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
     router.push('/');
   };
 
+  // Re-entry guard: the folder picker POST opens a native dialog on the API
+  // host; repeated clicks must not stack requests.
+  const pickingRef = useRef(false);
   const pickWorkspaceFolderAction = async () => {
+    if (pickingRef.current) return;
+    pickingRef.current = true;
     try {
       const selected = await pickWorkspaceFolder(workspaceRoot);
       if (!selected) return;
@@ -180,6 +185,8 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
           : 'Could not open the folder picker. The dialog runs on the API host — start @agent/api on this machine and try again.',
         'Folder picker failed',
       );
+    } finally {
+      pickingRef.current = false;
     }
   };
 
@@ -675,7 +682,18 @@ function ThreadItem({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={handleRenameKey}
-            onBlur={() => void commitRename()}
+            onBlur={(e) => {
+              // Skip commit when focus moves to the Save/Cancel button inside
+              // this editor; otherwise Cancel's click never fires (the button
+              // unmounts on blur-commit) and Tab-to-Cancel saves the draft.
+              if (
+                e.relatedTarget instanceof Node &&
+                e.currentTarget.parentElement?.contains(e.relatedTarget)
+              ) {
+                return;
+              }
+              void commitRename();
+            }}
             rows={1}
             aria-label="Rename chat"
             className="type-ui min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-0.5 text-sm leading-snug shadow-none focus-visible:ring-0"
@@ -686,6 +704,7 @@ function ThreadItem({
               variant="ghost"
               size="sm"
               className="h-7 px-2 text-xs"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={cancelRename}
               aria-label="Cancel rename"
             >
@@ -695,6 +714,7 @@ function ThreadItem({
               type="button"
               size="sm"
               className="h-7 px-2 text-xs"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => void commitRename()}
               aria-label="Save name"
             >

@@ -1268,6 +1268,10 @@ export async function runLoop(
     ...(config.contextReport ? { contextReport: config.contextReport } : {}),
   });
 
+  // Hoisted so the outer catch can skip any unanswered tool calls of the
+  // turn in progress when the loop throws — upholds I1 (every tool_call_id
+  // gets one durable tool row) on the error path.
+  let turnToolCalls: ChatCompletionMessageToolCall[] = [];
   try {
     while (
       limits.maxIterations === undefined ||
@@ -1322,6 +1326,7 @@ export async function runLoop(
           },
           { durationMs },
         );
+        turnToolCalls = turn.toolCalls;
 
         // Tool turns end like any other: the ledger row is durable, so the
         // client can settle this assistant message before tools run.
@@ -1532,6 +1537,19 @@ export async function runLoop(
     return completeAfterLimit();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
+    // I1: close the gap on the error path. A throw mid-turn can leave
+    // tool_call_ids without a durable tool row; the ledger is the truth.
+    if (turnToolCalls.length > 0) {
+      try {
+        await skipToolCalls(
+          unansweredToolCalls(turnToolCalls),
+          'Skipped: run errored.',
+        );
+      } catch {
+        /* best-effort; the run is already failing */
+      }
+    }
 
     trace({
       type: 'tool_error',
