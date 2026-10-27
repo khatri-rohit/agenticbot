@@ -39,12 +39,13 @@ const OPEN_PLAN_WORK_NUDGE =
 const USER_SKIPPED_CHOICE =
   'User skipped this choice. Stop. Do not assume a path or keep editing.';
 
-type ToolStage = 'skill' | 'read' | 'network' | 'mutate';
+type ToolStage = 'skill' | 'read' | 'network' | 'exec' | 'mutate';
 
 function toolStage(name: string): ToolStage {
   if (name === 'load_skill') return 'skill';
   if (name === 'glob' || name === 'grep' || name === 'read_file') return 'read';
   if (name === 'web_search' || name === 'web_fetch') return 'network';
+  if (name === 'run_terminal') return 'exec';
   return 'mutate';
 }
 
@@ -184,25 +185,43 @@ function pathFromToolArgs(args: unknown): string | null {
 }
 
 /**
- * Outcome key for mutate-stage stuck detection. edit_file keys on path+result
- * so varied failing spans on the same file accumulate; other mutates keep
+ * Outcome key for mutate/exec stuck detection. edit_file keys on path+result
+ * so varied failing spans on the same file accumulate; run_terminal keys on
+ * the exit-code prefix (cwd + exit/signal line) so two builds with the same
+ * first error but different file counts don't falsely match; other tools keep
  * call+result (repeat guard already covers identical args).
  */
 function outcomeKey(toolName: string, args: unknown, result: string): string {
-  const resultHash = sha256Text(result.slice(0, 2000));
   if (toolName === 'edit_file') {
     const filePath = pathFromToolArgs(args) ?? toolCallKey(toolName, args);
-    return `${toolName}:${filePath}#${resultHash}`;
+    return `${toolName}:${filePath}#${sha256Text(result.slice(0, 2000))}`;
   }
-  return `${toolCallKey(toolName, args)}#${resultHash}`;
+  if (toolName === 'run_terminal') {
+    // Result format: "cwd: <path>\nexit <code>\n<body>" / "cwd: <path>\nsignal <n>\n<body>"
+    // Hash the first two lines (cwd + status) — the exit-code-bearing prefix.
+    // Two runs with the same exit code but different output bodies are progress
+    // (different errors being fixed); same exit code + same cwd 3× = stuck.
+    const newlineIdx = result.indexOf('\n');
+    const prefix =
+      newlineIdx === -1
+        ? result
+        : result.slice(0, result.indexOf('\n', newlineIdx + 1));
+    return `${toolCallKey(toolName, args)}#${sha256Text(prefix)}`;
+  }
+  return `${toolCallKey(toolName, args)}#${sha256Text(result.slice(0, 2000))}`;
+}
+
+/** edit_file results start with "Created" or "Patched" on success. */
+function isEditSuccess(result: string): boolean {
+  return result.startsWith('Created') || result.startsWith('Patched');
 }
 
 /** Invented tool names in one run before hard halt (I1 + I6). */
 const MAX_UNKNOWN_TOOL_STREAK = 2;
 /** Distinct read_file admits per path per run (stops offset paging storms). */
 const MAX_READ_FILE_PER_PATH = 30;
-/** run_terminal admits per run (stops shell flood). */
-const MAX_TERMINAL_CALLS = 25;
+/** run_terminal admits per run (stops shell flood; migrations run 40+ builds). */
+const MAX_TERMINAL_CALLS = 60;
 /** Identical mutate call+result before stuck halt. */
 const MAX_IDENTICAL_OUTCOMES = 3;
 
@@ -344,6 +363,9 @@ export async function runLoop(
   const readFileByPath = new Map<string, number>();
   const repeatedCalls = new Map<string, number>();
   const repeatedOutcomes = new Map<string, number>();
+  // Exec-stage outcome keys tracked so a successful edit_file can clear them:
+  // an edit between identical build exits is progress, not stuck-ness.
+  const execOutcomeKeys = new Set<string>();
 
   function noteLimit(reason: string): void {
     lastLimitReason = reason;
@@ -756,7 +778,14 @@ export async function runLoop(
     const repeatCount = (repeatedCalls.get(callKey) ?? 0) + 1;
     repeatedCalls.set(callKey, repeatCount);
 
-    if (repeatCount > limits.maxRepeatedToolCalls) {
+    // Exec tools (run_terminal) are exempt from the arg-repeat guard: re-running
+    // the same build after an edit is legitimate verification, and outcome dedup
+    // (MAX_IDENTICAL_OUTCOMES) catches true stuck-ness. The arg-repeat guard
+    // stays for mutate/read/network/skill.
+    if (
+      repeatCount > limits.maxRepeatedToolCalls &&
+      toolStage(toolName) !== 'exec'
+    ) {
       noteLimit(
         limitMessage('limit.repeat', `repeated tool call blocked: ${toolName}`),
       );
@@ -883,11 +912,14 @@ export async function runLoop(
         tool_call_id: toolCall.id,
         content: result,
       });
-      // Mutate-stage only: same call + same result = stuck (e.g. write theater).
-      if (toolStage(toolName) === 'mutate') {
+      // Mutate + exec: same call + same result = stuck (e.g. write theater,
+      // or run_terminal producing the same exit code with no edit between).
+      const stage = toolStage(toolName);
+      if (stage === 'mutate' || stage === 'exec') {
         const key = outcomeKey(toolName, args, result);
         const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
         repeatedOutcomes.set(key, outcomeCount);
+        if (stage === 'exec') execOutcomeKeys.add(key);
         if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
           noteLimit(
             limitMessage(
@@ -897,6 +929,13 @@ export async function runLoop(
           );
           return 'halted';
         }
+      }
+      // A successful edit_file is progress: prior exec outcomes (build/lint
+      // exits) are now stale. Clear them so the next verification cycle starts
+      // fresh instead of accumulating toward a false stuck-ness halt.
+      if (toolName === 'edit_file' && isEditSuccess(result)) {
+        for (const k of execOutcomeKeys) repeatedOutcomes.delete(k);
+        execOutcomeKeys.clear();
       }
       return 'ok';
     } catch (error) {
@@ -1323,6 +1362,7 @@ export async function runLoop(
           skill: [],
           read: [],
           network: [],
+          exec: [],
           mutate: [],
         };
         for (const call of ready) {
@@ -1342,7 +1382,7 @@ export async function runLoop(
           return 'ok' as const;
         };
 
-        // I4 staging: skill → read → network → mutate. Abort only on
+        // I4 staging: skill → read → network → exec → mutate. Abort only on
         // deferred|halted — never short-circuit on truthy 'ok'.
         let batchOutcome: 'ok' | 'deferred' | 'halted' = 'ok';
         for (const stageBatch of [staged.skill, staged.read] as const) {
@@ -1350,7 +1390,11 @@ export async function runLoop(
           if (batchOutcome !== 'ok') break;
         }
         if (batchOutcome === 'ok') {
-          for (const stageBatch of [staged.network, staged.mutate] as const) {
+          for (const stageBatch of [
+            staged.network,
+            staged.exec,
+            staged.mutate,
+          ] as const) {
             batchOutcome = await runSerial(stageBatch);
             if (batchOutcome !== 'ok') break;
           }
