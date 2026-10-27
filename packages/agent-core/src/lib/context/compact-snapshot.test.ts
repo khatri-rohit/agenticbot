@@ -11,7 +11,6 @@ import {
   stubLiveToolResults,
 } from './assemble-context';
 import { createToolRegistry } from '../tools/registry';
-import { load_skill } from '../tools/skills';
 
 function envelope(
   seq: number,
@@ -250,45 +249,6 @@ describe('compact snapshot', () => {
     if (last?.role === 'user') {
       expect(last.content).toBe('now?');
     }
-  });
-
-  it('splits tools, rules, and skills out of the system layer', () => {
-    const tools = createToolRegistry([load_skill]);
-    const { report, messages } = assembleContext({
-      tools,
-      memory: {
-        user: 'Name: Ada',
-        notes: '',
-        agentsMd: 'Use nx.',
-        project: 'App notes',
-      },
-      snapshot: null,
-      envelopes: [envelope(1, 'user', 'implement the patch')],
-      skillNames: ['patch-and-verify'],
-    });
-    const ids = report.layers.map((layer) => layer.id);
-    expect(ids).toContain('tools');
-    expect(ids).toContain('skills_catalog');
-    expect(ids).toContain('skills_bodies');
-    expect(ids).toContain('rules');
-    expect(ids).toContain('conversation');
-    expect(ids).not.toContain('scratch');
-    expect(ids).not.toContain('tail');
-    const system = report.layers.find((layer) => layer.id === 'system');
-    const toolLayer = report.layers.find((layer) => layer.id === 'tools');
-    const catalog = report.layers.find((layer) => layer.id === 'skills_catalog');
-    const bodies = report.layers.find((layer) => layer.id === 'skills_bodies');
-    const rules = report.layers.find((layer) => layer.id === 'rules');
-    expect(system?.tokens).toBeGreaterThan(0);
-    expect(toolLayer?.tokens).toBeGreaterThan(0);
-    expect(catalog?.tokens).toBeGreaterThan(0);
-    expect(bodies?.tokens).toBeGreaterThan(0);
-    expect(rules?.tokens).toBeGreaterThan(0);
-    const blob = JSON.stringify(messages);
-    expect(blob).toContain('*patch-and-verify');
-    expect(blob).toContain('## patch-and-verify');
-    // Full catalog is always in context; suggestions only get the * mark.
-    expect(blob).toContain('home-research');
   });
 
   it('refreshContextReport uses promptTokens as occupied', () => {

@@ -37,9 +37,7 @@ export type RunHandle = {
   emitter: EventEmitter;
   result: RunLoopResult | null;
   pendingChoices: Map<string, PendingChoiceWaiter>;
-  /** Workspace root for mutex enforcement (coding runs only). */
-  workspaceRoot?: string;
-  /** Posture: ask runs are read-only and don't need the workspace mutex. */
+  /** Posture: ask runs are read-only. */
   posture?: RunPosture;
 };
 
