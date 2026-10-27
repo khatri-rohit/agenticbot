@@ -175,4 +175,4 @@ export type {
   ContextReport,
   Snapshot,
 } from './lib/context.js';
-export { DEFAULT_CONTEXT_BUDGET } from './lib/context.js';
+export { DEFAULT_CONTEXT_BUDGET, parseSnapshot } from './lib/context.js';

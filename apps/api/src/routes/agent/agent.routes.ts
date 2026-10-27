@@ -570,6 +570,11 @@ router.post('/run', async (req: Request, res: Response) => {
   }
 
   if (typeof rewindThroughSeq === 'number') {
+    if (!Number.isInteger(rewindThroughSeq) || rewindThroughSeq < 0) {
+      return res
+        .status(400)
+        .json({ error: 'rewindThroughSeq must be a non-negative integer' });
+    }
     await store.rewind(threadId, rewindThroughSeq);
   }
 

@@ -18,6 +18,7 @@ import {
   isWorkspaceKind,
   normalizeThreadKind,
   parseThreadPlan,
+  parseSnapshot,
   sameWorkspaceRoot,
   selectPlanForRewind,
   parseThreadLastRun,
@@ -401,16 +402,23 @@ export class ThreadStore {
     await this.restorePlanAfterRewind(threadId, keepThroughSeq);
   }
 
-  async readSnapshot(threadId: string): Promise<Snapshot | null> {
+  private async readJsonFile<T>(
+    filePath: string,
+    parse: (raw: unknown) => T,
+    fallback: T,
+  ): Promise<T> {
     try {
-      const raw = await readFile(this.snapshotPath(threadId), 'utf8');
-      return JSON.parse(raw) as Snapshot;
+      const raw = await readFile(filePath, 'utf8');
+      return parse(JSON.parse(raw));
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') return null;
-      if (error instanceof SyntaxError) return null;
+      if (err.code === 'ENOENT' || error instanceof SyntaxError) return fallback;
       throw error;
     }
+  }
+
+  async readSnapshot(threadId: string): Promise<Snapshot | null> {
+    return this.readJsonFile(this.snapshotPath(threadId), parseSnapshot, null);
   }
 
   async writeSnapshot(threadId: string, snapshot: Snapshot): Promise<void> {
@@ -426,15 +434,7 @@ export class ThreadStore {
   }
 
   async readLastRun(threadId: string): Promise<ThreadLastRun | null> {
-    try {
-      const raw = await readFile(this.lastRunPath(threadId), 'utf8');
-      return parseThreadLastRun(JSON.parse(raw));
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') return null;
-      if (error instanceof SyntaxError) return null;
-      throw error;
-    }
+    return this.readJsonFile(this.lastRunPath(threadId), parseThreadLastRun, null);
   }
 
   async writeLastRun(threadId: string, lastRun: ThreadLastRun): Promise<void> {
@@ -446,15 +446,11 @@ export class ThreadStore {
   }
 
   async readPlan(threadId: string): Promise<ThreadPlan> {
-    try {
-      const raw = await readFile(this.planPath(threadId), 'utf8');
-      return parseThreadPlan(JSON.parse(raw), threadId);
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') return emptyThreadPlan(threadId);
-      if (error instanceof SyntaxError) return emptyThreadPlan(threadId);
-      throw error;
-    }
+    return this.readJsonFile(
+      this.planPath(threadId),
+      (raw) => parseThreadPlan(raw, threadId),
+      emptyThreadPlan(threadId),
+    );
   }
 
   async writePlan(threadId: string, plan: ThreadPlan): Promise<ThreadPlan> {
@@ -512,17 +508,11 @@ export class ThreadStore {
   }
 
   private async readPlanLog(threadId: string): Promise<ThreadPlan[]> {
-    try {
-      const raw = await readFile(this.planLogPath(threadId), 'utf8');
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.map((item) => parseThreadPlan(item, threadId));
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOENT') return [];
-      if (error instanceof SyntaxError) return [];
-      throw error;
-    }
+    return this.readJsonFile(
+      this.planLogPath(threadId),
+      (raw) => (Array.isArray(raw) ? raw.map((item) => parseThreadPlan(item, threadId)) : []),
+      [],
+    );
   }
 
   private async writePlanFiles(
