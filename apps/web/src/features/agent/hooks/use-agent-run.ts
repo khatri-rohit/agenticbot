@@ -119,6 +119,7 @@ export function useAgentRun(threadId: string | null) {
   const wasRunningRef = useRef(false);
   const syncedThreadModelRef = useRef<string | null>(null);
   const [threadKind, setThreadKind] = useState<ThreadKind>('home');
+  const [isSubagentThread, setIsSubagentThread] = useState(false);
   const [ledgerEpoch, setLedgerEpoch] = useState(0);
   const bumpLedger = useCallback(() => {
     setLedgerEpoch((n) => n + 1);
@@ -134,6 +135,7 @@ export function useAgentRun(threadId: string | null) {
       syncedThreadModelRef.current = thread.id;
       const workspace = isWorkspaceKind(thread.kind);
       setThreadKind(workspace ? 'workspace' : 'home');
+      setIsSubagentThread(thread.parentThreadId !== undefined);
       if (workspace && thread.workspaceRoot) {
         setWorkspaceRoot(thread.workspaceRoot);
       } else {
@@ -595,6 +597,7 @@ export function useAgentRun(threadId: string | null) {
     isRunning: chatState.activeRun !== null,
     ledgerEpoch,
     threadKind,
+    isSubagentThread,
   };
 }
 

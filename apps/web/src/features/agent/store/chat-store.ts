@@ -38,6 +38,21 @@ export type CompactionNotice = {
   createdAt: string;
 };
 
+/** Sub-agent delegation activity for a turn (SSE or ledger hydrate). */
+export type SubagentActivity = {
+  subRunId: string;
+  subThreadId: string;
+  profile: string;
+  task: string;
+  status: 'running' | 'completed' | 'incomplete' | 'error' | 'cancelled';
+  iterations?: number;
+  toolCalls?: number;
+  summary?: string;
+  limitReason?: string;
+  /** Event seq — orders activity against settled assistant snippets. */
+  seq: number;
+};
+
 export type AssistantSnippet = {
   messageId: string;
   content: string;
@@ -53,6 +68,8 @@ export type ChatRunState = {
   posture: RunPosture;
   streamingMessage: { id: string; content: string } | null;
   toolActivity: ToolActivity[];
+  /** Sub-agent delegation cards for this run. */
+  subagentActivity: SubagentActivity[];
   /** Assistant messages settled mid-run (assistant.completed), in event order. */
   assistantSnippets: AssistantSnippet[];
   lastSeq: number;
@@ -152,6 +169,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           posture: event.posture === 'ask' ? 'ask' : 'agent',
           streamingMessage: null,
           toolActivity: [],
+          subagentActivity: [],
           assistantSnippets: [],
           lastSeq,
           ...(event.estimatedPromptTokens !== undefined
@@ -482,6 +500,52 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         ...state,
         activeRun: {
           ...state.activeRun,
+          lastSeq,
+        },
+      };
+    }
+
+    case 'subrun.started': {
+      if (!state.activeRun) return state;
+      const activity: SubagentActivity = {
+        subRunId: event.subRunId,
+        subThreadId: event.subThreadId,
+        profile: event.profile,
+        task: event.task,
+        status: 'running',
+        seq: lastSeq,
+      };
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          subagentActivity: [
+            ...state.activeRun.subagentActivity,
+            activity,
+          ],
+          lastSeq,
+        },
+      };
+    }
+
+    case 'subrun.settled': {
+      if (!state.activeRun) return state;
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          subagentActivity: state.activeRun.subagentActivity.map((item) =>
+            item.subRunId === event.subRunId
+              ? {
+                  ...item,
+                  status: event.status,
+                  iterations: event.iterations,
+                  toolCalls: event.toolCalls,
+                  summary: event.summary,
+                  ...(event.limitReason ? { limitReason: event.limitReason } : {}),
+                }
+              : item,
+          ),
           lastSeq,
         },
       };

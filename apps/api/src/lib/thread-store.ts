@@ -65,10 +65,11 @@ export class ThreadStore {
   listThreads(filter?: {
     kind?: ThreadKind;
     workspaceRoot?: string;
+    includeSubagents?: boolean;
   }): Thread[] {
     const rows = this.db
       .prepare(
-        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root
+        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root, parent_thread_id, parent_run_id
          FROM threads
          ORDER BY pinned DESC, updated_at DESC`,
       )
@@ -84,6 +85,13 @@ export class ThreadStore {
       ) {
         return false;
       }
+      // Sub-agent threads are hidden from sidebar by default.
+      if (
+        !filter?.includeSubagents &&
+        thread.parentThreadId !== undefined
+      ) {
+        return false;
+      }
       return true;
     });
   }
@@ -91,7 +99,7 @@ export class ThreadStore {
   getThread(id: string): Thread | undefined {
     const row = this.db
       .prepare(
-        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root
+        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root, parent_thread_id, parent_run_id
          FROM threads WHERE id = ?`,
       )
       .get(id) as CatalogThreadRow | undefined;
@@ -101,7 +109,12 @@ export class ThreadStore {
   async createThread(
     model: string,
     title = 'New Chat',
-    options?: { kind?: ThreadKind; workspaceRoot?: string },
+    options?: {
+      kind?: ThreadKind;
+      workspaceRoot?: string;
+      parentThreadId?: string;
+      parentRunId?: string;
+    },
   ): Promise<Thread> {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -116,10 +129,10 @@ export class ThreadStore {
 
     this.db
       .prepare(
-        `INSERT INTO threads (id, title, model, pinned, created_at, updated_at, last_seq, kind, workspace_root)
-         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?)`,
+        `INSERT INTO threads (id, title, model, pinned, created_at, updated_at, last_seq, kind, workspace_root, parent_thread_id, parent_run_id)
+         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?, ?, ?)`,
       )
-      .run(id, title, model, now, now, kind, workspaceRoot);
+      .run(id, title, model, now, now, kind, workspaceRoot, options?.parentThreadId ?? null, options?.parentRunId ?? null);
 
     return {
       id,
@@ -130,6 +143,8 @@ export class ThreadStore {
       pinned: false,
       kind,
       ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
+      ...(options?.parentRunId ? { parentRunId: options.parentRunId } : {}),
     };
   }
 
@@ -591,6 +606,8 @@ type CatalogThreadRow = {
   updated_at: string;
   kind?: string | null;
   workspace_root?: string | null;
+  parent_thread_id?: string | null;
+  parent_run_id?: string | null;
 };
 
 function rowToThread(row: CatalogThreadRow): Thread {
@@ -604,6 +621,8 @@ function rowToThread(row: CatalogThreadRow): Thread {
     pinned: row.pinned === 1,
     kind,
     ...(row.workspace_root ? { workspaceRoot: row.workspace_root } : {}),
+    ...(row.parent_thread_id ? { parentThreadId: row.parent_thread_id } : {}),
+    ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
   };
 }
 
@@ -647,6 +666,8 @@ export async function openThreadStore(home: string): Promise<ThreadStore> {
   `);
   ensureColumn(db, 'threads', 'kind', `kind TEXT NOT NULL DEFAULT 'home'`);
   ensureColumn(db, 'threads', 'workspace_root', `workspace_root TEXT`);
+  ensureColumn(db, 'threads', 'parent_thread_id', `parent_thread_id TEXT`);
+  ensureColumn(db, 'threads', 'parent_run_id', `parent_run_id TEXT`);
   db.exec(`
     UPDATE threads SET kind = 'home' WHERE kind IN ('research', '');
     UPDATE threads SET kind = 'workspace' WHERE kind = 'coding';

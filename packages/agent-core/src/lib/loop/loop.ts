@@ -39,12 +39,13 @@ const OPEN_PLAN_WORK_NUDGE =
 const USER_SKIPPED_CHOICE =
   'User skipped this choice. Stop. Do not assume a path or keep editing.';
 
-type ToolStage = 'skill' | 'read' | 'network' | 'exec' | 'mutate';
+type ToolStage = 'skill' | 'read' | 'network' | 'subagent' | 'exec' | 'mutate';
 
 function toolStage(name: string): ToolStage {
   if (name === 'load_skill') return 'skill';
   if (name === 'glob' || name === 'grep' || name === 'read_file') return 'read';
   if (name === 'web_search' || name === 'web_fetch') return 'network';
+  if (name === 'delegate') return 'subagent';
   if (name === 'run_terminal') return 'exec';
   return 'mutate';
 }
@@ -517,6 +518,10 @@ export async function runLoop(
         ? { workspaceRoot: config.workspaceRoot }
         : {}),
       ...(config.offerChoice ? { offerChoice: config.offerChoice } : {}),
+      ...(config.spawnSubagent ? { spawnSubagent: config.spawnSubagent } : {}),
+      ...(config.subagentDepth !== undefined
+        ? { subagentDepth: config.subagentDepth }
+        : {}),
       putBlob,
       ...(config.readBlob
         ? {
@@ -881,9 +886,9 @@ export async function runLoop(
     const startedAt = Date.now();
 
     try {
-      // exec tools own their timeout + process-tree kill (workspace.ts).
+      // exec tools and delegate own their timeout + process-tree kill.
       // The loop's withTimeout would race the tool's timer and leak the child.
-      const ownsTimeout = toolName === 'offer_choice' || tool.risk === 'exec';
+      const ownsTimeout = toolName === 'offer_choice' || tool.risk === 'exec' || toolName === 'delegate';
       const result = await withTimeout(
         tool.execute(args, toolCtx),
         ownsTimeout ? 0 : limits.toolTimeoutMs,
@@ -1037,9 +1042,9 @@ export async function runLoop(
       batch.map(async (call) => {
         const started = Date.now();
         try {
-          // exec tools own their timeout + process-tree kill.
+          // exec tools and delegate own their timeout + process-tree kill.
           const ownsTimeout =
-            call.toolName === 'offer_choice' || call.tool.risk === 'exec';
+            call.toolName === 'offer_choice' || call.tool.risk === 'exec' || call.toolName === 'delegate';
           const result = await withTimeout(
             call.tool.execute(call.args, toolCtx),
             ownsTimeout ? 0 : limits.toolTimeoutMs,
@@ -1367,6 +1372,7 @@ export async function runLoop(
           skill: [],
           read: [],
           network: [],
+          subagent: [],
           exec: [],
           mutate: [],
         };
@@ -1387,10 +1393,12 @@ export async function runLoop(
           return 'ok' as const;
         };
 
-        // I4 staging: skill → read → network → exec → mutate. Abort only on
-        // deferred|halted — never short-circuit on truthy 'ok'.
+        // I4 staging: skill → read → subagent → network → exec → mutate.
+        // skill, read, and subagent run parallel (executeReadyBatch);
+        // network, exec, mutate run serial (one at a time within stage).
+        // Abort only on deferred|halted — never short-circuit on truthy 'ok'.
         let batchOutcome: 'ok' | 'deferred' | 'halted' = 'ok';
-        for (const stageBatch of [staged.skill, staged.read] as const) {
+        for (const stageBatch of [staged.skill, staged.read, staged.subagent] as const) {
           batchOutcome = await executeReadyBatch(stageBatch, []);
           if (batchOutcome !== 'ok') break;
         }

@@ -38,7 +38,9 @@ export type AgentEvent =
   | RunCompleted
   | RunSettled
   | RunError
-  | LimitHit;
+  | LimitHit
+  | SubrunStarted
+  | SubrunSettled;
 
 export interface RunStarted {
   seq: number;
@@ -227,6 +229,37 @@ export interface RunSettled {
   runId: string;
   /** True when the loop finished incomplete (limit / open plan / etc.). */
   incomplete?: boolean;
+}
+
+/**
+ * A sub-agent (recursive runLoop) started under a parent run via `delegate`.
+ * Sub-events funnel through the parent run's emit, tagged with subRunId;
+ * the parent owns the seq counter. UI renders a collapsible sub-agent trail.
+ */
+export interface SubrunStarted {
+  seq: number;
+  type: 'subrun.started';
+  runId: string;
+  subRunId: string;
+  parentRunId: string;
+  /** Child thread — UI navigates here to view the sub-agent conversation. */
+  subThreadId: string;
+  profile: string;
+  task: string;
+}
+
+/** Sub-agent run finished (completed / incomplete / error / cancelled). */
+export interface SubrunSettled {
+  seq: number;
+  type: 'subrun.settled';
+  runId: string;
+  subRunId: string;
+  parentRunId: string;
+  status: 'completed' | 'incomplete' | 'error' | 'cancelled';
+  iterations: number;
+  toolCalls: number;
+  summary: string;
+  limitReason?: string;
 }
 
 /** Union of event types for filtering. */

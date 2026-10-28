@@ -25,6 +25,8 @@ export type {
   RunSettled,
   RunError,
   LimitHit,
+  SubrunStarted,
+  SubrunSettled,
 } from './lib/event.js';
 
 export type { Thread, ThreadKind } from './lib/thread.js';
@@ -112,6 +114,8 @@ export type {
   ToolOrigin,
   ToolContext,
 } from './lib/tool-context.js';
+
+export type { SubagentSpec, SubagentResult } from './lib/subagent-types.js';
 
 export type {
   ChoiceOption,

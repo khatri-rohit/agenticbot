@@ -86,6 +86,25 @@ export {
 export type { PlanStore } from './lib/tools/plan';
 export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
+// Sub-agents
+export { delegate } from './lib/subagent/delegate';
+export {
+  SUBAGENT_PROFILES,
+  getSubagentProfile,
+  listSubagentProfiles,
+} from './lib/subagent/profiles';
+export {
+  MAX_SUBAGENT_DEPTH,
+  DIGEST_MAX_CHARS,
+  encodeSubagentHeader,
+  parseSubagentHeader,
+} from './lib/subagent/types';
+export type {
+  SubagentProfile,
+  SubagentSpec,
+  SubagentResult,
+} from './lib/subagent/types';
+
 // Events / trace
 export { consoleTrace, teeTrace, traceCompactionEvent } from './lib/events/trace';
 export type { TraceEvent } from './lib/events/trace-types';

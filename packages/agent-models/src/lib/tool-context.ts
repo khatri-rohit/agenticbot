@@ -1,4 +1,5 @@
 import type { ChoiceRequest, ChoiceResult } from './choice.js';
+import type { SubagentSpec, SubagentResult } from './subagent-types.js';
 import type { TraceEvent } from './trace.js';
 
 /**
@@ -60,4 +61,12 @@ export type ToolContext = {
    * reading the tool result string. Undefined when the host passes no trace.
    */
   trace?: (event: TraceEvent) => void;
+  /**
+   * Spawn a sub-agent (recursive runLoop on a child thread). The host
+   * (RunManager) implements this per-run. Undefined in contexts without
+   * delegation support (e.g. HOME_MODE, eval harness).
+   */
+  spawnSubagent?: (spec: SubagentSpec) => Promise<SubagentResult>;
+  /** Sub-agent recursion depth (parent run = 0). Used by delegate for depth check. */
+  subagentDepth?: number;
 };

@@ -25,6 +25,7 @@ import {
 } from './conversation-rail';
 import { MessageActions } from './message-actions';
 import { CompactionCard } from './compaction-card';
+import { SubagentCard } from './subagent-card';
 import { ToolStepList } from './tool-call-panel';
 import { PlanChip } from './thread-plan-card';
 import { UserMessage } from './user-message';
@@ -85,6 +86,7 @@ export function MessageList({
         activeRunId,
         streaming: liveStreaming,
         compaction: turnCompaction,
+        subagentActivity: chatState.activeRun?.subagentActivity,
       });
       const toolCount = steps.reduce(
         (sum, step) => (step.type === 'tools' ? sum + step.rows.length : sum),
@@ -239,6 +241,7 @@ export function MessageList({
                 activeRunId,
                 streaming: liveStreaming,
                 compaction: turnCompaction,
+                subagentActivity: chatState.activeRun?.subagentActivity,
               });
               const showSteps =
                 turn.replies.length > 0 ||
@@ -320,6 +323,14 @@ export function MessageList({
                             <CompactionCard
                               key={`compaction-${step.notice.runId ?? step.notice.throughSeq}`}
                               notice={step.notice}
+                            />
+                          );
+                        }
+                        if (step.type === 'subagent') {
+                          return (
+                            <SubagentCard
+                              key={`subagent-${step.activity.subRunId}`}
+                              activity={step.activity}
                             />
                           );
                         }

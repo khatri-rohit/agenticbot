@@ -7,6 +7,7 @@ import {
 import type {
   AssistantSnippet,
   CompactionNotice,
+  SubagentActivity,
   ToolActivity,
 } from '../features/agent/store/chat-store';
 
@@ -24,6 +25,7 @@ export type TimelineStep =
   | { type: 'snippet'; messageId: string; content: string }
   | { type: 'tools'; key: string; rows: ToolCallRow[] }
   | { type: 'compaction'; notice: CompactionNotice }
+  | { type: 'subagent'; activity: SubagentActivity }
   | { type: 'stream'; content: string };
 
 function previewToArgs(value: unknown): string | undefined {
@@ -117,6 +119,7 @@ export function buildTurnTimeline(input: {
   activeRunId?: string;
   streaming?: { id: string; content: string } | null;
   compaction?: CompactionNotice | null;
+  subagentActivity?: SubagentActivity[];
 }): TimelineStep[] {
   const steps: TimelineStep[] = [];
   const activityMap = liveById(input.liveActivity);
@@ -230,6 +233,12 @@ export function buildTurnTimeline(input: {
     }
   }
   flushTools();
+
+  // Sub-agent delegation cards — rendered in seq order alongside other steps.
+  const subagentSteps = input.subagentActivity ?? [];
+  for (const activity of subagentSteps) {
+    steps.push({ type: 'subagent', activity });
+  }
 
   const streamContent = input.streaming?.content.trim();
   if (streamContent) {

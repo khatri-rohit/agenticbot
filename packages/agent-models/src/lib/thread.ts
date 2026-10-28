@@ -76,4 +76,8 @@ export interface Thread {
   kind?: ThreadKind;
   /** Absolute workspace folder when kind is workspace. */
   workspaceRoot?: string;
+  /** Parent thread when this thread is a sub-agent. Absent = top-level. */
+  parentThreadId?: string;
+  /** Parent run that spawned this sub-agent thread. */
+  parentRunId?: string;
 }

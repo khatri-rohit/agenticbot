@@ -69,6 +69,7 @@ export const WORKSPACE_MODE: ModeConfig = {
     'plan',
     'todo',
     'offer_choice',
+    'delegate',
   ],
   limits: {
     maxIterations: 200,

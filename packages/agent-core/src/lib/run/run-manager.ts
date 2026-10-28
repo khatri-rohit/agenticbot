@@ -100,8 +100,12 @@ export class RunManager {
       hasOpenPlanWork: opts.hasOpenPlanWork,
       contextBudget: opts.contextBudget,
       ...(opts.trace ? { trace: opts.trace } : {}),
+      ...(opts.spawnSubagent ? { spawnSubagent: opts.spawnSubagent } : {}),
+      ...(opts.subagentDepth !== undefined
+        ? { subagentDepth: opts.subagentDepth }
+        : {}),
       emit: (event) => {
-        if (handle.cancelled) return;
+        if (handle.cancelled && event.type !== 'subrun.settled') return;
         handle.emitter.emit(event);
       },
     });

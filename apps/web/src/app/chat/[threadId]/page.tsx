@@ -35,6 +35,7 @@ export default function ChatThreadPage({
     editLastUserMessage,
     ledgerEpoch,
     threadKind,
+    isSubagentThread,
   } = useAgentRun(threadId);
   const messages = useMessages(threadId, ledgerEpoch);
   const sentPendingRef = useRef(false);
@@ -90,6 +91,11 @@ export default function ChatThreadPage({
               </div>
             </div>
           ) : null}
+          {isSubagentThread ? (
+            <div className="px-4 py-3 text-center text-xs text-muted-foreground">
+              Sub-agent thread — read-only
+            </div>
+          ) : (
           <ChatInput
             key={threadId}
             draftScope={threadId}
@@ -111,6 +117,7 @@ export default function ChatThreadPage({
             streamingContent={chatState.activeRun?.streamingMessage?.content}
             runModel={chatState.activeRun?.model}
           />
+          )}
         </div>
       }
     >

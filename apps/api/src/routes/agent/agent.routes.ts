@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  AgentEventWithoutSeq,
   LedgerEnvelope,
   MemoryTarget,
   MessageAttachment,
@@ -57,6 +58,7 @@ import {
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
+import { createSpawnSubagent } from '../../lib/spawn-subagent';
 import { createJsonlTraceSink } from '../../lib/trace-sink.js';
 import { skillsRouter } from './skills.routes';
 import type { ThreadStore } from '../../lib/thread-store';
@@ -546,10 +548,12 @@ router.get('/threads', async (req: Request, res: Response) => {
     req.query.workspaceRoot.trim()
       ? path.resolve(req.query.workspaceRoot.trim())
       : undefined;
+  const includeSubagents = req.query.includeSubagents === 'true';
   return res.json({
     threads: store.listThreads({
       ...(kind ? { kind } : {}),
       ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(includeSubagents ? { includeSubagents: true } : {}),
     }),
   });
 });
@@ -675,6 +679,13 @@ router.post('/run', async (req: Request, res: Response) => {
   const thread = store.getThread(threadId);
   if (!thread) {
     return res.status(404).json({ error: 'Thread not found' });
+  }
+
+  // Sub-agent threads are read-only — user cannot start runs on them (Q4).
+  if (thread.parentThreadId) {
+    return res
+      .status(400)
+      .json({ error: 'Sub-agent threads are read-only' });
   }
 
   if (isWorkspaceKind(thread.kind) && !thread.workspaceRoot) {
@@ -817,6 +828,26 @@ router.post('/run', async (req: Request, res: Response) => {
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
+    // Sub-agent delegation: build closure per-run with parent context.
+    ...(isWorkspaceKind(thread.kind) && thread.workspaceRoot
+      ? {
+          spawnSubagent: createSpawnSubagent({
+            parentRunId: assignedRunId,
+            parentThreadId: threadId,
+            parentPosture: prepared.posture,
+            depth: 0,
+            workspaceRoot: thread.workspaceRoot,
+            endpoint: endpoint ?? 'cloud',
+            modelCall,
+            runManager,
+            store,
+            emit: (event: AgentEventWithoutSeq) => {
+              const handle = runManager.get(assignedRunId);
+              handle?.emitter.emit(event);
+            },
+          }),
+        }
+      : {}),
     trace: traceSink,
     onFinished: async (result) => {
       try {

@@ -16,8 +16,40 @@ import {
   X,
 } from 'lucide-react';
 import type { ToolCallRow } from '../lib/turn-timeline';
+import { SubagentCard } from './subagent-card';
+import type { SubagentActivity } from '../features/agent/store/chat-store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+/** Parse the subagent header from a delegate tool result (ledger rebuild path). */
+function parseSubagentHeader(content: string): {
+  profile: string;
+  subThreadId: string;
+  subRunId: string;
+  status: string;
+  iterations: number;
+  toolCalls: number;
+} | null {
+  const line = content.split('\n')[0];
+  if (!line.startsWith('subagent:')) return null;
+  const fields = new Map<string, string>();
+  for (const part of line.slice('subagent:'.length).split(' ')) {
+    const eq = part.indexOf('=');
+    if (eq > 0) fields.set(part.slice(0, eq), part.slice(eq + 1));
+  }
+  const profile = fields.get('profile');
+  const subThreadId = fields.get('subThreadId');
+  const subRunId = fields.get('subRunId');
+  if (!profile || !subThreadId || !subRunId) return null;
+  return {
+    profile,
+    subThreadId,
+    subRunId,
+    status: fields.get('status') ?? 'completed',
+    iterations: Number(fields.get('iterations') ?? 0),
+    toolCalls: Number(fields.get('toolCalls') ?? 0),
+  };
+}
 
 export type { ToolCallRow };
 
@@ -192,9 +224,34 @@ export function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
   if (rows.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
-      {rows.map((row) => (
-        <ToolCard key={row.toolCallId} row={row} />
-      ))}
+      {rows.map((row) => {
+        // Ledger rebuild path (UC3/UC6): delegate tool results carry a
+        // machine-readable header. Parse it and render a SubagentCard
+        // instead of a plain tool result.
+        if (row.toolName === 'delegate' && row.result) {
+          const header = parseSubagentHeader(row.result);
+          if (header) {
+            const activity: SubagentActivity = {
+              subRunId: header.subRunId,
+              subThreadId: header.subThreadId,
+              profile: header.profile,
+              task: row.args ? String(row.args).slice(0, 120) : '',
+              status: header.status as SubagentActivity['status'],
+              iterations: header.iterations,
+              toolCalls: header.toolCalls,
+              summary: row.result.split('\n').slice(2).join('\n').trim() || undefined,
+              seq: 0,
+            };
+            return (
+              <SubagentCard
+                key={`subagent-${header.subRunId}`}
+                activity={activity}
+              />
+            );
+          }
+        }
+        return <ToolCard key={row.toolCallId} row={row} />;
+      })}
     </div>
   );
 }

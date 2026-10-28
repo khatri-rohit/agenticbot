@@ -9,6 +9,8 @@ import type {
   LedgerAppendMeta,
   LedgerRecord,
   RunPosture,
+  SubagentSpec,
+  SubagentResult,
   ToolOrigin,
 } from '@agent/agent-models';
 import type { TraceEvent } from '../events/trace-types';
@@ -76,6 +78,10 @@ export type RunLoopConfig = {
   hasOpenPlanWork?: () => boolean | Promise<boolean>;
   /** Budget for mid-turn tool-result stubbing. Defaults to DEFAULT_CONTEXT_BUDGET. */
   contextBudget?: ContextBudget;
+  /** Spawn a sub-agent (recursive runLoop on a child thread). Host-injected. */
+  spawnSubagent?: (spec: SubagentSpec) => Promise<SubagentResult>;
+  /** Sub-agent recursion depth (parent run = 0). */
+  subagentDepth?: number;
 };
 
 export type RunLoopResult = {

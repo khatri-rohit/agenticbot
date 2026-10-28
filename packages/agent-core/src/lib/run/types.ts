@@ -8,6 +8,8 @@ import type {
   LedgerAppendMeta,
   LedgerRecord,
   RunPosture,
+  SubagentSpec,
+  SubagentResult,
   ToolOrigin,
   TraceEvent,
 } from '@agent/agent-models';
@@ -70,4 +72,8 @@ export type StartRunOptions = {
   contextBudget?: ContextBudget;
   /** Trace sink for offline replay / eval debugging. Optional. */
   trace?: (event: TraceEvent) => void;
+  /** Spawn a sub-agent (recursive runLoop on a child thread). Host-injected. */
+  spawnSubagent?: (spec: SubagentSpec) => Promise<SubagentResult>;
+  /** Sub-agent recursion depth (parent run = 0). */
+  subagentDepth?: number;
 };

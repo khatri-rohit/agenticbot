@@ -23,6 +23,9 @@ export type LedgerRecord =
 export type LedgerAppendMeta = {
   /** Assistant response wall-clock duration (model-call + stream time). */
   durationMs?: number;
+  /** Sub-run linkage: set when this record belongs to a delegated sub-agent. */
+  parentRunId?: string;
+  subRunId?: string;
 };
 
 export type LedgerSystemRecord = {
