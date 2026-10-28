@@ -6,6 +6,9 @@ import type {
   MemoryTarget,
   MessageAttachment,
   ModeConfig,
+  OllamaBalance,
+  OllamaBalanceLegacy,
+  OllamaBalanceModern,
   OllamaEndpoint,
   StartRunRequest,
   ThinkingValue,
@@ -43,6 +46,7 @@ import {
   getOllamaModelConfig,
   listOllamaModels,
   loadWorkspaceRules,
+  nativeOllamaBaseUrl,
   packMentionedThread,
   resolveReasoningEffort,
   getSkill,
@@ -60,6 +64,97 @@ import type { ThreadStore } from '../../lib/thread-store';
 const router = Router();
 router.use(skillsRouter);
 const runManager = new RunManager();
+
+/** Cached Ollama Cloud balance — 60s TTL to stay within the 10 req/min limit. */
+let balanceCache: { data: OllamaBalance; expiresAt: number } | null = null;
+const BALANCE_TTL_MS = 60_000;
+
+type RawBalanceIncluded = {
+  balance_usd?: number;
+  allowance_usd?: number;
+  period?: { from?: string; until?: string };
+  session?: { remaining_percent?: number; resets_at?: string };
+  weekly?: { remaining_percent?: number; resets_at?: string };
+};
+
+type RawBalanceResponse = {
+  included?: RawBalanceIncluded;
+  purchased?: { balance_usd?: number };
+};
+
+function parseBalance(raw: RawBalanceResponse): OllamaBalance {
+  const included = raw.included ?? {};
+  const result: OllamaBalance = {};
+
+  if (included.session && included.weekly) {
+    const legacy: OllamaBalanceLegacy = {
+      session: {
+        remainingPercent: included.session.remaining_percent ?? 0,
+        resetsAt: included.session.resets_at ?? '',
+      },
+      weekly: {
+        remainingPercent: included.weekly.remaining_percent ?? 0,
+        resetsAt: included.weekly.resets_at ?? '',
+      },
+    };
+    result.legacy = legacy;
+  } else if (
+    typeof included.balance_usd === 'number' &&
+    typeof included.allowance_usd === 'number'
+  ) {
+    const modern: OllamaBalanceModern = {
+      balanceUsd: included.balance_usd,
+      allowanceUsd: included.allowance_usd,
+      period: {
+        from: included.period?.from ?? '',
+        until: included.period?.until ?? '',
+      },
+    };
+    result.modern = modern;
+  }
+
+  if (typeof raw.purchased?.balance_usd === 'number') {
+    result.purchasedUsd = raw.purchased.balance_usd;
+  }
+
+  return result;
+}
+
+router.get('/usage/balance', async (_req: Request, res: Response) => {
+  if (!process.env.OLLAMA_API_KEY) {
+    res.status(404).json({ error: 'No OLLAMA_API_KEY configured' });
+    return;
+  }
+
+  if (balanceCache && Date.now() < balanceCache.expiresAt) {
+    res.json(balanceCache.data);
+    return;
+  }
+
+  try {
+    const base = nativeOllamaBaseUrl('cloud');
+    const response = await fetch(`${base}/api/balance`, {
+      headers: { Authorization: `Bearer ${process.env.OLLAMA_API_KEY}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!response.ok) {
+      res.status(response.status).json({
+        error: `Ollama balance API returned ${response.status}`,
+      });
+      return;
+    }
+
+    const raw = (await response.json().catch(() => ({}))) as RawBalanceResponse;
+    const data = parseBalance(raw);
+    balanceCache = { data, expiresAt: Date.now() + BALANCE_TTL_MS };
+    res.json(data);
+  } catch (error) {
+    res.status(502).json({
+      error: error instanceof Error ? error.message : 'Balance fetch failed',
+    });
+  }
+});
 
 /** Per-run JSONL trace files for offline replay / eval debugging. */
 const traceSink = createJsonlTraceSink(

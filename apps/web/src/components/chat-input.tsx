@@ -37,6 +37,7 @@ import {
 } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
 import { useContextMeter } from '@/features/agent/hooks/use-context-meter';
+import { useOllamaBalance } from '@/features/agent/hooks/use-ollama-balance';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
 import { useVoiceInput } from '@/features/agent/hooks/use-voice-input';
 import {
@@ -59,6 +60,7 @@ import { ModelPicker } from '@/components/model-picker';
 import { WorkspacePicker } from '@/components/workspace-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
+import { UsageMeter } from '@/components/usage-meter';
 import { SkillsPanel } from '@/components/skills-panel';
 import { registerComposerFocus } from '@/components/composer-focus';
 import { Button } from '@/components/ui/button';
@@ -475,6 +477,8 @@ export function ChatInput({
     liveRunModel: runModel,
     skillHints: { requested: skillTokensInText(input) },
   });
+
+  const ollamaBalance = useOllamaBalance({ local: composerOptions.local });
 
   // Catalog must be ready before the user types so inline `/name` tokens
   // highlight immediately; not keyed on picker open.
@@ -1066,6 +1070,10 @@ export function ChatInput({
 
   const actionControls = (
     <>
+      <UsageMeter
+        balance={ollamaBalance.balance}
+        loading={ollamaBalance.loading}
+      />
       {voice.enabled ? (
         <Button
           type="button"

@@ -90,6 +90,10 @@ export type {
   ThinkingMode,
   OllamaThinkingConfig,
   OllamaModelConfig,
+  OllamaBalanceLimit,
+  OllamaBalanceLegacy,
+  OllamaBalanceModern,
+  OllamaBalance,
 } from './lib/ollama-model.js';
 
 export type {

@@ -5,6 +5,7 @@ import type {
   MemoryFiles,
   MemoryOp,
   MessageAttachment,
+  OllamaBalance,
   OllamaEndpoint,
   OllamaListedModel,
   OllamaModelConfig,
@@ -218,6 +219,16 @@ export async function fetchCloudOllamaModels(): Promise<LocalOllamaModelsRespons
     throw new Error(body.error ?? `Failed to list cloud models: ${res.status}`);
   }
   return res.json() as Promise<LocalOllamaModelsResponse>;
+}
+
+/** Fetch Ollama Cloud balance (session/weekly limits or USD credits). */
+export async function fetchOllamaBalance(): Promise<OllamaBalance> {
+  const res = await fetch(`${API_BASE}/api/agent/usage/balance`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load balance: ${res.status}`);
+  }
+  return res.json() as Promise<OllamaBalance>;
 }
 
 export type ContextEstimateResponse = {

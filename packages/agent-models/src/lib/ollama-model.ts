@@ -34,3 +34,30 @@ export type OllamaModelConfig = {
   supportsTools: boolean;
   supportsVision: boolean;
 };
+
+/**
+ * Ollama Cloud balance — from GET https://ollama.com/api/balance.
+ * Two plan shapes: legacy (session + weekly remaining %) or modern (USD balance).
+ */
+
+export type OllamaBalanceLimit = {
+  remainingPercent: number;
+  resetsAt: string;
+};
+
+export type OllamaBalanceLegacy = {
+  session: OllamaBalanceLimit;
+  weekly: OllamaBalanceLimit;
+};
+
+export type OllamaBalanceModern = {
+  balanceUsd: number;
+  allowanceUsd: number;
+  period: { from: string; until: string };
+};
+
+export type OllamaBalance = {
+  legacy?: OllamaBalanceLegacy;
+  modern?: OllamaBalanceModern;
+  purchasedUsd?: number;
+};
