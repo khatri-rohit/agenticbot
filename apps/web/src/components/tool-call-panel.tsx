@@ -15,9 +15,31 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
+import { parseSubagentHeader, subagentDigestBody } from '@agent/agent-models';
 import type { ToolCallRow } from '../lib/turn-timeline';
+import { SubagentCard } from './subagent-card';
+import type { SubagentActivity } from '../features/agent/store/chat-store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+/** The digest markers are for the parent model; the card shows the body. */
+function stripUntrustedMarkers(text: string): string {
+  return text
+    .replace(/^UNTRUSTED_SUBAGENT_BEGIN\n?/, '')
+    .replace(/\n?UNTRUSTED_SUBAGENT_END$/, '')
+    .trim();
+}
+
+/** Objective from delegate args (JSON string), for the rebuilt card title. */
+function delegateObjective(args: string | undefined): string {
+  if (!args) return '';
+  try {
+    const parsed = JSON.parse(args) as { objective?: unknown };
+    return typeof parsed.objective === 'string' ? parsed.objective : '';
+  } catch {
+    return '';
+  }
+}
 
 export type { ToolCallRow };
 
@@ -192,9 +214,34 @@ export function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
   if (rows.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
-      {rows.map((row) => (
-        <ToolCard key={row.toolCallId} row={row} />
-      ))}
+      {rows.map((row) => {
+        // Ledger rebuild path (UC3/UC6): delegate tool results carry a
+        // machine-readable header. Parse it and render a SubagentCard
+        // instead of a plain tool result.
+        if (row.toolName === 'delegate' && row.result) {
+          const header = parseSubagentHeader(row.result);
+          if (header) {
+            const activity: SubagentActivity = {
+              subRunId: header.subRunId,
+              subThreadId: header.subThreadId,
+              profile: header.profile,
+              task: delegateObjective(row.args).slice(0, 160),
+              status: header.status,
+              iterations: header.iterations,
+              toolCalls: header.toolCalls,
+              summary: stripUntrustedMarkers(subagentDigestBody(row.result)) || undefined,
+              seq: 0,
+            };
+            return (
+              <SubagentCard
+                key={`subagent-${header.subRunId}`}
+                activity={activity}
+              />
+            );
+          }
+        }
+        return <ToolCard key={row.toolCallId} row={row} />;
+      })}
     </div>
   );
 }
@@ -385,11 +432,22 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
       </p>
     );
   }
-  const lines = content.split('\n');
+  // read_file results open with "[lines a–b of N]"; number the gutter from a.
+  // Older ledger rows have no header and start at line 1.
+  const header = content.match(/^\[lines? (\d+)(?:–\d+)? of ([^\]\n]*)\]\n/);
+  const firstLine = header ? Number(header[1]) : 1;
+  let body = header ? content.slice(header[0].length) : content;
+  // "(read_file truncated … continue with offset=…)" is a note, not a file line.
+  const note = body.match(/\n\n(\((?:read_file truncated|continue with)[^\n]*\))$/);
+  if (note) body = body.slice(0, note.index);
+  const lines = body.split('\n');
+  const label = header
+    ? `File · lines ${firstLine}–${firstLine + lines.length - 1} of ${header[2]}`
+    : `File · ${lines.length} lines`;
   return (
     <div className="min-w-0">
       <PreviewHeader
-        label={`File · ${lines.length} lines`}
+        label={label}
         onCopy={<CopyButton text={content} />}
       />
       <pre
@@ -401,12 +459,17 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
         {lines.map((line, i) => (
           <span key={i} className="block">
             <span className="mr-3 inline-block w-8 shrink-0 select-none text-right text-muted-foreground/40 tabular-nums">
-              {i + 1}
+              {firstLine + i}
             </span>
             <span>{line}</span>
           </span>
         ))}
       </pre>
+      {note ? (
+        <p className="type-caption px-3 pb-2 italic text-muted-foreground/60">
+          {note[1]}
+        </p>
+      ) : null}
     </div>
   );
 }

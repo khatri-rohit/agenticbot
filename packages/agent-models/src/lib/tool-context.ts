@@ -1,4 +1,5 @@
 import type { ChoiceRequest, ChoiceResult } from './choice.js';
+import type { SubagentSpec, SubagentResult } from './subagent-types.js';
 import type { TraceEvent } from './trace.js';
 
 /**
@@ -60,4 +61,15 @@ export type ToolContext = {
    * reading the tool result string. Undefined when the host passes no trace.
    */
   trace?: (event: TraceEvent) => void;
+  /**
+   * Spawn a sub-agent. The loop binds this to the parent run (signal, budget,
+   * capabilities, depth). Undefined where delegation is off (Home, children).
+   */
+  spawnSubagent?: (spec: SubagentSpec) => Promise<SubagentResult>;
+  /**
+   * End the run after this tool batch with `content` as the final answer.
+   * Used by a sub-agent's `report` tool so the child does not pay for one
+   * more model call just to say "done".
+   */
+  requestStop?: (content: string) => void;
 };

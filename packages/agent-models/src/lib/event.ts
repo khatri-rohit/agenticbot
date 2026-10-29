@@ -2,7 +2,8 @@ import type { ChoiceOption } from './choice.js';
 import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
 import type { ThreadPlan } from './plan.js';
-import type { RunPosture, TokenUsage } from './run.js';
+import type { RunPosture, RunUsage, TokenUsage } from './run.js';
+import type { SubagentStatus } from './subagent-types.js';
 
 /**
  * AgentEvent — the server's streaming protocol to the client.
@@ -38,7 +39,10 @@ export type AgentEvent =
   | RunCompleted
   | RunSettled
   | RunError
-  | LimitHit;
+  | LimitHit
+  | SubrunStarted
+  | SubrunProgress
+  | SubrunSettled;
 
 export interface RunStarted {
   seq: number;
@@ -53,6 +57,10 @@ export interface RunStarted {
   estimatedPromptTokens?: number;
   /** Per-layer breakdown from assembleContext (M2). */
   contextReport?: ContextReport;
+  /** Prompt-token cap for the whole run (own + sub-agents), when capped. */
+  maxPromptTokens?: number;
+  /** ISO time the run started (server clock), for the live total-elapsed clock. */
+  startedAt?: string;
 }
 
 export interface TurnStarted {
@@ -127,6 +135,8 @@ export interface TurnCompleted {
   usage?: TokenUsage;
   /** Layers rebuilt from the live prompt after this iteration. */
   contextReport?: ContextReport;
+  /** Run spend so far (own + sub-agents). */
+  runUsage?: RunUsage;
 }
 
 export interface RunCompleted {
@@ -139,6 +149,8 @@ export interface RunCompleted {
   incomplete?: boolean;
   /** Stable limit reason when incomplete (e.g. `limit.terminal: …`). */
   limitReason?: string;
+  /** Total spend for the run (own + sub-agents). */
+  usage?: RunUsage;
 }
 
 export interface RunError {
@@ -227,6 +239,49 @@ export interface RunSettled {
   runId: string;
   /** True when the loop finished incomplete (limit / open plan / etc.). */
   incomplete?: boolean;
+}
+
+/**
+ * A sub-agent started under a parent run via `delegate`. Its own events stay
+ * on the child run; the parent stream only carries these markers.
+ */
+export interface SubrunStarted {
+  seq: number;
+  type: 'subrun.started';
+  runId: string;
+  subRunId: string;
+  parentRunId: string;
+  /** Child thread — UI navigates here to view the sub-agent conversation. */
+  subThreadId: string;
+  profile: string;
+  /** The brief's objective. */
+  task: string;
+}
+
+/** Throttled child progress for the parent's sub-agent card. */
+export interface SubrunProgress {
+  seq: number;
+  type: 'subrun.progress';
+  runId: string;
+  subRunId: string;
+  toolCalls: number;
+  lastTool?: string;
+}
+
+/** Sub-agent run finished (completed / incomplete / error / cancelled). */
+export interface SubrunSettled {
+  seq: number;
+  type: 'subrun.settled';
+  runId: string;
+  subRunId: string;
+  parentRunId: string;
+  subThreadId: string;
+  status: SubagentStatus;
+  iterations: number;
+  toolCalls: number;
+  summary: string;
+  limitReason?: string;
+  usage?: RunUsage;
 }
 
 /** Union of event types for filtering. */

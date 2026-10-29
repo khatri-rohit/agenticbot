@@ -35,6 +35,7 @@ export default function ChatThreadPage({
     editLastUserMessage,
     ledgerEpoch,
     threadKind,
+    isSubagentThread,
   } = useAgentRun(threadId);
   const messages = useMessages(threadId, ledgerEpoch);
   const sentPendingRef = useRef(false);
@@ -52,6 +53,7 @@ export default function ChatThreadPage({
       model,
       thinking: pending.thinking,
       posture: pending.posture === 'ask' ? 'ask' : 'agent',
+      contextWindowMode: pending.contextWindowMode ?? 'default',
     });
     void sendMessage(
       pending.content,
@@ -62,6 +64,7 @@ export default function ChatThreadPage({
         thinking: pending.thinking,
         posture: pending.posture === 'ask' ? 'ask' : 'agent',
         ...(pending.skills ? { skills: pending.skills } : {}),
+        contextWindowMode: pending.contextWindowMode ?? 'default',
       },
       pending.attachments,
     );
@@ -90,6 +93,11 @@ export default function ChatThreadPage({
               </div>
             </div>
           ) : null}
+          {isSubagentThread ? (
+            <div className="px-4 py-3 text-center text-xs text-muted-foreground">
+              Sub-agent thread — read-only
+            </div>
+          ) : (
           <ChatInput
             key={threadId}
             draftScope={threadId}
@@ -105,12 +113,16 @@ export default function ChatThreadPage({
             onComposerOptionsChange={setComposerOptions}
             onStop={() => void stopGeneration()}
             occupiedTokens={chatState.activeRun?.occupiedTokens}
+            runPromptTokens={chatState.activeRun?.runPromptTokens}
+            runPromptCap={chatState.activeRun?.runPromptCap}
+            runUsageEstimated={chatState.activeRun?.runUsageEstimated}
             occupiedCoversStream={chatState.activeRun?.occupiedCoversStream}
             estimatedPromptTokens={chatState.activeRun?.estimatedPromptTokens}
             contextReport={chatState.activeRun?.contextReport}
             streamingContent={chatState.activeRun?.streamingMessage?.content}
             runModel={chatState.activeRun?.model}
           />
+          )}
         </div>
       }
     >
@@ -123,6 +135,12 @@ export default function ChatThreadPage({
         onEditLastUserMessage={(id, content) =>
           editLastUserMessage(id, content)
         }
+        {...(isSubagentThread
+          ? {}
+          : {
+              onContinue: () =>
+                sendMessage('Continue from where the last run stopped.'),
+            })}
       />
     </ChatShell>
   );

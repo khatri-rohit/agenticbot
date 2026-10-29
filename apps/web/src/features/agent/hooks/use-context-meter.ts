@@ -126,7 +126,7 @@ export function useContextMeter(options: {
   // Key by thread + the options that change the estimate (model, local,
   // webSearch, posture, skills). A model or posture change after a successful
   // hydrate must re-fetch, not serve a stale windowTokens from the old config.
-  const estimateKey = `${threadId ?? ''}|${composerOptions.model ?? ''}|${composerOptions.local ?? ''}|${composerOptions.webSearch ?? ''}|${composerOptions.posture ?? ''}|${skillHints?.requested?.join(',') ?? ''}`;
+  const estimateKey = `${threadId ?? ''}|${composerOptions.model ?? ''}|${composerOptions.local ?? ''}|${composerOptions.webSearch ?? ''}|${composerOptions.posture ?? ''}|${skillHints?.requested?.join(',') ?? ''}|${composerOptions.contextWindowMode ?? ''}`;
   const lastEstimateKey = useRef<string | undefined>(undefined);
   // In-flight hydrate for this key; blocks re-schedule while typing churns deps.
   const hydrateRequestedKey = useRef<string | undefined>(undefined);
@@ -140,6 +140,9 @@ export function useContextMeter(options: {
     webSearch: composerOptions.webSearch,
     posture: composerOptions.posture,
     skills: skillHints,
+    ...(composerOptions.contextWindowMode
+      ? { contextWindowMode: composerOptions.contextWindowMode }
+      : {}),
   };
 
   // Hydrate once per thread (success-gated). Not tied to draft keystrokes.

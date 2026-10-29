@@ -4,8 +4,14 @@
 
 export {
   configureSkillRoots,
+  formatPinnedSkills,
   formatSkillBodies,
   formatSkillsCatalog,
+  skillCard,
+  skillCore,
+  skillForLoad,
+  skillLintWarnings,
+  skillSections,
   getSkill,
   invalidateSkillCatalog,
   listSkillCatalogs,
@@ -34,12 +40,16 @@ export {
 // Loop
 export { runLoop } from './lib/loop/loop';
 export type {
+  CapacityGate,
   ModelCallFn,
   RunLoopConfig,
   RunLoopResult,
   RunLoopStatus,
+  SubagentParent,
+  SubagentSpawner,
 } from './lib/loop/types';
 export {
+  BUDGET_WARN_RATIO,
   DEFAULT_LIMITS,
   resolveLimits,
   type AgentLimits,
@@ -47,10 +57,16 @@ export {
 export { createStreamModelCall } from './lib/loop/model-call';
 
 // Tools
-export { createToolRegistry, ALL_TOOLS } from './lib/tools/registry';
+export {
+  createToolRegistry,
+  listTools,
+  registerToolProvider,
+  type ToolProvider,
+} from './lib/tools/registry';
 export { offer_choice } from './lib/tools/offer-choice';
-export type { Tool, ToolGuidance, ToolRegistry } from './lib/tools/type';
-export { WORKSPACE_TOOLS } from './lib/tools/workspace';
+export { recall } from './lib/tools/recall';
+export type { Tool, ToolGuidance, ToolRegistry, ToolStage } from './lib/tools/type';
+export { WORKSPACE_TOOLS, diffTool } from './lib/tools/workspace';
 export {
   resolveWorkspacePath,
   isPathInside,
@@ -61,6 +77,12 @@ export {
   refreshContextReport,
   stubLiveToolResults,
 } from './lib/context/assemble-context';
+export {
+  compactCurrentRun,
+  evictToolResults,
+  ReadDedupe,
+  retireSkillBodies,
+} from './lib/context/residency';
 export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
 export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export type {
@@ -70,6 +92,7 @@ export type {
 } from './lib/context/assemble-context';
 export {
   chooseCompactThroughSeq,
+  chooseCompactThroughSeqForTarget,
   buildExtractiveSnapshot,
   packMentionedThread,
 } from './lib/context/compact-snapshot';
@@ -85,6 +108,33 @@ export {
 } from './lib/tools/plan';
 export type { PlanStore } from './lib/tools/plan';
 export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
+
+// Sub-agents
+export { createDelegateTool } from './lib/subagent/delegate';
+export {
+  configureSubagentRoot,
+  getSubagentProfile,
+  listSubagentProfiles,
+  subagentProfileWarnings,
+} from './lib/subagent/profiles';
+export {
+  CHILD_STRIPPED_TOOLS,
+  DIGEST_MAX_CHARS,
+  MAX_CONCURRENT_SUBAGENTS,
+} from './lib/subagent/types';
+export type {
+  SubagentContext,
+  SubagentLimits,
+  SubagentProfile,
+} from './lib/subagent/types';
+export {
+  buildSubagentPrompt,
+  parseReport,
+  renderDigest,
+  renderReport,
+} from './lib/subagent/prompt';
+export { createSubagentRunner } from './lib/subagent/runner';
+export type { SubagentHost } from './lib/subagent/runner';
 
 // Events / trace
 export { consoleTrace, teeTrace, traceCompactionEvent } from './lib/events/trace';

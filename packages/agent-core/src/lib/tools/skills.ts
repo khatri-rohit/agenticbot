@@ -147,44 +147,166 @@ export function getSkill(name: string): Skill | undefined {
 }
 
 /** User-requested bodies (`/` picks). Not host guesses. */
-export function formatSkillBodies(
+/** Bodies above this are "large": they load as core + contents, then by section. */
+export const SKILL_LARGE_CHARS = 8_000;
+/** One section per load_skill call; longer sections are cut with a pointer. */
+export const SKILL_SECTION_MAX_CHARS = 12_000;
+/** Fallback core when a skill has no `## Core rules` section. */
+const SKILL_CORE_FALLBACK_CHARS = 1_200;
+/** `/` picks are pinned in full up to this total; larger picks pin core + contents. */
+export const PINNED_SKILLS_MAX_CHARS = 24_000;
+
+const CORE_HEADING = /^##\s+core rules\s*$/im;
+
+/** `## ` sections of a skill body, in order. Text before the first heading is the preamble. */
+export function skillSections(instructions: string): { title: string; body: string }[] {
+  const parts = instructions.split(/\n(?=##\s)/);
+  const sections: { title: string; body: string }[] = [];
+  for (const part of parts) {
+    const match = part.match(/^##\s+(.+)\n?/);
+    if (!match) continue;
+    sections.push({ title: match[1]!.trim(), body: part.slice(match[0].length).trim() });
+  }
+  return sections;
+}
+
+/**
+ * The must-follow rules that stay in context after a skill body is evicted:
+ * the `## Core rules` section, else the first paragraph or list block.
+ */
+export function skillCore(instructions: string): string {
+  const core = skillSections(instructions).find((section) => CORE_HEADING.test(`## ${section.title}`));
+  if (core) return core.body.trim();
+  const firstBlock = instructions.trim().split(/\n\s*\n/)[0] ?? '';
+  return firstBlock.length > SKILL_CORE_FALLBACK_CHARS
+    ? `${firstBlock.slice(0, SKILL_CORE_FALLBACK_CHARS)}…`
+    : firstBlock;
+}
+
+/** Large skills without `## Core rules` (their evicted card falls back to the first block). */
+export function skillLintWarnings(): string[] {
+  return catalog()
+    .filter(
+      (skill) =>
+        skill.instructions.length > SKILL_LARGE_CHARS &&
+        !CORE_HEADING.test(skill.instructions),
+    )
+    .map(
+      (skill) =>
+        `${skill.name}: ${Math.round(skill.instructions.length / 4)} tokens and no "## Core rules" section`,
+    );
+}
+
+function contentsLine(skill: Skill): string {
+  const sections = skillSections(skill.instructions);
+  if (sections.length === 0) return '';
+  return `Sections (load_skill with section): ${sections
+    .map((section) => `${section.title} (~${Math.round(section.body.length / 4)} tokens)`)
+    .join('; ')}`;
+}
+
+/** What load_skill returns: the whole body when small, else core + contents, or one section. */
+export function skillForLoad(skill: Skill, section?: string): string {
+  if (section) {
+    const wanted = section.trim().toLowerCase();
+    const found = skillSections(skill.instructions).find(
+      (item) => item.title.toLowerCase() === wanted,
+    );
+    if (!found) return `Section "${section}" not found in ${skill.name}. ${contentsLine(skill)}`;
+    return found.body.length > SKILL_SECTION_MAX_CHARS
+      ? `${found.body.slice(0, SKILL_SECTION_MAX_CHARS)}\n…(section cut at ${SKILL_SECTION_MAX_CHARS} chars)`
+      : found.body;
+  }
+  if (skill.instructions.length <= SKILL_LARGE_CHARS) return skill.instructions;
+  return [`# ${skill.name} — core rules`, skillCore(skill.instructions), '', contentsLine(skill)]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * Replaces a loaded skill body once it has been applied: core rules plus a
+ * reload note. The model keeps the rules; the long body stops riding along.
+ */
+export function skillCard(name: string, loadedAtIteration?: number): string {
+  const skill = getSkill(name);
+  const when = loadedAtIteration !== undefined ? ` at iteration ${loadedAtIteration}` : '';
+  if (!skill) return `(skill card) ${name} was loaded${when}; call load_skill again for the full text.`;
+  return `(skill card) ${skill.name} loaded${when}. Core rules:\n${skillCore(skill.instructions)}\nCall load_skill again for the full text or a section.`;
+}
+
+/**
+ * Bodies for `/` picks (mandatory for this send). Pinned in full while the
+ * total stays under `capChars`; larger picks pin core + contents instead.
+ */
+export function formatPinnedSkills(
   names: string[],
   alreadyLoaded: string[] = [],
-): string {
+  capChars = PINNED_SKILLS_MAX_CHARS,
+): { text: string; trimmed: string[] } {
   const skip = new Set(alreadyLoaded.map((name) => name.toLowerCase()));
   const blocks: string[] = [];
+  const trimmed: string[] = [];
   const seen = new Set<string>();
+  let used = 0;
   for (const name of names) {
     const skill = getSkill(name);
     if (!skill) continue;
     const key = skill.name.toLowerCase();
     if (seen.has(key) || skip.has(key)) continue;
     seen.add(key);
-    blocks.push(`## ${skill.name}\n${skill.instructions}`);
+    let body = skill.instructions;
+    if (used + body.length > capChars) {
+      // Over the cap: large skills pin core + contents, small ones their core.
+      body =
+        skill.instructions.length > SKILL_LARGE_CHARS
+          ? skillForLoad(skill)
+          : skillCore(skill.instructions);
+      trimmed.push(skill.name);
+    }
+    used += body.length;
+    blocks.push(`## ${skill.name}\n${body}`);
   }
-  if (blocks.length === 0) return '';
-  return [
-    '# Loaded skills',
-    'The user attached these packs to this send. Follow them.',
-    'Do not call load_skill again for these names.',
-    '',
-    blocks.join('\n\n'),
-  ].join('\n');
+  if (blocks.length === 0) return { text: '', trimmed };
+  return {
+    text: [
+      '# Loaded skills',
+      'The user attached these packs to this send. Follow them.',
+      'Do not call load_skill again for these names (except to load a listed section).',
+      '',
+      blocks.join('\n\n'),
+    ].join('\n'),
+    trimmed,
+  };
 }
+
+export function formatSkillBodies(
+  names: string[],
+  alreadyLoaded: string[] = [],
+): string {
+  return formatPinnedSkills(names, alreadyLoaded).text;
+}
+
+/** Catalog lines are for matching, not reading; the body loads on demand. */
+const CATALOG_DESCRIPTION_MAX_CHARS = 200;
 
 export function formatSkillsCatalog(skills: SkillMetadata[]): string {
   const lines =
     skills.length === 0
       ? '- (none)'
       : skills
-          .map((skill) => `- ${skill.name}: ${skill.description}`)
+          .map((skill) => {
+            const description =
+              skill.description.length > CATALOG_DESCRIPTION_MAX_CHARS
+                ? `${skill.description.slice(0, CATALOG_DESCRIPTION_MAX_CHARS)}…`
+                : skill.description;
+            return `- ${skill.name}: ${description}`;
+          })
           .join('\n');
   return [
     '# Skills',
     'Catalog of procedure packs (name + description).',
-    'On a new non-trivial task, match this list to the user intent before glob, grep, read_file, or edit_file.',
-    'Call load_skill with an exact catalog name to load a body. If none apply, continue without a skill.',
-    'Loading does not approve steps or add tools. Do not use offer_choice to pick a skill.',
+    'Load one with load_skill (exact name) when its description matches what you are about to do. Most tasks need none.',
+    'Large skills return core rules + a section list; load a section when you need it. Loading does not approve steps or add tools.',
     '',
     lines,
   ].join('\n');
@@ -227,6 +349,10 @@ export const load_skill: Tool = {
             type: 'string',
             description: 'Exact skill name from the skills catalog',
           },
+          section: {
+            type: 'string',
+            description: 'Optional section title, for large skills that list their sections.',
+          },
         },
         required: ['skill_name'],
         additionalProperties: false,
@@ -249,10 +375,12 @@ export const load_skill: Tool = {
       'Follow the loaded steps; they do not grant extra tools or bypass the path jail.',
     ],
   },
+  stage: 'skill',
   execute: async (args) => {
     const name = String(args.skill_name ?? '').trim();
     const skill = getSkill(name);
-    if (skill) return skill.instructions;
+    const section = typeof args.section === 'string' ? args.section : undefined;
+    if (skill) return skillForLoad(skill, section);
     const available = listSkills()
       .map((item) => item.name)
       .join(', ');

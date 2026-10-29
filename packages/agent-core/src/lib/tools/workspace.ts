@@ -417,7 +417,8 @@ export const readFileTool: Tool = {
     usage: [
       'Pass a relative path from glob/grep.',
       'Read before edit_file so oldText is a unique span from this file.',
-      'Use offset/limit for large files; output is hard-capped.',
+      'Output starts with [lines a–b of N]; it is not file content. A cut read names the offset to continue from.',
+      'To find a block in a large file, grep for its anchor line first, then read from that line.',
     ],
   },
   risk: 'read',
@@ -436,22 +437,65 @@ export const readFileTool: Tool = {
         return `File not found: ${asString(args.path)}`;
       return `Failed to read file: ${err.message}`;
     }
-    const offsetRaw = args.offset;
-    const limitRaw = args.limit;
-    const offset =
-      typeof offsetRaw === 'number' && offsetRaw > 1
-        ? Math.floor(offsetRaw)
-        : 1;
-    const lines = text.split('\n');
-    const start = Math.min(offset - 1, lines.length);
-    const limit =
-      typeof limitRaw === 'number' && limitRaw > 0
-        ? Math.floor(limitRaw)
-        : lines.length;
-    const slice = lines.slice(start, start + limit).join('\n');
-    return truncated(slice, WORKSPACE_READ_MAX_CHARS, 'read_file');
+    return formatFileRead(text, args.offset, args.limit);
   },
 };
+
+/** Reads narrower than this are widened: a 3-line slice costs a model call and shows no surroundings. */
+export const WORKSPACE_READ_MIN_LINES = 40;
+
+/**
+ * read_file result: a `[lines a–b of N]` header, then the raw lines (no
+ * per-line numbers, so spans copy cleanly into edit_file oldText). Cuts on a
+ * line boundary and names the offset to continue from.
+ */
+export function formatFileRead(
+  text: string,
+  offsetRaw: unknown,
+  limitRaw: unknown,
+): string {
+  const partial = Buffer.byteLength(text, 'utf8') >= WORKSPACE_READ_MAX_LOAD_BYTES;
+  const all = text.split('\n');
+  // A trailing newline ends the last line; it does not start another.
+  const total = text.endsWith('\n') ? all.length - 1 : all.length;
+  const of = `${total}${partial ? '+ (file larger than the 1 MB read window)' : ''}`;
+  if (text.length === 0) return '[empty file]';
+
+  const offset =
+    typeof offsetRaw === 'number' && offsetRaw > 1 ? Math.floor(offsetRaw) : 1;
+  if (offset > total) {
+    return `[offset ${offset} is past end of file (${of} lines)]`;
+  }
+  const requested =
+    typeof limitRaw === 'number' && limitRaw > 0
+      ? Math.floor(limitRaw)
+      : total;
+  const limit = Math.max(requested, WORKSPACE_READ_MIN_LINES);
+  const start = offset - 1;
+  const end = Math.min(total, start + limit);
+
+  const first = all[start] ?? '';
+  if (first.length > WORKSPACE_READ_MAX_CHARS) {
+    const next = offset < total ? `\n\n(continue with offset=${offset + 1})` : '';
+    return `[line ${offset} of ${of}; line cut at ${WORKSPACE_READ_MAX_CHARS} chars]\n${first.slice(0, WORKSPACE_READ_MAX_CHARS)}${next}`;
+  }
+
+  const kept: string[] = [];
+  let chars = 0;
+  for (let i = start; i < end; i++) {
+    const line = all[i] ?? '';
+    if (kept.length > 0 && chars + line.length + 1 > WORKSPACE_READ_MAX_CHARS) break;
+    kept.push(line);
+    chars += line.length + 1;
+  }
+  const last = start + kept.length;
+  const header = `[lines ${offset}–${last} of ${of}]`;
+  const footer =
+    last < end
+      ? `\n\n(read_file truncated at line ${last} of ${of} — continue with offset=${last + 1})`
+      : '';
+  return `${header}\n${kept.join('\n')}${footer}`;
+}
 
 export const editFileTool: Tool = {
   definition: {
@@ -725,10 +769,108 @@ function runWorkspaceCommand(
   });
 }
 
+export const WORKSPACE_DIFF_MAX_CHARS = 12_000;
+
+/** git with fixed args (no shell), cwd jailed to the workspace root. */
+function runGit(
+  cwd: string,
+  args: string[],
+  signal: AbortSignal,
+): Promise<{ code: number; out: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, windowsHide: true });
+    let out = '';
+    const onAbort = () => child.kill();
+    signal.addEventListener('abort', onAbort, { once: true });
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (out.length < WORKSPACE_DIFF_MAX_CHARS * 2) out += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (out.length < WORKSPACE_DIFF_MAX_CHARS * 2) out += chunk.toString('utf8');
+    });
+    child.on('error', (error) => {
+      signal.removeEventListener('abort', onAbort);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      signal.removeEventListener('abort', onAbort);
+      resolve({ code: code ?? 0, out });
+    });
+  });
+}
+
+export const diffTool: Tool = {
+  definition: {
+    type: 'function',
+    function: {
+      name: 'diff',
+      description:
+        'Show uncommitted changes in the open workspace: git diff against HEAD (staged + unstaged) and untracked files. Read-only.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Optional file or folder (relative) to limit the diff.',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  guidance: {
+    whenToUse: ['You need to see what changed in the working tree (review, final summary).'],
+    whenNotToUse: ['To read a file — use read_file.'],
+    usage: ['Output is capped; pass path to narrow a large diff.'],
+  },
+  risk: 'read',
+  stage: 'read',
+  execute: async (args, ctx) => {
+    const root = await workspaceRootReal(ctx.workspaceRoot);
+    if (!root) return 'No workspace is bound to this run';
+    let target = '.';
+    const requested = asString(args.path).trim();
+    if (requested) {
+      const resolved = await resolveWorkspacePath(ctx.workspaceRoot, requested);
+      if (!resolved.ok) return resolved.error;
+      target = toPosixRelative(root, resolved.abs) || '.';
+    }
+    try {
+      // A repo with no commits has no HEAD: show staged + unstaged instead.
+      const hasHead =
+        (await runGit(root, ['rev-parse', '--verify', '--quiet', 'HEAD'], ctx.signal)).code === 0;
+      const diffOf = async (extra: string[]) => {
+        if (hasHead) return runGit(root, ['diff', 'HEAD', '--no-color', ...extra, '--', target], ctx.signal);
+        const staged = await runGit(root, ['diff', '--cached', '--no-color', ...extra, '--', target], ctx.signal);
+        if (staged.code !== 0) return staged;
+        const unstaged = await runGit(root, ['diff', '--no-color', ...extra, '--', target], ctx.signal);
+        return { ...unstaged, out: [staged.out.trim(), unstaged.out.trim()].filter(Boolean).join('\n') };
+      };
+      const stat = await diffOf(['--stat']);
+      if (stat.code !== 0) return `git diff failed: ${stat.out.trim() || `exit ${stat.code}`}`;
+      const body = await diffOf([]);
+      const untracked = await runGit(
+        root,
+        ['ls-files', '--others', '--exclude-standard', '--', target],
+        ctx.signal,
+      );
+      const parts = [
+        stat.out.trim() || '(no tracked changes)',
+        untracked.out.trim() ? `Untracked files:\n${untracked.out.trim()}` : '',
+        body.out.trim(),
+      ].filter(Boolean);
+      return truncated(parts.join('\n\n'), WORKSPACE_DIFF_MAX_CHARS, 'diff');
+    } catch (error) {
+      return `git diff failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  },
+};
+
 export const WORKSPACE_TOOLS: Tool[] = [
   globTool,
   grepTool,
   readFileTool,
   editFileTool,
   runTerminalTool,
+  diffTool,
 ];

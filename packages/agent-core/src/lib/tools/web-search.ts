@@ -12,7 +12,7 @@ export const webSearchTool: Tool = {
     function: {
       name: 'web_search',
       description:
-        'Built-in live web search. Returns hit cards (title, URL, snippet). Top hits are prefetched into a source store with sha256 — use web_fetch with sha256+offset+limit to read more of a page. If the user pasted a URL, prefer web_fetch. Cite URLs. Do not search the same question twice.',
+        'Built-in live web search. Returns hit cards (title, URL, snippet). Top hits are prefetched into a source store with sha256 — use web_fetch with sha256+query to find the part of a page you need. If the user pasted a URL, prefer web_fetch. Cite URLs. Do not search the same question twice.',
       parameters: {
         type: 'object',
         properties: {
@@ -43,7 +43,7 @@ export const webSearchTool: Tool = {
       'Call web_search directly — do not load a skill first.',
       'Write a specific query; include the current year when freshness matters.',
       'Prefer one focused search per sub-question before broadening.',
-      'After results return, answer from snippets or web_fetch sha256+offset for deeper sections.',
+      'After results return, answer from snippets or web_fetch sha256+query for the section you need.',
       'Only web_fetch URLs listed in the hit cards or pasted by the user.',
       'After a non-empty result, answer — do not issue another web_search for the same question.',
     ],
@@ -65,7 +65,7 @@ export const webFetchTool: Tool = {
     function: {
       name: 'web_fetch',
       description:
-        'Read a known URL into the source store and return a short card (title, sha256, headings, first ~2k chars), or page a stored source with sha256+offset+limit. Full page text stays in the store — do not refetch the same URL for more text; use sha256 paging instead.',
+        'Read a known URL into the source store and return a short card (title, sha256, headings, first ~2k chars). For more of a stored source, pass sha256+query to get the matching passages, or sha256+offset+limit to read a section in order. Full page text stays in the store — do not refetch the same URL for more text.',
       parameters: {
         type: 'object',
         properties: {
@@ -78,6 +78,11 @@ export const webFetchTool: Tool = {
             type: 'string',
             description:
               'sha256 from a prior web_fetch/web_search card. Use with offset/limit to read more of that source.',
+          },
+          query: {
+            type: 'string',
+            description:
+              'With sha256: words to find in the stored source. Returns matching passages with their offsets instead of a slice.',
           },
           offset: {
             type: 'number',
@@ -104,7 +109,7 @@ export const webFetchTool: Tool = {
       'The card/snippet already contains enough text to answer.',
     ],
     usage: [
-      'Pass url to load a page (card + store). Pass sha256+offset+limit to continue reading.',
+      'Pass url to load a page (card + store). Pass sha256+query to jump to what you need; sha256+offset+limit only to read one section in full.',
       'Answer from returned slices and cite the URL.',
       'If the fetch fails, say so — do not invent page content.',
       'Do not refetch the same URL, add hash variants, or use reader proxies for more text.',
@@ -128,6 +133,7 @@ export const webFetchTool: Tool = {
             : typeof args.limit === 'string'
               ? Number(args.limit)
               : undefined,
+        query: typeof args.query === 'string' ? args.query : undefined,
       },
       ctx,
     );

@@ -4,7 +4,7 @@ import {
   createStreamModelCall,
   assembleContext,
   createToolRegistry,
-  ALL_TOOLS,
+  listTools,
   type TraceEvent,
 } from '@agent/agent-core';
 import { formatReport, scoreScenario, type ScenarioRunInput } from './metrics';
@@ -34,7 +34,7 @@ async function runScenario(
   scenarioId: string,
   query: string,
 ): Promise<ScenarioRunInput & { answer: string }> {
-  const tools = createToolRegistry(ALL_TOOLS);
+  const tools = createToolRegistry(listTools());
   const { messages } = assembleContext({
     tools,
     memory: { user: '', notes: '' },

@@ -82,6 +82,8 @@ export interface Message {
   createdAt: string;
   /** Wall-clock model-call + stream time for assistant messages; undefined for user/tool and old ledger replays. */
   durationMs?: number;
+  /** On a run's final answer: wall clock of the whole run (all calls, tools, sub-agents). */
+  runDurationMs?: number;
 }
 
 /**

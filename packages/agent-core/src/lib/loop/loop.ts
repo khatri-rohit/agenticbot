@@ -6,10 +6,15 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import {
+  CHARS_PER_TOKEN,
   ChoiceSkipped,
   DEFAULT_CONTEXT_BUDGET,
+  emptyRunUsage,
   isAskStrippedTool,
+  totalRunUsage,
+  type AgentEventWithoutSeq,
   type LedgerAppendMeta,
+  type RunUsage,
   type TokenUsage,
   type ToolContext,
 } from '@agent/agent-models';
@@ -18,10 +23,18 @@ import {
   refreshContextReport,
   stubLiveToolResults,
 } from '../context/assemble-context';
+import {
+  compactCurrentRun,
+  evictToolResults,
+  ReadDedupe,
+  retireSkillBodies,
+} from '../context/residency';
 import { consoleTrace, type TraceEvent } from '../events/trace';
-import { resolveLimits } from './limits';
+import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { getSkill } from '../tools/skills';
+import { BUDGET_WARN_RATIO, resolveLimits } from './limits';
 import type { ModelTurn } from '../model/types';
-import type { Tool, ToolRegistry } from '../tools/type';
+import type { Tool, ToolRegistry, ToolStage } from '../tools/type';
 import { sha256Text } from '../tools/web-source';
 import {
   extractHttpUrls,
@@ -39,12 +52,13 @@ const OPEN_PLAN_WORK_NUDGE =
 const USER_SKIPPED_CHOICE =
   'User skipped this choice. Stop. Do not assume a path or keep editing.';
 
-type ToolStage = 'skill' | 'read' | 'network' | 'exec' | 'mutate';
-
-function toolStage(name: string): ToolStage {
+/** A tool's declared stage wins; the name table covers built-ins without one. */
+function toolStage(name: string, tool?: Tool): ToolStage {
+  if (tool?.stage) return tool.stage;
   if (name === 'load_skill') return 'skill';
   if (name === 'glob' || name === 'grep' || name === 'read_file') return 'read';
   if (name === 'web_search' || name === 'web_fetch') return 'network';
+  if (name === 'delegate') return 'subagent';
   if (name === 'run_terminal') return 'exec';
   return 'mutate';
 }
@@ -155,6 +169,10 @@ function toolCallKey(toolName: string, args: unknown): string {
         sha256: record.sha256.trim().toLowerCase(),
         offset: record.offset ?? 0,
         limit: record.limit ?? 0,
+        query:
+          typeof record.query === 'string'
+            ? record.query.trim().toLowerCase()
+            : '',
       })}`;
     }
     if (typeof record.url === 'string') {
@@ -224,6 +242,19 @@ const MAX_READ_FILE_PER_PATH = 30;
 const MAX_TERMINAL_CALLS = 60;
 /** Identical mutate call+result before stuck halt. */
 const MAX_IDENTICAL_OUTCOMES = 3;
+/** Share of maxPromptTokens spent with no progress before the loop steers once. */
+const STALL_NUDGE_RATIO = 0.3;
+/** Past this share with no progress, the parent's own web tools close until progress. */
+const RESEARCH_GATE_RATIO = 0.5;
+/** Tighter marks while the host says account capacity is behind pace. */
+const STALL_NUDGE_RATIO_CONSERVE = 0.2;
+const RESEARCH_GATE_RATIO_CONSERVE = 0.35;
+/** Turns in a row whose every call hit the research gate before the run ends with a handoff. */
+const MAX_GATED_TURNS = 2;
+/** Partial reads of one file (since its last edit) between grep hints. */
+const READ_CREEP_NOTE_EVERY = 3;
+/** In-order slices of one web source between query hints. */
+const WEB_SLICE_NOTE_EVERY = 3;
 
 /** Coded tool rows so UI/ledger can tell skips from real results (I1 + observability). */
 function limitMessage(
@@ -236,7 +267,11 @@ function limitMessage(
     | 'limit.outcome'
     | 'limit.iterations'
     | 'limit.plan'
-    | 'limit.finish',
+    | 'limit.finish'
+    | 'limit.tokens'
+    | 'limit.wall'
+    | 'limit.research'
+    | 'limit.capacity',
   detail: string,
 ): string {
   return `${code}: ${detail}`;
@@ -340,16 +375,70 @@ function withTimeout<T>(
  * Emits AgentEvents via config.emit (for SSE/UI) AND traces via config.trace
  * (for eval/console). Durable turns go through config.onMessage (host ledger).
  */
+/**
+ * Run the agent loop. The wrapper owns run-wide accounting: every result
+ * carries token usage (own + sub-agents), and one `run_finish` trace closes
+ * the run whichever path ended it.
+ */
 export async function runLoop(
   modelCall: ModelCallFn,
   messages: ChatCompletionMessageParam[],
   tools: ToolRegistry,
   config: RunLoopConfig,
 ): Promise<RunLoopResult> {
-  const limits = resolveLimits(config.limits);
-  const trace = config.trace ?? ((event: TraceEvent) => consoleTrace(event));
-  const emit = config.emit;
   const runId = config.runId ?? randomUUID();
+  const trace = config.trace ?? ((event: TraceEvent) => consoleTrace(event));
+  const usage = emptyRunUsage();
+  const startedAt = Date.now();
+  const result = await runLoopCore(modelCall, messages, tools, {
+    ...config,
+    runId,
+    trace,
+  }, usage, startedAt);
+  trace({
+    type: 'run_finish',
+    runId,
+    iterations: result.iterations,
+    toolCalls: result.toolCalls,
+    status: result.status,
+    ...(result.limitReason ? { limitReason: result.limitReason } : {}),
+    usage,
+    durationMs: Date.now() - startedAt,
+  });
+  return { ...result, usage };
+}
+
+type CoreResult = Omit<RunLoopResult, 'usage'>;
+
+const BUDGET_NUDGE =
+  'Run budget nearly spent. Finish the current step, run verification once, and report what is done and what is left. Do not start new work.';
+const ADVISOR_HINT =
+  'The same command produced the same result twice. If you are stuck, delegate to the advisor profile with the specific question instead of retrying.';
+
+async function runLoopCore(
+  modelCall: ModelCallFn,
+  messages: ChatCompletionMessageParam[],
+  tools: ToolRegistry,
+  config: RunLoopConfig & { runId: string; trace: (event: TraceEvent) => void },
+  usage: RunUsage,
+  runStartedAt: number,
+): Promise<CoreResult> {
+  const limits = resolveLimits(config.limits);
+  const trace = config.trace;
+  // run.completed and turn.completed carry run spend so the UI meter and
+  // offline traces never have to sum per-call usage themselves.
+  const emit = config.emit
+    ? (event: AgentEventWithoutSeq) => {
+        if (event.type === 'run.completed') {
+          config.emit!({ ...event, usage: snapshotUsage() });
+        } else if (event.type === 'turn.completed') {
+          config.emit!({ ...event, runUsage: snapshotUsage() });
+        } else {
+          config.emit!(event);
+        }
+      }
+    : undefined;
+  const runId = config.runId;
   const threadId = config.threadId ?? 'unknown';
   const signal = config.signal;
   const origin = config.origin ?? 'chat';
@@ -366,6 +455,403 @@ export async function runLoop(
   // Exec-stage outcome keys tracked so a successful edit_file can clear them:
   // an edit between identical build exits is progress, not stuck-ness.
   const execOutcomeKeys = new Set<string>();
+  // Index of the first message this run appends; in-run compaction never
+  // touches anything before it (system layers + prior turns stay cacheable).
+  const runStart = messages.length;
+  const readDedupe = new ReadDedupe();
+  // load_skill results still resident in full: tool_call_id → name + iteration.
+  const skillLoads = new Map<string, { name: string; iteration: number }>();
+  let budgetWarned = false;
+  // Progress steering (parent agent runs only): prompt spend since the last
+  // successful edit or sub-agent report.
+  let spentAtProgress = 0;
+  let childCallsAtProgress = 0;
+  let stallNudged = false;
+  let researchGateTraced = false;
+  // Research-gate refusals in the current turn, and turns in a row that were
+  // nothing but refusals (each still costs a full model call).
+  let gatedThisTurn = 0;
+  let gatedTurnStreak = 0;
+  // Partial reads per path since its last edit; in-order slices per web source.
+  const partialReadsByPath = new Map<string, number>();
+  const webSlicesBySha = new Map<string, number>();
+  let advisorHinted = false;
+  let prefixHeavy = false;
+  let stopContent: string | undefined;
+
+  function snapshotUsage(): RunUsage {
+    return {
+      own: { ...usage.own },
+      children: { ...usage.children },
+    };
+  }
+
+  /**
+   * Charge one model call. Without provider usage (local Ollama, streams
+   * without include_usage) the local estimate is charged instead, so the
+   * token budget never goes blind. Returns true when estimated.
+   */
+  function chargeOwnUsage(
+    turnUsage: TokenUsage | undefined,
+    estimatedPrompt: number,
+    content: string | null | undefined,
+  ): boolean {
+    usage.own.calls += 1;
+    if (turnUsage) {
+      usage.own.promptTokens += turnUsage.promptTokens;
+      usage.own.completionTokens += turnUsage.completionTokens;
+      return false;
+    }
+    usage.own.estimatedCalls += 1;
+    usage.own.promptTokens += estimatedPrompt;
+    usage.own.completionTokens += Math.ceil((content ?? '').length / CHARS_PER_TOKEN);
+    return true;
+  }
+
+  function chargeChildUsage(child: RunUsage): void {
+    const total = totalRunUsage(child);
+    usage.children.promptTokens += total.promptTokens;
+    usage.children.completionTokens += total.completionTokens;
+    usage.children.calls += total.calls;
+    usage.children.estimatedCalls += total.estimatedCalls;
+  }
+
+  function remainingPromptTokens(): number | undefined {
+    if (limits.maxPromptTokens === undefined) return undefined;
+    return Math.max(0, limits.maxPromptTokens - totalRunUsage(usage).promptTokens);
+  }
+
+  /**
+   * Token and wall-clock gates. Checked before every model call. `nextCall`
+   * (the estimate of the call about to be sent) stops the run before a call
+   * that would cross the cap, so only the final answer can go over it.
+   */
+  function budgetExceeded(nextCall = 0): string | null {
+    const spent = totalRunUsage(usage).promptTokens;
+    if (limits.maxPromptTokens !== undefined && spent >= limits.maxPromptTokens) {
+      return limitMessage(
+        'limit.tokens',
+        `prompt token budget spent (${spent} of ${limits.maxPromptTokens})`,
+      );
+    }
+    if (
+      limits.maxPromptTokens !== undefined &&
+      nextCall > 0 &&
+      spent + nextCall > limits.maxPromptTokens
+    ) {
+      return limitMessage(
+        'limit.tokens',
+        `prompt token budget nearly spent: the next call (~${nextCall}) would pass the cap (${spent} of ${limits.maxPromptTokens})`,
+      );
+    }
+    if (limits.maxWallMs !== undefined && Date.now() - runStartedAt >= limits.maxWallMs) {
+      return limitMessage(
+        'limit.wall',
+        `wall clock budget spent (${Math.round(limits.maxWallMs / 1000)}s)`,
+      );
+    }
+    return null;
+  }
+
+  function maybeWarnBudget(): void {
+    if (budgetWarned || limits.maxPromptTokens === undefined) return;
+    const spent = totalRunUsage(usage).promptTokens;
+    if (spent < limits.maxPromptTokens * BUDGET_WARN_RATIO) return;
+    budgetWarned = true;
+    // Loop control, not a durable turn: joins the live prompt only.
+    messages.push({ role: 'user', content: BUDGET_NUDGE });
+    trace({
+      type: 'budget_warning',
+      runId,
+      iteration: iterations,
+      reason: 'prompt tokens',
+      promptTokens: spent,
+      limitPromptTokens: limits.maxPromptTokens,
+    });
+  }
+
+  /**
+   * Progress steering applies to a capped parent run that can edit. Ask runs
+   * cannot edit, Home has no edit_file, and sub-agents never edit.
+   */
+  function progressSteering(): boolean {
+    return (
+      limits.maxPromptTokens !== undefined &&
+      (config.depth ?? 0) === 0 &&
+      posture === 'agent' &&
+      tools.byName.has('edit_file')
+    );
+  }
+
+  function markProgress(): void {
+    spentAtProgress = totalRunUsage(usage).promptTokens;
+    childCallsAtProgress = usage.children.calls;
+    stallNudged = false;
+    researchGateTraced = false;
+  }
+
+  /** Prompt tokens spent since the last progress. A finished sub-agent counts as progress. */
+  function idleTokens(): number {
+    if (usage.children.calls > childCallsAtProgress) markProgress();
+    return totalRunUsage(usage).promptTokens - spentAtProgress;
+  }
+
+  function conserving(): boolean {
+    return config.capacity?.conserve() === true;
+  }
+
+  function researchGated(): boolean {
+    const ratio = conserving() ? RESEARCH_GATE_RATIO_CONSERVE : RESEARCH_GATE_RATIO;
+    return (
+      progressSteering() &&
+      idleTokens() >= limits.maxPromptTokens! * ratio
+    );
+  }
+
+  function maybeSteerProgress(): void {
+    if (stallNudged || !progressSteering()) return;
+    const max = limits.maxPromptTokens!;
+    const idle = idleTokens();
+    const ratio = conserving() ? STALL_NUDGE_RATIO_CONSERVE : STALL_NUDGE_RATIO;
+    if (idle < max * ratio) return;
+    stallNudged = true;
+    const spent = totalRunUsage(usage).promptTokens;
+    const perCall = Math.max(1, estimatePromptTokens(messages, tools.definitions));
+    const callsLeft = Math.floor(Math.max(0, max - spent) / perCall);
+    const delegate = tools.byName.has('delegate')
+      ? ' If one specific fact is still missing, delegate(explore) with that question instead of searching more yourself.'
+      : '';
+    // Loop control, not a durable turn: joins the live prompt only.
+    messages.push({
+      role: 'user',
+      content: `${Math.round(idle / 1000)}k prompt tokens (${Math.round((idle / max) * 100)}% of this run's budget) went to steps with no edit. About ${callsLeft} model calls remain at the current context size. Act on what you have: make the change, or answer if no change was asked.${delegate}`,
+    });
+    trace({
+      type: 'stall_nudge',
+      runId,
+      iteration: iterations,
+      idleTokens: idle,
+      promptTokens: spent,
+      limitPromptTokens: max,
+    });
+  }
+
+  function maybeSuggestAdvisor(): void {
+    if (advisorHinted || !tools.byName.has('delegate')) return;
+    advisorHinted = true;
+    messages.push({ role: 'user', content: ADVISOR_HINT });
+  }
+
+  /**
+   * Prompt-only residency after a tool turn: cap oversized recent results,
+   * evict old results to cards, then collapse old iterations of this run.
+   */
+  async function manageResidency(): Promise<void> {
+    stubLiveToolResults(messages, contextBudget, runStart);
+
+    for (const retired of retireSkillBodies(
+      messages,
+      skillLoads,
+      iterations,
+      contextBudget.skillResidentIterations,
+    )) {
+      // A reload after retirement is legitimate, not a repeat.
+      for (const key of [...repeatedCalls.keys()]) {
+        if (key.startsWith('load_skill:')) repeatedCalls.delete(key);
+      }
+      trace({
+        type: 'skill_evicted',
+        runId,
+        iteration: iterations,
+        name: retired.name,
+        residentIterations: contextBudget.skillResidentIterations,
+      });
+    }
+
+    const evicted = await evictToolResults(
+      messages,
+      contextBudget,
+      tools.definitions,
+      putBlob,
+    );
+    if (evicted) {
+      readDedupe.forget(evicted.toolCallIds);
+      trace({
+        type: 'context_evicted',
+        runId,
+        iteration: iterations,
+        evicted: evicted.evicted,
+        beforeTokens: evicted.beforeTokens,
+        afterTokens: evicted.afterTokens,
+      });
+    }
+
+    if (prefixHeavy) return;
+    const compacted = compactCurrentRun(
+      messages,
+      runStart,
+      contextBudget,
+      tools.definitions,
+    );
+    if (!compacted) return;
+    readDedupe.forget(compacted.toolCallIds);
+    for (const id of compacted.toolCallIds) skillLoads.delete(id);
+    trace({
+      type: 'context_compacted_inrun',
+      runId,
+      iteration: iterations,
+      beforeTokens: compacted.beforeTokens,
+      afterTokens: compacted.afterTokens,
+    });
+    if (compacted.prefixHeavy) {
+      // Prior turns alone keep the prompt over the low mark. Folding one
+      // more iteration per call would rewrite the prefix every call, so stop;
+      // pre-run compaction handles this at the next run.
+      prefixHeavy = true;
+      trace({
+        type: 'context_prefix_heavy',
+        runId,
+        iteration: iterations,
+        promptTokens: compacted.afterTokens,
+      });
+    }
+  }
+
+  /**
+   * Walking a file a few lines at a time (offset/limit reads) is how a run
+   * loses its place; every few partial reads of one file, point at grep.
+   */
+  function withReadCreepNote(
+    readPath: string,
+    args: Record<string, unknown>,
+    result: string,
+  ): string {
+    const partial =
+      (typeof args.offset === 'number' && args.offset > 1) ||
+      typeof args.limit === 'number';
+    if (!partial || result.startsWith('[empty file]')) return result;
+    const count = (partialReadsByPath.get(readPath) ?? 0) + 1;
+    partialReadsByPath.set(readPath, count);
+    if (count % READ_CREEP_NOTE_EVERY !== 0) return result;
+    trace({
+      type: 'tool_note',
+      runId,
+      iteration: iterations,
+      toolName: 'read_file',
+      note: 'read_creep',
+      count,
+    });
+    return `${result}\n\n(note) ${count} partial reads of ${readPath} since it last changed. To find a block, grep for its anchor line (grep returns path:line), then read from that line.`;
+  }
+
+  /** Every few in-order slices of one web source, point at query (or explore). */
+  function withWebSliceNote(args: Record<string, unknown>, result: string): string {
+    const sha = typeof args.sha256 === 'string' ? args.sha256.trim().toLowerCase() : '';
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    if (!sha || query || !result.startsWith('## Source slice')) return result;
+    const count = (webSlicesBySha.get(sha) ?? 0) + 1;
+    webSlicesBySha.set(sha, count);
+    if (count % WEB_SLICE_NOTE_EVERY !== 0) return result;
+    trace({
+      type: 'tool_note',
+      runId,
+      iteration: iterations,
+      toolName: 'web_fetch',
+      note: 'web_slices',
+      count,
+    });
+    const delegate = tools.byName.has('delegate')
+      ? ', or delegate(explore) to read a long source for you'
+      : '';
+    return `${result}\n\n(note) ${count} slices of this source read in order; every slice stays in context. Use query="…" to jump to what you need${delegate}.`;
+  }
+
+  /** Per-tool result shaping before the result joins the prompt and ledger. */
+  function shapeToolResult(
+    toolName: string,
+    args: Record<string, unknown>,
+    raw: string,
+    toolCallId: string,
+  ): string {
+    const cap = tools.byName.get(toolName)?.outputCap;
+    const result =
+      cap !== undefined && raw.length > cap
+        ? `${raw.slice(0, cap)}\n\n(${toolName} output capped at ${cap} chars)`
+        : raw;
+    if (toolName === 'read_file') {
+      const readPath = pathFromToolArgs(args);
+      if (readPath === null) return result;
+      const shaped = readDedupe.apply(readPath, args, result, iterations, toolCallId);
+      return withReadCreepNote(readPath, args, shaped);
+    }
+    if (toolName === 'web_fetch') {
+      return withWebSliceNote(args, result);
+    }
+    if (toolName === 'load_skill' && !result.startsWith('Skill not found')) {
+      const name = String(args.skill_name ?? '').trim();
+      skillLoads.set(toolCallId, { name, iteration: iterations });
+      trace({
+        type: 'skill_loaded',
+        runId,
+        iteration: iterations,
+        name,
+        ...(typeof args.section === 'string' ? { section: args.section } : {}),
+        tokens: Math.ceil(result.length / CHARS_PER_TOKEN),
+        source: 'model',
+      });
+      return result;
+    }
+    if (toolName === 'edit_file' && isEditSuccess(result)) {
+      const editPath = pathFromToolArgs(args);
+      if (editPath !== null) {
+        readDedupe.invalidatePath(editPath);
+        partialReadsByPath.delete(editPath);
+      }
+    } else if (toolName === 'run_terminal') {
+      readDedupe.clear();
+    }
+    return result;
+  }
+
+  /** A tool (sub-agent `report`) asked to end the run with this answer. */
+  async function finishRequestedStop(
+    content: string,
+    lastUsage?: TokenUsage,
+  ): Promise<CoreResult> {
+    await appendDurable(
+      { role: 'assistant', content },
+      { runDurationMs: Date.now() - runStartedAt },
+    );
+    emitTurnCompleted(iterations, lastUsage);
+    emit?.({
+      type: 'run.completed',
+      runId,
+      iterations,
+      toolCalls: totalToolCalls,
+    });
+    return {
+      runId,
+      content,
+      iterations,
+      toolCalls: totalToolCalls,
+      status: 'completed',
+    };
+  }
+
+  /**
+   * The parent's messages for an advisor fork: everything up to (not
+   * including) the assistant turn whose tool calls are still running, so
+   * the fork is a valid conversation with the parent's exact prefix.
+   */
+  function forkMessages(): ChatCompletionMessageParam[] {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message?.role === 'assistant' && message.tool_calls?.length) {
+        return messages.slice(0, i);
+      }
+    }
+    return [...messages];
+  }
 
   function noteLimit(reason: string): void {
     lastLimitReason = reason;
@@ -517,25 +1003,48 @@ export async function runLoop(
         ? { workspaceRoot: config.workspaceRoot }
         : {}),
       ...(config.offerChoice ? { offerChoice: config.offerChoice } : {}),
-      putBlob,
-      ...(config.readBlob
+      ...(config.subagents && tools.byName.has('delegate')
         ? {
-            readBlob: async (sha, offset, length) => {
-              const source = await getWebSource(sha);
-              if (source) {
-                if (offset === undefined && length === undefined) {
-                  return source.content;
-                }
-                const start = offset ?? 0;
-                return source.content.slice(
-                  start,
-                  length === undefined ? undefined : start + length,
-                );
-              }
-              return config.readBlob!(sha, offset, length);
-            },
+            spawnSubagent: (spec) =>
+              config.subagents!(spec, {
+                runId,
+                threadId,
+                model: config.model,
+                depth: config.depth ?? 0,
+                posture,
+                signal: signal ?? new AbortController().signal,
+                ...(config.workspaceRoot !== undefined
+                  ? { workspaceRoot: config.workspaceRoot }
+                  : {}),
+                toolNames: [...tools.byName.keys()],
+                contextBudget,
+                remainingPromptTokens: remainingPromptTokens(),
+                forkMessages,
+                ...(config.emit ? { emit: config.emit } : {}),
+                ...(config.pinnedSkills ? { pinnedSkills: config.pinnedSkills } : {}),
+                ...(config.capacity ? { capacity: config.capacity } : {}),
+                chargeUsage: chargeChildUsage,
+              }),
           }
         : {}),
+      requestStop: (content) => {
+        stopContent = content;
+      },
+      putBlob,
+      readBlob: async (sha, offset, length) => {
+        const key = sha.toLowerCase();
+        const cached = (await getWebSource(key))?.content ?? webBodies.get(key);
+        if (cached !== undefined) {
+          if (offset === undefined && length === undefined) return cached;
+          const start = offset ?? 0;
+          return cached.slice(
+            start,
+            length === undefined ? undefined : start + length,
+          );
+        }
+        if (!config.readBlob) throw new Error(`Blob not found: ${sha}`);
+        return config.readBlob(key, offset, length);
+      },
       noteTrustedWebUrls,
       noteWebSource,
       getWebSource,
@@ -736,6 +1245,52 @@ export async function runLoop(
       }
     }
 
+    // Research gate: after half the budget with no edit or sub-agent report,
+    // the parent's own web tools close until progress. A refusal row, not a
+    // halt: reads, edits and delegate(explore) still work.
+    if ((toolName === 'web_search' || toolName === 'web_fetch') && researchGated()) {
+      const idle = idleTokens();
+      const delegate = tools.byName.has('delegate')
+        ? ' If one specific fact is still missing, delegate(explore) with that question.'
+        : '';
+      const blocked = limitMessage(
+        'limit.research',
+        `Web research is paused for this run: ${Math.round((idle / limits.maxPromptTokens!) * 100)}% of the budget went to steps with no edit. It reopens after your next edit or sub-agent report. Use what you have.${delegate}`,
+      );
+      gatedThisTurn += 1;
+      if (!researchGateTraced) {
+        researchGateTraced = true;
+        trace({
+          type: 'research_gate',
+          runId,
+          iteration: iterations,
+          toolName,
+          idleTokens: idle,
+        });
+      }
+      emit?.({
+        type: 'tool.started',
+        runId,
+        toolCallId: toolCall.id,
+        toolName,
+        argsPreview: toolArgsPreview(toolName, args),
+      });
+      emit?.({
+        type: 'tool.completed',
+        runId,
+        toolCallId: toolCall.id,
+        toolName,
+        durationMs: 0,
+        resultPreview: preview(blocked, 200),
+      });
+      await appendDurable({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: blocked,
+      });
+      return { kind: 'filled' };
+    }
+
     const readPath =
       toolName === 'read_file' ? pathFromToolArgs(args) : null;
     if (readPath !== null) {
@@ -784,7 +1339,7 @@ export async function runLoop(
     // stays for mutate/read/network/skill.
     if (
       repeatCount > limits.maxRepeatedToolCalls &&
-      toolStage(toolName) !== 'exec'
+      toolStage(toolName, tool) !== 'exec'
     ) {
       noteLimit(
         limitMessage('limit.repeat', `repeated tool call blocked: ${toolName}`),
@@ -810,7 +1365,7 @@ export async function runLoop(
     halt: Extract<AdmitResult, { kind: 'halt' }>,
     fromIndex: number,
     toolCalls: ChatCompletionMessageToolCall[],
-  ): Promise<RunLoopResult> {
+  ): Promise<CoreResult> {
     const triggerAnswered = isToolAnswered(halt.toolCall.id);
     if (halt.reason === 'repeat') {
       if (!triggerAnswered) {
@@ -838,7 +1393,7 @@ export async function runLoop(
     return '';
   }
 
-  function finishChoiceSkipped(): RunLoopResult {
+  function finishChoiceSkipped(): CoreResult {
     emitTurnCompleted(iterations);
     emit?.({
       type: 'run.completed',
@@ -881,14 +1436,15 @@ export async function runLoop(
     const startedAt = Date.now();
 
     try {
-      // exec tools own their timeout + process-tree kill (workspace.ts).
+      // exec tools and delegate own their timeout + process-tree kill.
       // The loop's withTimeout would race the tool's timer and leak the child.
-      const ownsTimeout = toolName === 'offer_choice' || tool.risk === 'exec';
-      const result = await withTimeout(
+      const ownsTimeout = toolName === 'offer_choice' || tool.risk === 'exec' || toolName === 'delegate';
+      const raw = await withTimeout(
         tool.execute(args, toolCtx),
         ownsTimeout ? 0 : limits.toolTimeoutMs,
         signal,
       );
+      const result = shapeToolResult(toolName, args, raw, toolCall.id);
       const durationMs = Date.now() - startedAt;
       trace({
         type: 'tool_complete',
@@ -897,6 +1453,7 @@ export async function runLoop(
         toolName,
         durationMs,
         resultPreview: preview(result),
+        resultChars: raw.length,
       });
       emit?.({
         type: 'tool.completed',
@@ -914,12 +1471,13 @@ export async function runLoop(
       });
       // Mutate + exec: same call + same result = stuck (e.g. write theater,
       // or run_terminal producing the same exit code with no edit between).
-      const stage = toolStage(toolName);
+      const stage = toolStage(toolName, tool);
       if (stage === 'mutate' || stage === 'exec') {
         const key = outcomeKey(toolName, args, result);
         const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
         repeatedOutcomes.set(key, outcomeCount);
         if (stage === 'exec') execOutcomeKeys.add(key);
+        if (outcomeCount === MAX_IDENTICAL_OUTCOMES - 1) maybeSuggestAdvisor();
         if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
           noteLimit(
             limitMessage(
@@ -936,6 +1494,7 @@ export async function runLoop(
       if (toolName === 'edit_file' && isEditSuccess(result)) {
         for (const k of execOutcomeKeys) repeatedOutcomes.delete(k);
         execOutcomeKeys.clear();
+        markProgress();
       }
       return 'ok';
     } catch (error) {
@@ -1037,10 +1596,10 @@ export async function runLoop(
       batch.map(async (call) => {
         const started = Date.now();
         try {
-          // exec tools own their timeout + process-tree kill.
+          // exec tools and delegate own their timeout + process-tree kill.
           const ownsTimeout =
-            call.toolName === 'offer_choice' || call.tool.risk === 'exec';
-          const result = await withTimeout(
+            call.toolName === 'offer_choice' || call.tool.risk === 'exec' || call.toolName === 'delegate';
+          const raw = await withTimeout(
             call.tool.execute(call.args, toolCtx),
             ownsTimeout ? 0 : limits.toolTimeoutMs,
             signal,
@@ -1048,7 +1607,8 @@ export async function runLoop(
           return {
             call,
             ok: true as const,
-            result,
+            result: shapeToolResult(call.toolName, call.args, raw, call.toolCall.id),
+            resultChars: raw.length,
             durationMs: Date.now() - started,
           };
         } catch (error) {
@@ -1081,6 +1641,7 @@ export async function runLoop(
           toolName: call.toolName,
           durationMs,
           resultPreview: preview(item.result),
+          resultChars: item.resultChars,
         });
         emit?.({
           type: 'tool.completed',
@@ -1096,7 +1657,7 @@ export async function runLoop(
           content: item.result,
         });
         // Mutate-stage only; finish appending the batch before returning halted.
-        if (toolStage(call.toolName) === 'mutate') {
+        if (toolStage(call.toolName, call.tool) === 'mutate') {
           const key = outcomeKey(call.toolName, call.args, item.result);
           const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
           repeatedOutcomes.set(key, outcomeCount);
@@ -1205,13 +1766,15 @@ export async function runLoop(
     );
     const content = turn.content ?? '';
     const durationMs = Date.now() - startedAt;
+    // The tool-less finalize prompt is everything in `messages` right now.
+    chargeOwnUsage(turn.usage, estimatePromptTokens(messages), turn.content);
 
     await appendDurable(
       {
         role: 'assistant',
         content,
       },
-      { durationMs },
+      { durationMs, runDurationMs: Date.now() - runStartedAt },
     );
 
     emit?.({
@@ -1225,15 +1788,35 @@ export async function runLoop(
     return { content, usage: turn.usage };
   }
 
-  async function completeAfterLimit(): Promise<RunLoopResult> {
-    stubLiveToolResults(messages, contextBudget);
-    const final = await finalizeAnswer();
-    trace({
-      type: 'run_finish',
+  /**
+   * Account capacity ran out (or is about to). No final model call: it would
+   * fail or spend the last of the allowance. The ledger and plan carry the
+   * state; the next run continues from them.
+   */
+  function finishPaused(reason: string): CoreResult {
+    noteLimit(limitMessage('limit.capacity', reason));
+    emitTurnCompleted(iterations);
+    emit?.({
+      type: 'run.completed',
       runId,
       iterations,
       toolCalls: totalToolCalls,
+      incomplete: true,
+      ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
     });
+    return {
+      runId,
+      content: lastAssistantContent(),
+      iterations,
+      toolCalls: totalToolCalls,
+      status: 'incomplete',
+      ...(lastLimitReason ? { limitReason: lastLimitReason } : {}),
+    };
+  }
+
+  async function completeAfterLimit(): Promise<CoreResult> {
+    stubLiveToolResults(messages, contextBudget, runStart);
+    const final = await finalizeAnswer();
     emitTurnCompleted(iterations, final.usage);
     emit?.({
       type: 'run.completed',
@@ -1253,8 +1836,27 @@ export async function runLoop(
     };
   }
 
-  trace({ type: 'run_start', runId, model: config.model });
   const posture = config.posture ?? 'agent';
+  trace({
+    type: 'run_start',
+    runId,
+    model: config.model,
+    threadId,
+    ...(config.parentRunId ? { parentRunId: config.parentRunId } : {}),
+    depth: config.depth ?? 0,
+    mode: config.mode,
+    posture,
+    windowTokens: contextBudget.windowTokens,
+    ...(config.contextReport?.windowSource
+      ? { windowSource: config.contextReport.windowSource }
+      : {}),
+    ...(config.contextReport
+      ? {
+          occupiedTokens: config.contextReport.occupiedTokens,
+          layers: config.contextReport.layers,
+        }
+      : {}),
+  });
   emit?.({
     type: 'run.started',
     runId,
@@ -1266,7 +1868,23 @@ export async function runLoop(
       ? { estimatedPromptTokens: config.estimatedPromptTokens }
       : {}),
     ...(config.contextReport ? { contextReport: config.contextReport } : {}),
+    ...(limits.maxPromptTokens !== undefined
+      ? { maxPromptTokens: limits.maxPromptTokens }
+      : {}),
+    startedAt: new Date(runStartedAt).toISOString(),
   });
+  for (const name of config.pinnedSkills ?? []) {
+    const skill = getSkill(name);
+    if (!skill) continue;
+    trace({
+      type: 'skill_loaded',
+      runId,
+      iteration: 0,
+      name: skill.name,
+      tokens: Math.ceil(skill.instructions.length / CHARS_PER_TOKEN),
+      source: 'pick',
+    });
+  }
 
   // Hoisted so the outer catch can skip any unanswered tool calls of the
   // turn in progress when the loop throws — upholds I1 (every tool_call_id
@@ -1280,7 +1898,26 @@ export async function runLoop(
       throwIfAborted(signal);
       iterations++;
 
-      trace({ type: 'llm_request', runId, iteration: iterations });
+      const estimatedPrompt = estimatePromptTokens(messages, tools.definitions);
+      // The first call always runs: skipping it to finalize would cost the same.
+      const overBudget = budgetExceeded(iterations > 1 ? estimatedPrompt : 0);
+      if (overBudget) {
+        iterations--;
+        noteLimit(overBudget);
+        return await completeAfterLimit();
+      }
+      const capacityPause = config.capacity?.pauseReason() ?? null;
+      if (capacityPause) {
+        iterations--;
+        return finishPaused(capacityPause);
+      }
+
+      trace({
+        type: 'llm_request',
+        runId,
+        iteration: iterations,
+        estimatedPromptTokens: estimatedPrompt,
+      });
       emit?.({ type: 'turn.started', runId, iteration: iterations });
 
       const messageId = randomUUID();
@@ -1306,6 +1943,7 @@ export async function runLoop(
       );
       throwIfAborted(signal);
       const durationMs = Date.now() - startedAt;
+      const usageEstimated = chargeOwnUsage(turn.usage, estimatedPrompt, turn.content);
 
       trace({
         type: 'llm_response',
@@ -1315,6 +1953,8 @@ export async function runLoop(
         hasToolCalls: Boolean(turn.toolCalls.length),
         contentPreview: turn.content ? preview(turn.content) : undefined,
         ...(turn.usage ? { usage: turn.usage } : {}),
+        durationMs,
+        ...(usageEstimated ? { usageEstimated } : {}),
       });
 
       if (turn.toolCalls.length > 0) {
@@ -1341,6 +1981,7 @@ export async function runLoop(
         const ready: ReadyToolCall[] = [];
         let halt: Extract<AdmitResult, { kind: 'halt' }> | null = null;
         let haltIndex = 0;
+        gatedThisTurn = 0;
         for (let index = 0; index < turn.toolCalls.length; index++) {
           if (signal?.aborted) {
             await skipToolCalls(
@@ -1363,15 +2004,32 @@ export async function runLoop(
           ready.push(admitted.call);
         }
 
+        // A model that only retries closed web tools spends a full call per
+        // refusal; after MAX_GATED_TURNS such turns, end with a handoff.
+        gatedTurnStreak =
+          !halt && gatedThisTurn > 0 && gatedThisTurn === turn.toolCalls.length
+            ? gatedTurnStreak + 1
+            : 0;
+        if (gatedTurnStreak >= MAX_GATED_TURNS) {
+          noteLimit(
+            limitMessage(
+              'limit.research',
+              `${gatedTurnStreak} turns in a row only retried closed web tools`,
+            ),
+          );
+          return await completeAfterLimit();
+        }
+
         const staged: Record<ToolStage, ReadyToolCall[]> = {
           skill: [],
           read: [],
           network: [],
+          subagent: [],
           exec: [],
           mutate: [],
         };
         for (const call of ready) {
-          staged[toolStage(call.toolName)].push(call);
+          staged[toolStage(call.toolName, call.tool)].push(call);
         }
 
         const runSerial = async (batch: ReadyToolCall[]) => {
@@ -1387,8 +2045,11 @@ export async function runLoop(
           return 'ok' as const;
         };
 
-        // I4 staging: skill → read → network → exec → mutate. Abort only on
-        // deferred|halted — never short-circuit on truthy 'ok'.
+        // I4 staging: skill → read → network → exec → mutate → subagent.
+        // skill, read, and subagent run parallel (executeReadyBatch);
+        // network, exec, mutate run serial (one at a time within stage).
+        // Sub-agents go last so a review in the same turn sees this turn's edits.
+        // Abort only on deferred|halted — never short-circuit on truthy 'ok'.
         let batchOutcome: 'ok' | 'deferred' | 'halted' = 'ok';
         for (const stageBatch of [staged.skill, staged.read] as const) {
           batchOutcome = await executeReadyBatch(stageBatch, []);
@@ -1404,6 +2065,9 @@ export async function runLoop(
             if (batchOutcome !== 'ok') break;
           }
         }
+        if (batchOutcome === 'ok') {
+          batchOutcome = await executeReadyBatch(staged.subagent, []);
+        }
         if (batchOutcome === 'deferred') {
           return finishChoiceSkipped();
         }
@@ -1412,24 +2076,30 @@ export async function runLoop(
             ? limitMessage('limit.outcome', 'Skipped: tool call limit reached.')
             : SKIP_LIMIT_REACHED;
           await skipToolCalls(unansweredToolCalls(turn.toolCalls), skipDetail);
-          return completeAfterLimit();
+          return await completeAfterLimit();
         }
         if (halt) {
-          return finishHalt(halt, haltIndex, turn.toolCalls);
+          return await finishHalt(halt, haltIndex, turn.toolCalls);
+        }
+        if (stopContent !== undefined) {
+          return await finishRequestedStop(stopContent, turn.usage);
         }
 
-        stubLiveToolResults(messages, contextBudget);
+        await manageResidency();
+        maybeSteerProgress();
+        maybeWarnBudget();
         emitTurnCompleted(iterations, turn.usage);
         continue;
       }
 
-      // No tool calls — this is the final assistant response.
+      // No tool calls — this is the final assistant response. durationMs is
+      // this call; runDurationMs is the whole run the user waited for.
       await appendDurable(
         {
           role: 'assistant',
           content: turn.content ?? '',
         },
-        { durationMs },
+        { durationMs, runDurationMs: Date.now() - runStartedAt },
       );
 
       emit?.({
@@ -1477,12 +2147,6 @@ export async function runLoop(
           };
         }
 
-        trace({
-          type: 'run_finish',
-          runId,
-          iterations,
-          toolCalls: totalToolCalls,
-        });
         emitTurnCompleted(iterations, turn.usage);
         emit?.({
           type: 'run.completed',
@@ -1534,9 +2198,13 @@ export async function runLoop(
       ),
     );
 
-    return completeAfterLimit();
+    return await completeAfterLimit();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // Usage limit (e.g. Ollama 429 "session usage limit"): pause, not error.
+    const capacityReason = signal?.aborted
+      ? null
+      : (config.capacity?.limitReasonFor(error) ?? null);
 
     // I1: close the gap on the error path. A throw mid-turn can leave
     // tool_call_ids without a durable tool row; the ledger is the truth.
@@ -1544,12 +2212,13 @@ export async function runLoop(
       try {
         await skipToolCalls(
           unansweredToolCalls(turnToolCalls),
-          'Skipped: run errored.',
+          capacityReason ? 'Skipped: account usage limit reached.' : 'Skipped: run errored.',
         );
       } catch {
         /* best-effort; the run is already failing */
       }
     }
+    if (capacityReason) return finishPaused(capacityReason);
 
     trace({
       type: 'tool_error',
@@ -1582,10 +2251,12 @@ async function finalizeWithoutTools(
   onTextDelta: ((delta: string) => void) | undefined,
   signal: AbortSignal | undefined,
 ): Promise<ModelTurn> {
+  // Doubles as the handoff the next run continues from (it is the last
+  // assistant row in the ledger, and the Last run layer points at it).
   messages.push({
     role: 'user',
     content:
-      'Tool budget reached. Answer my original question now using only the information above, and say what is uncertain.',
+      'This run stopped at a limit; tools are off. If the request can be answered from the information above, answer it now and say what is uncertain. Otherwise write a short handoff for the next run: what is done (files changed, what was verified), what is left, and the exact next step.',
   });
 
   return modelCall(

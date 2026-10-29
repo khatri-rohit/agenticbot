@@ -28,6 +28,7 @@ import {
   MAX_THREAD_MENTIONS,
   imageAttachments,
   isThreadMention,
+  resolveContextWindow,
   threadMentions,
 } from '@agent/agent-models';
 import {
@@ -37,6 +38,7 @@ import {
 } from '@/features/agent/api/agent-client';
 import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
 import { useContextMeter } from '@/features/agent/hooks/use-context-meter';
+import { useOllamaBalance } from '@/features/agent/hooks/use-ollama-balance';
 import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
 import { useVoiceInput } from '@/features/agent/hooks/use-voice-input';
 import {
@@ -53,12 +55,15 @@ import {
   mergeCloudModels,
   modelSupportsVision,
   readStoredComposerModel,
+  writeStoredContextWindowMode,
   type OllamaModel,
 } from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
 import { WorkspacePicker } from '@/components/workspace-picker';
+import { ContextWindowPicker } from '@/components/context-window-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
+import { UsageMeter } from '@/components/usage-meter';
 import { SkillsPanel } from '@/components/skills-panel';
 import { registerComposerFocus } from '@/components/composer-focus';
 import { Button } from '@/components/ui/button';
@@ -231,6 +236,9 @@ export function ChatInput({
   variant = 'dock',
   threadId,
   occupiedTokens,
+  runPromptTokens,
+  runPromptCap,
+  runUsageEstimated,
   occupiedCoversStream,
   estimatedPromptTokens,
   contextReport,
@@ -263,6 +271,12 @@ export function ChatInput({
   variant?: 'dock' | 'hero';
   threadId?: string;
   occupiedTokens?: number;
+  /** Run spend so far (prompt tokens, own + sub-agents). */
+  runPromptTokens?: number;
+  /** The run's prompt-token cap, from run.started. */
+  runPromptCap?: number;
+  /** Some calls had no provider usage and were estimated. */
+  runUsageEstimated?: boolean;
   occupiedCoversStream?: boolean;
   estimatedPromptTokens?: number;
   contextReport?: ContextReport;
@@ -449,12 +463,16 @@ export function ChatInput({
   }, [draftScope, input, pendingAttachments]);
 
   const modelConfig = useOllamaModelConfig(composerOptions.model, localMode);
-  // Soft fallback until /context/estimate or live ContextReport supplies windowTokens.
-  const contextLimit =
+  // Soft fallback until /context/estimate or live ContextReport supplies
+  // windowTokens. Same rule as the server, so the meter never flashes 1M.
+  const modelWindow =
     modelConfig?.contextLength ??
-    cloudModels.find((m) => m.id === composerOptions.model)
-      ?.contextLength ??
+    cloudModels.find((m) => m.id === composerOptions.model)?.contextLength ??
     null;
+  const contextLimit = resolveContextWindow({
+    mode: composerOptions.contextWindowMode ?? 'default',
+    modelMax: modelWindow,
+  }).windowTokens;
   const visionOk = modelSupportsVision(
     composerOptions.model,
     modelConfig?.supportsVision,
@@ -475,6 +493,8 @@ export function ChatInput({
     liveRunModel: runModel,
     skillHints: { requested: skillTokensInText(input) },
   });
+
+  const ollamaBalance = useOllamaBalance({ local: composerOptions.local });
 
   // Catalog must be ready before the user types so inline `/name` tokens
   // highlight immediately; not keyed on picker open.
@@ -1052,6 +1072,15 @@ export function ChatInput({
           disabled={isRunning}
         />
       ) : null}
+      <ContextWindowPicker
+        modelMax={modelConfig?.contextLength}
+        value={composerOptions.contextWindowMode}
+        onChange={(contextWindowMode) => {
+          writeStoredContextWindowMode(contextWindowMode);
+          onComposerOptionsChange({ ...composerOptions, contextWindowMode });
+        }}
+        disabled={isRunning}
+      />
       <ContextUsage
         used={contextMeter.used}
         limit={contextMeter.limit}
@@ -1060,12 +1089,22 @@ export function ChatInput({
         layers={contextMeter.layers}
         reserve={contextMeter.reserve}
         windowSource={contextMeter.windowSource}
+        {...(runPromptTokens !== undefined ? { runPromptTokens } : {})}
+        {...(runPromptCap !== undefined ? { runPromptCap } : {})}
+        {...(runUsageEstimated ? { runUsageEstimated } : {})}
+        {...(contextReport?.trimmedSkills?.length
+          ? { trimmedSkills: contextReport.trimmedSkills }
+          : {})}
       />
     </>
   );
 
   const actionControls = (
     <>
+      <UsageMeter
+        balance={ollamaBalance.balance}
+        loading={ollamaBalance.loading}
+      />
       {voice.enabled ? (
         <Button
           type="button"

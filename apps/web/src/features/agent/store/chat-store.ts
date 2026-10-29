@@ -38,6 +38,25 @@ export type CompactionNotice = {
   createdAt: string;
 };
 
+/** Sub-agent delegation activity for a turn (SSE or ledger hydrate). */
+export type SubagentActivity = {
+  subRunId: string;
+  subThreadId: string;
+  profile: string;
+  task: string;
+  status: 'running' | 'completed' | 'incomplete' | 'error' | 'cancelled';
+  iterations?: number;
+  toolCalls?: number;
+  /** Last tool the running child finished (subrun.progress). */
+  lastTool?: string;
+  summary?: string;
+  limitReason?: string;
+  /** Child spend; prompt + completion tokens. */
+  tokens?: number;
+  /** Event seq — orders activity against settled assistant snippets. */
+  seq: number;
+};
+
 export type AssistantSnippet = {
   messageId: string;
   content: string;
@@ -53,6 +72,8 @@ export type ChatRunState = {
   posture: RunPosture;
   streamingMessage: { id: string; content: string } | null;
   toolActivity: ToolActivity[];
+  /** Sub-agent delegation cards for this run. */
+  subagentActivity: SubagentActivity[];
   /** Assistant messages settled mid-run (assistant.completed), in event order. */
   assistantSnippets: AssistantSnippet[];
   lastSeq: number;
@@ -61,6 +82,14 @@ export type ChatRunState = {
   contextReport?: ContextReport;
   /** Last prompt tokens from turn.completed in this run. */
   occupiedTokens?: number;
+  /** Prompt tokens spent so far this run, own + sub-agents. */
+  runPromptTokens?: number;
+  /** Run cap from run.started. */
+  runPromptCap?: number;
+  /** Server start time from run.started, for the live total-elapsed clock. */
+  runStartedAt?: string;
+  /** Some calls were charged from the local estimate (no provider usage). */
+  runUsageEstimated?: boolean;
   /** True when occupiedTokens already includes the current streamingMessage. */
   occupiedCoversStream?: boolean;
 };
@@ -152,8 +181,13 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           posture: event.posture === 'ask' ? 'ask' : 'agent',
           streamingMessage: null,
           toolActivity: [],
+          subagentActivity: [],
           assistantSnippets: [],
           lastSeq,
+          ...(event.maxPromptTokens !== undefined
+            ? { runPromptCap: event.maxPromptTokens }
+            : {}),
+          ...(event.startedAt ? { runStartedAt: event.startedAt } : {}),
           ...(event.estimatedPromptTokens !== undefined
             ? { estimatedPromptTokens: event.estimatedPromptTokens }
             : {}),
@@ -421,6 +455,17 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           ...(event.contextReport
             ? { contextReport: event.contextReport }
             : {}),
+          ...(event.runUsage
+            ? {
+                runPromptTokens:
+                  event.runUsage.own.promptTokens +
+                  event.runUsage.children.promptTokens,
+                runUsageEstimated:
+                  event.runUsage.own.estimatedCalls +
+                    event.runUsage.children.estimatedCalls >
+                  0,
+              }
+            : {}),
         },
       };
     }
@@ -482,6 +527,81 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         ...state,
         activeRun: {
           ...state.activeRun,
+          lastSeq,
+        },
+      };
+    }
+
+    case 'subrun.started': {
+      if (!state.activeRun) return state;
+      const activity: SubagentActivity = {
+        subRunId: event.subRunId,
+        subThreadId: event.subThreadId,
+        profile: event.profile,
+        task: event.task,
+        status: 'running',
+        seq: lastSeq,
+      };
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          subagentActivity: [
+            ...state.activeRun.subagentActivity,
+            activity,
+          ],
+          lastSeq,
+        },
+      };
+    }
+
+    case 'subrun.progress': {
+      if (!state.activeRun) return state;
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          subagentActivity: state.activeRun.subagentActivity.map((item) =>
+            item.subRunId === event.subRunId
+              ? {
+                  ...item,
+                  toolCalls: event.toolCalls,
+                  ...(event.lastTool ? { lastTool: event.lastTool } : {}),
+                }
+              : item,
+          ),
+          lastSeq,
+        },
+      };
+    }
+
+    case 'subrun.settled': {
+      if (!state.activeRun) return state;
+      const usage = event.usage;
+      const tokens = usage
+        ? usage.own.promptTokens +
+          usage.own.completionTokens +
+          usage.children.promptTokens +
+          usage.children.completionTokens
+        : undefined;
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          subagentActivity: state.activeRun.subagentActivity.map((item) =>
+            item.subRunId === event.subRunId
+              ? {
+                  ...item,
+                  subThreadId: event.subThreadId,
+                  status: event.status,
+                  iterations: event.iterations,
+                  toolCalls: event.toolCalls,
+                  summary: event.summary,
+                  ...(event.limitReason ? { limitReason: event.limitReason } : {}),
+                  ...(tokens !== undefined ? { tokens } : {}),
+                }
+              : item,
+          ),
           lastSeq,
         },
       };

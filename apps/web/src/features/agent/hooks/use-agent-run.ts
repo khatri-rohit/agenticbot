@@ -18,6 +18,7 @@ import {
   modelSupportsVision,
   readStoredComposerLocal,
   readStoredComposerModel,
+  readStoredContextWindowMode,
   resolveOllamaModel,
   writeStoredComposerLocal,
   writeStoredComposerModel,
@@ -91,6 +92,7 @@ const defaultComposerOptions = (): ComposerOptions => {
     local,
     model: readStoredComposerModel(local),
     posture: 'agent',
+    contextWindowMode: readStoredContextWindowMode(),
   };
 };
 
@@ -119,6 +121,7 @@ export function useAgentRun(threadId: string | null) {
   const wasRunningRef = useRef(false);
   const syncedThreadModelRef = useRef<string | null>(null);
   const [threadKind, setThreadKind] = useState<ThreadKind>('home');
+  const [isSubagentThread, setIsSubagentThread] = useState(false);
   const [ledgerEpoch, setLedgerEpoch] = useState(0);
   const bumpLedger = useCallback(() => {
     setLedgerEpoch((n) => n + 1);
@@ -134,6 +137,7 @@ export function useAgentRun(threadId: string | null) {
       syncedThreadModelRef.current = thread.id;
       const workspace = isWorkspaceKind(thread.kind);
       setThreadKind(workspace ? 'workspace' : 'home');
+      setIsSubagentThread(thread.parentThreadId !== undefined);
       if (workspace && thread.workspaceRoot) {
         setWorkspaceRoot(thread.workspaceRoot);
       } else {
@@ -146,6 +150,8 @@ export function useAgentRun(threadId: string | null) {
           ...prev,
           model,
           webSearch: prev.webSearch,
+          contextWindowMode:
+            thread.contextWindowMode ?? prev.contextWindowMode ?? 'default',
         };
       });
     });
@@ -328,6 +334,9 @@ export function useAgentRun(threadId: string | null) {
         thinking: options.thinking,
         posture: normalizeRunPosture(options.posture),
         ...(options.skills ? { skills: options.skills } : {}),
+        ...(options.contextWindowMode
+          ? { contextWindowMode: options.contextWindowMode }
+          : {}),
       });
 
       setChatState((prev) => ({
@@ -419,6 +428,8 @@ export function useAgentRun(threadId: string | null) {
           options.posture ?? composerOptions.posture,
         ),
         ...(options.skills ? { skills: options.skills } : {}),
+        contextWindowMode:
+          options.contextWindowMode ?? composerOptions.contextWindowMode ?? 'default',
       };
 
       if (chatStateRef.current.activeRun) {
@@ -489,6 +500,7 @@ export function useAgentRun(threadId: string | null) {
       local,
       thinking: composerOptions.thinking,
       posture: normalizeRunPosture(composerOptions.posture),
+      contextWindowMode: composerOptions.contextWindowMode ?? 'default',
     });
 
     const restored = await fetchLedger(threadId);
@@ -537,6 +549,7 @@ export function useAgentRun(threadId: string | null) {
         thinking: composerOptions.thinking,
         posture: normalizeRunPosture(composerOptions.posture),
         ...(requested.length > 0 ? { skills: { requested } } : {}),
+        contextWindowMode: composerOptions.contextWindowMode ?? 'default',
       });
 
       const restored = await fetchLedger(threadId);
@@ -595,6 +608,7 @@ export function useAgentRun(threadId: string | null) {
     isRunning: chatState.activeRun !== null,
     ledgerEpoch,
     threadKind,
+    isSubagentThread,
   };
 }
 

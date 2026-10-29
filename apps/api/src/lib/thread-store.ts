@@ -23,6 +23,7 @@ import {
   selectPlanForRewind,
   parseThreadLastRun,
   type ChatMessage,
+  type ContextWindowMode,
   type LedgerAppendMeta,
   type LedgerEnvelope,
   type LedgerRecord,
@@ -65,10 +66,11 @@ export class ThreadStore {
   listThreads(filter?: {
     kind?: ThreadKind;
     workspaceRoot?: string;
+    includeSubagents?: boolean;
   }): Thread[] {
     const rows = this.db
       .prepare(
-        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root
+        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root, parent_thread_id, parent_run_id, context_window_mode
          FROM threads
          ORDER BY pinned DESC, updated_at DESC`,
       )
@@ -84,6 +86,13 @@ export class ThreadStore {
       ) {
         return false;
       }
+      // Sub-agent threads are hidden from sidebar by default.
+      if (
+        !filter?.includeSubagents &&
+        thread.parentThreadId !== undefined
+      ) {
+        return false;
+      }
       return true;
     });
   }
@@ -91,7 +100,7 @@ export class ThreadStore {
   getThread(id: string): Thread | undefined {
     const row = this.db
       .prepare(
-        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root
+        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root, parent_thread_id, parent_run_id, context_window_mode
          FROM threads WHERE id = ?`,
       )
       .get(id) as CatalogThreadRow | undefined;
@@ -101,7 +110,14 @@ export class ThreadStore {
   async createThread(
     model: string,
     title = 'New Chat',
-    options?: { kind?: ThreadKind; workspaceRoot?: string },
+    options?: {
+      kind?: ThreadKind;
+      workspaceRoot?: string;
+      parentThreadId?: string;
+      parentRunId?: string;
+      /** Sub-agent profile that owns this thread (resume must match it). */
+      subagentProfile?: string;
+    },
   ): Promise<Thread> {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -116,10 +132,21 @@ export class ThreadStore {
 
     this.db
       .prepare(
-        `INSERT INTO threads (id, title, model, pinned, created_at, updated_at, last_seq, kind, workspace_root)
-         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?)`,
+        `INSERT INTO threads (id, title, model, pinned, created_at, updated_at, last_seq, kind, workspace_root, parent_thread_id, parent_run_id, subagent_profile)
+         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?, ?, ?, ?)`,
       )
-      .run(id, title, model, now, now, kind, workspaceRoot);
+      .run(
+        id,
+        title,
+        model,
+        now,
+        now,
+        kind,
+        workspaceRoot,
+        options?.parentThreadId ?? null,
+        options?.parentRunId ?? null,
+        options?.subagentProfile ?? null,
+      );
 
     return {
       id,
@@ -130,6 +157,8 @@ export class ThreadStore {
       pinned: false,
       kind,
       ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
+      ...(options?.parentRunId ? { parentRunId: options.parentRunId } : {}),
     };
   }
 
@@ -141,10 +170,16 @@ export class ThreadStore {
       pinned?: boolean;
       kind?: ThreadKind;
       workspaceRoot?: string | null;
+      contextWindowMode?: ContextWindowMode;
     },
   ): Thread | undefined {
     const current = this.getThread(id);
     if (!current) return undefined;
+    if (changes.contextWindowMode !== undefined) {
+      this.db
+        .prepare(`UPDATE threads SET context_window_mode = ? WHERE id = ?`)
+        .run(changes.contextWindowMode, id);
+    }
 
     const title = changes.title ?? current.title;
     const model = changes.model ?? current.model;
@@ -167,8 +202,46 @@ export class ThreadStore {
     return this.getThread(id);
   }
 
+  /** Profile recorded for a sub-agent thread, if any. */
+  subagentProfile(id: string): string | undefined {
+    const row = this.db
+      .prepare(`SELECT subagent_profile FROM threads WHERE id = ?`)
+      .get(id) as { subagent_profile?: string | null } | undefined;
+    return row?.subagent_profile ?? undefined;
+  }
+
+  /**
+   * Delete sub-agent threads of `parentThreadId` (all, or those `select`
+   * accepts), recursively. Children never outlive the run rows that made them.
+   */
+  async deleteChildThreads(
+    parentThreadId: string,
+    select?: (child: { parentRunId?: string; createdAt: string }) => boolean,
+  ): Promise<void> {
+    const rows = this.db
+      .prepare(`SELECT id, parent_run_id, created_at FROM threads WHERE parent_thread_id = ?`)
+      .all(parentThreadId) as {
+      id: string;
+      parent_run_id?: string | null;
+      created_at: string;
+    }[];
+    for (const row of rows) {
+      if (
+        select &&
+        !select({
+          ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
+          createdAt: row.created_at,
+        })
+      ) {
+        continue;
+      }
+      await this.deleteThread(row.id);
+    }
+  }
+
   async deleteThread(id: string): Promise<boolean> {
     if (!this.getThread(id)) return false;
+    await this.deleteChildThreads(id);
     await rm(this.threadDir(id), { recursive: true, force: true });
     this.db.prepare(`DELETE FROM threads WHERE id = ?`).run(id);
     this.writers.delete(id);
@@ -353,6 +426,9 @@ export class ThreadStore {
       ...(input.meta?.durationMs != null
         ? { durationMs: input.meta.durationMs }
         : {}),
+      ...(input.meta?.runDurationMs != null
+        ? { runDurationMs: input.meta.runDurationMs }
+        : {}),
       ...(input.skills ? { skills: input.skills } : {}),
     };
 
@@ -386,10 +462,27 @@ export class ThreadStore {
     if (!this.getThread(threadId)) {
       throw new Error(`Thread not found: ${threadId}`);
     }
-    const kept = (await this.loadLedger(threadId)).envelopes.filter(
-      (envelope) => envelope.seq <= keepThroughSeq,
+    const all = (await this.loadLedger(threadId)).envelopes;
+    const kept = all.filter((envelope) => envelope.seq <= keepThroughSeq);
+    // Sub-agent threads go with the run rows that started them. A run cut in
+    // the middle keeps the children created up to its last kept row.
+    const lastKeptTs = new Map<string, string>();
+    for (const envelope of kept) {
+      if (envelope.runId) lastKeptTs.set(envelope.runId, envelope.ts);
+    }
+    const touchedRuns = new Set(
+      all
+        .filter((envelope) => envelope.seq > keepThroughSeq && envelope.runId)
+        .map((envelope) => envelope.runId as string),
     );
     await this.rewriteLedger(threadId, kept);
+    if (touchedRuns.size > 0) {
+      await this.deleteChildThreads(threadId, (child) => {
+        if (!child.parentRunId || !touchedRuns.has(child.parentRunId)) return false;
+        const cut = lastKeptTs.get(child.parentRunId);
+        return cut === undefined || child.createdAt > cut;
+      });
+    }
     const now = new Date().toISOString();
     const lastSeq = kept.at(-1)?.seq ?? 0;
     this.seqs.set(threadId, lastSeq);
@@ -557,6 +650,11 @@ export class ThreadStore {
     return sha;
   }
 
+  /** Per-thread JSONL traces (one file per run), read by the future eval app. */
+  traceDir(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'traces');
+  }
+
   private threadDir(threadId: string): string {
     return path.join(this.home, 'sessions', threadId);
   }
@@ -591,6 +689,9 @@ type CatalogThreadRow = {
   updated_at: string;
   kind?: string | null;
   workspace_root?: string | null;
+  parent_thread_id?: string | null;
+  parent_run_id?: string | null;
+  context_window_mode?: string | null;
 };
 
 function rowToThread(row: CatalogThreadRow): Thread {
@@ -604,6 +705,11 @@ function rowToThread(row: CatalogThreadRow): Thread {
     pinned: row.pinned === 1,
     kind,
     ...(row.workspace_root ? { workspaceRoot: row.workspace_root } : {}),
+    ...(row.parent_thread_id ? { parentThreadId: row.parent_thread_id } : {}),
+    ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
+    ...(row.context_window_mode === 'model' || row.context_window_mode === 'default'
+      ? { contextWindowMode: row.context_window_mode }
+      : {}),
   };
 }
 
@@ -647,6 +753,10 @@ export async function openThreadStore(home: string): Promise<ThreadStore> {
   `);
   ensureColumn(db, 'threads', 'kind', `kind TEXT NOT NULL DEFAULT 'home'`);
   ensureColumn(db, 'threads', 'workspace_root', `workspace_root TEXT`);
+  ensureColumn(db, 'threads', 'parent_thread_id', `parent_thread_id TEXT`);
+  ensureColumn(db, 'threads', 'parent_run_id', `parent_run_id TEXT`);
+  ensureColumn(db, 'threads', 'context_window_mode', `context_window_mode TEXT`);
+  ensureColumn(db, 'threads', 'subagent_profile', `subagent_profile TEXT`);
   db.exec(`
     UPDATE threads SET kind = 'home' WHERE kind IN ('research', '');
     UPDATE threads SET kind = 'workspace' WHERE kind = 'coding';

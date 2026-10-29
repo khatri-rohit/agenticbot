@@ -2,19 +2,19 @@ import { Router, type Request, type Response } from 'express';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  ContextReport,
   LedgerEnvelope,
   MemoryTarget,
   MessageAttachment,
   ModeConfig,
   OllamaEndpoint,
+  Snapshot,
   StartRunRequest,
-  ThinkingValue,
   Thread,
   ThreadKind,
   ThreadPlan,
 } from '@agent/agent-models';
 import {
-  DEFAULT_CONTEXT_BUDGET,
   DEFAULT_MEMORY_CAPS,
   HOME_MODE,
   MAX_THREAD_MENTIONS,
@@ -24,35 +24,47 @@ import {
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
+  parseContextWindowMode,
   parseThreadKind,
   planHasOpenWork,
   threadMentions,
+  type ContextWindowMode,
   type RunPosture,
 } from '@agent/agent-models';
 import {
-  ALL_TOOLS,
   RUN_HANDLE_TTL_MS,
   RunManager,
   assembleContext,
   buildExtractiveSnapshot,
-  chooseCompactThroughSeq,
+  chooseCompactThroughSeqForTarget,
   createMemoryTool,
   createPlanTools,
   createStreamModelCall,
+  createSubagentRunner,
   createToolRegistry,
   getOllamaModelConfig,
   listOllamaModels,
+  listTools,
   loadWorkspaceRules,
   packMentionedThread,
-  resolveReasoningEffort,
   getSkill,
   traceCompactionEvent,
   type MentionedThreadContext,
   type ToolRegistry,
 } from '@agent/agent-core';
+import {
+  BalanceError,
+  appendUsageLog,
+  capacityEnabled,
+  capacitySnapshot,
+  createCapacityGate,
+  getOllamaBalance,
+} from '../../lib/capacity';
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
-import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
+import { getAgentHome, getMemoryStore, getThreadStore } from '../../lib/store-instance';
+import { resolveCallOptions, resolveContextBudget } from '../../lib/model-runtime';
+import { createSubagentHost } from '../../lib/subagent-host';
 import { createJsonlTraceSink } from '../../lib/trace-sink.js';
 import { skillsRouter } from './skills.routes';
 import type { ThreadStore } from '../../lib/thread-store';
@@ -61,10 +73,29 @@ const router = Router();
 router.use(skillsRouter);
 const runManager = new RunManager();
 
-/** Per-run JSONL trace files for offline replay / eval debugging. */
-const traceSink = createJsonlTraceSink(
-  path.join(__dirname, '..', '..', '..', 'traces'),
-);
+router.get('/usage/balance', async (_req: Request, res: Response) => {
+  if (!capacityEnabled()) {
+    res.status(404).json({ error: 'No OLLAMA_API_KEY configured' });
+    return;
+  }
+
+  try {
+    res.json(await getOllamaBalance());
+  } catch (error) {
+    if (error instanceof BalanceError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    res.status(502).json({
+      error: error instanceof Error ? error.message : 'Balance fetch failed',
+    });
+  }
+});
+
+/** Per-thread JSONL traces (`<thread>/traces/<runId>.jsonl`), plus console. */
+function traceSinkFor(store: ThreadStore, threadId: string) {
+  return createJsonlTraceSink(store.traceDir(threadId));
+}
 
 function toolAllowList(
   mode: ModeConfig,
@@ -234,6 +265,8 @@ async function prepareRun(input: {
   model: string;
   endpoint?: OllamaEndpoint;
   skillNames?: string[];
+  /** Overrides the thread's stored mode (estimate previews a change). */
+  contextWindowMode?: ContextWindowMode;
   onMemoryUpdated?: (payload: MemoryUpdatedPayload) => void;
   onPlanUpdated?: (payload: PlanUpdatedPayload) => void;
 }): Promise<{
@@ -274,7 +307,7 @@ async function prepareRun(input: {
 
   const tools = createToolRegistry(
     [
-      ...ALL_TOOLS,
+      ...listTools(),
       ...planTools,
       createMemoryTool({
         read: () => memory.read(workspaceRoot),
@@ -298,20 +331,11 @@ async function prepareRun(input: {
     posture,
   );
 
-  let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
-  let windowSource: 'show' | 'default' = 'default';
-  try {
-    const config = await getOllamaModelConfig(
-      input.model,
-      input.endpoint ?? 'cloud',
-    );
-    if (config.contextLength) {
-      windowTokens = config.contextLength;
-      windowSource = 'show';
-    }
-  } catch {
-    // Keep the default window when /api/show is unavailable.
-  }
+  const window = await resolveContextBudget(
+    input.model,
+    input.endpoint ?? 'cloud',
+    input.contextWindowMode ?? input.thread?.contextWindowMode,
+  );
 
   const snapshot =
     input.threadId === 'draft'
@@ -340,16 +364,80 @@ async function prepareRun(input: {
       ...(plan ? { plan } : {}),
       ...(lastRun ? { lastRun } : {}),
     },
-    { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
+    window.budget,
   );
 
   return {
     tools,
     messages,
-    report: { ...report, windowSource },
+    report: { ...report, windowSource: window.source },
     mode,
     posture,
   };
+}
+
+/**
+ * Extractive compaction (no LLM): when `report` says the thread is over
+ * compactAtRatio, cut older turns until history fits compactToRatio and write
+ * the snapshot. Returns the snapshot, or null when nothing was compacted.
+ * Runs after every run and, for an oversized start, before one.
+ */
+async function compactThread(input: {
+  store: ThreadStore;
+  threadId: string;
+  model: string;
+  envelopes: LedgerEnvelope[];
+  report: ContextReport;
+}): Promise<Snapshot | null> {
+  const { store, envelopes, report } = input;
+  if (!report.needsCompaction) return null;
+  const { budget, layers, occupiedTokens } = report;
+  const historyTokens =
+    layers.find((layer) => layer.id === 'conversation')?.tokens ?? 0;
+  const fixedTokens = Math.max(0, occupiedTokens - historyTokens);
+  const targetTokens = Math.max(
+    1,
+    (budget.windowTokens - budget.outputReserveTokens) * budget.compactToRatio -
+      fixedTokens,
+  );
+  const throughSeq = chooseCompactThroughSeqForTarget(
+    envelopes,
+    budget.keepToolResultsForTurns,
+    targetTokens,
+  );
+  if (throughSeq == null) return null;
+  const existing = await store.readSnapshot(input.threadId);
+  if (existing && existing.throughSeq >= throughSeq) return null;
+
+  const snapshot = buildExtractiveSnapshot({
+    threadId: input.threadId,
+    model: input.model,
+    envelopes,
+    throughSeq,
+  });
+  await store.writeSnapshot(input.threadId, snapshot);
+  return snapshot;
+}
+
+/** UI notice + trace for a snapshot written during `runId`. */
+function emitCompacted(
+  store: ThreadStore,
+  runId: string,
+  threadId: string,
+  snapshot: Snapshot,
+): void {
+  runManager.get(runId)?.emitter.emit({
+    type: 'context.compacted',
+    runId,
+    threadId,
+    throughSeq: snapshot.throughSeq,
+    brief: snapshot.brief,
+    summary: snapshot.summary,
+    createdAt: snapshot.createdAt,
+  });
+  traceSinkFor(store, threadId)(
+    traceCompactionEvent({ runId, threadId, snapshot }),
+  );
 }
 
 async function maybeCompactThread(input: {
@@ -375,44 +463,19 @@ async function maybeCompactThread(input: {
     skillNames: resolveRequestedSkills(undefined, lastUser?.skills?.selected),
   });
   if (!prepared.report.needsCompaction) return;
-  const throughSeq = chooseCompactThroughSeq(
-    envelopes,
-    prepared.report.budget.keepToolResultsForTurns,
-  );
-  if (throughSeq == null) return;
-  const existing = await store.readSnapshot(input.threadId);
-  if (existing && existing.throughSeq >= throughSeq) return;
-
-  const emitter = runManager.get(input.runId)?.emitter;
-  emitter?.emit({
+  runManager.get(input.runId)?.emitter.emit({
     type: 'context.compacting',
     runId: input.runId,
     threadId: input.threadId,
   });
-
-  const snapshot = buildExtractiveSnapshot({
+  const snapshot = await compactThread({
+    store,
     threadId: input.threadId,
     model: input.model,
     envelopes,
-    throughSeq,
+    report: prepared.report,
   });
-  await store.writeSnapshot(input.threadId, snapshot);
-  emitter?.emit({
-    type: 'context.compacted',
-    runId: input.runId,
-    threadId: input.threadId,
-    throughSeq: snapshot.throughSeq,
-    brief: snapshot.brief,
-    summary: snapshot.summary,
-    createdAt: snapshot.createdAt,
-  });
-  traceSink(
-    traceCompactionEvent({
-      runId: input.runId,
-      threadId: input.threadId,
-      snapshot,
-    }),
-  );
+  if (snapshot) emitCompacted(store, input.runId, input.threadId, snapshot);
 }
 
 /**
@@ -451,10 +514,12 @@ router.get('/threads', async (req: Request, res: Response) => {
     req.query.workspaceRoot.trim()
       ? path.resolve(req.query.workspaceRoot.trim())
       : undefined;
+  const includeSubagents = req.query.includeSubagents === 'true';
   return res.json({
     threads: store.listThreads({
       ...(kind ? { kind } : {}),
       ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(includeSubagents ? { includeSubagents: true } : {}),
     }),
   });
 });
@@ -505,7 +570,9 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
     pinned?: boolean;
     kind?: ThreadKind;
     workspaceRoot?: string | null;
+    contextWindowMode?: unknown;
   };
+  const contextWindowMode = parseContextWindowMode(body.contextWindowMode);
   let workspaceRoot = body.workspaceRoot;
   if (typeof workspaceRoot === 'string' && workspaceRoot.trim()) {
     const resolved = await resolveWorkspaceDir(workspaceRoot);
@@ -519,6 +586,7 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
     ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
     ...(kind ? { kind } : {}),
     ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+    ...(contextWindowMode ? { contextWindowMode } : {}),
   });
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
   return res.json(thread);
@@ -569,6 +637,7 @@ router.post('/run', async (req: Request, res: Response) => {
     thinking,
     posture: rawPosture,
     skills: rawSkills,
+    contextWindowMode: rawWindowMode,
   } = req.body as StartRunRequest;
   const posture = normalizeRunPosture(rawPosture);
 
@@ -577,9 +646,23 @@ router.post('/run', async (req: Request, res: Response) => {
   }
 
   const store = await getThreadStore();
-  const thread = store.getThread(threadId);
-  if (!thread) {
+  const found = store.getThread(threadId);
+  if (!found) {
     return res.status(404).json({ error: 'Thread not found' });
+  }
+  // The window decides when compaction runs, so it lives on the thread:
+  // this run and the compaction after it read the same value.
+  const windowMode = parseContextWindowMode(rawWindowMode);
+  const thread =
+    windowMode && windowMode !== (found.contextWindowMode ?? 'default')
+      ? (store.updateThread(threadId, { contextWindowMode: windowMode }) ?? found)
+      : found;
+
+  // Sub-agent threads are read-only — user cannot start runs on them (Q4).
+  if (thread.parentThreadId) {
+    return res
+      .status(400)
+      .json({ error: 'Sub-agent threads are read-only' });
   }
 
   if (isWorkspaceKind(thread.kind) && !thread.workspaceRoot) {
@@ -650,7 +733,7 @@ router.post('/run', async (req: Request, res: Response) => {
   }
 
   let assignedRunId = '';
-  const prepared = await prepareRun({
+  const prepareInput = {
     threadId,
     thread,
     webSearch,
@@ -660,7 +743,7 @@ router.post('/run', async (req: Request, res: Response) => {
     model: useModel,
     endpoint,
     skillNames,
-    onMemoryUpdated: (payload) => {
+    onMemoryUpdated: (payload: MemoryUpdatedPayload) => {
       const handle = runManager.get(assignedRunId);
       handle?.emitter.emit({
         type: 'memory.updated',
@@ -668,7 +751,7 @@ router.post('/run', async (req: Request, res: Response) => {
         ...payload,
       });
     },
-    onPlanUpdated: (payload) => {
+    onPlanUpdated: (payload: PlanUpdatedPayload) => {
       const handle = runManager.get(assignedRunId);
       handle?.emitter.emit({
         type: 'plan.updated',
@@ -677,7 +760,18 @@ router.post('/run', async (req: Request, res: Response) => {
         plan: payload.plan,
       });
     },
+  };
+  let prepared = await prepareRun(prepareInput);
+  // Oversized start (window switched down, big mention, long last run):
+  // compact before the first model call instead of carrying it all run.
+  const preRunSnapshot = await compactThread({
+    store,
+    threadId,
+    model: useModel,
+    envelopes,
+    report: prepared.report,
   });
+  if (preRunSnapshot) prepared = await prepareRun(prepareInput);
 
   const callOptions = await resolveCallOptions(
     useModel,
@@ -686,6 +780,11 @@ router.post('/run', async (req: Request, res: Response) => {
     prepared.mode.temperature,
   );
   const modelCall = createStreamModelCall(callOptions);
+  // Cloud runs share one account: pause on a spent session/week instead of
+  // erroring, and steer tighter when behind even weekly pace.
+  const capacity =
+    endpoint === 'cloud' && capacityEnabled() ? createCapacityGate() : undefined;
+  const balanceBefore = capacitySnapshot();
 
   assignedRunId = runManager.start({
     threadId,
@@ -722,8 +821,30 @@ router.post('/run', async (req: Request, res: Response) => {
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
-    trace: traceSink,
+    // The loop binds the runner to this run (signal, budget, capabilities).
+    ...(isWorkspaceKind(thread.kind) && thread.workspaceRoot
+      ? {
+          subagents: createSubagentRunner({
+            runManager,
+            host: createSubagentHost({ store, endpoint }),
+          }),
+        }
+      : {}),
+    trace: traceSinkFor(store, threadId),
+    ...(skillNames.length > 0 ? { pinnedSkills: skillNames } : {}),
+    ...(capacity ? { capacity } : {}),
     onFinished: async (result) => {
+      // Not awaited: the balance read after a run must not delay compaction.
+      void appendUsageLog(getAgentHome(), {
+        runId: result.runId,
+        threadId,
+        model: useModel,
+        endpoint,
+        status: result.status,
+        ...(result.limitReason ? { limitReason: result.limitReason } : {}),
+        usage: result.usage,
+        balanceBefore,
+      });
       try {
         const runStatus = lastRunStatusFrom(result, runManager);
         await store.writeLastRun(threadId, {
@@ -764,6 +885,7 @@ router.post('/run', async (req: Request, res: Response) => {
     threadId,
     plan: await store.readPlan(threadId),
   });
+  if (preRunSnapshot) emitCompacted(store, assignedRunId, threadId, preRunSnapshot);
 
   // First turn: title via the same chat model (runs in parallel with the agent).
   // Await so POST /run returns after ThreadStore has the real title for refreshThreads.
@@ -793,6 +915,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     local,
     posture,
     skills: rawSkills,
+    contextWindowMode,
   } = req.body as {
     threadId?: string;
     draft?: string;
@@ -802,7 +925,9 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     local?: boolean;
     posture?: RunPosture;
     skills?: StartRunRequest['skills'];
+    contextWindowMode?: unknown;
   };
+  const previewWindowMode = parseContextWindowMode(contextWindowMode);
 
   const store = await getThreadStore();
   let envelopes: LedgerEnvelope[] = [];
@@ -844,6 +969,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     model: useModel,
     endpoint: endpointFromLocal(local),
     skillNames: resolveRequestedSkills(rawSkills),
+    ...(previewWindowMode ? { contextWindowMode: previewWindowMode } : {}),
   });
 
   return res.json({
@@ -1081,35 +1207,5 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
 
   return;
 });
-
-async function resolveCallOptions(
-  model: string,
-  thinking: unknown,
-  endpoint: OllamaEndpoint,
-  temperature: number,
-): Promise<{
-  reasoningEffort?: string;
-  endpoint: OllamaEndpoint;
-  temperature: number;
-}> {
-  const requested: ThinkingValue | undefined =
-    typeof thinking === 'boolean' ||
-    (typeof thinking === 'string' && thinking.length > 0)
-      ? thinking
-      : undefined;
-
-  try {
-    const config = await getOllamaModelConfig(model, endpoint);
-    const reasoningEffort = resolveReasoningEffort(config, requested);
-    return {
-      endpoint,
-      temperature,
-      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-    };
-  } catch {
-    // /api/show unavailable — omit effort; still route to the chosen endpoint
-    return { endpoint, temperature };
-  }
-}
 
 export { router as agentRouter };

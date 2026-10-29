@@ -20,6 +20,7 @@ import { toastError } from '@/hooks/use-toast';
 import {
   readStoredComposerLocal,
   readStoredComposerModel,
+  readStoredContextWindowMode,
   writeStoredComposerLocal,
   writeStoredComposerModel,
 } from '@/lib/ollama-models';
@@ -42,6 +43,7 @@ const defaultOptions = (webSearch: boolean): ComposerOptions => {
     local,
     model: readStoredComposerModel(local),
     posture: 'agent',
+    contextWindowMode: readStoredContextWindowMode(),
   };
 };
 
@@ -148,6 +150,9 @@ export default function HomePage() {
                   : undefined,
                 attachments,
                 ...(options.skills ? { skills: options.skills } : {}),
+                ...(options.contextWindowMode
+                  ? { contextWindowMode: options.contextWindowMode }
+                  : {}),
               });
               if (!stashed) {
                 await deleteThread(thread.id);

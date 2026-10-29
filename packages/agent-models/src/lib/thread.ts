@@ -1,3 +1,5 @@
+import type { ContextWindowMode } from './context.js';
+
 /**
  * A conversation thread. The top-level durable entity.
  *
@@ -76,4 +78,10 @@ export interface Thread {
   kind?: ThreadKind;
   /** Absolute workspace folder when kind is workspace. */
   workspaceRoot?: string;
+  /** Parent thread when this thread is a sub-agent. Absent = top-level. */
+  parentThreadId?: string;
+  /** Parent run that spawned this sub-agent thread. */
+  parentRunId?: string;
+  /** Context window policy. Absent = default (200k cap). */
+  contextWindowMode?: ContextWindowMode;
 }

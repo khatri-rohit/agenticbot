@@ -1,3 +1,4 @@
+import type { ContextWindowMode } from './context.js';
 import type { MessageAttachment, PendingToolCall } from './message.js';
 import type { ThinkingValue } from './ollama-model.js';
 
@@ -27,6 +28,41 @@ export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens?: number;
+}
+
+/**
+ * Token spend for one run. `own` is this run's model calls; `children` is the
+ * sum of every sub-agent run it spawned (already rolled up recursively).
+ */
+export interface RunUsage {
+  own: UsageTotals;
+  children: UsageTotals;
+}
+
+export interface UsageTotals {
+  promptTokens: number;
+  completionTokens: number;
+  calls: number;
+  /** Calls charged from the local estimate because the provider sent no usage. */
+  estimatedCalls: number;
+}
+
+export function emptyRunUsage(): RunUsage {
+  return {
+    own: { promptTokens: 0, completionTokens: 0, calls: 0, estimatedCalls: 0 },
+    children: { promptTokens: 0, completionTokens: 0, calls: 0, estimatedCalls: 0 },
+  };
+}
+
+/** Own + children, for budgets and display. */
+export function totalRunUsage(usage: RunUsage): UsageTotals {
+  return {
+    promptTokens: usage.own.promptTokens + usage.children.promptTokens,
+    completionTokens:
+      usage.own.completionTokens + usage.children.completionTokens,
+    calls: usage.own.calls + usage.children.calls,
+    estimatedCalls: usage.own.estimatedCalls + usage.children.estimatedCalls,
+  };
 }
 
 /**
@@ -116,4 +152,6 @@ export type StartRunRequest = {
   skills?: {
     requested?: string[];
   };
+  /** Persisted on the thread when present; later runs and compaction reuse it. */
+  contextWindowMode?: ContextWindowMode;
 };

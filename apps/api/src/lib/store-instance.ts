@@ -2,7 +2,13 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { configureSkillRoots } from '@agent/agent-core';
+import {
+  configureSkillRoots,
+  configureSubagentRoot,
+  listTools,
+  skillLintWarnings,
+  subagentProfileWarnings,
+} from '@agent/agent-core';
 
 import { resolveAgentHome } from './agent-home.js';
 import { MemoryStore } from './memory-store.js';
@@ -20,11 +26,27 @@ function home(): string {
 }
 
 let storePromise: Promise<ThreadStore> | undefined;
+let agentsConfigured = false;
 let memoryStore: MemoryStore | undefined;
 
 export function getAgentHome(): string {
   const dir = home();
   configureSkillRoots(path.join(dir, 'skills'));
+  if (!agentsConfigured) {
+    agentsConfigured = true;
+    // User sub-agents: $AGENT_HOME/agents/<name>.md. Bad files are skipped, not fatal.
+    configureSubagentRoot(
+      path.join(dir, 'agents'),
+      listTools().map((tool) => tool.definition.function.name),
+    );
+    for (const warning of subagentProfileWarnings()) {
+      console.warn(`[agents] skipped ${warning}`);
+    }
+    // Large skills without core rules keep only their first block once evicted.
+    for (const warning of skillLintWarnings()) {
+      console.warn(`[skills] ${warning}`);
+    }
+  }
   return dir;
 }
 

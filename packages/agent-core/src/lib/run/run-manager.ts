@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 
 import {
   ChoiceSkipped,
+  emptyRunUsage,
   MAX_CHOICE_TEXT_CHARS,
   type AgentEvent,
   type ChoiceRequest,
   type ChoiceResult,
 } from '@agent/agent-models';
 import { runLoop } from '../loop/loop';
+import type { RunLoopResult } from '../loop/types';
 import { EventEmitter } from '../events/emitter';
 import type { EventSubscriber } from '../events/types';
 import type {
@@ -40,9 +42,13 @@ export class RunManager {
 
   /** Start a run. Returns the runId immediately; the run executes async. */
   start(opts: StartRunOptions): string {
-    const runId = randomUUID();
+    const runId = opts.runId ?? randomUUID();
     const emitter = new EventEmitter();
     const abortController = new AbortController();
+    let settle!: (result: RunLoopResult) => void;
+    const done = new Promise<RunLoopResult>((resolve) => {
+      settle = resolve;
+    });
 
     const handle: RunHandle = {
       runId,
@@ -54,23 +60,55 @@ export class RunManager {
       result: null,
       pendingChoices: new Map(),
       posture: opts.posture ?? 'agent',
+      done,
     };
 
     this.runs.set(runId, handle);
 
+    // A child run dies with its parent: parent cancel aborts this run too.
+    const parentSignal = opts.parentSignal;
+    const onParentAbort = () => this.cancel(runId);
+    if (parentSignal?.aborted) {
+      queueMicrotask(onParentAbort);
+    } else {
+      parentSignal?.addEventListener('abort', onParentAbort, { once: true });
+    }
+
     // Execute async — don't block the caller.
-    this.executeRun(runId, opts).catch((err) => {
-      handle.status = 'error';
-      handle.result = {
-        runId,
-        content: `Run manager error: ${err instanceof Error ? err.message : String(err)}`,
-        iterations: 0,
-        toolCalls: 0,
-        status: 'error',
-      };
-    });
+    this.executeRun(runId, opts)
+      .catch((err) => {
+        handle.status = 'error';
+        handle.result = {
+          runId,
+          content: `Run manager error: ${err instanceof Error ? err.message : String(err)}`,
+          iterations: 0,
+          toolCalls: 0,
+          status: 'error',
+          usage: emptyRunUsage(),
+        };
+      })
+      .finally(() => {
+        parentSignal?.removeEventListener('abort', onParentAbort);
+        settle(
+          handle.result ?? {
+            runId,
+            content: '',
+            iterations: 0,
+            toolCalls: 0,
+            status: 'error',
+            usage: emptyRunUsage(),
+          },
+        );
+      });
 
     return runId;
+  }
+
+  /** Resolves once the run has finished (after onFinished). Never rejects. */
+  wait(runId: string): Promise<RunLoopResult> {
+    const handle = this.runs.get(runId);
+    if (!handle) return Promise.reject(new Error(`Run not found: ${runId}`));
+    return handle.done;
   }
 
   private async executeRun(
@@ -100,8 +138,13 @@ export class RunManager {
       hasOpenPlanWork: opts.hasOpenPlanWork,
       contextBudget: opts.contextBudget,
       ...(opts.trace ? { trace: opts.trace } : {}),
+      ...(opts.subagents ? { subagents: opts.subagents } : {}),
+      ...(opts.depth !== undefined ? { depth: opts.depth } : {}),
+      ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
+      ...(opts.pinnedSkills?.length ? { pinnedSkills: opts.pinnedSkills } : {}),
+      ...(opts.capacity ? { capacity: opts.capacity } : {}),
       emit: (event) => {
-        if (handle.cancelled) return;
+        if (handle.cancelled && event.type !== 'subrun.settled') return;
         handle.emitter.emit(event);
       },
     });
