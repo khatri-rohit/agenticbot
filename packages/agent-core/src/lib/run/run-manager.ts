@@ -142,6 +142,7 @@ export class RunManager {
       ...(opts.depth !== undefined ? { depth: opts.depth } : {}),
       ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       ...(opts.pinnedSkills?.length ? { pinnedSkills: opts.pinnedSkills } : {}),
+      ...(opts.capacity ? { capacity: opts.capacity } : {}),
       emit: (event) => {
         if (handle.cancelled && event.type !== 'subrun.settled') return;
         handle.emitter.emit(event);

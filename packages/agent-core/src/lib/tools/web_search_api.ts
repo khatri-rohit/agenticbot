@@ -12,6 +12,7 @@ import {
 } from './web-search-providers';
 import {
   formatWebSourceCard,
+  formatWebSourceMatches,
   formatWebSourceSlice,
   sha256Text,
   WEB_SLICE_DEFAULT_CHARS,
@@ -159,7 +160,7 @@ export async function webSearch(
   const lines: string[] = [
     `## Web Search Results: "${trimmed}"`,
     '',
-    'Hit cards below. Prefetched sources include sha256 — use web_fetch with sha256+offset+limit to read more. Do not dump whole pages into the next message.',
+    'Hit cards below. Prefetched sources include sha256 — use web_fetch with sha256+query to find the part you need. Do not dump whole pages into the next message.',
     '',
   ];
 
@@ -212,7 +213,7 @@ export async function webSearch(
     lines.push(`snippet: ${snippetPreview(body)}`);
     if (sha256) {
       lines.push(
-        `Read more: web_fetch sha256=${sha256} offset=0 limit=${WEB_SLICE_DEFAULT_CHARS}`,
+        `Read more: web_fetch sha256=${sha256} query="<words on the page>"`,
       );
     }
     lines.push('');
@@ -265,11 +266,21 @@ async function webFetchBySha(
   sha256: string,
   offset: number,
   limit: number,
+  query: string,
   ctx?: Pick<ToolContext, 'getWebSource'>,
 ): Promise<string> {
   const source = await ctx?.getWebSource?.(sha256);
   if (!source) {
-    return `Unknown sha256 ${sha256}. Fetch the URL first with web_fetch, then page with sha256+offset+limit.`;
+    return `Unknown sha256 ${sha256}. Fetch the URL first with web_fetch, then read it with sha256 + query or offset.`;
+  }
+  if (query) {
+    return formatWebSourceMatches({
+      url: source.url,
+      title: source.title,
+      sha256: source.sha256,
+      content: source.content,
+      query,
+    });
   }
   return formatWebSourceSlice({
     url: source.url,
@@ -281,13 +292,14 @@ async function webFetchBySha(
   });
 }
 
-/** Fetch by URL (card) or page a stored source by sha256+offset+limit. */
+/** Fetch by URL (card), search a stored source by sha256+query, or page it by sha256+offset+limit. */
 export async function webFetch(
   args: {
     url?: string;
     sha256?: string;
     offset?: number;
     limit?: number;
+    query?: string;
   },
   ctx?: ToolContext,
 ): Promise<string> {
@@ -303,7 +315,8 @@ export async function webFetch(
     const limit = Number.isFinite(args.limit)
       ? Number(args.limit)
       : WEB_SLICE_DEFAULT_CHARS;
-    return webFetchBySha(sha256, offset, limit, ctx);
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    return webFetchBySha(sha256, offset, limit, query, ctx);
   }
 
   if (!url) {

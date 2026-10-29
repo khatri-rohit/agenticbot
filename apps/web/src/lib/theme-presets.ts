@@ -26,7 +26,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'studio',
     label: 'Studio',
-    description: 'Claude Desktop dark — warm charcoal',
+    description: 'Warm charcoal — high contrast',
     scheme: 'dark',
     swatch: { bg: '#1f1e1d', accent: '#d97757' },
   },

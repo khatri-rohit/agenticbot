@@ -12,18 +12,19 @@
   --theme-scheme: dark;
 }
 
-/* Studio — default. Exact Claude Desktop dark: warm charcoal, clay accent */
+/* Studio — default. Warm charcoal, high contrast: white conversation text,
+   bright muted labels (unselected sidebar stays readable) */
 :root,
 [data-theme='studio'] {
   --theme-scheme: dark;
   --background: #1f1e1d;
-  --foreground: #faf9f5;
+  --foreground: #ffffff;
   --card: #262624;
-  --card-foreground: #faf9f5;
+  --card-foreground: #ffffff;
   --popover: #30302e;
   --popover-foreground: #faf9f5;
   --muted: #262624;
-  --muted-foreground: #a9a79e;
+  --muted-foreground: #c2c0b6;
   --border: rgb(222 220 209 / 0.1);
   --input: #1a1918;
   --ring: #d97757;
@@ -34,7 +35,7 @@
   --accent: #2a2928;
   --accent-foreground: #faf9f5;
   --sidebar: #262624;
-  --sidebar-foreground: #ecebe5;
+  --sidebar-foreground: #f5f4ef;
   --link: #e8916f;
   --link-hover: #f0a582;
   --scrollbar-track: rgb(222 220 209 / 0.05);

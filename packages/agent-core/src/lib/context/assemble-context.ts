@@ -103,10 +103,18 @@ function formatLastRunPrompt(lastRun: ThreadLastRun): string | null {
     (lastRun.status === 'error'
       ? 'Run ended with an error'
       : 'Run stopped early');
+  // Budget, wall-clock, iteration, tool and capacity stops leave a handoff
+  // (or the plan) to continue from; re-exploring would re-spend the budget.
+  const resumable = /^limit\.(tokens|wall|iterations|tools|capacity)\b/.test(reason);
   return [
     '# Last run',
     `The previous run on this thread ended early (status: ${lastRun.status}).`,
     `Reason: ${reason}`,
+    ...(resumable
+      ? [
+          'If the user asks to continue: pick up from the last assistant message (the handoff) and the plan. Do not redo finished steps or repeat research already done.',
+        ]
+      : []),
     'Workspace files may have changed since any tool results below. Re-read before editing or relying on those results.',
   ].join('\n');
 }

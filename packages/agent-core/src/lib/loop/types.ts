@@ -35,6 +35,20 @@ export type ModelCallFn = (
   signal?: AbortSignal,
 ) => Promise<ModelTurn>;
 
+/**
+ * Account capacity, supplied by the host (e.g. the Ollama session/weekly
+ * balance). Every method is synchronous and reads host-cached state, so the
+ * loop never waits on the network. Omitted = capacity is never a gate.
+ */
+export type CapacityGate = {
+  /** Checked before each model call. A reason pauses the run (no final call). */
+  pauseReason(): string | null;
+  /** While true, progress steering uses tighter marks. */
+  conserve(): boolean;
+  /** A model-call error that means "usage limit reached" → pause reason; else null. */
+  limitReasonFor(error: unknown): string | null;
+};
+
 export type RunLoopConfig = {
   runId?: string;
   threadId?: string;
@@ -90,6 +104,8 @@ export type RunLoopConfig = {
   parentRunId?: string;
   /** The user's `/` picks for this send (already in the prompt as Loaded skills). */
   pinnedSkills?: string[];
+  /** Account capacity gate; children share the parent's. */
+  capacity?: CapacityGate;
 };
 
 /** What a sub-agent inherits from (and reports back to) its parent run. */
@@ -114,6 +130,8 @@ export type SubagentParent = {
   pinnedSkills?: string[];
   /** Roll the child's spend into the parent's usage and budget. */
   chargeUsage: (usage: RunUsage) => void;
+  /** The parent's capacity gate; a child pauses on the same account limits. */
+  capacity?: CapacityGate;
 };
 
 export type SubagentSpawner = (

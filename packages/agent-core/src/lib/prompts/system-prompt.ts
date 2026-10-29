@@ -70,7 +70,7 @@ function toolProtocol(registry: ToolRegistry, isWorkspace: boolean): string {
         : '- web_search is on. When current facts matter, search once with a specific query and cite the URLs you used.'
       : '- web_search is off. Do not invent live facts.',
     has('web_fetch')
-      ? '- web_fetch returns a source card (sha256 + teaser). Page further with sha256 + offset + limit; do not refetch the URL.'
+      ? '- web_fetch returns a source card (sha256 + teaser). Find the part you need with sha256 + query; page with offset only to read one section in full. Do not refetch the URL.'
       : '',
     has('recall')
       ? '- Old results may appear as "(evicted)" cards and skills as "(skill card)". Call recall with the sha256 (or load_skill again) only when you need that exact text.'

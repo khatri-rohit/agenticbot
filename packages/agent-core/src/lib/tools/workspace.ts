@@ -417,7 +417,8 @@ export const readFileTool: Tool = {
     usage: [
       'Pass a relative path from glob/grep.',
       'Read before edit_file so oldText is a unique span from this file.',
-      'Use offset/limit for large files; output is hard-capped.',
+      'Output starts with [lines a–b of N]; it is not file content. A cut read names the offset to continue from.',
+      'To find a block in a large file, grep for its anchor line first, then read from that line.',
     ],
   },
   risk: 'read',
@@ -436,22 +437,65 @@ export const readFileTool: Tool = {
         return `File not found: ${asString(args.path)}`;
       return `Failed to read file: ${err.message}`;
     }
-    const offsetRaw = args.offset;
-    const limitRaw = args.limit;
-    const offset =
-      typeof offsetRaw === 'number' && offsetRaw > 1
-        ? Math.floor(offsetRaw)
-        : 1;
-    const lines = text.split('\n');
-    const start = Math.min(offset - 1, lines.length);
-    const limit =
-      typeof limitRaw === 'number' && limitRaw > 0
-        ? Math.floor(limitRaw)
-        : lines.length;
-    const slice = lines.slice(start, start + limit).join('\n');
-    return truncated(slice, WORKSPACE_READ_MAX_CHARS, 'read_file');
+    return formatFileRead(text, args.offset, args.limit);
   },
 };
+
+/** Reads narrower than this are widened: a 3-line slice costs a model call and shows no surroundings. */
+export const WORKSPACE_READ_MIN_LINES = 40;
+
+/**
+ * read_file result: a `[lines a–b of N]` header, then the raw lines (no
+ * per-line numbers, so spans copy cleanly into edit_file oldText). Cuts on a
+ * line boundary and names the offset to continue from.
+ */
+export function formatFileRead(
+  text: string,
+  offsetRaw: unknown,
+  limitRaw: unknown,
+): string {
+  const partial = Buffer.byteLength(text, 'utf8') >= WORKSPACE_READ_MAX_LOAD_BYTES;
+  const all = text.split('\n');
+  // A trailing newline ends the last line; it does not start another.
+  const total = text.endsWith('\n') ? all.length - 1 : all.length;
+  const of = `${total}${partial ? '+ (file larger than the 1 MB read window)' : ''}`;
+  if (text.length === 0) return '[empty file]';
+
+  const offset =
+    typeof offsetRaw === 'number' && offsetRaw > 1 ? Math.floor(offsetRaw) : 1;
+  if (offset > total) {
+    return `[offset ${offset} is past end of file (${of} lines)]`;
+  }
+  const requested =
+    typeof limitRaw === 'number' && limitRaw > 0
+      ? Math.floor(limitRaw)
+      : total;
+  const limit = Math.max(requested, WORKSPACE_READ_MIN_LINES);
+  const start = offset - 1;
+  const end = Math.min(total, start + limit);
+
+  const first = all[start] ?? '';
+  if (first.length > WORKSPACE_READ_MAX_CHARS) {
+    const next = offset < total ? `\n\n(continue with offset=${offset + 1})` : '';
+    return `[line ${offset} of ${of}; line cut at ${WORKSPACE_READ_MAX_CHARS} chars]\n${first.slice(0, WORKSPACE_READ_MAX_CHARS)}${next}`;
+  }
+
+  const kept: string[] = [];
+  let chars = 0;
+  for (let i = start; i < end; i++) {
+    const line = all[i] ?? '';
+    if (kept.length > 0 && chars + line.length + 1 > WORKSPACE_READ_MAX_CHARS) break;
+    kept.push(line);
+    chars += line.length + 1;
+  }
+  const last = start + kept.length;
+  const header = `[lines ${offset}–${last} of ${of}]`;
+  const footer =
+    last < end
+      ? `\n\n(read_file truncated at line ${last} of ${of} — continue with offset=${last + 1})`
+      : '';
+  return `${header}\n${kept.join('\n')}${footer}`;
+}
 
 export const editFileTool: Tool = {
   definition: {

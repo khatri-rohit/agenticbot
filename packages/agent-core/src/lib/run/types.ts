@@ -15,6 +15,7 @@ import type {
 import type { EventEmitter } from '../events/emitter';
 import type { AgentLimits } from '../loop/limits';
 import type {
+  CapacityGate,
   ModelCallFn,
   RunLoopResult,
   SubagentSpawner,
@@ -78,6 +79,8 @@ export type StartRunOptions = {
   contextBudget?: ContextBudget;
   /** Trace sink for offline replay / eval debugging. Optional. */
   trace?: (event: TraceEvent) => void;
+  /** Account capacity gate (host-cached balance). Optional. */
+  capacity?: CapacityGate;
   /** Sub-agent runner; the loop binds it to this run. */
   subagents?: SubagentSpawner;
   /** 0 for a user run, 1 for a sub-agent. */

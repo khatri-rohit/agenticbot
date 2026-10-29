@@ -40,6 +40,7 @@ export {
 // Loop
 export { runLoop } from './lib/loop/loop';
 export type {
+  CapacityGate,
   ModelCallFn,
   RunLoopConfig,
   RunLoopResult,

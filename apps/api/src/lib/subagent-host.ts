@@ -12,6 +12,7 @@ import {
   type SubagentHost,
 } from '@agent/agent-core';
 
+import { capacityState } from './capacity';
 import { modelRolesFor, resolveCallOptions, resolveContextBudget } from './model-runtime';
 import type { ThreadStore } from './thread-store';
 import { createJsonlTraceSink } from './trace-sink.js';
@@ -72,7 +73,14 @@ export function createSubagentHost(deps: {
       return text.slice(start, length === undefined ? undefined : start + length);
     },
     writeLastRun: (threadId, lastRun) => store.writeLastRun(threadId, lastRun),
-    modelFor: (role, parentModel) => modelRolesFor(parentModel)[role],
+    // Behind weekly pace, review/advisor run on the main model instead of the
+    // strong one; explore already uses fast.
+    modelFor: (role, parentModel) =>
+      modelRolesFor(parentModel)[
+        role === 'strong' && endpoint === 'cloud' && capacityState() === 'conserve'
+          ? 'main'
+          : role
+      ],
     async modelCall(model) {
       // Children search and report; turn thinking off where the model allows
       // it, otherwise keep the model's own default.

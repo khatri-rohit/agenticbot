@@ -21,6 +21,7 @@ import type {
   SubagentParent,
   SubagentSpawner,
 } from '../loop/types';
+import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import type { RunManager } from '../run/run-manager';
 import { createToolRegistry, listTools } from '../tools/registry';
 import {
@@ -215,6 +216,32 @@ export function createSubagentRunner(deps: {
       return failure(spec, 'error', 'No run budget left for a sub-agent. Finish the work yourself.');
     }
 
+    const paused = parent.capacity?.pauseReason();
+    if (paused) {
+      return failure(spec, 'error', `Account usage limit: ${paused}. Do not delegate now.`);
+    }
+
+    // An advisor re-sends the parent's whole conversation. When that alone is
+    // bigger than its share, the child could only spend its cap on a forced
+    // final answer, so refuse before creating a thread.
+    if (profile.context === 'fork' && parent.remainingPromptTokens !== undefined) {
+      const available = Math.min(
+        profile.limits.maxPromptTokens,
+        Math.floor(
+          Math.max(0, parent.remainingPromptTokens - (reserved.get(parent.runId) ?? 0)) *
+            CHILD_BUDGET_SHARE,
+        ),
+      );
+      const needed = estimatePromptTokens(parent.forkMessages());
+      if (needed > available) {
+        return failure(
+          spec,
+          'error',
+          `Not enough run budget for advisor: this conversation is ~${needed} tokens and its share is ${available}. Decide yourself.`,
+        );
+      }
+    }
+
     let threadId: string;
     let history: ChatCompletionMessageParam[] = [];
     if (spec.resume) {
@@ -397,6 +424,7 @@ export function createSubagentRunner(deps: {
         depth: parent.depth + 1,
         parentRunId: parent.runId,
         parentSignal: parent.signal,
+        ...(parent.capacity ? { capacity: parent.capacity } : {}),
       });
 
       // Throttled progress for the parent's card.

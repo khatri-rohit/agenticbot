@@ -38,12 +38,15 @@ export function MessageList({
   threadKind = 'home',
   onRetryLastResponse,
   onEditLastUserMessage,
+  onContinue,
 }: {
   messages: Message[] | undefined;
   chatState: ChatState;
   isRunning: boolean;
   threadKind?: 'home' | 'workspace';
   onRetryLastResponse: () => void | Promise<void>;
+  /** Start the next run from the last run's handoff (budget/capacity stops). */
+  onContinue?: () => void | Promise<void>;
   onEditLastUserMessage: (
     messageId: string,
     content: string,
@@ -360,12 +363,28 @@ export function MessageList({
           </div>
 
           {chatState.limitNotice ? (
-            <p
-              className="type-caption px-1 text-muted-foreground"
+            <div
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1"
               role="status"
             >
-              Run stopped early: {chatState.limitNotice.reason}
-            </p>
+              <p className="type-caption text-muted-foreground">
+                {isCapacityLimit(chatState.limitNotice.reason)
+                  ? 'Paused'
+                  : 'Run stopped early'}
+                : {chatState.limitNotice.reason}
+              </p>
+              {onContinue &&
+              !isRunning &&
+              isResumableLimit(chatState.limitNotice.reason) ? (
+                <button
+                  type="button"
+                  onClick={() => void onContinue()}
+                  className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted"
+                >
+                  Continue
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           <div ref={endRef} className="h-6" />
@@ -373,6 +392,15 @@ export function MessageList({
       </div>
     </div>
   );
+}
+
+/** Stops that leave a handoff to continue from (not cancel, errors, or plan/finish gates). */
+function isResumableLimit(reason: string): boolean {
+  return /^limit\.(tokens|wall|iterations|tools|capacity):/.test(reason);
+}
+
+function isCapacityLimit(reason: string): boolean {
+  return reason.startsWith('limit.capacity:');
 }
 
 /** Attach compaction to the turn that produced it (by runId), else last turn. */

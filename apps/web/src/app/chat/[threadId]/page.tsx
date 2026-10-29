@@ -135,6 +135,12 @@ export default function ChatThreadPage({
         onEditLastUserMessage={(id, content) =>
           editLastUserMessage(id, content)
         }
+        {...(isSubagentThread
+          ? {}
+          : {
+              onContinue: () =>
+                sendMessage('Continue from where the last run stopped.'),
+            })}
       />
     </ChatShell>
   );

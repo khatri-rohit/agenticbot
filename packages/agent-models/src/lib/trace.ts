@@ -158,4 +158,30 @@ export type TraceEvent =
       reason: string;
       promptTokens: number;
       limitPromptTokens?: number;
+    }
+  | {
+      /** Prompt tokens spent since the last edit or sub-agent report passed the steer mark. */
+      type: 'stall_nudge';
+      runId: string;
+      iteration: number;
+      idleTokens: number;
+      promptTokens: number;
+      limitPromptTokens: number;
+    }
+  | {
+      /** Parent web tool refused until progress (edit or sub-agent report). */
+      type: 'research_gate';
+      runId: string;
+      iteration: number;
+      toolName: string;
+      idleTokens: number;
+    }
+  | {
+      /** The loop appended a steering note to a tool result. */
+      type: 'tool_note';
+      runId: string;
+      iteration: number;
+      toolName: string;
+      note: 'read_creep' | 'web_slices';
+      count: number;
     };

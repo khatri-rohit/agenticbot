@@ -432,11 +432,22 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
       </p>
     );
   }
-  const lines = content.split('\n');
+  // read_file results open with "[lines a–b of N]"; number the gutter from a.
+  // Older ledger rows have no header and start at line 1.
+  const header = content.match(/^\[lines? (\d+)(?:–\d+)? of ([^\]\n]*)\]\n/);
+  const firstLine = header ? Number(header[1]) : 1;
+  let body = header ? content.slice(header[0].length) : content;
+  // "(read_file truncated … continue with offset=…)" is a note, not a file line.
+  const note = body.match(/\n\n(\((?:read_file truncated|continue with)[^\n]*\))$/);
+  if (note) body = body.slice(0, note.index);
+  const lines = body.split('\n');
+  const label = header
+    ? `File · lines ${firstLine}–${firstLine + lines.length - 1} of ${header[2]}`
+    : `File · ${lines.length} lines`;
   return (
     <div className="min-w-0">
       <PreviewHeader
-        label={`File · ${lines.length} lines`}
+        label={label}
         onCopy={<CopyButton text={content} />}
       />
       <pre
@@ -448,12 +459,17 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
         {lines.map((line, i) => (
           <span key={i} className="block">
             <span className="mr-3 inline-block w-8 shrink-0 select-none text-right text-muted-foreground/40 tabular-nums">
-              {i + 1}
+              {firstLine + i}
             </span>
             <span>{line}</span>
           </span>
         ))}
       </pre>
+      {note ? (
+        <p className="type-caption px-3 pb-2 italic text-muted-foreground/60">
+          {note[1]}
+        </p>
+      ) : null}
     </div>
   );
 }
