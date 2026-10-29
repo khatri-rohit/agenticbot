@@ -94,6 +94,8 @@ export class BalanceError extends Error {
 
 let cache: { data: OllamaBalance; fetchedAt: number } | null = null;
 let inflight: Promise<OllamaBalance> | null = null;
+/** Last request start, success or failure: failures back off like successes. */
+let lastAttemptAt = 0;
 
 export function capacityEnabled(): boolean {
   return Boolean(process.env.OLLAMA_API_KEY);
@@ -124,9 +126,16 @@ async function fetchBalance(): Promise<OllamaBalance> {
 export async function getOllamaBalance(
   maxAgeMs = BALANCE_TTL_MS,
 ): Promise<OllamaBalance> {
-  const age = cache ? Date.now() - cache.fetchedAt : Infinity;
+  const now = Date.now();
+  const age = cache ? now - cache.fetchedAt : Infinity;
   if (cache && (age < maxAgeMs || age < BALANCE_MIN_REFRESH_MS)) return cache.data;
+  // Forced refreshes (after a run, after a 429) also respect the floor when
+  // the previous attempt failed, so errors cannot turn into a request storm.
+  if (!inflight && cache && now - lastAttemptAt < BALANCE_MIN_REFRESH_MS) {
+    return cache.data;
+  }
   if (!inflight) {
+    lastAttemptAt = now;
     inflight = fetchBalance().finally(() => {
       inflight = null;
     });
@@ -134,9 +143,19 @@ export async function getOllamaBalance(
   return inflight;
 }
 
-/** Last known balance without waiting; kicks a background refresh when stale. */
+/**
+ * Last known balance without waiting; kicks a background refresh when stale.
+ * Refreshes wait BALANCE_TTL_MS after the last attempt, so a failing balance
+ * API (no cache ever filled) is not retried on every model call.
+ */
 function cachedBalance(): OllamaBalance | null {
-  if (capacityEnabled() && (!cache || Date.now() - cache.fetchedAt >= BALANCE_TTL_MS)) {
+  const now = Date.now();
+  if (
+    capacityEnabled() &&
+    !inflight &&
+    (!cache || now - cache.fetchedAt >= BALANCE_TTL_MS) &&
+    now - lastAttemptAt >= BALANCE_TTL_MS
+  ) {
     void getOllamaBalance().catch(() => undefined);
   }
   return cache?.data ?? null;

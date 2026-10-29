@@ -211,15 +211,30 @@ export class ThreadStore {
   }
 
   /**
-   * Delete sub-agent threads of `parentThreadId` (all, or only those started
-   * by `runIds`), recursively. Children never outlive the run that made them.
+   * Delete sub-agent threads of `parentThreadId` (all, or those `select`
+   * accepts), recursively. Children never outlive the run rows that made them.
    */
-  async deleteChildThreads(parentThreadId: string, runIds?: Set<string>): Promise<void> {
+  async deleteChildThreads(
+    parentThreadId: string,
+    select?: (child: { parentRunId?: string; createdAt: string }) => boolean,
+  ): Promise<void> {
     const rows = this.db
-      .prepare(`SELECT id, parent_run_id FROM threads WHERE parent_thread_id = ?`)
-      .all(parentThreadId) as { id: string; parent_run_id?: string | null }[];
+      .prepare(`SELECT id, parent_run_id, created_at FROM threads WHERE parent_thread_id = ?`)
+      .all(parentThreadId) as {
+      id: string;
+      parent_run_id?: string | null;
+      created_at: string;
+    }[];
     for (const row of rows) {
-      if (runIds && !(row.parent_run_id && runIds.has(row.parent_run_id))) continue;
+      if (
+        select &&
+        !select({
+          ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
+          createdAt: row.created_at,
+        })
+      ) {
+        continue;
+      }
       await this.deleteThread(row.id);
     }
   }
@@ -411,6 +426,9 @@ export class ThreadStore {
       ...(input.meta?.durationMs != null
         ? { durationMs: input.meta.durationMs }
         : {}),
+      ...(input.meta?.runDurationMs != null
+        ? { runDurationMs: input.meta.runDurationMs }
+        : {}),
       ...(input.skills ? { skills: input.skills } : {}),
     };
 
@@ -446,16 +464,25 @@ export class ThreadStore {
     }
     const all = (await this.loadLedger(threadId)).envelopes;
     const kept = all.filter((envelope) => envelope.seq <= keepThroughSeq);
-    // Runs whose rows are discarded take their sub-agent threads with them.
-    const keptRuns = new Set(kept.map((envelope) => envelope.runId).filter(Boolean));
-    const droppedRuns = new Set(
+    // Sub-agent threads go with the run rows that started them. A run cut in
+    // the middle keeps the children created up to its last kept row.
+    const lastKeptTs = new Map<string, string>();
+    for (const envelope of kept) {
+      if (envelope.runId) lastKeptTs.set(envelope.runId, envelope.ts);
+    }
+    const touchedRuns = new Set(
       all
         .filter((envelope) => envelope.seq > keepThroughSeq && envelope.runId)
-        .map((envelope) => envelope.runId as string)
-        .filter((runId) => !keptRuns.has(runId)),
+        .map((envelope) => envelope.runId as string),
     );
     await this.rewriteLedger(threadId, kept);
-    if (droppedRuns.size > 0) await this.deleteChildThreads(threadId, droppedRuns);
+    if (touchedRuns.size > 0) {
+      await this.deleteChildThreads(threadId, (child) => {
+        if (!child.parentRunId || !touchedRuns.has(child.parentRunId)) return false;
+        const cut = lastKeptTs.get(child.parentRunId);
+        return cut === undefined || child.createdAt > cut;
+      });
+    }
     const now = new Date().toISOString();
     const lastSeq = kept.at(-1)?.seq ?? 0;
     this.seqs.set(threadId, lastSeq);

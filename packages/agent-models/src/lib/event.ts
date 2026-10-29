@@ -59,6 +59,8 @@ export interface RunStarted {
   contextReport?: ContextReport;
   /** Prompt-token cap for the whole run (own + sub-agents), when capped. */
   maxPromptTokens?: number;
+  /** ISO time the run started (server clock), for the live total-elapsed clock. */
+  startedAt?: string;
 }
 
 export interface TurnStarted {

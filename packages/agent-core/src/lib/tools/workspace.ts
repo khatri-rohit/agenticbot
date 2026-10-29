@@ -836,9 +836,19 @@ export const diffTool: Tool = {
       target = toPosixRelative(root, resolved.abs) || '.';
     }
     try {
-      const stat = await runGit(root, ['diff', 'HEAD', '--no-color', '--stat', '--', target], ctx.signal);
+      // A repo with no commits has no HEAD: show staged + unstaged instead.
+      const hasHead =
+        (await runGit(root, ['rev-parse', '--verify', '--quiet', 'HEAD'], ctx.signal)).code === 0;
+      const diffOf = async (extra: string[]) => {
+        if (hasHead) return runGit(root, ['diff', 'HEAD', '--no-color', ...extra, '--', target], ctx.signal);
+        const staged = await runGit(root, ['diff', '--cached', '--no-color', ...extra, '--', target], ctx.signal);
+        if (staged.code !== 0) return staged;
+        const unstaged = await runGit(root, ['diff', '--no-color', ...extra, '--', target], ctx.signal);
+        return { ...unstaged, out: [staged.out.trim(), unstaged.out.trim()].filter(Boolean).join('\n') };
+      };
+      const stat = await diffOf(['--stat']);
       if (stat.code !== 0) return `git diff failed: ${stat.out.trim() || `exit ${stat.code}`}`;
-      const body = await runGit(root, ['diff', 'HEAD', '--no-color', '--', target], ctx.signal);
+      const body = await diffOf([]);
       const untracked = await runGit(
         root,
         ['ls-files', '--others', '--exclude-standard', '--', target],

@@ -4,7 +4,8 @@ import type { RunUsage, TokenUsage } from './run.js';
 /**
  * Bumped when a TraceEvent field changes meaning or is removed. Adding an
  * optional field does not bump it. Sinks stamp every line with `v`, so an
- * offline reader (eval / observability app) can parse old traces.
+ * offline reader (eval / observability app) can parse old traces. The JSONL
+ * sink also stamps `ts` and `seq` (per-run-file emit order); order by `seq`.
  */
 export const TRACE_SCHEMA_VERSION = 2;
 

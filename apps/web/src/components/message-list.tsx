@@ -298,6 +298,7 @@ export function MessageList({
                               key={step.message.id}
                               message={step.message}
                               showMeta={isLatestAssistant}
+                              turnStartedAt={turn.userMessage.createdAt}
                               showRetry={!isRunning && isLatestAssistant}
                               onRetry={onRetryLastResponse}
                               retryDisabled={isRunning}
@@ -355,6 +356,9 @@ export function MessageList({
                       hasStreamingText={Boolean(streaming?.content)}
                       compacting={compactionNotice?.status === 'running'}
                       waitingForChoice={chatState.pendingChoices.length > 0}
+                      {...(chatState.activeRun?.runStartedAt
+                        ? { runStartedAt: chatState.activeRun.runStartedAt }
+                        : {})}
                     />
                   ) : null}
                 </section>
@@ -396,7 +400,7 @@ export function MessageList({
 
 /** Stops that leave a handoff to continue from (not cancel, errors, or plan/finish gates). */
 function isResumableLimit(reason: string): boolean {
-  return /^limit\.(tokens|wall|iterations|tools|capacity):/.test(reason);
+  return /^limit\.(tokens|wall|iterations|tools|capacity|research):/.test(reason);
 }
 
 function isCapacityLimit(reason: string): boolean {
@@ -423,11 +427,14 @@ function TurnStatusLine({
   hasStreamingText,
   compacting,
   waitingForChoice,
+  runStartedAt,
 }: {
   toolActivity: ToolActivity[];
   hasStreamingText: boolean;
   compacting?: boolean;
   waitingForChoice?: boolean;
+  /** Server start time of the run; shows the total next to the phase clock. */
+  runStartedAt?: string;
 }) {
   const running = toolActivity.find((t) => t.status === 'running');
   let label: string | null = null;
@@ -454,6 +461,9 @@ function TurnStatusLine({
   }, [label]);
 
   if (!label) return null;
+  // Re-rendered every second by the phase clock above.
+  const started = runStartedAt ? Date.parse(runStartedAt) : NaN;
+  const total = Number.isFinite(started) ? Math.max(0, Date.now() - started) : null;
 
   return (
     <p
@@ -465,7 +475,9 @@ function TurnStatusLine({
         aria-hidden
       />
       {label}
-      <span className="text-muted-foreground/50">{elapsed}s</span>
+      <span className="text-muted-foreground/50">
+        {elapsed}s{total != null ? ` · ${formatDuration(total)} total` : ''}
+      </span>
     </p>
   );
 }
@@ -473,15 +485,19 @@ function TurnStatusLine({
 function MessageTimestamp({
   iso,
   durationMs,
+  title,
 }: {
   iso: string;
   durationMs?: number;
+  /** Hover detail (finish time, time spent writing the answer). */
+  title?: string;
 }) {
   const text = formatMessageTime(iso);
   if (!text) return null;
   return (
     <time
       dateTime={iso}
+      title={title}
       className="type-caption text-muted-foreground/55 tabular-nums"
     >
       {text}
@@ -491,21 +507,51 @@ function MessageTimestamp({
 }
 
 /**
+ * Footer timing for a turn's final answer: when the run started and how long
+ * the whole run took (every model call, tool and sub-agent), not just the
+ * last call that wrote the answer. Old ledger rows have no runDurationMs:
+ * fall back to the gap from the user's message (over-counts a Retry).
+ */
+function answerTiming(
+  message: Message,
+  turnStartedAt?: string,
+): { iso: string; durationMs?: number; title?: string } {
+  const finished = Date.parse(message.createdAt);
+  let total = message.runDurationMs;
+  if (total == null && turnStartedAt && Number.isFinite(finished)) {
+    const start = Date.parse(turnStartedAt);
+    if (Number.isFinite(start) && finished >= start) total = finished - start;
+  }
+  if (total == null || !Number.isFinite(finished)) {
+    return { iso: message.createdAt, durationMs: message.durationMs };
+  }
+  const writing =
+    message.durationMs != null ? ` · writing the answer ${formatDuration(message.durationMs)}` : '';
+  return {
+    iso: new Date(finished - total).toISOString(),
+    durationMs: total,
+    title: `Finished ${formatMessageTime(message.createdAt)}${writing}`,
+  };
+}
+
+/**
  * One meta row per message: timestamp left, actions right. Always visible —
  * hover-gating hides the primary affordances on touch and during streaming.
  */
 function MessageMetaRow({
   iso,
   durationMs,
+  title,
   children,
 }: {
   iso?: string;
   durationMs?: number;
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
-      <MessageTimestamp iso={iso ?? ''} durationMs={durationMs} />
+      <MessageTimestamp iso={iso ?? ''} durationMs={durationMs} title={title} />
       <div className="flex min-w-0 items-center">{children}</div>
     </div>
   );
@@ -517,15 +563,19 @@ function AssistantMessage({
   showRetry,
   onRetry,
   retryDisabled,
+  turnStartedAt,
 }: {
   message: Message;
-  /** Meta footer (time · duration · Copy) only on the turn's final response. */
+  /** Meta footer (start time · run duration · Copy) only on the turn's final response. */
   showMeta?: boolean;
+  /** The turn's user message time; fallback start for old rows. */
+  turnStartedAt?: string;
   showRetry?: boolean;
   onRetry: () => void | Promise<void>;
   retryDisabled?: boolean;
 }) {
   if (!message.content.trim()) return null;
+  const timing = answerTiming(message, turnStartedAt);
 
   return (
     <div className="min-w-0 max-w-full">
@@ -533,7 +583,11 @@ function AssistantMessage({
         <AgentMarkdown content={message.content} />
       </article>
       {showMeta ? (
-        <MessageMetaRow iso={message.createdAt} durationMs={message.durationMs}>
+        <MessageMetaRow
+          iso={timing.iso}
+          durationMs={timing.durationMs}
+          {...(timing.title ? { title: timing.title } : {})}
+        >
           <MessageActions
             content={message.content}
             align="start"

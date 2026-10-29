@@ -23,6 +23,8 @@ export type LedgerRecord =
 export type LedgerAppendMeta = {
   /** Assistant response wall-clock duration (model-call + stream time). */
   durationMs?: number;
+  /** On a run's final answer: wall clock from run start (tools, sub-agents and every model call). */
+  runDurationMs?: number;
   /** Sub-run linkage: set when this record belongs to a delegated sub-agent. */
   parentRunId?: string;
   subRunId?: string;
@@ -69,6 +71,8 @@ export type LedgerEnvelope = {
   attachments?: MessageAttachment[];
   /** Assistant response wall-clock duration (model-call + stream); host-assigned like seq/ts. */
   durationMs?: number;
+  /** Final answer only: wall clock of the whole run that produced it. */
+  runDurationMs?: number;
   /** User-requested skill names for the run that consumed this user turn. */
   skills?: { selected: string[] };
 };
@@ -155,6 +159,9 @@ export function envelopeToUiMessage(
       createdAt: envelope.ts,
       ...(envelope.durationMs != null
         ? { durationMs: envelope.durationMs }
+        : {}),
+      ...(envelope.runDurationMs != null
+        ? { runDurationMs: envelope.runDurationMs }
         : {}),
     };
   }

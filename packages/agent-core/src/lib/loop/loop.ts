@@ -249,6 +249,8 @@ const RESEARCH_GATE_RATIO = 0.5;
 /** Tighter marks while the host says account capacity is behind pace. */
 const STALL_NUDGE_RATIO_CONSERVE = 0.2;
 const RESEARCH_GATE_RATIO_CONSERVE = 0.35;
+/** Turns in a row whose every call hit the research gate before the run ends with a handoff. */
+const MAX_GATED_TURNS = 2;
 /** Partial reads of one file (since its last edit) between grep hints. */
 const READ_CREEP_NOTE_EVERY = 3;
 /** In-order slices of one web source between query hints. */
@@ -466,6 +468,10 @@ async function runLoopCore(
   let childCallsAtProgress = 0;
   let stallNudged = false;
   let researchGateTraced = false;
+  // Research-gate refusals in the current turn, and turns in a row that were
+  // nothing but refusals (each still costs a full model call).
+  let gatedThisTurn = 0;
+  let gatedTurnStreak = 0;
   // Partial reads per path since its last edit; in-order slices per web source.
   const partialReadsByPath = new Map<string, number>();
   const webSlicesBySha = new Map<string, number>();
@@ -812,7 +818,10 @@ async function runLoopCore(
     content: string,
     lastUsage?: TokenUsage,
   ): Promise<CoreResult> {
-    await appendDurable({ role: 'assistant', content });
+    await appendDurable(
+      { role: 'assistant', content },
+      { runDurationMs: Date.now() - runStartedAt },
+    );
     emitTurnCompleted(iterations, lastUsage);
     emit?.({
       type: 'run.completed',
@@ -1248,6 +1257,7 @@ async function runLoopCore(
         'limit.research',
         `Web research is paused for this run: ${Math.round((idle / limits.maxPromptTokens!) * 100)}% of the budget went to steps with no edit. It reopens after your next edit or sub-agent report. Use what you have.${delegate}`,
       );
+      gatedThisTurn += 1;
       if (!researchGateTraced) {
         researchGateTraced = true;
         trace({
@@ -1764,7 +1774,7 @@ async function runLoopCore(
         role: 'assistant',
         content,
       },
-      { durationMs },
+      { durationMs, runDurationMs: Date.now() - runStartedAt },
     );
 
     emit?.({
@@ -1861,6 +1871,7 @@ async function runLoopCore(
     ...(limits.maxPromptTokens !== undefined
       ? { maxPromptTokens: limits.maxPromptTokens }
       : {}),
+    startedAt: new Date(runStartedAt).toISOString(),
   });
   for (const name of config.pinnedSkills ?? []) {
     const skill = getSkill(name);
@@ -1970,6 +1981,7 @@ async function runLoopCore(
         const ready: ReadyToolCall[] = [];
         let halt: Extract<AdmitResult, { kind: 'halt' }> | null = null;
         let haltIndex = 0;
+        gatedThisTurn = 0;
         for (let index = 0; index < turn.toolCalls.length; index++) {
           if (signal?.aborted) {
             await skipToolCalls(
@@ -1990,6 +2002,22 @@ async function runLoopCore(
           }
           if (admitted.kind === 'filled') continue;
           ready.push(admitted.call);
+        }
+
+        // A model that only retries closed web tools spends a full call per
+        // refusal; after MAX_GATED_TURNS such turns, end with a handoff.
+        gatedTurnStreak =
+          !halt && gatedThisTurn > 0 && gatedThisTurn === turn.toolCalls.length
+            ? gatedTurnStreak + 1
+            : 0;
+        if (gatedTurnStreak >= MAX_GATED_TURNS) {
+          noteLimit(
+            limitMessage(
+              'limit.research',
+              `${gatedTurnStreak} turns in a row only retried closed web tools`,
+            ),
+          );
+          return await completeAfterLimit();
         }
 
         const staged: Record<ToolStage, ReadyToolCall[]> = {
@@ -2064,13 +2092,14 @@ async function runLoopCore(
         continue;
       }
 
-      // No tool calls — this is the final assistant response.
+      // No tool calls — this is the final assistant response. durationMs is
+      // this call; runDurationMs is the whole run the user waited for.
       await appendDurable(
         {
           role: 'assistant',
           content: turn.content ?? '',
         },
-        { durationMs },
+        { durationMs, runDurationMs: Date.now() - runStartedAt },
       );
 
       emit?.({

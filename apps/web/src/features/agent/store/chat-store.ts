@@ -86,6 +86,8 @@ export type ChatRunState = {
   runPromptTokens?: number;
   /** Run cap from run.started. */
   runPromptCap?: number;
+  /** Server start time from run.started, for the live total-elapsed clock. */
+  runStartedAt?: string;
   /** Some calls were charged from the local estimate (no provider usage). */
   runUsageEstimated?: boolean;
   /** True when occupiedTokens already includes the current streamingMessage. */
@@ -185,6 +187,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           ...(event.maxPromptTokens !== undefined
             ? { runPromptCap: event.maxPromptTokens }
             : {}),
+          ...(event.startedAt ? { runStartedAt: event.startedAt } : {}),
           ...(event.estimatedPromptTokens !== undefined
             ? { estimatedPromptTokens: event.estimatedPromptTokens }
             : {}),

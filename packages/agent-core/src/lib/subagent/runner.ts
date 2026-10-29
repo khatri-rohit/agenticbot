@@ -123,13 +123,24 @@ class Slots {
       return;
     }
     await new Promise<void>((resolve, reject) => {
-      const onAbort = () => reject(new Error('Run cancelled'));
-      signal.addEventListener('abort', onAbort, { once: true });
-      this.queue.push(() => {
+      const grant = () => {
         signal.removeEventListener('abort', onAbort);
         this.active += 1;
         resolve();
-      });
+      };
+      // A cancelled waiter leaves the queue; otherwise release() would hand
+      // it a slot nobody gives back and the run's Slots never goes idle.
+      const onAbort = () => {
+        const index = this.queue.indexOf(grant);
+        if (index >= 0) this.queue.splice(index, 1);
+        reject(new Error('Run cancelled'));
+      };
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.queue.push(grant);
     });
   }
   release(): void {
