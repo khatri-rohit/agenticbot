@@ -26,9 +26,9 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'studio',
     label: 'Studio',
-    description: 'Near-black IDE chrome — default',
+    description: 'Claude Desktop dark — warm charcoal',
     scheme: 'dark',
-    swatch: { bg: 'oklch(0.14 0.004 250)', accent: 'oklch(0.7 0.1 195)' },
+    swatch: { bg: '#1f1e1d', accent: '#d97757' },
   },
   {
     id: 'midnight',

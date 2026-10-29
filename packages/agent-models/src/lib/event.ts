@@ -57,6 +57,8 @@ export interface RunStarted {
   estimatedPromptTokens?: number;
   /** Per-layer breakdown from assembleContext (M2). */
   contextReport?: ContextReport;
+  /** Prompt-token cap for the whole run (own + sub-agents), when capped. */
+  maxPromptTokens?: number;
 }
 
 export interface TurnStarted {

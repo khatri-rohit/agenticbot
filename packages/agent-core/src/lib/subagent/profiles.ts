@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { ModelRole } from '@agent/agent-models';
 
+import { getSkill } from '../tools/skills';
 import type { SubagentContext, SubagentLimits, SubagentProfile } from './types';
 
 /**
@@ -21,6 +22,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     context: 'none',
     rules: false,
     report: true,
+    skills: [],
+    inheritPickedSkills: false,
     source: 'builtin',
     prompt: `You are a code search specialist. Find what the brief asks for and stop.
 - Start broad (glob, grep), then read only the files that matter.
@@ -37,6 +40,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     context: 'diff',
     rules: true,
     report: true,
+    skills: ['caveman-review', 'anti-slop-examples'],
+    inheritPickedSkills: true,
     source: 'builtin',
     prompt: `You are a code reviewer with no stake in the change.
 - Start with the diff tool, then read surrounding code where a change touches shared types, callers, or error paths.
@@ -54,6 +59,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     context: 'fork',
     rules: false,
     report: false,
+    skills: [],
+    inheritPickedSkills: false,
     source: 'builtin',
     prompt: '',
   },
@@ -62,6 +69,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
 let userRoot: string | null = null;
 let knownTools: Set<string> | null = null;
 let cachedUser: SubagentProfile[] | null = null;
+/** File names + mtimes of the agents folder when `cachedUser` was built. */
+let cachedSignature = '';
 const warnings: string[] = [];
 
 /**
@@ -76,7 +85,7 @@ export function configureSubagentRoot(root: string | null, toolNames: string[]):
 
 /** Problems found while loading user agents (unknown tools, bad fields). */
 export function subagentProfileWarnings(): string[] {
-  userProfiles();
+  listSubagentProfiles();
   return [...warnings];
 }
 
@@ -113,6 +122,10 @@ function parseUserProfile(file: string, raw: string): SubagentProfile | string {
     .filter(Boolean);
   const unknown = knownTools ? tools.filter((tool) => !knownTools!.has(tool)) : [];
   if (unknown.length > 0) return `${file}: unknown tools ${unknown.join(', ')}`;
+  const skills = (fields.get('skills') ?? '')
+    .split(',')
+    .map((skill) => skill.trim())
+    .filter(Boolean);
   const turns = Number(fields.get('maxturns') ?? 15);
   const limits: SubagentLimits = {
     maxIterations: Number.isFinite(turns) && turns > 0 ? Math.min(Math.floor(turns), 40) : 15,
@@ -129,22 +142,42 @@ function parseUserProfile(file: string, raw: string): SubagentProfile | string {
     context,
     rules: fields.get('rules') === 'true' || context === 'diff',
     report: fields.get('report') !== 'false',
+    skills,
+    inheritPickedSkills: fields.get('inheritpickedskills') === 'true',
     prompt: body,
     source: 'user',
   };
 }
 
+/** Cheap change detector: adding, removing, or editing an agent file reloads. */
+function folderSignature(root: string): { files: string[]; signature: string } {
+  let files: string[] = [];
+  try {
+    files = readdirSync(root).filter((file) => file.endsWith('.md'));
+  } catch {
+    return { files: [], signature: '' };
+  }
+  const signature = files
+    .map((file) => {
+      try {
+        return `${file}:${statSync(path.join(root, file)).mtimeMs}`;
+      } catch {
+        return file;
+      }
+    })
+    .sort()
+    .join('|');
+  return { files, signature };
+}
+
 function userProfiles(): SubagentProfile[] {
-  if (cachedUser) return cachedUser;
+  const current = userRoot ? folderSignature(userRoot) : { files: [], signature: '' };
+  if (cachedUser && current.signature === cachedSignature) return cachedUser;
+  cachedSignature = current.signature;
   warnings.length = 0;
   cachedUser = [];
   if (!userRoot) return cachedUser;
-  let files: string[] = [];
-  try {
-    files = readdirSync(userRoot).filter((file) => file.endsWith('.md'));
-  } catch {
-    return cachedUser;
-  }
+  const files = current.files;
   const builtinNames = new Set(BUILTIN_PROFILES.map((profile) => profile.name));
   for (const file of files) {
     let raw: string;
@@ -165,8 +198,20 @@ function userProfiles(): SubagentProfile[] {
   return cachedUser;
 }
 
+/**
+ * Bound skills that do not exist are dropped with a warning (startup log via
+ * subagentProfileWarnings), never silently at spawn.
+ */
+function withKnownSkills(profile: SubagentProfile): SubagentProfile {
+  const missing = profile.skills.filter((name) => !getSkill(name));
+  if (missing.length === 0) return profile;
+  const note = `${profile.name}: unknown skills ${missing.join(', ')} (dropped)`;
+  if (!warnings.includes(note)) warnings.push(note);
+  return { ...profile, skills: profile.skills.filter((name) => getSkill(name)) };
+}
+
 export function listSubagentProfiles(): SubagentProfile[] {
-  return [...BUILTIN_PROFILES, ...userProfiles()];
+  return [...BUILTIN_PROFILES, ...userProfiles()].map(withKnownSkills);
 }
 
 export function getSubagentProfile(name: string): SubagentProfile | undefined {

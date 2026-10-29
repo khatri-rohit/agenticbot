@@ -72,6 +72,9 @@ export function ContextUsage({
   reserve = 0,
   windowSource,
   runPromptTokens,
+  runPromptCap,
+  runUsageEstimated,
+  trimmedSkills,
 }: {
   used: number;
   limit: number | null;
@@ -82,6 +85,10 @@ export function ContextUsage({
   windowSource?: ContextWindowSource;
   /** Prompt tokens billed so far this run: every call re-sends the context. */
   runPromptTokens?: number;
+  runPromptCap?: number;
+  runUsageEstimated?: boolean;
+  /** `/` picks pinned as core + contents because they passed the pinned cap. */
+  trimmedSkills?: string[];
 }) {
   if (limit == null || limit <= 0) return null;
 
@@ -218,11 +225,18 @@ export function ContextUsage({
             <>
               <dt className="text-muted-foreground">Run spend</dt>
               <dd className="text-right tabular-nums">
+                {runUsageEstimated ? '~' : ''}
                 {runPromptTokens.toLocaleString()}
+                {runPromptCap ? ` of ${runPromptCap.toLocaleString()}` : ''}
               </dd>
             </>
           ) : null}
         </dl>
+        {trimmedSkills?.length ? (
+          <p className="type-caption mt-2 text-muted-foreground">
+            Pinned as core rules only (over the skill size cap): {trimmedSkills.join(', ')}
+          </p>
+        ) : null}
         {defaultWindow ? (
           <p className="type-caption mt-2 text-muted-foreground">
             Using the 200K fallback window: the model's size is unavailable

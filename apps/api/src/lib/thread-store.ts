@@ -115,6 +115,8 @@ export class ThreadStore {
       workspaceRoot?: string;
       parentThreadId?: string;
       parentRunId?: string;
+      /** Sub-agent profile that owns this thread (resume must match it). */
+      subagentProfile?: string;
     },
   ): Promise<Thread> {
     const id = randomUUID();
@@ -130,10 +132,21 @@ export class ThreadStore {
 
     this.db
       .prepare(
-        `INSERT INTO threads (id, title, model, pinned, created_at, updated_at, last_seq, kind, workspace_root, parent_thread_id, parent_run_id)
-         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?, ?, ?)`,
+        `INSERT INTO threads (id, title, model, pinned, created_at, updated_at, last_seq, kind, workspace_root, parent_thread_id, parent_run_id, subagent_profile)
+         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?, ?, ?, ?)`,
       )
-      .run(id, title, model, now, now, kind, workspaceRoot, options?.parentThreadId ?? null, options?.parentRunId ?? null);
+      .run(
+        id,
+        title,
+        model,
+        now,
+        now,
+        kind,
+        workspaceRoot,
+        options?.parentThreadId ?? null,
+        options?.parentRunId ?? null,
+        options?.subagentProfile ?? null,
+      );
 
     return {
       id,
@@ -189,8 +202,31 @@ export class ThreadStore {
     return this.getThread(id);
   }
 
+  /** Profile recorded for a sub-agent thread, if any. */
+  subagentProfile(id: string): string | undefined {
+    const row = this.db
+      .prepare(`SELECT subagent_profile FROM threads WHERE id = ?`)
+      .get(id) as { subagent_profile?: string | null } | undefined;
+    return row?.subagent_profile ?? undefined;
+  }
+
+  /**
+   * Delete sub-agent threads of `parentThreadId` (all, or only those started
+   * by `runIds`), recursively. Children never outlive the run that made them.
+   */
+  async deleteChildThreads(parentThreadId: string, runIds?: Set<string>): Promise<void> {
+    const rows = this.db
+      .prepare(`SELECT id, parent_run_id FROM threads WHERE parent_thread_id = ?`)
+      .all(parentThreadId) as { id: string; parent_run_id?: string | null }[];
+    for (const row of rows) {
+      if (runIds && !(row.parent_run_id && runIds.has(row.parent_run_id))) continue;
+      await this.deleteThread(row.id);
+    }
+  }
+
   async deleteThread(id: string): Promise<boolean> {
     if (!this.getThread(id)) return false;
+    await this.deleteChildThreads(id);
     await rm(this.threadDir(id), { recursive: true, force: true });
     this.db.prepare(`DELETE FROM threads WHERE id = ?`).run(id);
     this.writers.delete(id);
@@ -408,10 +444,18 @@ export class ThreadStore {
     if (!this.getThread(threadId)) {
       throw new Error(`Thread not found: ${threadId}`);
     }
-    const kept = (await this.loadLedger(threadId)).envelopes.filter(
-      (envelope) => envelope.seq <= keepThroughSeq,
+    const all = (await this.loadLedger(threadId)).envelopes;
+    const kept = all.filter((envelope) => envelope.seq <= keepThroughSeq);
+    // Runs whose rows are discarded take their sub-agent threads with them.
+    const keptRuns = new Set(kept.map((envelope) => envelope.runId).filter(Boolean));
+    const droppedRuns = new Set(
+      all
+        .filter((envelope) => envelope.seq > keepThroughSeq && envelope.runId)
+        .map((envelope) => envelope.runId as string)
+        .filter((runId) => !keptRuns.has(runId)),
     );
     await this.rewriteLedger(threadId, kept);
+    if (droppedRuns.size > 0) await this.deleteChildThreads(threadId, droppedRuns);
     const now = new Date().toISOString();
     const lastSeq = kept.at(-1)?.seq ?? 0;
     this.seqs.set(threadId, lastSeq);
@@ -685,6 +729,7 @@ export async function openThreadStore(home: string): Promise<ThreadStore> {
   ensureColumn(db, 'threads', 'parent_thread_id', `parent_thread_id TEXT`);
   ensureColumn(db, 'threads', 'parent_run_id', `parent_run_id TEXT`);
   ensureColumn(db, 'threads', 'context_window_mode', `context_window_mode TEXT`);
+  ensureColumn(db, 'threads', 'subagent_profile', `subagent_profile TEXT`);
   db.exec(`
     UPDATE threads SET kind = 'home' WHERE kind IN ('research', '');
     UPDATE threads SET kind = 'workspace' WHERE kind = 'coding';

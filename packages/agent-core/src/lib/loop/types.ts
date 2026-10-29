@@ -88,6 +88,8 @@ export type RunLoopConfig = {
   depth?: number;
   /** Set on sub-agent runs, for traces. */
   parentRunId?: string;
+  /** The user's `/` picks for this send (already in the prompt as Loaded skills). */
+  pinnedSkills?: string[];
 };
 
 /** What a sub-agent inherits from (and reports back to) its parent run. */
@@ -108,6 +110,8 @@ export type SubagentParent = {
   forkMessages: () => ChatCompletionMessageParam[];
   /** Parent stream, for subrun.* markers. */
   emit?: (event: AgentEventWithoutSeq) => void;
+  /** The user's `/` picks for this send; profiles may inherit them. */
+  pinnedSkills?: string[];
   /** Roll the child's spend into the parent's usage and budget. */
   chargeUsage: (usage: RunUsage) => void;
 };

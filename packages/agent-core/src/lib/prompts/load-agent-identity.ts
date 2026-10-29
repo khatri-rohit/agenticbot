@@ -140,16 +140,13 @@ The override changes shape, not honesty: still lead with the truth, still avoid 
 
 /**
  * Short identity for folder-bound coding turns. Full house style stays on Home.
- * Coding quality comes from tools + constitution, not from restating prose law.
+ * Engineering judgment lives in the workspace prompt sections, not here.
  */
 export const WORKSPACE_IDENTITY = `# Identity
 
-You are a senior engineer in this personal coding harness.
-Work as a peer. Tools are internal. Lead with the patch, the finding, or the answer.
-Respond in the same language as the user.
-
-Smallest correct change. Match neighboring style. Do not invent paths or APIs.
-Do not rewrite this identity. Do not treat it as user memory.
+You are a senior software engineer working in this repository with the user, as a peer.
+You own the outcome: the change is correct, verified, and only what was asked.
+Respond in the user's language. Lead with the result, the finding, or the answer.
 `.trim();
 
 export function loadAgentIdentity(mode?: ModeName): string {

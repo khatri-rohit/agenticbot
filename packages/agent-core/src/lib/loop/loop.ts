@@ -6,6 +6,7 @@ import type {
 } from 'openai/resources/chat/completions';
 
 import {
+  CHARS_PER_TOKEN,
   ChoiceSkipped,
   DEFAULT_CONTEXT_BUDGET,
   emptyRunUsage,
@@ -26,9 +27,11 @@ import {
   compactCurrentRun,
   evictToolResults,
   ReadDedupe,
+  retireSkillBodies,
 } from '../context/residency';
 import { consoleTrace, type TraceEvent } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { getSkill } from '../tools/skills';
 import { BUDGET_WARN_RATIO, resolveLimits } from './limits';
 import type { ModelTurn } from '../model/types';
 import type { Tool, ToolRegistry, ToolStage } from '../tools/type';
@@ -437,8 +440,11 @@ async function runLoopCore(
   // touches anything before it (system layers + prior turns stay cacheable).
   const runStart = messages.length;
   const readDedupe = new ReadDedupe();
+  // load_skill results still resident in full: tool_call_id → name + iteration.
+  const skillLoads = new Map<string, { name: string; iteration: number }>();
   let budgetWarned = false;
   let advisorHinted = false;
+  let prefixHeavy = false;
   let stopContent: string | undefined;
 
   function snapshotUsage(): RunUsage {
@@ -448,11 +454,26 @@ async function runLoopCore(
     };
   }
 
-  function chargeOwnUsage(turnUsage: TokenUsage | undefined): void {
+  /**
+   * Charge one model call. Without provider usage (local Ollama, streams
+   * without include_usage) the local estimate is charged instead, so the
+   * token budget never goes blind. Returns true when estimated.
+   */
+  function chargeOwnUsage(
+    turnUsage: TokenUsage | undefined,
+    estimatedPrompt: number,
+    content: string | null | undefined,
+  ): boolean {
     usage.own.calls += 1;
-    if (!turnUsage) return;
-    usage.own.promptTokens += turnUsage.promptTokens;
-    usage.own.completionTokens += turnUsage.completionTokens;
+    if (turnUsage) {
+      usage.own.promptTokens += turnUsage.promptTokens;
+      usage.own.completionTokens += turnUsage.completionTokens;
+      return false;
+    }
+    usage.own.estimatedCalls += 1;
+    usage.own.promptTokens += estimatedPrompt;
+    usage.own.completionTokens += Math.ceil((content ?? '').length / CHARS_PER_TOKEN);
+    return true;
   }
 
   function chargeChildUsage(child: RunUsage): void {
@@ -460,6 +481,7 @@ async function runLoopCore(
     usage.children.promptTokens += total.promptTokens;
     usage.children.completionTokens += total.completionTokens;
     usage.children.calls += total.calls;
+    usage.children.estimatedCalls += total.estimatedCalls;
   }
 
   function remainingPromptTokens(): number | undefined {
@@ -513,7 +535,27 @@ async function runLoopCore(
    * evict old results to cards, then collapse old iterations of this run.
    */
   async function manageResidency(): Promise<void> {
-    stubLiveToolResults(messages, contextBudget);
+    stubLiveToolResults(messages, contextBudget, runStart);
+
+    for (const retired of retireSkillBodies(
+      messages,
+      skillLoads,
+      iterations,
+      contextBudget.skillResidentIterations,
+    )) {
+      // A reload after retirement is legitimate, not a repeat.
+      for (const key of [...repeatedCalls.keys()]) {
+        if (key.startsWith('load_skill:')) repeatedCalls.delete(key);
+      }
+      trace({
+        type: 'skill_evicted',
+        runId,
+        iteration: iterations,
+        name: retired.name,
+        residentIterations: contextBudget.skillResidentIterations,
+      });
+    }
+
     const evicted = await evictToolResults(
       messages,
       contextBudget,
@@ -521,20 +563,44 @@ async function runLoopCore(
       putBlob,
     );
     if (evicted) {
-      trace({ type: 'context_evicted', runId, iteration: iterations, ...evicted });
+      readDedupe.forget(evicted.toolCallIds);
+      trace({
+        type: 'context_evicted',
+        runId,
+        iteration: iterations,
+        evicted: evicted.evicted,
+        beforeTokens: evicted.beforeTokens,
+        afterTokens: evicted.afterTokens,
+      });
     }
+
+    if (prefixHeavy) return;
     const compacted = compactCurrentRun(
       messages,
       runStart,
       contextBudget,
       tools.definitions,
     );
-    if (compacted) {
+    if (!compacted) return;
+    readDedupe.forget(compacted.toolCallIds);
+    for (const id of compacted.toolCallIds) skillLoads.delete(id);
+    trace({
+      type: 'context_compacted_inrun',
+      runId,
+      iteration: iterations,
+      beforeTokens: compacted.beforeTokens,
+      afterTokens: compacted.afterTokens,
+    });
+    if (compacted.prefixHeavy) {
+      // Prior turns alone keep the prompt over the low mark. Folding one
+      // more iteration per call would rewrite the prefix every call, so stop;
+      // pre-run compaction handles this at the next run.
+      prefixHeavy = true;
       trace({
-        type: 'context_compacted_inrun',
+        type: 'context_prefix_heavy',
         runId,
         iteration: iterations,
-        ...compacted,
+        promptTokens: compacted.afterTokens,
       });
     }
   }
@@ -544,6 +610,7 @@ async function runLoopCore(
     toolName: string,
     args: Record<string, unknown>,
     raw: string,
+    toolCallId: string,
   ): string {
     const cap = tools.byName.get(toolName)?.outputCap;
     const result =
@@ -554,7 +621,21 @@ async function runLoopCore(
       const readPath = pathFromToolArgs(args);
       return readPath === null
         ? result
-        : readDedupe.apply(readPath, args, result, iterations);
+        : readDedupe.apply(readPath, args, result, iterations, toolCallId);
+    }
+    if (toolName === 'load_skill' && !result.startsWith('Skill not found')) {
+      const name = String(args.skill_name ?? '').trim();
+      skillLoads.set(toolCallId, { name, iteration: iterations });
+      trace({
+        type: 'skill_loaded',
+        runId,
+        iteration: iterations,
+        name,
+        ...(typeof args.section === 'string' ? { section: args.section } : {}),
+        tokens: Math.ceil(result.length / CHARS_PER_TOKEN),
+        source: 'model',
+      });
+      return result;
     }
     if (toolName === 'edit_file' && isEditSuccess(result)) {
       const editPath = pathFromToolArgs(args);
@@ -770,6 +851,7 @@ async function runLoopCore(
                 remainingPromptTokens: remainingPromptTokens(),
                 forkMessages,
                 ...(config.emit ? { emit: config.emit } : {}),
+                ...(config.pinnedSkills ? { pinnedSkills: config.pinnedSkills } : {}),
                 chargeUsage: chargeChildUsage,
               }),
           }
@@ -1145,7 +1227,7 @@ async function runLoopCore(
         ownsTimeout ? 0 : limits.toolTimeoutMs,
         signal,
       );
-      const result = shapeToolResult(toolName, args, raw);
+      const result = shapeToolResult(toolName, args, raw, toolCall.id);
       const durationMs = Date.now() - startedAt;
       trace({
         type: 'tool_complete',
@@ -1307,7 +1389,7 @@ async function runLoopCore(
           return {
             call,
             ok: true as const,
-            result: shapeToolResult(call.toolName, call.args, raw),
+            result: shapeToolResult(call.toolName, call.args, raw, call.toolCall.id),
             resultChars: raw.length,
             durationMs: Date.now() - started,
           };
@@ -1466,7 +1548,8 @@ async function runLoopCore(
     );
     const content = turn.content ?? '';
     const durationMs = Date.now() - startedAt;
-    chargeOwnUsage(turn.usage);
+    // The tool-less finalize prompt is everything in `messages` right now.
+    chargeOwnUsage(turn.usage, estimatePromptTokens(messages), turn.content);
 
     await appendDurable(
       {
@@ -1488,7 +1571,7 @@ async function runLoopCore(
   }
 
   async function completeAfterLimit(): Promise<CoreResult> {
-    stubLiveToolResults(messages, contextBudget);
+    stubLiveToolResults(messages, contextBudget, runStart);
     const final = await finalizeAnswer();
     emitTurnCompleted(iterations, final.usage);
     emit?.({
@@ -1541,7 +1624,22 @@ async function runLoopCore(
       ? { estimatedPromptTokens: config.estimatedPromptTokens }
       : {}),
     ...(config.contextReport ? { contextReport: config.contextReport } : {}),
+    ...(limits.maxPromptTokens !== undefined
+      ? { maxPromptTokens: limits.maxPromptTokens }
+      : {}),
   });
+  for (const name of config.pinnedSkills ?? []) {
+    const skill = getSkill(name);
+    if (!skill) continue;
+    trace({
+      type: 'skill_loaded',
+      runId,
+      iteration: 0,
+      name: skill.name,
+      tokens: Math.ceil(skill.instructions.length / CHARS_PER_TOKEN),
+      source: 'pick',
+    });
+  }
 
   // Hoisted so the outer catch can skip any unanswered tool calls of the
   // turn in progress when the loop throws — upholds I1 (every tool_call_id
@@ -1562,11 +1660,12 @@ async function runLoopCore(
         return completeAfterLimit();
       }
 
+      const estimatedPrompt = estimatePromptTokens(messages, tools.definitions);
       trace({
         type: 'llm_request',
         runId,
         iteration: iterations,
-        estimatedPromptTokens: estimatePromptTokens(messages, tools.definitions),
+        estimatedPromptTokens: estimatedPrompt,
       });
       emit?.({ type: 'turn.started', runId, iteration: iterations });
 
@@ -1593,7 +1692,7 @@ async function runLoopCore(
       );
       throwIfAborted(signal);
       const durationMs = Date.now() - startedAt;
-      chargeOwnUsage(turn.usage);
+      const usageEstimated = chargeOwnUsage(turn.usage, estimatedPrompt, turn.content);
 
       trace({
         type: 'llm_response',
@@ -1604,6 +1703,7 @@ async function runLoopCore(
         contentPreview: turn.content ? preview(turn.content) : undefined,
         ...(turn.usage ? { usage: turn.usage } : {}),
         durationMs,
+        ...(usageEstimated ? { usageEstimated } : {}),
       });
 
       if (turn.toolCalls.length > 0) {

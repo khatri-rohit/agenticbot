@@ -51,6 +51,8 @@ export type TraceEvent =
       usage?: TokenUsage;
       /** Model call + stream time. */
       durationMs?: number;
+      /** Provider sent no usage; the run charged the local estimate. */
+      usageEstimated?: boolean;
     }
   | {
       type: 'tool_start';
@@ -125,6 +127,29 @@ export type TraceEvent =
       iteration: number;
       beforeTokens: number;
       afterTokens: number;
+    }
+  | {
+      type: 'skill_loaded';
+      runId: string;
+      iteration?: number;
+      name: string;
+      section?: string;
+      tokens: number;
+      source: 'model' | 'pick' | 'profile';
+    }
+  | {
+      type: 'skill_evicted';
+      runId: string;
+      iteration: number;
+      name: string;
+      residentIterations: number;
+    }
+  | {
+      /** In-run compaction cannot get under its low mark; stopped for this run. */
+      type: 'context_prefix_heavy';
+      runId: string;
+      iteration: number;
+      promptTokens: number;
     }
   | {
       type: 'budget_warning';

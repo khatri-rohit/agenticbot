@@ -83,6 +83,8 @@ export type StartRunOptions = {
   /** 0 for a user run, 1 for a sub-agent. */
   depth?: number;
   parentRunId?: string;
+  /** The user's `/` picks for this send. */
+  pinnedSkills?: string[];
   /** Parent run's signal: aborting it cancels this run. */
   parentSignal?: AbortSignal;
 };

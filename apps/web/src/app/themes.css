@@ -1,7 +1,7 @@
 /*
  * Product themes — toggled via html[data-theme].
- * Studio (default) takes cues from modern IDE chrome: near-black surfaces,
- * cool neutrals, thin borders, sparse accent. Not a purple demo theme.
+ * Studio (default) mirrors the Claude Desktop dark theme: warm charcoal
+ * surfaces, hairline borders, clay accent. Not a purple demo theme.
  */
 
 :root {
@@ -12,55 +12,56 @@
   --theme-scheme: dark;
 }
 
-/* Studio — default. OLED charcoal, cool gray hierarchy, muted teal accent */
+/* Studio — default. Exact Claude Desktop dark: warm charcoal, clay accent */
 :root,
 [data-theme='studio'] {
   --theme-scheme: dark;
-  --background: rgb(20, 20, 20);
-  --foreground: rgb(255, 255, 255);
-  --card: rgb(33, 33, 33);
-  --card-foreground: oklch(100% 0.00011 271.152);
-  --popover: oklch(0.19 0.006 250);
-  --popover-foreground: oklch(0.93 0.006 250);
-  --muted: oklch(0.26 0.008 250);
-  --muted-foreground: oklch(97.015% 0.00011 271.152);
-  --border: oklch(0.28 0.008 250);
-  --input: rgb(33, 33, 33);
-  --ring: oklch(0.68 0.08 195);
-  --primary: oklch(100% 0.00011 271.152);
-  --primary-foreground: oklch(0.16 0.004 250);
-  --secondary: oklch(0.22 0.007 250);
-  --secondary-foreground: oklch(0.9 0.006 250);
-  --accent: rgb(33, 33, 33);
-  --accent-foreground: oklch(100% 0.00011 271.152);
-  --sidebar: rgb(24, 24, 24);
-  --sidebar-foreground: oklch(0.84 0.008 250);
-  --link: oklch(0.74 0.09 200);
-  --link-hover: oklch(0.82 0.08 200);
-  --scrollbar-track: oklch(0.16 0.004 250 / 0.35);
-  --scrollbar-thumb: oklch(0.42 0.01 250 / 0.9);
-  --scrollbar-thumb-hover: oklch(0.52 0.012 250);
-  --scrollbar-thumb-active: oklch(0.6 0.014 250);
-  --md-block-bg: oklch(0.16 0.005 250);
-  --md-block-border: oklch(0.3 0.01 250);
-  --md-block-accent: oklch(0.7 0.1 195);
-  --md-inline-code-bg: oklch(0.26 0.008 250);
-  --md-inline-code-border: oklch(0.34 0.01 250);
-  --diff-removed-fg: oklch(0.72 0.16 25);
-  --diff-removed-bg: oklch(0.28 0.05 25);
-  --diff-removed-ring: oklch(0.5 0.12 25);
-  --diff-added-fg: oklch(0.74 0.14 155);
-  --diff-added-bg: oklch(0.26 0.04 155);
-  --diff-added-ring: oklch(0.5 0.1 155);
-  --terminal-bg: oklch(0.14 0.004 250);
-  --terminal-fg: oklch(0.86 0.006 250);
-  --terminal-prompt: oklch(0.74 0.14 155);
-  --terminal-muted: oklch(0.55 0.008 250);
-  --terminal-ring: oklch(0.26 0.006 250);
-  --status-failed: oklch(0.68 0.18 25);
-  --status-ok: oklch(0.74 0.14 155);
-  --warning: oklch(0.78 0.15 75);
-  --warning-fg: oklch(0.82 0.14 75);
+  --background: #1f1e1d;
+  --foreground: #faf9f5;
+  --card: #262624;
+  --card-foreground: #faf9f5;
+  --popover: #30302e;
+  --popover-foreground: #faf9f5;
+  --muted: #262624;
+  --muted-foreground: #a9a79e;
+  --border: rgb(222 220 209 / 0.1);
+  --input: #1a1918;
+  --ring: #d97757;
+  --primary: #d97757;
+  --primary-foreground: #ffffff;
+  --secondary: #30302e;
+  --secondary-foreground: #ecebe5;
+  --accent: #2a2928;
+  --accent-foreground: #faf9f5;
+  --sidebar: #262624;
+  --sidebar-foreground: #ecebe5;
+  --link: #e8916f;
+  --link-hover: #f0a582;
+  --scrollbar-track: rgb(222 220 209 / 0.05);
+  --scrollbar-thumb: rgb(222 220 209 / 0.18);
+  --scrollbar-thumb-hover: rgb(222 220 209 / 0.28);
+  --scrollbar-thumb-active: rgb(222 220 209 / 0.38);
+  --md-block-bg: #1a1918;
+  --md-block-border: rgb(222 220 209 / 0.12);
+  --md-block-accent: #d97757;
+  --md-inline-code-bg: rgb(222 220 209 / 0.06);
+  --md-inline-code-fg: #f2a08e;
+  --md-inline-code-border: rgb(222 220 209 / 0.12);
+  --diff-removed-fg: #f87171;
+  --diff-removed-bg: rgb(248 113 113 / 0.1);
+  --diff-removed-ring: rgb(248 113 113 / 0.35);
+  --diff-added-fg: #6ccf96;
+  --diff-added-bg: rgb(108 207 150 / 0.1);
+  --diff-added-ring: rgb(108 207 150 / 0.35);
+  --terminal-bg: #1a1918;
+  --terminal-fg: #ecebe5;
+  --terminal-prompt: #6ccf96;
+  --terminal-muted: #9c9a92;
+  --terminal-ring: rgb(222 220 209 / 0.12);
+  --status-failed: #f87171;
+  --status-ok: #6ccf96;
+  --warning: #e0a548;
+  --warning-fg: #e0a548;
 }
 
 /* Midnight — cooler blue-slate dark (alt dark) */

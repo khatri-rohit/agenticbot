@@ -28,6 +28,7 @@ import {
   MAX_THREAD_MENTIONS,
   imageAttachments,
   isThreadMention,
+  resolveContextWindow,
   threadMentions,
 } from '@agent/agent-models';
 import {
@@ -236,6 +237,8 @@ export function ChatInput({
   threadId,
   occupiedTokens,
   runPromptTokens,
+  runPromptCap,
+  runUsageEstimated,
   occupiedCoversStream,
   estimatedPromptTokens,
   contextReport,
@@ -270,6 +273,10 @@ export function ChatInput({
   occupiedTokens?: number;
   /** Run spend so far (prompt tokens, own + sub-agents). */
   runPromptTokens?: number;
+  /** The run's prompt-token cap, from run.started. */
+  runPromptCap?: number;
+  /** Some calls had no provider usage and were estimated. */
+  runUsageEstimated?: boolean;
   occupiedCoversStream?: boolean;
   estimatedPromptTokens?: number;
   contextReport?: ContextReport;
@@ -456,12 +463,16 @@ export function ChatInput({
   }, [draftScope, input, pendingAttachments]);
 
   const modelConfig = useOllamaModelConfig(composerOptions.model, localMode);
-  // Soft fallback until /context/estimate or live ContextReport supplies windowTokens.
-  const contextLimit =
+  // Soft fallback until /context/estimate or live ContextReport supplies
+  // windowTokens. Same rule as the server, so the meter never flashes 1M.
+  const modelWindow =
     modelConfig?.contextLength ??
-    cloudModels.find((m) => m.id === composerOptions.model)
-      ?.contextLength ??
+    cloudModels.find((m) => m.id === composerOptions.model)?.contextLength ??
     null;
+  const contextLimit = resolveContextWindow({
+    mode: composerOptions.contextWindowMode ?? 'default',
+    modelMax: modelWindow,
+  }).windowTokens;
   const visionOk = modelSupportsVision(
     composerOptions.model,
     modelConfig?.supportsVision,
@@ -1079,6 +1090,11 @@ export function ChatInput({
         reserve={contextMeter.reserve}
         windowSource={contextMeter.windowSource}
         {...(runPromptTokens !== undefined ? { runPromptTokens } : {})}
+        {...(runPromptCap !== undefined ? { runPromptCap } : {})}
+        {...(runUsageEstimated ? { runUsageEstimated } : {})}
+        {...(contextReport?.trimmedSkills?.length
+          ? { trimmedSkills: contextReport.trimmedSkills }
+          : {})}
       />
     </>
   );

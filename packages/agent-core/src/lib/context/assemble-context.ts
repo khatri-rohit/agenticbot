@@ -24,9 +24,10 @@ import {
 
 import { buildSystemPrompt } from '../prompts/system-prompt';
 import {
-  formatSkillBodies,
+  formatPinnedSkills,
   formatSkillsCatalog,
   listSkills,
+  skillCard,
 } from '../tools/skills';
 import type { ToolRegistry } from '../tools/type';
 import { stubWebSourceCard } from '../tools/web-source';
@@ -357,10 +358,17 @@ function imagePartCount(
 export function stubLiveToolResults(
   messages: ChatCompletionMessageParam[],
   budget: ContextBudget = DEFAULT_CONTEXT_BUDGET,
+  /**
+   * Index of the first message the running loop appended. Turns are counted
+   * only before it: the loop's own nudges are `role: 'user'` but are not user
+   * turns, and current-run results shrink only through eviction (which keeps
+   * a sha). Omitted at assemble time, where every message is from the ledger.
+   */
+  liveFrom: number = messages.length,
 ): number {
   const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
   const userIndexes: number[] = [];
-  for (let i = 0; i < messages.length; i++) {
+  for (let i = 0; i < Math.min(liveFrom, messages.length); i++) {
     if (messages[i]?.role === 'user') userIndexes.push(i);
   }
   const keepToolsFrom = keepFromNthLast(
@@ -391,7 +399,8 @@ export function stubLiveToolResults(
     }
     if (message.role !== 'tool') continue;
     const content = typeof message.content === 'string' ? message.content : '';
-    if (content.startsWith('(stub)')) continue;
+    // Already a stub or a residency card (which carries the sha to recall).
+    if (/^\((stub|evicted|skill card|unchanged)/.test(content)) continue;
     const old = i < keepToolsFrom;
     const overCap = content.length > maxToolChars;
     if (!old && !overCap) continue;
@@ -566,14 +575,19 @@ export function assembleContext(
   // Count a skill as loaded only when its load_skill call is in live and its
   // result is not stubbed; otherwise an explicit /skill pick after compaction
   // sends no body and no body is in the prompt.
-  const bodiesText = hasLoadSkill
-    ? formatSkillBodies(
+  // `/` picks are pinned for this send, capped in total; over the cap the
+  // largest picks pin core + contents (reported as trimmed to the host).
+  const pinned = hasLoadSkill
+    ? formatPinnedSkills(
         requestedNames,
+        // Only current-turn loads count: earlier turns' skill rows are sent
+        // as skill cards (core rules), so a pick must re-pin the full body.
         loadedSkillNamesFromEnvelopes(
-          live.filter((envelope) => envelope.seq >= keepToolsFrom),
+          live.filter((envelope) => envelope.seq >= (users.at(-1) ?? Infinity)),
         ),
       )
-    : '';
+    : { text: '', trimmed: [] };
+  const bodiesText = pinned.text;
   const bodiesMessage: ChatCompletionMessageParam | null = bodiesText
     ? { role: 'system', content: bodiesText }
     : null;
@@ -584,6 +598,21 @@ export function assembleContext(
   let stubbedToolResults = 0;
   const tailMessages: ChatCompletionMessageParam[] = [];
   const turnMessages: ChatCompletionMessageParam[] = [];
+
+  // Old load_skill rows become skill cards (core rules), not bare stubs.
+  const skillCallNames = new Map<string, string>();
+  for (const envelope of live) {
+    if (envelope.record.role !== 'assistant') continue;
+    for (const call of envelope.record.tool_calls ?? []) {
+      if (call.type !== 'function' || call.function.name !== 'load_skill') continue;
+      try {
+        const args = JSON.parse(call.function.arguments) as { skill_name?: unknown };
+        if (typeof args.skill_name === 'string') skillCallNames.set(call.id, args.skill_name);
+      } catch {
+        // Malformed args never produced a body worth carding.
+      }
+    }
+  }
 
   for (const envelope of live) {
     const inTurn = lastUserSeq !== undefined && envelope.seq >= lastUserSeq;
@@ -597,7 +626,19 @@ export function assembleContext(
     const stubImages =
       envelope.record.role === 'user' && envelope.seq < keepImagesFrom;
 
-    let message = toParam(envelope, stubTool, stubImages);
+    const skillName =
+      envelope.record.role === 'tool'
+        ? skillCallNames.get(envelope.record.tool_call_id)
+        : undefined;
+    let message: ChatCompletionMessageParam | null =
+      // A skill body is for the turn that loaded it; later turns get its card.
+      (stubTool || !inTurn) && skillName && envelope.record.role === 'tool'
+        ? {
+            role: 'tool',
+            tool_call_id: envelope.record.tool_call_id,
+            content: skillCard(skillName),
+          }
+        : toParam(envelope, stubTool, stubImages);
     if (
       message?.role === 'tool' &&
       overCap &&
@@ -721,6 +762,7 @@ export function assembleContext(
     occupiedTokens,
     stubbedToolResults,
     needsCompaction,
+    ...(pinned.trimmed.length > 0 ? { trimmedSkills: pinned.trimmed } : {}),
   };
 
   return { messages, report };

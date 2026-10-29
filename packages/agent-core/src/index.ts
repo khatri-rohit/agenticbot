@@ -4,8 +4,14 @@
 
 export {
   configureSkillRoots,
+  formatPinnedSkills,
   formatSkillBodies,
   formatSkillsCatalog,
+  skillCard,
+  skillCore,
+  skillForLoad,
+  skillLintWarnings,
+  skillSections,
   getSkill,
   invalidateSkillCatalog,
   listSkillCatalogs,
@@ -74,6 +80,7 @@ export {
   compactCurrentRun,
   evictToolResults,
   ReadDedupe,
+  retireSkillBodies,
 } from './lib/context/residency';
 export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
 export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';

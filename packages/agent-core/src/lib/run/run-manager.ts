@@ -141,6 +141,7 @@ export class RunManager {
       ...(opts.subagents ? { subagents: opts.subagents } : {}),
       ...(opts.depth !== undefined ? { depth: opts.depth } : {}),
       ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
+      ...(opts.pinnedSkills?.length ? { pinnedSkills: opts.pinnedSkills } : {}),
       emit: (event) => {
         if (handle.cancelled && event.type !== 'subrun.settled') return;
         handle.emitter.emit(event);

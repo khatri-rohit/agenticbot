@@ -28,6 +28,10 @@ export type ContextBudget = {
   inRunClearAtLeastTokens: number;
   /** In-run extractive compaction of the current turn starts at this share of the input budget. */
   inRunCompactRatio: number;
+  /** In-run compaction folds iterations until the prompt is under this share (low mark). */
+  inRunCompactToRatio: number;
+  /** Iterations a loaded skill body stays in full before it becomes a skill card. */
+  skillResidentIterations: number;
 };
 
 /**
@@ -54,6 +58,8 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   inRunKeepToolResults: 4,
   inRunClearAtLeastTokens: 10_000,
   inRunCompactRatio: 0.45,
+  inRunCompactToRatio: 0.3,
+  skillResidentIterations: 4,
 };
 
 export function parseContextWindowMode(value: unknown): ContextWindowMode | undefined {
@@ -111,6 +117,8 @@ export type ContextReport = {
   occupiedTokens: number;
   stubbedToolResults: number;
   needsCompaction: boolean;
+  /** `/` picks pinned as core + contents because the pinned total passed its cap. */
+  trimmedSkills?: string[];
   /**
    * Where budget.windowTokens came from for this assembly.
    * Hosts set this after assembleContext; refresh preserves it.

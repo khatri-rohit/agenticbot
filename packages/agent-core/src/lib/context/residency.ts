@@ -6,6 +6,7 @@ import type {
 import { CHARS_PER_TOKEN, type ContextBudget } from '@agent/agent-models';
 
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { skillCard } from '../tools/skills';
 import { sha256Text } from '../tools/web-source';
 
 /**
@@ -13,15 +14,20 @@ import { sha256Text } from '../tools/web-source';
  * starts; inside one long run nothing else shrinks the prompt, so every
  * iteration re-sends every tool result. These passes keep a long run's
  * prompt bounded without an LLM call: evict old tool results to cards,
- * collapse old iterations of the current turn into a recap, and answer
- * unchanged re-reads with a pointer.
+ * retire applied skill bodies to their core rules, collapse old iterations
+ * of the current turn into a recap, and answer unchanged re-reads with a
+ * pointer while the earlier result is still resident.
  */
 
 /** Tool results smaller than this are not worth a card. */
 const MIN_EVICT_CHARS = 800;
-/** Results the model relies on as live state; never evicted. */
+/**
+ * Live state the generic pass never evicts. load_skill bodies leave through
+ * retireSkillBodies instead, which keeps their core rules.
+ */
 const NEVER_EVICT = new Set(['plan', 'todo', 'load_skill']);
 const CARD_PREFIX = '(evicted)';
+const SKILL_CARD_PREFIX = '(skill card)';
 const UNCHANGED_PREFIX = '(unchanged';
 const RECAP_PREFIX = '(compacted progress)';
 const RECAP_MAX_CHARS = 8_000;
@@ -56,6 +62,7 @@ function argsPreview(raw: string): string {
 function isResident(content: string): boolean {
   return (
     !content.startsWith(CARD_PREFIX) &&
+    !content.startsWith(SKILL_CARD_PREFIX) &&
     !content.startsWith('(stub)') &&
     !content.startsWith(UNCHANGED_PREFIX)
   );
@@ -77,6 +84,8 @@ export type EvictionResult = {
   evicted: number;
   beforeTokens: number;
   afterTokens: number;
+  /** Tool calls whose results are no longer resident in full. */
+  toolCallIds: string[];
 };
 
 /**
@@ -117,6 +126,7 @@ export async function evictToolResults(
   }
   if (freedChars / CHARS_PER_TOKEN < budget.inRunClearAtLeastTokens) return null;
 
+  const toolCallIds: string[] = [];
   for (const index of candidates) {
     const message = messages[index];
     if (message?.role !== 'tool' || typeof message.content !== 'string') continue;
@@ -127,13 +137,44 @@ export async function evictToolResults(
         ? editCard(content)
         : evictionCard(info, content, await putBlob(content));
     messages[index] = { role: 'tool', tool_call_id: message.tool_call_id, content: card };
+    toolCallIds.push(message.tool_call_id);
   }
 
   return {
     evicted: candidates.length,
     beforeTokens,
     afterTokens: estimatePromptTokens(messages, tools),
+    toolCallIds,
   };
+}
+
+/**
+ * Turn applied skill bodies into skill cards (core rules + reload note).
+ * Age-based, not size-based: a body is needed while the model plans and
+ * starts the work, not for the rest of the run.
+ */
+export function retireSkillBodies(
+  messages: ChatCompletionMessageParam[],
+  loads: Map<string, { name: string; iteration: number }>,
+  iteration: number,
+  residentIterations: number,
+): { toolCallId: string; name: string }[] {
+  const retired: { toolCallId: string; name: string }[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    if (message?.role !== 'tool' || typeof message.content !== 'string') continue;
+    const load = loads.get(message.tool_call_id);
+    if (!load || iteration - load.iteration < residentIterations) continue;
+    if (!isResident(message.content)) continue;
+    messages[i] = {
+      role: 'tool',
+      tool_call_id: message.tool_call_id,
+      content: skillCard(load.name, load.iteration),
+    };
+    loads.delete(message.tool_call_id);
+    retired.push({ toolCallId: message.tool_call_id, name: load.name });
+  }
+  return retired;
 }
 
 function textOf(content: ChatCompletionMessageParam['content']): string {
@@ -170,13 +211,23 @@ function outcomeLine(info: ToolCallInfo | undefined, content: string): string {
 export type InRunCompactionResult = {
   beforeTokens: number;
   afterTokens: number;
+  /** Tool calls whose rows were folded into the recap. */
+  toolCallIds: string[];
+  /**
+   * True when even folding every removable iteration cannot reach the low
+   * mark: the prior-turn prefix is the problem, and retrying each iteration
+   * would only rewrite the prefix. The loop stops trying for this run.
+   */
+  prefixHeavy: boolean;
 };
 
 /**
  * Collapse the oldest iterations of the current run into one extractive
- * recap once the prompt passes `inRunCompactRatio` of the input budget.
- * Whole iterations (assistant + its tool rows) are removed, so tool_call
- * pairing stays valid. The ledger is untouched; this is prompt-only.
+ * recap once the prompt passes `inRunCompactRatio` (high mark) of the input
+ * budget, folding as many iterations as it takes to get under
+ * `inRunCompactToRatio` (low mark) in one pass, so the next trigger needs
+ * real growth. Whole iterations (assistant + its tool rows) are removed, so
+ * tool_call pairing stays valid. Prompt-only; the ledger is untouched.
  * `runStart` is the index of the first message this run appended.
  */
 export function compactCurrentRun(
@@ -188,6 +239,7 @@ export function compactCurrentRun(
   const beforeTokens = estimatePromptTokens(messages, tools);
   const inputBudget = budget.windowTokens - budget.outputReserveTokens;
   if (beforeTokens < inputBudget * budget.inRunCompactRatio) return null;
+  const lowMark = inputBudget * budget.inRunCompactToRatio;
 
   // An existing recap sits at runStart; fold it into the new one.
   let start = runStart;
@@ -203,12 +255,27 @@ export function compactCurrentRun(
     if (messages[i]?.role === 'assistant') groupStarts.push(i);
   }
   const keepGroups = Math.max(1, budget.inRunKeepToolResults);
-  if (groupStarts.length <= keepGroups) return null;
-  const cutEnd = groupStarts[groupStarts.length - keepGroups];
-  if (cutEnd === undefined || cutEnd <= start) return null;
+  // Too few iterations yet to fold; try again once the run has grown.
+  const removable = groupStarts.length - keepGroups;
+  if (removable <= 0) return null;
+
+  // Fold groups oldest-first until the estimate (minus folded, plus a recap
+  // line per tool row) reaches the low mark, or nothing removable is left.
+  let cutEnd = groupStarts[1] ?? messages.length;
+  let estimate = beforeTokens;
+  for (let g = 0; g < removable; g++) {
+    const from = groupStarts[g]!;
+    const to = groupStarts[g + 1] ?? messages.length;
+    estimate -= estimatePromptTokens(messages.slice(from, to));
+    estimate += 60 * messages.slice(from, to).filter((m) => m.role === 'tool').length / CHARS_PER_TOKEN;
+    cutEnd = to;
+    if (estimate <= lowMark) break;
+  }
+  const prefixHeavy = estimate > lowMark;
 
   const calls = toolCallIndex(messages);
   const lines: string[] = priorRecap ? [priorRecap] : [];
+  const toolCallIds: string[] = [];
   for (let i = start; i < cutEnd; i++) {
     const message = messages[i];
     if (!message) continue;
@@ -217,6 +284,7 @@ export function compactCurrentRun(
       if (text) lines.push(`Note: ${text}`);
     } else if (message.role === 'tool' && typeof message.content === 'string') {
       lines.push(outcomeLine(calls.get(message.tool_call_id), message.content));
+      toolCallIds.push(message.tool_call_id);
     }
   }
 
@@ -229,16 +297,22 @@ export function compactCurrentRun(
     content: `${RECAP_PREFIX}\nEarlier steps of this run, condensed. Re-read files before relying on old contents.\n${recap}`,
   });
 
-  return { beforeTokens, afterTokens: estimatePromptTokens(messages, tools) };
+  return {
+    beforeTokens,
+    afterTokens: estimatePromptTokens(messages, tools),
+    toolCallIds,
+    prefixHeavy,
+  };
 }
 
 /**
  * Answers a read_file that returns exactly what an earlier read of the same
- * path and range returned. Any edit to the path, or any terminal command
- * (formatters, codegen), invalidates it.
+ * path and range returned — only while that earlier result is still in the
+ * prompt in full. Eviction and compaction call `forget`; an edit to the path
+ * or any terminal command (formatters, codegen) invalidates it.
  */
 export class ReadDedupe {
-  private seen = new Map<string, { sha: string; iteration: number }>();
+  private seen = new Map<string, { sha: string; iteration: number; toolCallId: string }>();
 
   /** `path` is the loop's canonical form, so `./a.ts` and `a.ts` share a key. */
   apply(
@@ -246,16 +320,26 @@ export class ReadDedupe {
     args: Record<string, unknown>,
     result: string,
     iteration: number,
+    toolCallId: string,
   ): string {
     if (!path || result.startsWith('Error')) return result;
     const key = `${path}|${String(args.offset ?? '')}|${String(args.limit ?? '')}`;
     const sha = sha256Text(result);
     const prior = this.seen.get(key);
     if (prior && prior.sha === sha) {
-      return `${UNCHANGED_PREFIX} since iteration ${prior.iteration}) ${path}: identical to the earlier read_file result. If that result was evicted, recall sha256:${sha}.`;
+      return `${UNCHANGED_PREFIX} since iteration ${prior.iteration}) ${path}: identical to the earlier read_file result above.`;
     }
-    this.seen.set(key, { sha, iteration });
+    this.seen.set(key, { sha, iteration, toolCallId });
     return result;
+  }
+
+  /** The results of these tool calls left the prompt; stop pointing at them. */
+  forget(toolCallIds: Iterable<string>): void {
+    const gone = new Set(toolCallIds);
+    if (gone.size === 0) return;
+    for (const [key, entry] of this.seen) {
+      if (gone.has(entry.toolCallId)) this.seen.delete(key);
+    }
   }
 
   invalidatePath(path: string): void {

@@ -6,6 +6,7 @@ import {
   configureSkillRoots,
   configureSubagentRoot,
   listTools,
+  skillLintWarnings,
   subagentProfileWarnings,
 } from '@agent/agent-core';
 
@@ -40,6 +41,10 @@ export function getAgentHome(): string {
     );
     for (const warning of subagentProfileWarnings()) {
       console.warn(`[agents] skipped ${warning}`);
+    }
+    // Large skills without core rules keep only their first block once evicted.
+    for (const warning of skillLintWarnings()) {
+      console.warn(`[skills] ${warning}`);
     }
   }
   return dir;

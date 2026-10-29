@@ -426,6 +426,7 @@ body {
   padding: 0.1em 0.32em;
   border-radius: calc(var(--radius) - 2px);
   background: var(--md-inline-code-bg, var(--muted));
+  color: var(--md-inline-code-fg, inherit);
   font-family: var(--font-mono);
 }
 

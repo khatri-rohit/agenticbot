@@ -43,12 +43,14 @@ export interface UsageTotals {
   promptTokens: number;
   completionTokens: number;
   calls: number;
+  /** Calls charged from the local estimate because the provider sent no usage. */
+  estimatedCalls: number;
 }
 
 export function emptyRunUsage(): RunUsage {
   return {
-    own: { promptTokens: 0, completionTokens: 0, calls: 0 },
-    children: { promptTokens: 0, completionTokens: 0, calls: 0 },
+    own: { promptTokens: 0, completionTokens: 0, calls: 0, estimatedCalls: 0 },
+    children: { promptTokens: 0, completionTokens: 0, calls: 0, estimatedCalls: 0 },
   };
 }
 
@@ -59,6 +61,7 @@ export function totalRunUsage(usage: RunUsage): UsageTotals {
     completionTokens:
       usage.own.completionTokens + usage.children.completionTokens,
     calls: usage.own.calls + usage.children.calls,
+    estimatedCalls: usage.own.estimatedCalls + usage.children.estimatedCalls,
   };
 }
 

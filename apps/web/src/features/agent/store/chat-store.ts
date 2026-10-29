@@ -84,6 +84,10 @@ export type ChatRunState = {
   occupiedTokens?: number;
   /** Prompt tokens spent so far this run, own + sub-agents. */
   runPromptTokens?: number;
+  /** Run cap from run.started. */
+  runPromptCap?: number;
+  /** Some calls were charged from the local estimate (no provider usage). */
+  runUsageEstimated?: boolean;
   /** True when occupiedTokens already includes the current streamingMessage. */
   occupiedCoversStream?: boolean;
 };
@@ -178,6 +182,9 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           subagentActivity: [],
           assistantSnippets: [],
           lastSeq,
+          ...(event.maxPromptTokens !== undefined
+            ? { runPromptCap: event.maxPromptTokens }
+            : {}),
           ...(event.estimatedPromptTokens !== undefined
             ? { estimatedPromptTokens: event.estimatedPromptTokens }
             : {}),
@@ -450,6 +457,10 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
                 runPromptTokens:
                   event.runUsage.own.promptTokens +
                   event.runUsage.children.promptTokens,
+                runUsageEstimated:
+                  event.runUsage.own.estimatedCalls +
+                    event.runUsage.children.estimatedCalls >
+                  0,
               }
             : {}),
         },

@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  ContextReport,
   LedgerEnvelope,
   MemoryTarget,
   MessageAttachment,
@@ -10,6 +11,7 @@ import type {
   OllamaBalanceLegacy,
   OllamaBalanceModern,
   OllamaEndpoint,
+  Snapshot,
   StartRunRequest,
   Thread,
   ThreadKind,
@@ -442,6 +444,70 @@ async function prepareRun(input: {
   };
 }
 
+/**
+ * Extractive compaction (no LLM): when `report` says the thread is over
+ * compactAtRatio, cut older turns until history fits compactToRatio and write
+ * the snapshot. Returns the snapshot, or null when nothing was compacted.
+ * Runs after every run and, for an oversized start, before one.
+ */
+async function compactThread(input: {
+  store: ThreadStore;
+  threadId: string;
+  model: string;
+  envelopes: LedgerEnvelope[];
+  report: ContextReport;
+}): Promise<Snapshot | null> {
+  const { store, envelopes, report } = input;
+  if (!report.needsCompaction) return null;
+  const { budget, layers, occupiedTokens } = report;
+  const historyTokens =
+    layers.find((layer) => layer.id === 'conversation')?.tokens ?? 0;
+  const fixedTokens = Math.max(0, occupiedTokens - historyTokens);
+  const targetTokens = Math.max(
+    1,
+    (budget.windowTokens - budget.outputReserveTokens) * budget.compactToRatio -
+      fixedTokens,
+  );
+  const throughSeq = chooseCompactThroughSeqForTarget(
+    envelopes,
+    budget.keepToolResultsForTurns,
+    targetTokens,
+  );
+  if (throughSeq == null) return null;
+  const existing = await store.readSnapshot(input.threadId);
+  if (existing && existing.throughSeq >= throughSeq) return null;
+
+  const snapshot = buildExtractiveSnapshot({
+    threadId: input.threadId,
+    model: input.model,
+    envelopes,
+    throughSeq,
+  });
+  await store.writeSnapshot(input.threadId, snapshot);
+  return snapshot;
+}
+
+/** UI notice + trace for a snapshot written during `runId`. */
+function emitCompacted(
+  store: ThreadStore,
+  runId: string,
+  threadId: string,
+  snapshot: Snapshot,
+): void {
+  runManager.get(runId)?.emitter.emit({
+    type: 'context.compacted',
+    runId,
+    threadId,
+    throughSeq: snapshot.throughSeq,
+    brief: snapshot.brief,
+    summary: snapshot.summary,
+    createdAt: snapshot.createdAt,
+  });
+  traceSinkFor(store, threadId)(
+    traceCompactionEvent({ runId, threadId, snapshot }),
+  );
+}
+
 async function maybeCompactThread(input: {
   threadId: string;
   runId: string;
@@ -465,55 +531,19 @@ async function maybeCompactThread(input: {
     skillNames: resolveRequestedSkills(undefined, lastUser?.skills?.selected),
   });
   if (!prepared.report.needsCompaction) return;
-  // Cut older turns until history fits compactToRatio of the input budget.
-  const { budget, layers, occupiedTokens } = prepared.report;
-  const historyTokens =
-    layers.find((layer) => layer.id === 'conversation')?.tokens ?? 0;
-  const fixedTokens = Math.max(0, occupiedTokens - historyTokens);
-  const targetTokens = Math.max(
-    1,
-    (budget.windowTokens - budget.outputReserveTokens) * budget.compactToRatio -
-      fixedTokens,
-  );
-  const throughSeq = chooseCompactThroughSeqForTarget(
-    envelopes,
-    budget.keepToolResultsForTurns,
-    targetTokens,
-  );
-  if (throughSeq == null) return;
-  const existing = await store.readSnapshot(input.threadId);
-  if (existing && existing.throughSeq >= throughSeq) return;
-
-  const emitter = runManager.get(input.runId)?.emitter;
-  emitter?.emit({
+  runManager.get(input.runId)?.emitter.emit({
     type: 'context.compacting',
     runId: input.runId,
     threadId: input.threadId,
   });
-
-  const snapshot = buildExtractiveSnapshot({
+  const snapshot = await compactThread({
+    store,
     threadId: input.threadId,
     model: input.model,
     envelopes,
-    throughSeq,
+    report: prepared.report,
   });
-  await store.writeSnapshot(input.threadId, snapshot);
-  emitter?.emit({
-    type: 'context.compacted',
-    runId: input.runId,
-    threadId: input.threadId,
-    throughSeq: snapshot.throughSeq,
-    brief: snapshot.brief,
-    summary: snapshot.summary,
-    createdAt: snapshot.createdAt,
-  });
-  traceSinkFor(store, input.threadId)(
-    traceCompactionEvent({
-      runId: input.runId,
-      threadId: input.threadId,
-      snapshot,
-    }),
-  );
+  if (snapshot) emitCompacted(store, input.runId, input.threadId, snapshot);
 }
 
 /**
@@ -771,7 +801,7 @@ router.post('/run', async (req: Request, res: Response) => {
   }
 
   let assignedRunId = '';
-  const prepared = await prepareRun({
+  const prepareInput = {
     threadId,
     thread,
     webSearch,
@@ -781,7 +811,7 @@ router.post('/run', async (req: Request, res: Response) => {
     model: useModel,
     endpoint,
     skillNames,
-    onMemoryUpdated: (payload) => {
+    onMemoryUpdated: (payload: MemoryUpdatedPayload) => {
       const handle = runManager.get(assignedRunId);
       handle?.emitter.emit({
         type: 'memory.updated',
@@ -789,7 +819,7 @@ router.post('/run', async (req: Request, res: Response) => {
         ...payload,
       });
     },
-    onPlanUpdated: (payload) => {
+    onPlanUpdated: (payload: PlanUpdatedPayload) => {
       const handle = runManager.get(assignedRunId);
       handle?.emitter.emit({
         type: 'plan.updated',
@@ -798,7 +828,18 @@ router.post('/run', async (req: Request, res: Response) => {
         plan: payload.plan,
       });
     },
+  };
+  let prepared = await prepareRun(prepareInput);
+  // Oversized start (window switched down, big mention, long last run):
+  // compact before the first model call instead of carrying it all run.
+  const preRunSnapshot = await compactThread({
+    store,
+    threadId,
+    model: useModel,
+    envelopes,
+    report: prepared.report,
   });
+  if (preRunSnapshot) prepared = await prepareRun(prepareInput);
 
   const callOptions = await resolveCallOptions(
     useModel,
@@ -853,6 +894,7 @@ router.post('/run', async (req: Request, res: Response) => {
         }
       : {}),
     trace: traceSinkFor(store, threadId),
+    ...(skillNames.length > 0 ? { pinnedSkills: skillNames } : {}),
     onFinished: async (result) => {
       try {
         const runStatus = lastRunStatusFrom(result, runManager);
@@ -894,6 +936,7 @@ router.post('/run', async (req: Request, res: Response) => {
     threadId,
     plan: await store.readPlan(threadId),
   });
+  if (preRunSnapshot) emitCompacted(store, assignedRunId, threadId, preRunSnapshot);
 
   // First turn: title via the same chat model (runs in parallel with the agent).
   // Await so POST /run returns after ThreadStore has the real title for refreshThreads.

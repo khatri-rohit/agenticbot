@@ -231,7 +231,39 @@ Measure: same three tasks, before/after, from traces — iterations, prompt toke
 | 4 | Review child prompt contains `caveman-review`; trace shows `skill_loaded` with source `profile`. |
 | 5 | Same three tasks: fewer iterations and ritual calls, no drop in outcome. |
 
-## 9. Next loop (not this round)
+## 9. Implementation status (2026-10-29, uncommitted)
+
+| Item | Status | Where |
+| --- | --- | --- |
+| Step 0 probe / 4.1 layer order | **Not done** (needs live model calls). Round-1 order kept until probed. | — |
+| 3.1 nudges as turns | Done | `stubLiveToolResults(…, liveFrom)`; cards and stubs are skipped |
+| 3.2 dedupe vs eviction | Done | `ReadDedupe.forget`; eviction/compaction return removed tool_call_ids |
+| 3.3 compaction thrash | Done | `inRunCompactToRatio` 0.30 low mark, one pass; `prefixHeavy` stop + `context_prefix_heavy` trace |
+| 3.4 usage fallback | Done | `chargeOwnUsage` estimate, `estimatedCalls`, `usageEstimated` trace, `~` in meter |
+| 3.5 pre-run compaction | Done | `compactThread` shared by pre-run and post-run paths |
+| 4.2 digest semantics | Done | workspace prompt, Evidence section |
+| 4.3 child budget reservation | Done | runner `reserved` map, precheck before thread creation, try/finally release |
+| 4.4 orphan children | Done | `deleteChildThreads` (delete cascade + rewind of dropped runs) |
+| 4.5 resume | Done | `subagent_profile` column, `childInfo`, same-profile rule, advisor not resumable |
+| 4.6 small items | Done | run cap in `run.started` + meter "of"; meter fallback uses window rule; user agents reload on file change; children turn thinking off only when supported |
+| 5.1 skill lifecycle | Done | `retireSkillBodies` (4 iterations), skill cards in-run and for earlier turns, pinned cap 24k chars + `trimmedSkills` in meter popover |
+| 5.2 sections | Done | `load_skill({ skill_name, section })`, `skillForLoad`, `skillSections`, `skillCore`, startup lint warning |
+| 5.3 ritual removal | Done | prompt + catalog text |
+| 5.4 profile skills | Done | `skills` on profiles and user frontmatter; review binds `caveman-review`, `anti-slop-examples`; unknown names warn and drop |
+| 5.5 picked skills to children | Done | `pinnedSkills` → `inheritPickedSkills` (review) |
+| 5.6 skill traces | Done | `skill_loaded` (model / pick / profile), `skill_evicted` |
+| 6 engineer prompt | Done | `prompts/system-prompt.ts` workspace prompt (~1.96k tokens, was ~2.94k); Ask ~1.27k; Home loses the rituals |
+
+Review notes (open, not fixed):
+- The date is at the end of the system message but still inside it, so the cached prefix changes once a day.
+- A single oversized turn (huge mention or paste) cannot be compacted between runs (`keepUserTurns` floor of 1); in-run it ends in `prefixHeavy`.
+- Effort-only thinking models keep their default effort in children (no "off" value to send).
+- The prompt examples name this repo's files; harmless elsewhere but not generic.
+- Pre-run compaction emits only `context.compacted` (no preceding `context.compacting`).
+- Retiring any skill resets every `load_skill` repeat key (coarse but safe).
+- No new automated tests by request; behavior is verified only by typecheck and the existing 38 tests.
+
+## 10. Next loop (not this round)
 
 - Skill UX in the composer: cost of a pick, active-skill list for this send, optional carry-over to the next message.
 - Project skills from the workspace (`.agent/skills`) with precedence built-in → user → project.

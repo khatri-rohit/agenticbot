@@ -34,6 +34,13 @@ export type SubagentProfile = {
   rules: boolean;
   /** Child ends by calling `report` (structured result). */
   report: boolean;
+  /**
+   * Skills preloaded into the child prompt (full body when small, else core
+   * rules). Children never see the catalog or get load_skill.
+   */
+  skills: string[];
+  /** Also preload the parent's `/` picks for this send (review does). */
+  inheritPickedSkills: boolean;
   prompt: string;
   source: 'builtin' | 'user';
 };

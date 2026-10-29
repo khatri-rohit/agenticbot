@@ -7,6 +7,7 @@ import {
 } from '@agent/agent-models';
 import {
   createStreamModelCall,
+  getOllamaModelConfig,
   loadWorkspaceRules,
   type SubagentHost,
 } from '@agent/agent-core';
@@ -32,11 +33,18 @@ export function createSubagentHost(deps: {
         ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
         parentThreadId: input.parentThreadId,
         parentRunId: input.parentRunId,
+        subagentProfile: input.profile,
       });
       return { id: thread.id };
     },
-    parentOf(threadId) {
-      return store.getThread(threadId)?.parentThreadId;
+    childInfo(threadId) {
+      const thread = store.getThread(threadId);
+      if (!thread) return undefined;
+      const profile = store.subagentProfile(threadId);
+      return {
+        ...(thread.parentThreadId ? { parentThreadId: thread.parentThreadId } : {}),
+        ...(profile ? { profile } : {}),
+      };
     },
     async loadMessages(threadId) {
       const envelopes = await store.hydrateEnvelopes(threadId);
@@ -66,9 +74,17 @@ export function createSubagentHost(deps: {
     writeLastRun: (threadId, lastRun) => store.writeLastRun(threadId, lastRun),
     modelFor: (role, parentModel) => modelRolesFor(parentModel)[role],
     async modelCall(model) {
-      // Children never think: they search and report. Thinking stays a parent choice.
+      // Children search and report; turn thinking off where the model allows
+      // it, otherwise keep the model's own default.
+      let thinking: false | undefined;
+      try {
+        const config = await getOllamaModelConfig(model, endpoint);
+        thinking = config.thinking.values.some((value) => value === false) ? false : undefined;
+      } catch {
+        thinking = undefined;
+      }
       return createStreamModelCall(
-        await resolveCallOptions(model, false, endpoint, WORKSPACE_MODE.temperature),
+        await resolveCallOptions(model, thinking, endpoint, WORKSPACE_MODE.temperature),
       );
     },
     async contextBudget(model) {
