@@ -1,4 +1,4 @@
-import type { LedgerEnvelope, Snapshot } from '@agent/agent-models';
+import { CHARS_PER_TOKEN, type LedgerEnvelope, type Snapshot } from '@agent/agent-models';
 
 const BRIEF_MAX = 1_200;
 const SUMMARY_MAX = 8_000;
@@ -31,6 +31,35 @@ export function chooseCompactThroughSeq(
   const throughSeq = firstLive.seq - 1;
   if (throughSeq < 1) return null;
   return throughSeq;
+}
+
+function envelopeChars(envelope: LedgerEnvelope): number {
+  const { record } = envelope;
+  if (record.role === 'assistant') {
+    return (record.content ?? '').length + JSON.stringify(record.tool_calls ?? []).length;
+  }
+  return 'content' in record && typeof record.content === 'string' ? record.content.length : 0;
+}
+
+/**
+ * Like chooseCompactThroughSeq, but keeps cutting older turns (down to the
+ * last one) until the live tail fits `targetTokens`. A single oversized turn
+ * cannot be split here; in-run compaction handles that case.
+ */
+export function chooseCompactThroughSeqForTarget(
+  envelopes: LedgerEnvelope[],
+  keepUserTurns: number,
+  targetTokens: number,
+): number | null {
+  for (let keep = keepUserTurns; keep >= 1; keep--) {
+    const throughSeq = chooseCompactThroughSeq(envelopes, keep);
+    if (throughSeq === null) continue;
+    const tailChars = envelopes
+      .filter((envelope) => envelope.seq > throughSeq)
+      .reduce((sum, envelope) => sum + envelopeChars(envelope), 0);
+    if (tailChars / CHARS_PER_TOKEN <= targetTokens || keep === 1) return throughSeq;
+  }
+  return null;
 }
 
 /**

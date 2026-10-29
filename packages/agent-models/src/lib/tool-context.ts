@@ -62,11 +62,14 @@ export type ToolContext = {
    */
   trace?: (event: TraceEvent) => void;
   /**
-   * Spawn a sub-agent (recursive runLoop on a child thread). The host
-   * (RunManager) implements this per-run. Undefined in contexts without
-   * delegation support (e.g. HOME_MODE, eval harness).
+   * Spawn a sub-agent. The loop binds this to the parent run (signal, budget,
+   * capabilities, depth). Undefined where delegation is off (Home, children).
    */
   spawnSubagent?: (spec: SubagentSpec) => Promise<SubagentResult>;
-  /** Sub-agent recursion depth (parent run = 0). Used by delegate for depth check. */
-  subagentDepth?: number;
+  /**
+   * End the run after this tool batch with `content` as the final answer.
+   * Used by a sub-agent's `report` tool so the child does not pay for one
+   * more model call just to say "done".
+   */
+  requestStop?: (content: string) => void;
 };

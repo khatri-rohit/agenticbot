@@ -54,6 +54,18 @@ Tools are registered in `@agent/agent-core` and filtered per run:
 | `web_search` | Only if the client enables **Web search** in the composer (`allowedTools: ['web_search']`) | Live search: Ollama → Firecrawl → Tavily. Returns **hit cards**; top **2** hits are prefetched into the source store (`sha256`).                                            |
 | `web_fetch`  | **Always** (Home and Workspace `globalTools`)                                              | `url` → fetch pipeline (Ollama → Firecrawl → Tavily → **local HTTP**), store full page, return a **card** (~2k teaser). `sha256`+`offset`+`limit` → page the stored source. |
 | `load_skill` | **Always** (server `globalTools`)                                                          | Optional skill packs. `web_search` / `web_fetch` work without loading a skill.                                                                                              |
+| `recall`     | **Always**                                                                                 | Read back a stored body by `sha256`: an `(evicted)` tool-result card, a sub-agent report, or a ledger blob.                                                                |
+| `diff`       | Workspace                                                                                  | Read-only `git diff HEAD` + untracked files, jailed to the workspace folder. Used by the parent and the `review` sub-agent.                                                   |
+| `delegate`   | Workspace (Agent posture)                                                                  | Hand a side task to a sub-agent (`explore`, `review`, `advisor`, or a user agent). Returns a capped digest; full report via `recall`.                                       |
+
+### Context, budgets, and sub-agents
+
+- **Window:** each thread budgets against **200K** (default) or the **model's full size** (composer toggle, stored as `threads.context_window_mode`). Resolved once in `resolveContextBudget` (`apps/api/src/lib/model-runtime.ts`) from `resolveContextWindow` (`agent-models/context.ts`).
+- **Compaction between runs** starts at `compactAtRatio` (65%) of the input budget and cuts older turns until history fits `compactToRatio` (25%).
+- **Inside a run** (`agent-core/context/residency.ts`): old tool results become `(evicted)` cards once the prompt passes `inRunEvictTokens` (40k, absolute), keeping the newest 4 and only when a pass frees ≥10k tokens; old iterations collapse into one extractive recap at `inRunCompactRatio` (45%); an unchanged `read_file` re-read returns a pointer.
+- **Token budget:** `maxPromptTokens` / `maxWallMs` per run (`WORKSPACE_MODE`: 2.5M / 30 min, `HOME_MODE`: 400k / 15 min). One wrap-up nudge at 80%, `limit.tokens` / `limit.wall` at 100%. Sub-agent spend is charged to the parent.
+- **Sub-agents** (`agent-core/subagent/`): one writer, many readers. Children get profile tools ∩ parent tools, minus `delegate`, `offer_choice`, `memory`, `plan`, `todo`, `edit_file`, `run_terminal`; no nesting; at most 4 in parallel per run; cancelled with the parent; a lean child prompt; a `report` tool that ends the child run. Model roles: `AGENT_MODEL_FAST` (explore) and `AGENT_MODEL_STRONG` (review, advisor), both defaulting to the parent's model. User agents: `$AGENT_HOME/agents/<name>.md` (frontmatter `name`, `description`, `model: main|fast|strong`, `tools`, `context: none|diff`, `maxTurns`; body is the prompt).
+- **Traces:** every run (children included) writes `<AGENT_HOME>/sessions/<threadId>/traces/<runId>.jsonl`, schema version `v` (`TRACE_SCHEMA_VERSION`), with per-call usage and timing, context layers, evictions, compaction, budget warnings, and `run_finish` usage.
 
 **Resource discipline (by design):**
 
@@ -232,7 +244,7 @@ Client tool wiring (`apps/web/src/features/agent/api/agent-client.ts`):
 ## Adding or changing tools (implementation guide)
 
 1. **Define the tool** in `@agent/agent-core` (`Tool`: OpenAI `definition`, `guidance`, `execute`).
-2. **Register** in `ALL_TOOLS` (`packages/agent-core/src/lib/tools/registry.ts`).
+2. **Register** in the `builtin` provider (`packages/agent-core/src/lib/tools/registry.ts`), or add a `ToolProvider` with `registerToolProvider` (the seam for MCP servers and plugins). Set `stage` (`read` / `network` / `exec` / `mutate` / …) so the loop schedules it correctly; a tool without one runs as `mutate`. Set `outputCap` to bound its result size.
 3. **Expose to the model** via profile policy:
    - User-toggleable → `HOME_MODE.allowedTools` and/or client `allowedTools`.
    - Always on → `HOME_MODE.globalTools` or `WORKSPACE_MODE.globalTools` (merged in `agent.routes.ts`).

@@ -725,10 +725,98 @@ function runWorkspaceCommand(
   });
 }
 
+export const WORKSPACE_DIFF_MAX_CHARS = 12_000;
+
+/** git with fixed args (no shell), cwd jailed to the workspace root. */
+function runGit(
+  cwd: string,
+  args: string[],
+  signal: AbortSignal,
+): Promise<{ code: number; out: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, windowsHide: true });
+    let out = '';
+    const onAbort = () => child.kill();
+    signal.addEventListener('abort', onAbort, { once: true });
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (out.length < WORKSPACE_DIFF_MAX_CHARS * 2) out += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (out.length < WORKSPACE_DIFF_MAX_CHARS * 2) out += chunk.toString('utf8');
+    });
+    child.on('error', (error) => {
+      signal.removeEventListener('abort', onAbort);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      signal.removeEventListener('abort', onAbort);
+      resolve({ code: code ?? 0, out });
+    });
+  });
+}
+
+export const diffTool: Tool = {
+  definition: {
+    type: 'function',
+    function: {
+      name: 'diff',
+      description:
+        'Show uncommitted changes in the open workspace: git diff against HEAD (staged + unstaged) and untracked files. Read-only.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Optional file or folder (relative) to limit the diff.',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  guidance: {
+    whenToUse: ['You need to see what changed in the working tree (review, final summary).'],
+    whenNotToUse: ['To read a file — use read_file.'],
+    usage: ['Output is capped; pass path to narrow a large diff.'],
+  },
+  risk: 'read',
+  stage: 'read',
+  execute: async (args, ctx) => {
+    const root = await workspaceRootReal(ctx.workspaceRoot);
+    if (!root) return 'No workspace is bound to this run';
+    let target = '.';
+    const requested = asString(args.path).trim();
+    if (requested) {
+      const resolved = await resolveWorkspacePath(ctx.workspaceRoot, requested);
+      if (!resolved.ok) return resolved.error;
+      target = toPosixRelative(root, resolved.abs) || '.';
+    }
+    try {
+      const stat = await runGit(root, ['diff', 'HEAD', '--no-color', '--stat', '--', target], ctx.signal);
+      if (stat.code !== 0) return `git diff failed: ${stat.out.trim() || `exit ${stat.code}`}`;
+      const body = await runGit(root, ['diff', 'HEAD', '--no-color', '--', target], ctx.signal);
+      const untracked = await runGit(
+        root,
+        ['ls-files', '--others', '--exclude-standard', '--', target],
+        ctx.signal,
+      );
+      const parts = [
+        stat.out.trim() || '(no tracked changes)',
+        untracked.out.trim() ? `Untracked files:\n${untracked.out.trim()}` : '',
+        body.out.trim(),
+      ].filter(Boolean);
+      return truncated(parts.join('\n\n'), WORKSPACE_DIFF_MAX_CHARS, 'diff');
+    } catch (error) {
+      return `git diff failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  },
+};
+
 export const WORKSPACE_TOOLS: Tool[] = [
   globTool,
   grepTool,
   readFileTool,
   editFileTool,
   runTerminalTool,
+  diffTool,
 ];

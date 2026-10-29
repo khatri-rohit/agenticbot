@@ -1,95 +1,175 @@
-import type { SubagentProfile } from './types';
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import type { ModelRole } from '@agent/agent-models';
+
+import type { SubagentContext, SubagentLimits, SubagentProfile } from './types';
 
 /**
- * Specialist profile catalog. Each profile is a declared tuple of
- * (tools, skills, model, posture, prompt section). The model picks one by
- * name via the `delegate` tool; the runtime assembles a registry and prompt
- * so the child's context cache is all signal for that job.
- *
- * `delegate` is never in a child's tool list — recursion is bounded by
- * MAX_SUBAGENT_DEPTH, not by tool availability.
- *
- * All profiles use glm-5.2:cloud. No model routing in v1.
- * No limits field — sub-agents use default WORKSPACE_MODE limits.
+ * Built-in specialists. Writes stay with the parent (one writer, many
+ * readers): no profile edits files or runs commands, and planning stays in
+ * the parent, which is the only agent that holds the conversation.
  */
-export const SUBAGENT_PROFILES: Record<string, SubagentProfile> = {
-  research: {
-    name: 'research',
+const BUILTIN_PROFILES: SubagentProfile[] = [
+  {
+    name: 'explore',
     description:
-      'Investigate a question against files and the web. Read-only. Returns findings + citations.',
-    tools: ['load_skill', 'web_search', 'web_fetch', 'glob', 'grep', 'read_file'],
-    skills: ['research', 'home-research'],
-    model: 'glm-5.2:cloud',
-    posture: 'ask',
-    promptSection: `# Research specialist
-
-You are a senior software engineer on a research task. Investigate the question and return a findings digest. Apply the same professional standards as the top-level agent.
-- Prefer the open folder first (glob/grep/read_file). Use web_search only when files lack the current API, version, or docs you need.
-- Cite source URLs inline. Do not invent live facts.
-- Do NOT edit files or run commands. State uncertainties in your digest.
-- Return a concise digest (1-2KB): key findings, citations, and open questions.`,
+      'Read-only search of the workspace (and the web when the parent has it). Use for questions that need more than ~5 files or several searches. Returns findings with path:line evidence.',
+    modelRole: 'fast',
+    tools: ['glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
+    limits: { maxIterations: 20, maxToolCalls: 60, maxWallMs: 5 * 60_000, maxPromptTokens: 300_000 },
+    context: 'none',
+    rules: false,
+    report: true,
+    source: 'builtin',
+    prompt: `You are a code search specialist. Find what the brief asks for and stop.
+- Start broad (glob, grep), then read only the files that matter.
+- Every finding cites evidence as path:line, or a URL for web facts.
+- If something is not in the workspace, say so; do not guess.`,
   },
-
-  implement: {
-    name: 'implement',
-    description:
-      'Implement a well-scoped change against the workspace. Edits files only (no terminal). Returns a change summary.',
-    tools: ['load_skill', 'glob', 'grep', 'read_file', 'edit_file'],
-    skills: ['implement', 'patch-and-verify', 'karpathy-guidelines'],
-    model: 'glm-5.2:cloud',
-    posture: 'agent',
-    promptSection: `# Implement specialist
-
-You are a senior software engineer implementing a change. Make the smallest correct change for the task.
-- Read call sites before editing shared types or loop semantics.
-- Match neighboring style. Fix root causes in the shared layer, not one-off patches.
-- If working in parallel, do NOT edit shared files (lockfiles, catalogs, index files, config). Edit only your assigned files. Note shared-file needs in your summary.
-- Do NOT run terminal commands or claim work is verified. State what you changed and what needs verification. The parent agent will run verification.
-- Return a concise change summary (1-2KB): files touched, what changed, verify-needed.`,
-  },
-
-  review: {
+  {
     name: 'review',
     description:
-      'Review changes or a diff against repo standards and spec. Read-only. Returns review comments.',
-    tools: ['load_skill', 'glob', 'grep', 'read_file', 'web_search', 'web_fetch'],
-    skills: ['code-review', 'caveman-review', 'anti-slop-examples'],
-    model: 'glm-5.2:cloud',
-    posture: 'ask',
-    promptSection: `# Review specialist
-
-You are a senior software engineer reviewing code. Review against this repo's standards (AGENTS.md) and the originating spec.
-- Read the actual diff/files before commenting. Do not review from memory.
-- Do NOT edit files or run commands.
-- Each comment: location, problem, fix — one line when possible.
-- Return review comments grouped by Standards vs Spec (1-2KB).`,
+      'Fresh-context review of uncommitted changes against the user request and project rules. Run once after edits pass verification. Returns issues with location, problem, fix, severity.',
+    modelRole: 'strong',
+    tools: ['diff', 'glob', 'grep', 'read_file', 'recall'],
+    limits: { maxIterations: 15, maxToolCalls: 50, maxWallMs: 5 * 60_000, maxPromptTokens: 300_000 },
+    context: 'diff',
+    rules: true,
+    report: true,
+    source: 'builtin',
+    prompt: `You are a code reviewer with no stake in the change.
+- Start with the diff tool, then read surrounding code where a change touches shared types, callers, or error paths.
+- Report real defects: wrong behavior, broken contracts, missed edge cases, rule violations. Skip style nits the project rules do not require.
+- Mark anything outside the user's request as out of scope instead of asking for it.
+- Each issue: location (path:line), problem, fix, severity.`,
   },
-
-  plan: {
-    name: 'plan',
+  {
+    name: 'advisor',
     description:
-      'Plan a chunk of work: set goal, journal decisions, produce a locked brief. Read-only. Returns the plan.',
-    tools: ['load_skill', 'glob', 'grep', 'read_file', 'plan', 'todo'],
-    skills: ['grilling', 'to-spec', 'wayfinder'],
-    model: 'glm-5.2:cloud',
-    posture: 'ask',
-    promptSection: `# Plan specialist
-
-You are a senior software engineer and architect. Turn the task into a locked brief.
-- Journal decisions with plan; finalize when the goal is concrete.
-- Break work into tracer-bullet tickets with blocking edges.
-- Do NOT edit files, run commands, or implement.
-- Return the finalized plan (1-2KB).`,
+      'Second opinion from a stronger model that sees this whole conversation. Use when stuck (same failure twice) or before a risky design choice. Ask one specific question.',
+    modelRole: 'strong',
+    tools: [],
+    limits: { maxIterations: 2, maxToolCalls: 0, maxWallMs: 3 * 60_000, maxPromptTokens: 600_000 },
+    context: 'fork',
+    rules: false,
+    report: false,
+    source: 'builtin',
+    prompt: '',
   },
-};
+];
 
-export function getSubagentProfile(name: string): SubagentProfile | undefined {
-  const key = name.trim().toLowerCase();
-  return SUBAGENT_PROFILES[key];
+let userRoot: string | null = null;
+let knownTools: Set<string> | null = null;
+let cachedUser: SubagentProfile[] | null = null;
+const warnings: string[] = [];
+
+/**
+ * Host sets the user agents folder ($AGENT_HOME/agents) and the tool names
+ * that exist, so user profiles naming unknown tools are rejected at load.
+ */
+export function configureSubagentRoot(root: string | null, toolNames: string[]): void {
+  userRoot = root ? path.resolve(root) : null;
+  knownTools = new Set(toolNames);
+  cachedUser = null;
+}
+
+/** Problems found while loading user agents (unknown tools, bad fields). */
+export function subagentProfileWarnings(): string[] {
+  userProfiles();
+  return [...warnings];
+}
+
+function frontmatter(raw: string): { fields: Map<string, string>; body: string } {
+  const text = raw.replace(/^﻿/, '').replace(/\r/g, '');
+  const fields = new Map<string, string>();
+  if (!text.startsWith('---')) return { fields, body: text.trim() };
+  const end = text.indexOf('\n---', 3);
+  if (end < 0) return { fields, body: text.trim() };
+  for (const line of text.slice(3, end).split('\n')) {
+    const match = line.match(/^([A-Za-z][\w-]*)\s*:\s*(.*)$/);
+    if (match) fields.set(match[1]!.toLowerCase(), match[2]!.trim().replace(/^['"]|['"]$/g, ''));
+  }
+  return { fields, body: text.slice(end + 4).trim() };
+}
+
+const ROLES: ModelRole[] = ['main', 'fast', 'strong'];
+const USER_CONTEXTS: SubagentContext[] = ['none', 'diff'];
+
+function parseUserProfile(file: string, raw: string): SubagentProfile | string {
+  const { fields, body } = frontmatter(raw);
+  const name = (fields.get('name') ?? path.basename(file, '.md')).trim().toLowerCase();
+  if (!/^[a-z][a-z0-9-]{1,40}$/.test(name)) return `${file}: invalid name "${name}"`;
+  const description = fields.get('description')?.trim();
+  if (!description) return `${file}: description is required`;
+  if (!body) return `${file}: prompt body is empty`;
+  const role = (fields.get('model') ?? 'main') as ModelRole;
+  if (!ROLES.includes(role)) return `${file}: model must be one of ${ROLES.join(', ')}`;
+  const context = (fields.get('context') ?? 'none') as SubagentContext;
+  if (!USER_CONTEXTS.includes(context)) return `${file}: context must be none or diff`;
+  const tools = (fields.get('tools') ?? 'glob, grep, read_file, recall')
+    .split(',')
+    .map((tool) => tool.trim())
+    .filter(Boolean);
+  const unknown = knownTools ? tools.filter((tool) => !knownTools!.has(tool)) : [];
+  if (unknown.length > 0) return `${file}: unknown tools ${unknown.join(', ')}`;
+  const turns = Number(fields.get('maxturns') ?? 15);
+  const limits: SubagentLimits = {
+    maxIterations: Number.isFinite(turns) && turns > 0 ? Math.min(Math.floor(turns), 40) : 15,
+    maxToolCalls: 60,
+    maxWallMs: 5 * 60_000,
+    maxPromptTokens: 300_000,
+  };
+  return {
+    name,
+    description,
+    modelRole: role,
+    tools,
+    limits,
+    context,
+    rules: fields.get('rules') === 'true' || context === 'diff',
+    report: fields.get('report') !== 'false',
+    prompt: body,
+    source: 'user',
+  };
+}
+
+function userProfiles(): SubagentProfile[] {
+  if (cachedUser) return cachedUser;
+  warnings.length = 0;
+  cachedUser = [];
+  if (!userRoot) return cachedUser;
+  let files: string[] = [];
+  try {
+    files = readdirSync(userRoot).filter((file) => file.endsWith('.md'));
+  } catch {
+    return cachedUser;
+  }
+  const builtinNames = new Set(BUILTIN_PROFILES.map((profile) => profile.name));
+  for (const file of files) {
+    let raw: string;
+    try {
+      raw = readFileSync(path.join(userRoot, file), 'utf8');
+    } catch {
+      continue;
+    }
+    const parsed = parseUserProfile(file, raw);
+    if (typeof parsed === 'string') {
+      warnings.push(parsed);
+    } else if (builtinNames.has(parsed.name)) {
+      warnings.push(`${file}: "${parsed.name}" is a built-in profile name`);
+    } else {
+      cachedUser.push(parsed);
+    }
+  }
+  return cachedUser;
 }
 
 export function listSubagentProfiles(): SubagentProfile[] {
-  return Object.values(SUBAGENT_PROFILES).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  return [...BUILTIN_PROFILES, ...userProfiles()];
+}
+
+export function getSubagentProfile(name: string): SubagentProfile | undefined {
+  const key = name.trim().toLowerCase();
+  return listSubagentProfiles().find((profile) => profile.name === key);
 }

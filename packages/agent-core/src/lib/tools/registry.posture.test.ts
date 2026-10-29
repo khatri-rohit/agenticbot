@@ -5,7 +5,7 @@ import {
   normalizeRunPosture,
 } from '@agent/agent-models';
 
-import { ALL_TOOLS, createToolRegistry } from './registry';
+import { createToolRegistry, listTools } from './registry';
 
 describe('Ask posture tool pack', () => {
   it('normalizes only ask as ask', () => {
@@ -41,9 +41,9 @@ describe('Ask posture tool pack', () => {
   });
 
   it('drops write/exec tools from the registry even if still on the allow-list', () => {
-    const agent = createToolRegistry(ALL_TOOLS, undefined, 'agent');
+    const agent = createToolRegistry(listTools(), undefined, 'agent');
     const ask = createToolRegistry(
-      ALL_TOOLS,
+      listTools(),
       ['glob', 'grep', 'read_file', 'edit_file', 'run_terminal', 'load_skill'],
       'ask',
     );

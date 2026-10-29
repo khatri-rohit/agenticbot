@@ -54,10 +54,12 @@ import {
   mergeCloudModels,
   modelSupportsVision,
   readStoredComposerModel,
+  writeStoredContextWindowMode,
   type OllamaModel,
 } from '@/lib/ollama-models';
 import { ModelPicker } from '@/components/model-picker';
 import { WorkspacePicker } from '@/components/workspace-picker';
+import { ContextWindowPicker } from '@/components/context-window-picker';
 import { ThinkingPicker } from '@/components/thinking-picker';
 import { ContextUsage } from '@/components/context-usage';
 import { UsageMeter } from '@/components/usage-meter';
@@ -233,6 +235,7 @@ export function ChatInput({
   variant = 'dock',
   threadId,
   occupiedTokens,
+  runPromptTokens,
   occupiedCoversStream,
   estimatedPromptTokens,
   contextReport,
@@ -265,6 +268,8 @@ export function ChatInput({
   variant?: 'dock' | 'hero';
   threadId?: string;
   occupiedTokens?: number;
+  /** Run spend so far (prompt tokens, own + sub-agents). */
+  runPromptTokens?: number;
   occupiedCoversStream?: boolean;
   estimatedPromptTokens?: number;
   contextReport?: ContextReport;
@@ -1056,6 +1061,15 @@ export function ChatInput({
           disabled={isRunning}
         />
       ) : null}
+      <ContextWindowPicker
+        modelMax={modelConfig?.contextLength}
+        value={composerOptions.contextWindowMode}
+        onChange={(contextWindowMode) => {
+          writeStoredContextWindowMode(contextWindowMode);
+          onComposerOptionsChange({ ...composerOptions, contextWindowMode });
+        }}
+        disabled={isRunning}
+      />
       <ContextUsage
         used={contextMeter.used}
         limit={contextMeter.limit}
@@ -1064,6 +1078,7 @@ export function ChatInput({
         layers={contextMeter.layers}
         reserve={contextMeter.reserve}
         windowSource={contextMeter.windowSource}
+        {...(runPromptTokens !== undefined ? { runPromptTokens } : {})}
       />
     </>
   );

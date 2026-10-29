@@ -1,3 +1,5 @@
+import type { ContextWindowMode } from '@agent/agent-models';
+
 /**
  * Curated Ollama model catalog — cloud-hosted and local.
  * Cloud models use the `:cloud` tag (Ollama Cloud API).
@@ -363,6 +365,26 @@ export function writeStoredComposerModel(model: string, local = false): void {
     const value = local ? model.trim() : resolveOllamaModel(model);
     if (!value) return;
     localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
+
+const CONTEXT_WINDOW_KEY = 'agent:composerContextWindow';
+
+/** Window mode for new threads; a thread's stored mode wins once it has one. */
+export function readStoredContextWindowMode(): ContextWindowMode {
+  if (typeof window === 'undefined') return 'default';
+  try {
+    return localStorage.getItem(CONTEXT_WINDOW_KEY) === 'model' ? 'model' : 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+export function writeStoredContextWindowMode(mode: ContextWindowMode): void {
+  try {
+    localStorage.setItem(CONTEXT_WINDOW_KEY, mode);
   } catch {
     /* ignore */
   }

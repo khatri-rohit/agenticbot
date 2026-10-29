@@ -1,4 +1,12 @@
-import type { TokenUsage } from './run.js';
+import type { ContextReportLayer, ContextWindowSource } from './context.js';
+import type { RunUsage, TokenUsage } from './run.js';
+
+/**
+ * Bumped when a TraceEvent field changes meaning or is removed. Adding an
+ * optional field does not bump it. Sinks stamp every line with `v`, so an
+ * offline reader (eval / observability app) can parse old traces.
+ */
+export const TRACE_SCHEMA_VERSION = 2;
 
 /**
  * Internal execution trace events (console / eval harness / JSONL sink).
@@ -12,11 +20,25 @@ export type TraceEvent =
       type: 'run_start';
       runId: string;
       model: string;
+      threadId?: string;
+      /** Set on sub-agent runs; the parent's runId. */
+      parentRunId?: string;
+      /** 0 for a user run, 1 for its sub-agents. */
+      depth?: number;
+      mode?: string;
+      posture?: string;
+      windowTokens?: number;
+      windowSource?: ContextWindowSource;
+      /** Prompt size of the first call, split by context layer. */
+      occupiedTokens?: number;
+      layers?: ContextReportLayer[];
     }
   | {
       type: 'llm_request';
       runId: string;
       iteration: number;
+      /** Heuristic size of the prompt about to be sent. */
+      estimatedPromptTokens?: number;
     }
   | {
       type: 'llm_response';
@@ -27,6 +49,8 @@ export type TraceEvent =
       contentPreview?: string;
       /** Provider-reported token counts for this iteration, when available. */
       usage?: TokenUsage;
+      /** Model call + stream time. */
+      durationMs?: number;
     }
   | {
       type: 'tool_start';
@@ -42,6 +66,8 @@ export type TraceEvent =
       toolName: string;
       durationMs: number;
       resultPreview: string;
+      /** Full result length before any preview clipping. */
+      resultChars?: number;
     }
   | {
       type: 'tool_error';
@@ -61,6 +87,10 @@ export type TraceEvent =
       runId: string;
       iterations: number;
       toolCalls: number;
+      status?: string;
+      limitReason?: string;
+      usage?: RunUsage;
+      durationMs?: number;
     }
   | {
       type: 'memory_gate';
@@ -78,4 +108,29 @@ export type TraceEvent =
       threadId: string;
       throughSeq: number;
       briefPreview: string;
+    }
+  | {
+      /** In-run eviction of old tool results into cards. */
+      type: 'context_evicted';
+      runId: string;
+      iteration: number;
+      evicted: number;
+      beforeTokens: number;
+      afterTokens: number;
+    }
+  | {
+      /** In-run extractive compaction of older iterations of this turn. */
+      type: 'context_compacted_inrun';
+      runId: string;
+      iteration: number;
+      beforeTokens: number;
+      afterTokens: number;
+    }
+  | {
+      type: 'budget_warning';
+      runId: string;
+      iteration: number;
+      reason: string;
+      promptTokens: number;
+      limitPromptTokens?: number;
     };

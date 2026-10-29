@@ -2,7 +2,6 @@ import { Router, type Request, type Response } from 'express';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type {
-  AgentEventWithoutSeq,
   LedgerEnvelope,
   MemoryTarget,
   MessageAttachment,
@@ -12,13 +11,11 @@ import type {
   OllamaBalanceModern,
   OllamaEndpoint,
   StartRunRequest,
-  ThinkingValue,
   Thread,
   ThreadKind,
   ThreadPlan,
 } from '@agent/agent-models';
 import {
-  DEFAULT_CONTEXT_BUDGET,
   DEFAULT_MEMORY_CAPS,
   HOME_MODE,
   MAX_THREAD_MENTIONS,
@@ -28,28 +25,30 @@ import {
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
+  parseContextWindowMode,
   parseThreadKind,
   planHasOpenWork,
   threadMentions,
+  type ContextWindowMode,
   type RunPosture,
 } from '@agent/agent-models';
 import {
-  ALL_TOOLS,
   RUN_HANDLE_TTL_MS,
   RunManager,
   assembleContext,
   buildExtractiveSnapshot,
-  chooseCompactThroughSeq,
+  chooseCompactThroughSeqForTarget,
   createMemoryTool,
   createPlanTools,
   createStreamModelCall,
+  createSubagentRunner,
   createToolRegistry,
   getOllamaModelConfig,
   listOllamaModels,
+  listTools,
   loadWorkspaceRules,
   nativeOllamaBaseUrl,
   packMentionedThread,
-  resolveReasoningEffort,
   getSkill,
   traceCompactionEvent,
   type MentionedThreadContext,
@@ -58,7 +57,8 @@ import {
 import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getMemoryStore, getThreadStore } from '../../lib/store-instance';
-import { createSpawnSubagent } from '../../lib/spawn-subagent';
+import { resolveCallOptions, resolveContextBudget } from '../../lib/model-runtime';
+import { createSubagentHost } from '../../lib/subagent-host';
 import { createJsonlTraceSink } from '../../lib/trace-sink.js';
 import { skillsRouter } from './skills.routes';
 import type { ThreadStore } from '../../lib/thread-store';
@@ -158,10 +158,10 @@ router.get('/usage/balance', async (_req: Request, res: Response) => {
   }
 });
 
-/** Per-run JSONL trace files for offline replay / eval debugging. */
-const traceSink = createJsonlTraceSink(
-  path.join(__dirname, '..', '..', '..', 'traces'),
-);
+/** Per-thread JSONL traces (`<thread>/traces/<runId>.jsonl`), plus console. */
+function traceSinkFor(store: ThreadStore, threadId: string) {
+  return createJsonlTraceSink(store.traceDir(threadId));
+}
 
 function toolAllowList(
   mode: ModeConfig,
@@ -331,6 +331,8 @@ async function prepareRun(input: {
   model: string;
   endpoint?: OllamaEndpoint;
   skillNames?: string[];
+  /** Overrides the thread's stored mode (estimate previews a change). */
+  contextWindowMode?: ContextWindowMode;
   onMemoryUpdated?: (payload: MemoryUpdatedPayload) => void;
   onPlanUpdated?: (payload: PlanUpdatedPayload) => void;
 }): Promise<{
@@ -371,7 +373,7 @@ async function prepareRun(input: {
 
   const tools = createToolRegistry(
     [
-      ...ALL_TOOLS,
+      ...listTools(),
       ...planTools,
       createMemoryTool({
         read: () => memory.read(workspaceRoot),
@@ -395,20 +397,11 @@ async function prepareRun(input: {
     posture,
   );
 
-  let windowTokens = DEFAULT_CONTEXT_BUDGET.windowTokens;
-  let windowSource: 'show' | 'default' = 'default';
-  try {
-    const config = await getOllamaModelConfig(
-      input.model,
-      input.endpoint ?? 'cloud',
-    );
-    if (config.contextLength) {
-      windowTokens = config.contextLength;
-      windowSource = 'show';
-    }
-  } catch {
-    // Keep the default window when /api/show is unavailable.
-  }
+  const window = await resolveContextBudget(
+    input.model,
+    input.endpoint ?? 'cloud',
+    input.contextWindowMode ?? input.thread?.contextWindowMode,
+  );
 
   const snapshot =
     input.threadId === 'draft'
@@ -437,13 +430,13 @@ async function prepareRun(input: {
       ...(plan ? { plan } : {}),
       ...(lastRun ? { lastRun } : {}),
     },
-    { ...DEFAULT_CONTEXT_BUDGET, windowTokens },
+    window.budget,
   );
 
   return {
     tools,
     messages,
-    report: { ...report, windowSource },
+    report: { ...report, windowSource: window.source },
     mode,
     posture,
   };
@@ -472,9 +465,20 @@ async function maybeCompactThread(input: {
     skillNames: resolveRequestedSkills(undefined, lastUser?.skills?.selected),
   });
   if (!prepared.report.needsCompaction) return;
-  const throughSeq = chooseCompactThroughSeq(
+  // Cut older turns until history fits compactToRatio of the input budget.
+  const { budget, layers, occupiedTokens } = prepared.report;
+  const historyTokens =
+    layers.find((layer) => layer.id === 'conversation')?.tokens ?? 0;
+  const fixedTokens = Math.max(0, occupiedTokens - historyTokens);
+  const targetTokens = Math.max(
+    1,
+    (budget.windowTokens - budget.outputReserveTokens) * budget.compactToRatio -
+      fixedTokens,
+  );
+  const throughSeq = chooseCompactThroughSeqForTarget(
     envelopes,
-    prepared.report.budget.keepToolResultsForTurns,
+    budget.keepToolResultsForTurns,
+    targetTokens,
   );
   if (throughSeq == null) return;
   const existing = await store.readSnapshot(input.threadId);
@@ -503,7 +507,7 @@ async function maybeCompactThread(input: {
     summary: snapshot.summary,
     createdAt: snapshot.createdAt,
   });
-  traceSink(
+  traceSinkFor(store, input.threadId)(
     traceCompactionEvent({
       runId: input.runId,
       threadId: input.threadId,
@@ -604,7 +608,9 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
     pinned?: boolean;
     kind?: ThreadKind;
     workspaceRoot?: string | null;
+    contextWindowMode?: unknown;
   };
+  const contextWindowMode = parseContextWindowMode(body.contextWindowMode);
   let workspaceRoot = body.workspaceRoot;
   if (typeof workspaceRoot === 'string' && workspaceRoot.trim()) {
     const resolved = await resolveWorkspaceDir(workspaceRoot);
@@ -618,6 +624,7 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
     ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
     ...(kind ? { kind } : {}),
     ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+    ...(contextWindowMode ? { contextWindowMode } : {}),
   });
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
   return res.json(thread);
@@ -668,6 +675,7 @@ router.post('/run', async (req: Request, res: Response) => {
     thinking,
     posture: rawPosture,
     skills: rawSkills,
+    contextWindowMode: rawWindowMode,
   } = req.body as StartRunRequest;
   const posture = normalizeRunPosture(rawPosture);
 
@@ -676,10 +684,17 @@ router.post('/run', async (req: Request, res: Response) => {
   }
 
   const store = await getThreadStore();
-  const thread = store.getThread(threadId);
-  if (!thread) {
+  const found = store.getThread(threadId);
+  if (!found) {
     return res.status(404).json({ error: 'Thread not found' });
   }
+  // The window decides when compaction runs, so it lives on the thread:
+  // this run and the compaction after it read the same value.
+  const windowMode = parseContextWindowMode(rawWindowMode);
+  const thread =
+    windowMode && windowMode !== (found.contextWindowMode ?? 'default')
+      ? (store.updateThread(threadId, { contextWindowMode: windowMode }) ?? found)
+      : found;
 
   // Sub-agent threads are read-only — user cannot start runs on them (Q4).
   if (thread.parentThreadId) {
@@ -828,27 +843,16 @@ router.post('/run', async (req: Request, res: Response) => {
     },
     hasOpenPlanWork: async () =>
       planHasOpenWork(await store.readPlan(threadId)),
-    // Sub-agent delegation: build closure per-run with parent context.
+    // The loop binds the runner to this run (signal, budget, capabilities).
     ...(isWorkspaceKind(thread.kind) && thread.workspaceRoot
       ? {
-          spawnSubagent: createSpawnSubagent({
-            parentRunId: assignedRunId,
-            parentThreadId: threadId,
-            parentPosture: prepared.posture,
-            depth: 0,
-            workspaceRoot: thread.workspaceRoot,
-            endpoint: endpoint ?? 'cloud',
-            modelCall,
+          subagents: createSubagentRunner({
             runManager,
-            store,
-            emit: (event: AgentEventWithoutSeq) => {
-              const handle = runManager.get(assignedRunId);
-              handle?.emitter.emit(event);
-            },
+            host: createSubagentHost({ store, endpoint }),
           }),
         }
       : {}),
-    trace: traceSink,
+    trace: traceSinkFor(store, threadId),
     onFinished: async (result) => {
       try {
         const runStatus = lastRunStatusFrom(result, runManager);
@@ -919,6 +923,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     local,
     posture,
     skills: rawSkills,
+    contextWindowMode,
   } = req.body as {
     threadId?: string;
     draft?: string;
@@ -928,7 +933,9 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     local?: boolean;
     posture?: RunPosture;
     skills?: StartRunRequest['skills'];
+    contextWindowMode?: unknown;
   };
+  const previewWindowMode = parseContextWindowMode(contextWindowMode);
 
   const store = await getThreadStore();
   let envelopes: LedgerEnvelope[] = [];
@@ -970,6 +977,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     model: useModel,
     endpoint: endpointFromLocal(local),
     skillNames: resolveRequestedSkills(rawSkills),
+    ...(previewWindowMode ? { contextWindowMode: previewWindowMode } : {}),
   });
 
   return res.json({
@@ -1207,35 +1215,5 @@ router.get('/run/:runId/events', (req: Request, res: Response) => {
 
   return;
 });
-
-async function resolveCallOptions(
-  model: string,
-  thinking: unknown,
-  endpoint: OllamaEndpoint,
-  temperature: number,
-): Promise<{
-  reasoningEffort?: string;
-  endpoint: OllamaEndpoint;
-  temperature: number;
-}> {
-  const requested: ThinkingValue | undefined =
-    typeof thinking === 'boolean' ||
-    (typeof thinking === 'string' && thinking.length > 0)
-      ? thinking
-      : undefined;
-
-  try {
-    const config = await getOllamaModelConfig(model, endpoint);
-    const reasoningEffort = resolveReasoningEffort(config, requested);
-    return {
-      endpoint,
-      temperature,
-      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-    };
-  } catch {
-    // /api/show unavailable — omit effort; still route to the chosen endpoint
-    return { endpoint, temperature };
-  }
-}
 
 export { router as agentRouter };

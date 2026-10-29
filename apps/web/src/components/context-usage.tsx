@@ -71,6 +71,7 @@ export function ContextUsage({
   layers = [],
   reserve = 0,
   windowSource,
+  runPromptTokens,
 }: {
   used: number;
   limit: number | null;
@@ -79,6 +80,8 @@ export function ContextUsage({
   layers?: ContextReportLayer[];
   reserve?: number;
   windowSource?: ContextWindowSource;
+  /** Prompt tokens billed so far this run: every call re-sends the context. */
+  runPromptTokens?: number;
 }) {
   if (limit == null || limit <= 0) return null;
 
@@ -87,7 +90,7 @@ export function ContextUsage({
   const usedLabel = used.toLocaleString();
   const limitLabel = limit.toLocaleString();
   const showTilde = source === 'estimate' || approximate;
-  const defaultWindow = windowSource === 'default';
+  const defaultWindow = windowSource === 'fallback';
   const size = 20;
   const stroke = 2.25;
   const radius = (size - stroke) / 2;
@@ -211,10 +214,18 @@ export function ContextUsage({
           <dd className="text-right tabular-nums">{free.toLocaleString()}</dd>
           <dt className="text-muted-foreground">Limit</dt>
           <dd className="text-right font-medium tabular-nums">{limitLabel}</dd>
+          {runPromptTokens !== undefined ? (
+            <>
+              <dt className="text-muted-foreground">Run spend</dt>
+              <dd className="text-right tabular-nums">
+                {runPromptTokens.toLocaleString()}
+              </dd>
+            </>
+          ) : null}
         </dl>
         {defaultWindow ? (
           <p className="type-caption mt-2 text-muted-foreground">
-            Using default window — model show unavailable
+            Using the 200K fallback window: the model's size is unavailable
           </p>
         ) : null}
         <p className="type-caption mt-2 text-muted-foreground tabular-nums">

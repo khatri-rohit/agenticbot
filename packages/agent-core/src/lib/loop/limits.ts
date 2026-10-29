@@ -19,7 +19,14 @@ export type AgentLimits = {
   maxToolCalls?: number;
   maxRepeatedToolCalls: number;
   toolTimeoutMs: number;
+  /** Prompt tokens across the run's model calls, sub-agents included. Omitted = uncapped. */
+  maxPromptTokens?: number;
+  /** Wall clock for the run. Omitted = uncapped. */
+  maxWallMs?: number;
 };
+
+/** Share of maxPromptTokens at which the loop nudges the model to wrap up. */
+export const BUDGET_WARN_RATIO = 0.8;
 
 /**
  * Merge host overrides. When the host passes a limits object, omitted
@@ -40,5 +47,9 @@ export function resolveLimits(partial?: Partial<AgentLimits>): AgentLimits {
     ...(partial.maxToolCalls !== undefined
       ? { maxToolCalls: partial.maxToolCalls }
       : {}),
+    ...(partial.maxPromptTokens !== undefined
+      ? { maxPromptTokens: partial.maxPromptTokens }
+      : {}),
+    ...(partial.maxWallMs !== undefined ? { maxWallMs: partial.maxWallMs } : {}),
   };
 }

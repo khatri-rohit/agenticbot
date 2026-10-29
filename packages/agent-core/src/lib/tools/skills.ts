@@ -172,12 +172,21 @@ export function formatSkillBodies(
   ].join('\n');
 }
 
+/** Catalog lines are for matching, not reading; the body loads on demand. */
+const CATALOG_DESCRIPTION_MAX_CHARS = 200;
+
 export function formatSkillsCatalog(skills: SkillMetadata[]): string {
   const lines =
     skills.length === 0
       ? '- (none)'
       : skills
-          .map((skill) => `- ${skill.name}: ${skill.description}`)
+          .map((skill) => {
+            const description =
+              skill.description.length > CATALOG_DESCRIPTION_MAX_CHARS
+                ? `${skill.description.slice(0, CATALOG_DESCRIPTION_MAX_CHARS)}…`
+                : skill.description;
+            return `- ${skill.name}: ${description}`;
+          })
           .join('\n');
   return [
     '# Skills',

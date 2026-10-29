@@ -1,136 +1,106 @@
-import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions';
-
 import type { ToolContext } from '@agent/agent-models';
+import { encodeSubagentHeader, type SubagentSpec } from '@agent/agent-models';
 
-import { getSubagentProfile, listSubagentProfiles } from './profiles';
-import type { SubagentSpec } from './types';
-import { MAX_SUBAGENT_DEPTH, encodeSubagentHeader } from './types';
-import type { Tool, ToolGuidance } from '../tools/type';
+import type { Tool } from '../tools/type';
+import type { SubagentProfile } from './types';
 
-const DELEGATE_DESCRIPTION = `Delegate a task to a specialist sub-agent. The sub-agent runs in an isolated context and returns a concise digest. Delegation keeps your context clean — the sub-agent does the noisy work and returns a summary.
+const THOROUGHNESS = ['quick', 'medium', 'thorough'] as const;
 
-## When to delegate
-- Research with multiple unknowns (read many files, search web) → delegate(research)
-- Implementation across multiple files or modules → delegate(implement), one per module, assign explicit files
-- Code review after implementation → delegate(review). Review is cheap — use liberally.
-- Planning a complex change → delegate(plan)
+function describe(profiles: SubagentProfile[]): string {
+  return `Hand a self-contained side task to a specialist sub-agent with its own context. You get back a short report, not its raw tool output.
 
-## When NOT to delegate
-- Simple single-step tasks — do them yourself
-- Quick one-file edit — do it yourself
-- Answering a question you already know — just answer
-- Running verification (nx typecheck/test) — do it yourself, always
+Profiles:
+${profiles.map((profile) => `- ${profile.name}: ${profile.description}`).join('\n')}
 
-## After delegation
-- Run verification yourself (nx typecheck/test)
-- Review delegate digests for completeness
-- Report combined results to the user
+Rules:
+- Delegate wide reading (more than ~5 files, several searches, or web research) to explore. Answer it yourself when a couple of reads will do.
+- After your edits pass verification, run review once. Fix findings inside the user's request; list the rest instead of acting on them.
+- Use advisor when stuck, with one specific question.
+- Never delegate edits or verification; you own both.
+- Write a real brief: objective (what to find or decide) and scope (files, folders, or questions; what to ignore).
+- Independent briefs in one turn run in parallel (at most 4 at a time).`;
+}
 
-## Profiles
-${listSubagentProfiles()
-  .map((p) => `- ${p.name}: ${p.description}`)
-  .join('\n')}
-
-Avoid fan-out > 5 sub-agents in a single turn.`;
-
-const DELEGATE_DEFINITION: ChatCompletionFunctionTool = {
-  type: 'function',
-  function: {
-    name: 'delegate',
-    description: DELEGATE_DESCRIPTION,
-    parameters: {
-      type: 'object',
-      properties: {
-        task: {
-          type: 'string',
-          description: 'The task to delegate. Be specific — include files, scope, and expected output.',
-        },
-        profile: {
-          type: 'string',
-          description: 'Specialist profile: research, implement, review, or plan.',
-          enum: ['research', 'implement', 'review', 'plan'],
-        },
-        tools: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional override for the profile tool allow-list.',
-        },
-        focusFiles: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'File paths to seed the sub-agent context.',
+/**
+ * The parent-side tool. Validation lives here; spawning, capabilities, and
+ * budgets live in the runner the loop binds to `ctx.spawnSubagent`.
+ */
+export function createDelegateTool(profiles: SubagentProfile[]): Tool {
+  const names = profiles.map((profile) => profile.name);
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'delegate',
+        description: describe(profiles),
+        parameters: {
+          type: 'object',
+          properties: {
+            profile: { type: 'string', enum: names, description: 'Which specialist.' },
+            objective: {
+              type: 'string',
+              description: 'What the sub-agent must find, check, or decide. One sentence.',
+            },
+            scope: {
+              type: 'string',
+              description: 'Where to look and where to stop: files, folders, questions, and what is out of bounds.',
+            },
+            outputFocus: {
+              type: 'string',
+              description: 'Optional: what the report should emphasize.',
+            },
+            thoroughness: {
+              type: 'string',
+              enum: [...THOROUGHNESS],
+              description: 'Optional for explore: quick (~5 tool calls), medium (~12), thorough (~25).',
+            },
+            resume: {
+              type: 'string',
+              description: 'Optional: subThreadId of an earlier sub-agent to continue with its history.',
+            },
+          },
+          required: ['profile', 'objective', 'scope'],
+          additionalProperties: false,
         },
       },
-      required: ['task', 'profile'],
-      additionalProperties: false,
     },
-  },
-};
-
-const DELEGATE_GUIDANCE: ToolGuidance = {
-  whenToUse: [
-    'Complex, decomposable tasks that would fill your context with tool results',
-    'Research requiring many file reads or web searches',
-    'Multi-file implementation that can be split by module',
-    'Code review after implementation (cheap — use liberally)',
-  ],
-  whenNotToUse: [
-    'Simple single-step tasks — do them yourself',
-    'Quick one-file edits',
-    'Running verification (nx typecheck/test) — always do this yourself',
-  ],
-  usage: [
-    'Be specific in the task — include files, scope, and expected output format',
-    'For parallel implementation, assign explicit files per delegate to avoid conflicts',
-    'Avoid fan-out > 5 sub-agents in a single turn',
-  ],
-};
-
-export const delegate: Tool = {
-  definition: DELEGATE_DEFINITION,
-  guidance: DELEGATE_GUIDANCE,
-  risk: 'external',
-  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
-    const task = args.task as string | undefined;
-    const profileName = args.profile as string | undefined;
-
-    if (!task || typeof task !== 'string' || task.trim().length === 0) {
-      return 'Error: delegate requires a non-empty "task" argument.';
-    }
-    if (!profileName) {
-      return 'Error: delegate requires a "profile" argument (research, implement, review, or plan).';
-    }
-
-    const profile = getSubagentProfile(profileName);
-    if (!profile) {
-      return `Error: unknown profile "${profileName}". Available: research, implement, review, plan.`;
-    }
-
-    // EC7: depth check before spawn — no child thread, no events.
-    const depth = ctx.subagentDepth ?? 0;
-    if (depth >= MAX_SUBAGENT_DEPTH) {
-      return 'Agent depth limit reached. Solve the task yourself.';
-    }
-
-    const spec: SubagentSpec = {
-      task,
-      profile: profileName,
-      ...(args.tools ? { tools: args.tools as string[] } : {}),
-      ...(args.focusFiles ? { focusFiles: args.focusFiles as string[] } : {}),
-    };
-
-    if (!ctx.spawnSubagent) {
-      return 'Error: sub-agent delegation is not available in this context.';
-    }
-
-    // EC2/EC5: catch all errors — delegate.execute never throws.
-    try {
+    guidance: {
+      whenToUse: [
+        'A side task would fill your context with search results or file contents you will not need again.',
+      ],
+      whenNotToUse: ['One or two reads answer it, or the task is an edit or verification.'],
+      usage: ['Give objective and scope; never delegate writes.'],
+    },
+    risk: 'external',
+    stage: 'subagent',
+    async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
+      const text = (key: string) =>
+        typeof args[key] === 'string' ? (args[key] as string).trim() : '';
+      const profile = text('profile').toLowerCase();
+      const objective = text('objective');
+      const scope = text('scope');
+      if (!names.includes(profile)) {
+        return `Error: unknown profile "${profile}". Available: ${names.join(', ')}.`;
+      }
+      if (!objective || !scope) {
+        return 'Error: delegate needs both "objective" and "scope".';
+      }
+      if (!ctx.spawnSubagent) {
+        return 'Error: delegation is not available in this run.';
+      }
+      const thoroughness = text('thoroughness');
+      const spec: SubagentSpec = {
+        profile,
+        objective,
+        scope,
+        ...(text('outputFocus') ? { outputFocus: text('outputFocus') } : {}),
+        ...((THOROUGHNESS as readonly string[]).includes(thoroughness)
+          ? { thoroughness: thoroughness as SubagentSpec['thoroughness'] }
+          : {}),
+        ...(text('resume') ? { resume: text('resume') } : {}),
+      };
       const result = await ctx.spawnSubagent(spec);
-      const header = encodeSubagentHeader(result, spec.profile, profileName);
-      return `${header}\n\n${result.summary}`;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      return `Error: sub-agent failed: ${msg}`;
-    }
-  },
-};
+      return `${encodeSubagentHeader(result)}\n\n${result.digest}`;
+    },
+  };
+}

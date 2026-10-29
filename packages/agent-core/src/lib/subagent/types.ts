@@ -1,85 +1,62 @@
-import type { RunPosture } from '@agent/agent-models';
-import type { SubagentSpec, SubagentResult } from '@agent/agent-models';
-
-// Re-export so agent-core consumers import from one place.
-export type { SubagentSpec, SubagentResult };
+import type { ModelRole } from '@agent/agent-models';
 
 /**
- * A named specialist profile. The residency play: each profile binds a
- * tool-subset, skill pack, model, posture, and prompt section so the child's
- * context cache is all signal for that job. The model picks a profile by
- * name; the runtime assembles the registry and prompt.
+ * A sub-agent profile is data: which model role, which tools (intersected
+ * with the parent's at spawn), which limits, what context it starts with,
+ * and its role prompt. Built-ins live in profiles.ts; users add more as
+ * `$AGENT_HOME/agents/<name>.md`.
  */
+export type SubagentContext =
+  /** Brief only. */
+  | 'none'
+  /** Brief + the parent's original request + project rules; starts from `diff`. */
+  | 'diff'
+  /** A copy of the parent conversation plus one question (cache-friendly prefix). */
+  | 'fork';
+
+export type SubagentLimits = {
+  maxIterations: number;
+  maxToolCalls: number;
+  maxWallMs: number;
+  /** Upper bound; the runner also caps it at a share of the parent's remaining budget. */
+  maxPromptTokens: number;
+};
+
 export type SubagentProfile = {
   name: string;
   description: string;
-  /** Tool allow-list applied to ALL_TOOLS. `delegate` is always excluded. */
+  modelRole: ModelRole;
+  /** Wanted tools. The child gets these ∩ the parent's registry − always-stripped. */
   tools: string[];
-  /** Skill packs to load into the child's system prompt at spawn. */
-  skills: string[];
-  /** Model id for the child run. */
-  model: string;
-  /** Child posture. May only narrow the parent's, never escalate. */
-  posture: RunPosture;
-  /** Injected into the child's system prompt as the role/behavior section. */
-  promptSection: string;
+  limits: SubagentLimits;
+  context: SubagentContext;
+  /** Include the workspace AGENTS.md in the child prompt. */
+  rules: boolean;
+  /** Child ends by calling `report` (structured result). */
+  report: boolean;
+  prompt: string;
+  source: 'builtin' | 'user';
 };
 
-/** What the model asks for via the `delegate` tool. */
-// SubagentSpec and SubagentResult are re-exported from @agent/agent-models above.
+/** Never available to a child: no asking the user, no durable state, no nesting. */
+export const CHILD_STRIPPED_TOOLS = [
+  'delegate',
+  'offer_choice',
+  'memory',
+  'plan',
+  'todo',
+  'edit_file',
+  'run_terminal',
+] as const;
 
-export const MAX_SUBAGENT_DEPTH = 2;
+/** Parallel children per parent run. Extra spawns wait for a slot. */
+export const MAX_CONCURRENT_SUBAGENTS = 4;
 
-export const DIGEST_MAX_CHARS = 2048;
+/** Rendered digest cap (~1.5k tokens). The full report goes to a blob. */
+export const DIGEST_MAX_CHARS = 6_000;
 
-/**
- * Encode a machine-readable header line for the delegate tool result.
- * The ledger stores tool content verbatim, so this header is durable —
- * the UI parses it to rebuild sub-agent cards on reload / history open.
- */
-export function encodeSubagentHeader(
-  result: SubagentResult,
-  subThreadId: string,
-  profile: string,
-): string {
-  return [
-    `subagent:profile=${profile}`,
-    `subThreadId=${subThreadId}`,
-    `subRunId=${result.subRunId}`,
-    `status=${result.status}`,
-    `iterations=${result.iterations}`,
-    `toolCalls=${result.toolCalls}`,
-  ].join(' ');
-}
+/** Share of the parent's remaining prompt budget one child may spend. */
+export const CHILD_BUDGET_SHARE = 0.25;
 
-/** Parse the subagent header from a ledger tool row. Returns null if absent. */
-export function parseSubagentHeader(
-  content: string,
-): {
-  profile: string;
-  subThreadId: string;
-  subRunId: string;
-  status: string;
-  iterations: number;
-  toolCalls: number;
-} | null {
-  const line = content.split('\n')[0];
-  if (!line.startsWith('subagent:')) return null;
-  const fields = new Map<string, string>();
-  for (const part of line.slice('subagent:'.length).split(' ')) {
-    const eq = part.indexOf('=');
-    if (eq > 0) fields.set(part.slice(0, eq), part.slice(eq + 1));
-  }
-  const profile = fields.get('profile');
-  const subThreadId = fields.get('subThreadId');
-  const subRunId = fields.get('subRunId');
-  if (!profile || !subThreadId || !subRunId) return null;
-  return {
-    profile,
-    subThreadId,
-    subRunId,
-    status: fields.get('status') ?? 'completed',
-    iterations: Number(fields.get('iterations') ?? 0),
-    toolCalls: Number(fields.get('toolCalls') ?? 0),
-  };
-}
+export const UNTRUSTED_SUBAGENT_BEGIN = 'UNTRUSTED_SUBAGENT_BEGIN';
+export const UNTRUSTED_SUBAGENT_END = 'UNTRUSTED_SUBAGENT_END';

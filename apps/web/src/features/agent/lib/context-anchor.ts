@@ -70,7 +70,9 @@ export function getContextAnchor(threadId: string): ContextAnchor | null {
         ? parsed.windowTokens
         : undefined;
     const windowSource =
-      parsed.windowSource === 'show' || parsed.windowSource === 'default'
+      parsed.windowSource === 'default' ||
+      parsed.windowSource === 'model' ||
+      parsed.windowSource === 'fallback'
         ? parsed.windowSource
         : undefined;
     const layers = parseLayers(parsed.layers);

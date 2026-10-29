@@ -9,6 +9,7 @@ import type {
   LedgerAppendMeta,
   LedgerRecord,
   RunPosture,
+  RunUsage,
   SubagentSpec,
   SubagentResult,
   ToolOrigin,
@@ -78,11 +79,43 @@ export type RunLoopConfig = {
   hasOpenPlanWork?: () => boolean | Promise<boolean>;
   /** Budget for mid-turn tool-result stubbing. Defaults to DEFAULT_CONTEXT_BUDGET. */
   contextBudget?: ContextBudget;
-  /** Spawn a sub-agent (recursive runLoop on a child thread). Host-injected. */
-  spawnSubagent?: (spec: SubagentSpec) => Promise<SubagentResult>;
-  /** Sub-agent recursion depth (parent run = 0). */
-  subagentDepth?: number;
+  /**
+   * Sub-agent runner. The loop binds it to this run (signal, budget,
+   * capabilities) when the registry has `delegate`.
+   */
+  subagents?: SubagentSpawner;
+  /** 0 for a user run, 1 for a sub-agent. */
+  depth?: number;
+  /** Set on sub-agent runs, for traces. */
+  parentRunId?: string;
 };
+
+/** What a sub-agent inherits from (and reports back to) its parent run. */
+export type SubagentParent = {
+  runId: string;
+  threadId: string;
+  model: string;
+  depth: number;
+  posture: RunPosture;
+  signal: AbortSignal;
+  workspaceRoot?: string;
+  /** Parent registry names; a child's tools are a subset. */
+  toolNames: string[];
+  contextBudget: ContextBudget;
+  /** Parent's unspent prompt-token budget, when capped. */
+  remainingPromptTokens?: number;
+  /** Parent conversation for an advisor fork. */
+  forkMessages: () => ChatCompletionMessageParam[];
+  /** Parent stream, for subrun.* markers. */
+  emit?: (event: AgentEventWithoutSeq) => void;
+  /** Roll the child's spend into the parent's usage and budget. */
+  chargeUsage: (usage: RunUsage) => void;
+};
+
+export type SubagentSpawner = (
+  spec: SubagentSpec,
+  parent: SubagentParent,
+) => Promise<SubagentResult>;
 
 export type RunLoopResult = {
   runId: string;
@@ -92,4 +125,6 @@ export type RunLoopResult = {
   status: RunLoopStatus;
   /** Present when status is incomplete due to a loop gate. */
   limitReason?: string;
+  /** Token spend, own + sub-agents. */
+  usage: RunUsage;
 };

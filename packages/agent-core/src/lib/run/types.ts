@@ -8,15 +8,17 @@ import type {
   LedgerAppendMeta,
   LedgerRecord,
   RunPosture,
-  SubagentSpec,
-  SubagentResult,
   ToolOrigin,
   TraceEvent,
 } from '@agent/agent-models';
 
 import type { EventEmitter } from '../events/emitter';
 import type { AgentLimits } from '../loop/limits';
-import type { ModelCallFn, RunLoopResult } from '../loop/types';
+import type {
+  ModelCallFn,
+  RunLoopResult,
+  SubagentSpawner,
+} from '../loop/types';
 import type { ToolRegistry } from '../tools/type';
 
 /** In-memory run handle status (RunManager; narrower than domain RunStatus). */
@@ -41,9 +43,13 @@ export type RunHandle = {
   pendingChoices: Map<string, PendingChoiceWaiter>;
   /** Posture: ask runs are read-only. */
   posture?: RunPosture;
+  /** Settles with the result after onFinished. */
+  done: Promise<RunLoopResult>;
 };
 
 export type StartRunOptions = {
+  /** Fixed id (sub-agents use the id they announced in subrun.started). */
+  runId?: string;
   threadId: string;
   model: string;
   /** Mode name for run.started (e.g. HOME_MODE.name). */
@@ -72,8 +78,11 @@ export type StartRunOptions = {
   contextBudget?: ContextBudget;
   /** Trace sink for offline replay / eval debugging. Optional. */
   trace?: (event: TraceEvent) => void;
-  /** Spawn a sub-agent (recursive runLoop on a child thread). Host-injected. */
-  spawnSubagent?: (spec: SubagentSpec) => Promise<SubagentResult>;
-  /** Sub-agent recursion depth (parent run = 0). */
-  subagentDepth?: number;
+  /** Sub-agent runner; the loop binds it to this run. */
+  subagents?: SubagentSpawner;
+  /** 0 for a user run, 1 for a sub-agent. */
+  depth?: number;
+  parentRunId?: string;
+  /** Parent run's signal: aborting it cancels this run. */
+  parentSignal?: AbortSignal;
 };

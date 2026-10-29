@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   ContextReport,
+  ContextWindowMode,
   MemoryCaps,
   MemoryFiles,
   MemoryOp,
@@ -36,6 +37,8 @@ export type ComposerOptions = {
   posture?: RunPosture;
   /** User-requested skills from `/` picks. */
   skills?: ComposerSkillHints;
+  /** 200k default window vs the model's full size. Persisted on the thread by /run. */
+  contextWindowMode?: ContextWindowMode;
 };
 
 export type PendingMessage = {
@@ -47,6 +50,7 @@ export type PendingMessage = {
   posture?: RunPosture;
   attachments?: MessageAttachment[];
   skills?: ComposerSkillHints;
+  contextWindowMode?: ContextWindowMode;
 };
 
 /**
@@ -84,6 +88,7 @@ export async function startRun(
     thinking?: ThinkingValue;
     posture?: RunPosture;
     skills?: ComposerSkillHints;
+    contextWindowMode?: ContextWindowMode;
   } = {},
 ): Promise<string> {
   const body: StartRunRequest = {
@@ -96,6 +101,9 @@ export async function startRun(
     thinking: options.thinking,
     posture: normalizeRunPosture(options.posture),
     ...(options.skills ? { skills: options.skills } : {}),
+    ...(options.contextWindowMode
+      ? { contextWindowMode: options.contextWindowMode }
+      : {}),
   };
 
   const res = await fetch(`${API_BASE}/api/agent/run`, {
@@ -248,6 +256,7 @@ export async function fetchContextEstimate(options: {
   webSearch?: boolean;
   posture?: RunPosture;
   skills?: ComposerSkillHints;
+  contextWindowMode?: ContextWindowMode;
 }): Promise<ContextEstimateResponse> {
   const res = await fetch(`${API_BASE}/api/agent/context/estimate`, {
     method: 'POST',
@@ -261,6 +270,9 @@ export async function fetchContextEstimate(options: {
       webSearch: options.webSearch,
       posture: normalizeRunPosture(options.posture),
       ...(options.skills ? { skills: options.skills } : {}),
+      ...(options.contextWindowMode
+        ? { contextWindowMode: options.contextWindowMode }
+        : {}),
     }),
   });
   if (!res.ok) {

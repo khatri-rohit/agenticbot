@@ -15,11 +15,21 @@ export type ToolGuidance = {
   usage: string[];
 };
 
+/**
+ * Loop scheduling class. skill/read/subagent batches run in parallel;
+ * network/exec/mutate run one at a time. A tool without a stage (e.g. a
+ * future MCP tool) is scheduled as `mutate`, the strictest class.
+ */
+export type ToolStage = 'skill' | 'read' | 'network' | 'subagent' | 'exec' | 'mutate';
+
 export type Tool = {
   definition: ChatCompletionFunctionTool;
   guidance: ToolGuidance;
   /** Host approval / cron profiles key off this (default treated as read). */
   risk?: ToolRisk;
+  stage?: ToolStage;
+  /** Hard cap on result chars before the result joins the prompt. */
+  outputCap?: number;
   execute: (
     args: Record<string, unknown>,
     ctx: ToolContext,

@@ -15,7 +15,7 @@ import {
   streamModelTurn,
   assembleContext,
   createToolRegistry,
-  ALL_TOOLS,
+  listTools,
   consoleTrace,
   teeTrace,
   createInMemoryPlanStore,
@@ -92,7 +92,7 @@ async function main() {
     );
     const planStore = createInMemoryPlanStore('cli');
     const tools = createToolRegistry(
-      [...ALL_TOOLS, ...createPlanTools(planStore)],
+      [...listTools(), ...createPlanTools(planStore)],
       toolNames,
       posture,
     );

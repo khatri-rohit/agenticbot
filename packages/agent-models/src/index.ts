@@ -26,6 +26,7 @@ export type {
   RunError,
   LimitHit,
   SubrunStarted,
+  SubrunProgress,
   SubrunSettled,
 } from './lib/event.js';
 
@@ -64,12 +65,16 @@ export type {
   RunStatus,
   ModelTurn,
   TokenUsage,
+  RunUsage,
+  UsageTotals,
   ChatMessage,
   ChatContentPart,
   StartRunRequest,
   RunPosture,
 } from './lib/run.js';
 export {
+  emptyRunUsage,
+  totalRunUsage,
   ASK_STRIPPED_TOOLS,
   normalizeRunPosture,
   applyPostureToTools,
@@ -82,8 +87,19 @@ export {
   occupiedFromUsage,
 } from './lib/token-estimate.js';
 
-export type { ModeName, ModeConfig, ModeLimits } from './lib/mode.js';
-export { HOME_MODE, WORKSPACE_MODE, modeForKind } from './lib/mode.js';
+export type {
+  ModeName,
+  ModeConfig,
+  ModeLimits,
+  ModelRole,
+  ModelRoles,
+} from './lib/mode.js';
+export {
+  HOME_MODE,
+  WORKSPACE_MODE,
+  modeForKind,
+  resolveModelRoles,
+} from './lib/mode.js';
 
 export type {
   OllamaEndpoint,
@@ -115,7 +131,19 @@ export type {
   ToolContext,
 } from './lib/tool-context.js';
 
-export type { SubagentSpec, SubagentResult } from './lib/subagent-types.js';
+export type {
+  SubagentHeader,
+  SubagentReport,
+  SubagentResult,
+  SubagentSpec,
+  SubagentStatus,
+  SubagentThoroughness,
+} from './lib/subagent-types.js';
+export {
+  encodeSubagentHeader,
+  parseSubagentHeader,
+  subagentDigestBody,
+} from './lib/subagent-types.js';
 
 export type {
   ChoiceOption,
@@ -129,6 +157,7 @@ export {
 } from './lib/choice.js';
 
 export type { TraceEvent } from './lib/trace.js';
+export { TRACE_SCHEMA_VERSION } from './lib/trace.js';
 
 export type {
   MemoryTarget,
@@ -185,4 +214,12 @@ export type {
   ContextReport,
   Snapshot,
 } from './lib/context.js';
-export { DEFAULT_CONTEXT_BUDGET, parseSnapshot } from './lib/context.js';
+export type { ContextWindowMode } from './lib/context.js';
+export {
+  DEFAULT_CONTEXT_BUDGET,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  contextBudgetForWindow,
+  parseContextWindowMode,
+  parseSnapshot,
+  resolveContextWindow,
+} from './lib/context.js';

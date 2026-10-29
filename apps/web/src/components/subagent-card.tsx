@@ -14,11 +14,14 @@ import type { SubagentActivity } from '../features/agent/store/chat-store';
 import { cn } from '@/lib/utils';
 
 const PROFILE_LABELS: Record<string, string> = {
-  research: 'Research',
-  implement: 'Implement',
+  explore: 'Explore',
   review: 'Review',
-  plan: 'Plan',
+  advisor: 'Advisor',
 };
+
+function formatTokens(tokens: number): string {
+  return tokens >= 1_000 ? `${Math.round(tokens / 1_000)}k tok` : `${tokens} tok`;
+}
 
 /**
  * Sub-agent delegation card in the turn trail — same column as tools.
@@ -38,7 +41,12 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
   })();
 
   const statusLabel = (() => {
-    if (running) return 'running…';
+    if (running) {
+      const calls = activity.toolCalls ?? 0;
+      return calls > 0
+        ? `${calls} tool${calls === 1 ? '' : 's'}${activity.lastTool ? ` · ${activity.lastTool}` : ''}`
+        : 'starting…';
+    }
     return activity.status;
   })();
 
@@ -68,6 +76,9 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
           {!running && activity.iterations !== undefined
             ? ` · ${activity.iterations}i ${activity.toolCalls ?? 0}t`
             : ''}
+          {!running && activity.tokens !== undefined
+            ? ` · ${formatTokens(activity.tokens)}`
+            : ''}
         </span>
         {!running ? (
           <ChevronDown
@@ -86,13 +97,15 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
               {activity.summary}
             </pre>
           ) : null}
-          <button
-            type="button"
-            className="type-ui text-primary hover:underline"
-            onClick={() => router.push(`/chat/${activity.subThreadId}`)}
-          >
-            View conversation →
-          </button>
+          {activity.subThreadId ? (
+            <button
+              type="button"
+              className="type-ui text-primary hover:underline"
+              onClick={() => router.push(`/chat/${activity.subThreadId}`)}
+            >
+              View conversation →
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>

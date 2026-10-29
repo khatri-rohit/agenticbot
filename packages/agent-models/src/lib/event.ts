@@ -2,7 +2,8 @@ import type { ChoiceOption } from './choice.js';
 import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
 import type { ThreadPlan } from './plan.js';
-import type { RunPosture, TokenUsage } from './run.js';
+import type { RunPosture, RunUsage, TokenUsage } from './run.js';
+import type { SubagentStatus } from './subagent-types.js';
 
 /**
  * AgentEvent — the server's streaming protocol to the client.
@@ -40,6 +41,7 @@ export type AgentEvent =
   | RunError
   | LimitHit
   | SubrunStarted
+  | SubrunProgress
   | SubrunSettled;
 
 export interface RunStarted {
@@ -129,6 +131,8 @@ export interface TurnCompleted {
   usage?: TokenUsage;
   /** Layers rebuilt from the live prompt after this iteration. */
   contextReport?: ContextReport;
+  /** Run spend so far (own + sub-agents). */
+  runUsage?: RunUsage;
 }
 
 export interface RunCompleted {
@@ -141,6 +145,8 @@ export interface RunCompleted {
   incomplete?: boolean;
   /** Stable limit reason when incomplete (e.g. `limit.terminal: …`). */
   limitReason?: string;
+  /** Total spend for the run (own + sub-agents). */
+  usage?: RunUsage;
 }
 
 export interface RunError {
@@ -232,9 +238,8 @@ export interface RunSettled {
 }
 
 /**
- * A sub-agent (recursive runLoop) started under a parent run via `delegate`.
- * Sub-events funnel through the parent run's emit, tagged with subRunId;
- * the parent owns the seq counter. UI renders a collapsible sub-agent trail.
+ * A sub-agent started under a parent run via `delegate`. Its own events stay
+ * on the child run; the parent stream only carries these markers.
  */
 export interface SubrunStarted {
   seq: number;
@@ -245,7 +250,18 @@ export interface SubrunStarted {
   /** Child thread — UI navigates here to view the sub-agent conversation. */
   subThreadId: string;
   profile: string;
+  /** The brief's objective. */
   task: string;
+}
+
+/** Throttled child progress for the parent's sub-agent card. */
+export interface SubrunProgress {
+  seq: number;
+  type: 'subrun.progress';
+  runId: string;
+  subRunId: string;
+  toolCalls: number;
+  lastTool?: string;
 }
 
 /** Sub-agent run finished (completed / incomplete / error / cancelled). */
@@ -255,11 +271,13 @@ export interface SubrunSettled {
   runId: string;
   subRunId: string;
   parentRunId: string;
-  status: 'completed' | 'incomplete' | 'error' | 'cancelled';
+  subThreadId: string;
+  status: SubagentStatus;
   iterations: number;
   toolCalls: number;
   summary: string;
   limitReason?: string;
+  usage?: RunUsage;
 }
 
 /** Union of event types for filtering. */

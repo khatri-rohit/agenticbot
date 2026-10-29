@@ -15,40 +15,30 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
+import { parseSubagentHeader, subagentDigestBody } from '@agent/agent-models';
 import type { ToolCallRow } from '../lib/turn-timeline';
 import { SubagentCard } from './subagent-card';
 import type { SubagentActivity } from '../features/agent/store/chat-store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-/** Parse the subagent header from a delegate tool result (ledger rebuild path). */
-function parseSubagentHeader(content: string): {
-  profile: string;
-  subThreadId: string;
-  subRunId: string;
-  status: string;
-  iterations: number;
-  toolCalls: number;
-} | null {
-  const line = content.split('\n')[0];
-  if (!line.startsWith('subagent:')) return null;
-  const fields = new Map<string, string>();
-  for (const part of line.slice('subagent:'.length).split(' ')) {
-    const eq = part.indexOf('=');
-    if (eq > 0) fields.set(part.slice(0, eq), part.slice(eq + 1));
+/** The digest markers are for the parent model; the card shows the body. */
+function stripUntrustedMarkers(text: string): string {
+  return text
+    .replace(/^UNTRUSTED_SUBAGENT_BEGIN\n?/, '')
+    .replace(/\n?UNTRUSTED_SUBAGENT_END$/, '')
+    .trim();
+}
+
+/** Objective from delegate args (JSON string), for the rebuilt card title. */
+function delegateObjective(args: string | undefined): string {
+  if (!args) return '';
+  try {
+    const parsed = JSON.parse(args) as { objective?: unknown };
+    return typeof parsed.objective === 'string' ? parsed.objective : '';
+  } catch {
+    return '';
   }
-  const profile = fields.get('profile');
-  const subThreadId = fields.get('subThreadId');
-  const subRunId = fields.get('subRunId');
-  if (!profile || !subThreadId || !subRunId) return null;
-  return {
-    profile,
-    subThreadId,
-    subRunId,
-    status: fields.get('status') ?? 'completed',
-    iterations: Number(fields.get('iterations') ?? 0),
-    toolCalls: Number(fields.get('toolCalls') ?? 0),
-  };
 }
 
 export type { ToolCallRow };
@@ -235,11 +225,11 @@ export function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
               subRunId: header.subRunId,
               subThreadId: header.subThreadId,
               profile: header.profile,
-              task: row.args ? String(row.args).slice(0, 120) : '',
-              status: header.status as SubagentActivity['status'],
+              task: delegateObjective(row.args).slice(0, 160),
+              status: header.status,
               iterations: header.iterations,
               toolCalls: header.toolCalls,
-              summary: row.result.split('\n').slice(2).join('\n').trim() || undefined,
+              summary: stripUntrustedMarkers(subagentDigestBody(row.result)) || undefined,
               seq: 0,
             };
             return (

@@ -16,6 +16,10 @@ export type ModeLimits = {
   maxToolCalls?: number;
   maxRepeatedToolCalls: number;
   toolTimeoutMs: number;
+  /** Prompt tokens across all model calls of the run, sub-agents included. */
+  maxPromptTokens?: number;
+  /** Wall clock for the whole run. */
+  maxWallMs?: number;
 };
 
 export interface ModeConfig {
@@ -37,6 +41,7 @@ export const HOME_MODE: ModeConfig = {
   allowedTools: ['web_search'],
   globalTools: [
     'web_fetch',
+    'recall',
     'load_skill',
     'memory',
     'plan',
@@ -48,6 +53,8 @@ export const HOME_MODE: ModeConfig = {
     maxToolCalls: 80,
     maxRepeatedToolCalls: 4,
     toolTimeoutMs: 45_000,
+    maxPromptTokens: 400_000,
+    maxWallMs: 15 * 60_000,
   },
 };
 
@@ -64,6 +71,8 @@ export const WORKSPACE_MODE: ModeConfig = {
     'read_file',
     'edit_file',
     'run_terminal',
+    'diff',
+    'recall',
     'load_skill',
     'memory',
     'plan',
@@ -76,9 +85,34 @@ export const WORKSPACE_MODE: ModeConfig = {
     maxToolCalls: 450,
     maxRepeatedToolCalls: 8,
     toolTimeoutMs: 120_000,
+    maxPromptTokens: 2_500_000,
+    maxWallMs: 30 * 60_000,
   },
 };
 
 export function modeForKind(kind: ThreadKind | undefined): ModeConfig {
   return isWorkspaceKind(kind) ? WORKSPACE_MODE : HOME_MODE;
+}
+
+/**
+ * Model per job. `main` is the user's pick for the parent run; sub-agent
+ * profiles name a role, and the host maps it to a model id (env-configured,
+ * defaulting to `main`).
+ */
+export type ModelRole = 'main' | 'fast' | 'strong';
+
+export type ModelRoles = Record<ModelRole, string>;
+
+export function resolveModelRoles(input: {
+  main: string;
+  fast?: string;
+  strong?: string;
+}): ModelRoles {
+  const fast = input.fast?.trim();
+  const strong = input.strong?.trim();
+  return {
+    main: input.main,
+    fast: fast || input.main,
+    strong: strong || input.main,
+  };
 }

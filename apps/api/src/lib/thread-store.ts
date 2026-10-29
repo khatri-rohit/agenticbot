@@ -23,6 +23,7 @@ import {
   selectPlanForRewind,
   parseThreadLastRun,
   type ChatMessage,
+  type ContextWindowMode,
   type LedgerAppendMeta,
   type LedgerEnvelope,
   type LedgerRecord,
@@ -69,7 +70,7 @@ export class ThreadStore {
   }): Thread[] {
     const rows = this.db
       .prepare(
-        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root, parent_thread_id, parent_run_id
+        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root, parent_thread_id, parent_run_id, context_window_mode
          FROM threads
          ORDER BY pinned DESC, updated_at DESC`,
       )
@@ -99,7 +100,7 @@ export class ThreadStore {
   getThread(id: string): Thread | undefined {
     const row = this.db
       .prepare(
-        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root, parent_thread_id, parent_run_id
+        `SELECT id, title, model, pinned, created_at, updated_at, kind, workspace_root, parent_thread_id, parent_run_id, context_window_mode
          FROM threads WHERE id = ?`,
       )
       .get(id) as CatalogThreadRow | undefined;
@@ -156,10 +157,16 @@ export class ThreadStore {
       pinned?: boolean;
       kind?: ThreadKind;
       workspaceRoot?: string | null;
+      contextWindowMode?: ContextWindowMode;
     },
   ): Thread | undefined {
     const current = this.getThread(id);
     if (!current) return undefined;
+    if (changes.contextWindowMode !== undefined) {
+      this.db
+        .prepare(`UPDATE threads SET context_window_mode = ? WHERE id = ?`)
+        .run(changes.contextWindowMode, id);
+    }
 
     const title = changes.title ?? current.title;
     const model = changes.model ?? current.model;
@@ -572,6 +579,11 @@ export class ThreadStore {
     return sha;
   }
 
+  /** Per-thread JSONL traces (one file per run), read by the future eval app. */
+  traceDir(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'traces');
+  }
+
   private threadDir(threadId: string): string {
     return path.join(this.home, 'sessions', threadId);
   }
@@ -608,6 +620,7 @@ type CatalogThreadRow = {
   workspace_root?: string | null;
   parent_thread_id?: string | null;
   parent_run_id?: string | null;
+  context_window_mode?: string | null;
 };
 
 function rowToThread(row: CatalogThreadRow): Thread {
@@ -623,6 +636,9 @@ function rowToThread(row: CatalogThreadRow): Thread {
     ...(row.workspace_root ? { workspaceRoot: row.workspace_root } : {}),
     ...(row.parent_thread_id ? { parentThreadId: row.parent_thread_id } : {}),
     ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
+    ...(row.context_window_mode === 'model' || row.context_window_mode === 'default'
+      ? { contextWindowMode: row.context_window_mode }
+      : {}),
   };
 }
 
@@ -668,6 +684,7 @@ export async function openThreadStore(home: string): Promise<ThreadStore> {
   ensureColumn(db, 'threads', 'workspace_root', `workspace_root TEXT`);
   ensureColumn(db, 'threads', 'parent_thread_id', `parent_thread_id TEXT`);
   ensureColumn(db, 'threads', 'parent_run_id', `parent_run_id TEXT`);
+  ensureColumn(db, 'threads', 'context_window_mode', `context_window_mode TEXT`);
   db.exec(`
     UPDATE threads SET kind = 'home' WHERE kind IN ('research', '');
     UPDATE threads SET kind = 'workspace' WHERE kind = 'coding';

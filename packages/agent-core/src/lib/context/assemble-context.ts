@@ -615,17 +615,20 @@ export function assembleContext(
     else tailMessages.push(message);
   }
 
+  // Stable layers first, then history, then layers that change between sends
+  // (skill picks, plan edits, mentions, last-run note). A plan edit then
+  // invalidates only the tail of the prompt, not the whole history prefix.
   const messages: ChatCompletionMessageParam[] = fillOrphanToolResults([
     systemMessage,
     ...(skillsMessage ? [skillsMessage] : []),
-    ...(bodiesMessage ? [bodiesMessage] : []),
     memoryMessage,
     ...(rulesMessage ? [rulesMessage] : []),
+    ...(briefMessage ? [briefMessage] : []),
+    ...tailMessages,
+    ...(bodiesMessage ? [bodiesMessage] : []),
     ...(planMessage ? [planMessage] : []),
     ...(mentionsMessage ? [mentionsMessage] : []),
-    ...(briefMessage ? [briefMessage] : []),
     ...(lastRunMessage ? [lastRunMessage] : []),
-    ...tailMessages,
     ...turnMessages,
   ]);
 
