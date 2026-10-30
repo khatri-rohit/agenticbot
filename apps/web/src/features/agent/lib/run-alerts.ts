@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@agent/agent-models';
+import { type AgentEvent, clampChatTitle } from '@agent/agent-models';
 
 const SOUND_KEY = 'desk:alerts-sound';
 const NOTIFY_KEY = 'desk:alerts-notify';
@@ -56,8 +56,9 @@ export function observeRunEvent(input: {
   subscribedRunId: string;
   subscribedThreadId: string;
   liveThreadId: string | null;
+  threadTitle: string | null;
 }): void {
-  const { event, subscribedRunId, subscribedThreadId, liveThreadId } = input;
+  const { event, subscribedRunId, subscribedThreadId, liveThreadId, threadTitle } = input;
   if (liveThreadId !== subscribedThreadId) return;
   if (event.runId !== subscribedRunId) return;
   if (!shouldProcessSeq(event.runId, event.seq)) return;
@@ -72,7 +73,7 @@ export function observeRunEvent(input: {
   if (readSoundPref()) {
     void playTone(kind);
   }
-  showBrowserNotification(kind, event);
+  showBrowserNotification(kind, event, threadTitle);
 }
 
 function classifyAlert(event: AgentEvent): RunAlertKind | null {
@@ -209,14 +210,18 @@ function getAudioContext(): AudioContext | null {
   return audioContext;
 }
 
-function showBrowserNotification(kind: RunAlertKind, event: AgentEvent): void {
+function showBrowserNotification(
+  kind: RunAlertKind,
+  event: AgentEvent,
+  threadTitle: string | null,
+): void {
   if (typeof window === 'undefined' || typeof Notification === 'undefined') {
     return;
   }
   if (!readNotifyPref() || Notification.permission !== 'granted') return;
   if (!isPageUnfocused()) return;
 
-  const { title, body, tag } = notificationCopy(kind, event);
+  const { title, body, tag } = notificationCopy(kind, event, threadTitle);
   try {
     const notification = new Notification(title, {
       body,
@@ -239,28 +244,36 @@ function isPageUnfocused(): boolean {
 function notificationCopy(
   kind: RunAlertKind,
   event: AgentEvent,
+  threadTitle: string | null,
 ): { title: string; body: string; tag: string } {
+  const label = threadLabel(threadTitle);
   if (event.type === 'choice.requested') {
     return {
-      title: 'Choice needed',
+      title: `Choice needed${label}`,
       body: clip(event.question),
       tag: `attention-${event.choiceId}`,
     };
   }
   if (kind === 'finished_ok') {
     return {
-      title: 'Run finished',
-      body: 'The agent is idle.',
+      title: `Run finished${label}`,
+      body: 'The agent completed and is idle.',
       tag: `finished-${event.runId}`,
     };
   }
   const error =
     event.type === 'run.error' ? event.error : 'The run ended with an error.';
   return {
-    title: 'Run failed',
+    title: `Run failed${label}`,
     body: clip(error),
     tag: `finished-${event.runId}`,
   };
+}
+
+/** Suffix the thread title so the user knows which tab fired the alert. */
+function threadLabel(threadTitle: string | null): string {
+  if (!threadTitle || threadTitle === 'New Chat') return '';
+  return ` · ${clampChatTitle(threadTitle)}`;
 }
 
 function clip(text: string): string {
