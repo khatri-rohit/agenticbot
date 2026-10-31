@@ -78,6 +78,8 @@ export type SubagentHost = {
   modelCall(model: string): Promise<ModelCallFn>;
   /** Context budget for a model at the default window. */
   contextBudget(model: string): Promise<ContextBudget>;
+  /** Reasoning effort resolved for a model, traced on child llm_request (L1). */
+  reasoningEffortFor(model: string): Promise<string | undefined>;
   agentsMd(workspaceRoot: string): Promise<string>;
   trace(threadId: string): ((event: TraceEvent) => void) | undefined;
 };
@@ -398,6 +400,7 @@ export function createSubagentRunner(deps: {
       }
 
       const modelCall = await host.modelCall(model);
+      const reasoningEffort = await host.reasoningEffortFor(model);
       runManager.start({
         runId: subRunId,
         threadId,
@@ -436,6 +439,7 @@ export function createSubagentRunner(deps: {
         parentRunId: parent.runId,
         parentSignal: parent.signal,
         ...(parent.capacity ? { capacity: parent.capacity } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       });
 
       // Throttled progress for the parent's card.

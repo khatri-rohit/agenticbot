@@ -1,8 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { type Thread } from '@agent/agent-models';
 import { clampChatTitle } from '@/lib/thread-title';
 import { fetchThread } from '../features/agent/api/thread-client';
@@ -10,6 +11,7 @@ import {
   getThreadsSnapshot,
   subscribeThreads,
 } from '../features/agent/store/thread-cache';
+import { folderNameFromRoot } from '../features/agent/store/space-store';
 
 export function ChatHeader({ threadId }: { threadId: string }) {
   const router = useRouter();
@@ -48,6 +50,23 @@ export function ChatHeader({ threadId }: { threadId: string }) {
   const isPending = title === 'New Chat';
   const display = isPending ? title : clampChatTitle(title);
 
+  // Breadcrumb context: workspace name for workspace threads, "Home" otherwise.
+  const isWorkspace = thread?.kind === 'workspace';
+  const spaceName = isWorkspace
+    ? folderNameFromRoot(thread?.workspaceRoot ?? null)
+    : 'Home';
+
+  // Dynamic browser tab title so each open tab identifies its thread.
+  useEffect(() => {
+    if (!thread) return;
+    document.title = isPending
+      ? 'New Chat · Personal Assistant'
+      : `${clampChatTitle(title)} · Personal Assistant`;
+    return () => {
+      document.title = 'Personal Assistant';
+    };
+  }, [thread, isPending, title]);
+
   return (
     <header className="shrink-0 border-b border-border/40 px-5 py-3">
       {thread?.parentThreadId ? (
@@ -60,6 +79,19 @@ export function ChatHeader({ threadId }: { threadId: string }) {
           Back to {parentThread ? clampChatTitle(parentThread.title) : 'parent'}
         </button>
       ) : null}
+      <nav
+        aria-label="Thread location"
+        className="mb-1 flex items-center gap-1 text-xs text-muted-foreground"
+      >
+        <Link
+          href="/"
+          className="transition-colors hover:text-foreground"
+        >
+          {spaceName}
+        </Link>
+        <ChevronRight className="size-3 shrink-0 opacity-60" strokeWidth={1.75} />
+        <span className="truncate text-foreground/80">{display}</span>
+      </nav>
       <h1 className="truncate text-lg font-semibold leading-snug tracking-tight text-pretty text-foreground">
         {isPending ? (
           <span className="inline-flex items-center gap-2">

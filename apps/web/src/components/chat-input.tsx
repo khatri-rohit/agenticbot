@@ -72,6 +72,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Kbd } from '@/components/ui/kbd';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -303,6 +304,7 @@ export function ChatInput({
     null,
   );
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [skillSlashOpen, setSkillSlashOpen] = useState(false);
   const [skillSlashQuery, setSkillSlashQuery] = useState('');
   const [skillSlashActive, setSkillSlashActive] = useState(0);
@@ -898,6 +900,31 @@ export function ChatInput({
     });
   }, [modelConfig]);
 
+  // Ctrl+. (Cmd+. on macOS) toggles Ask ↔ Agent posture.
+  // Ctrl+/ (Cmd+/ on macOS) opens the model picker dropdown.
+  const showPostureChipsRef = useRef(showPostureChips);
+  showPostureChipsRef.current = showPostureChips;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      if (e.key === '.') {
+        if (!showPostureChipsRef.current) return;
+        e.preventDefault();
+        const current = composerOptionsRef.current.posture ?? 'agent';
+        onComposerOptionsChangeRef.current({
+          ...composerOptionsRef.current,
+          posture: current === 'agent' ? 'ask' : 'agent',
+        });
+      } else if (e.key === '/') {
+        e.preventDefault();
+        setModelPickerOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const isHero = variant === 'hero';
   const hasText = Boolean(input.trim());
   const canSend = (hasText || pendingAttachments.length > 0) && localModelReady;
@@ -915,17 +942,22 @@ export function ChatInput({
   const attachMenu = (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-            aria-label="Composer options"
-          >
-            <Plus className="size-4" strokeWidth={2.25} />
-          </Button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                aria-label="Composer options"
+              >
+                <Plus className="size-4" strokeWidth={2.25} />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Attach &amp; options</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent align="center" className="w-52 bg-card shadow-lg">
           <DropdownMenuLabel>Composer</DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -1000,43 +1032,54 @@ export function ChatInput({
   // Host run posture is shown separately via run.started.
 
   const postureChips = showPostureChips ? (
-    <div
-      className="flex h-7 shrink-0 items-center rounded-md border border-border/60 p-0.5"
-      role="group"
-      aria-label="Workspace posture"
-    >
-      {(
-        [
-          { id: 'ask', label: 'Ask' },
-          { id: 'agent', label: 'Agent' },
-        ] as const
-      ).map((option) => {
-        const selected = posture === option.id;
-        return (
-          <Button
-            key={option.id}
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-pressed={selected}
-            className={cn(
-              'h-6 px-2 text-xs font-normal',
-              selected
-                ? 'bg-muted text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-            onClick={() =>
-              onComposerOptionsChange({
-                ...composerOptions,
-                posture: option.id,
-              })
-            }
-          >
-            {option.label}
-          </Button>
-        );
-      })}
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className="flex h-7 shrink-0 items-center rounded-md border border-border/60 p-0.5"
+          role="group"
+          aria-label="Workspace posture"
+        >
+          {(
+            [
+              { id: 'ask', label: 'Ask' },
+              { id: 'agent', label: 'Agent' },
+            ] as const
+          ).map((option) => {
+            const selected = posture === option.id;
+            return (
+              <Button
+                key={option.id}
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-pressed={selected}
+                className={cn(
+                  'h-6 px-2 text-xs font-normal',
+                  selected
+                    ? 'bg-muted text-foreground'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+                onClick={() =>
+                  onComposerOptionsChange({
+                    ...composerOptions,
+                    posture: option.id,
+                  })
+                }
+              >
+                {option.label}
+              </Button>
+            );
+          })}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>
+        <span className="flex items-center gap-1.5">
+          Posture — Ask / Agent
+          <Kbd>Ctrl</Kbd>
+          <Kbd>.</Kbd>
+        </span>
+      </TooltipContent>
+    </Tooltip>
   ) : null;
 
   const modelControls = (
@@ -1061,6 +1104,8 @@ export function ChatInput({
               'No models on the API host. Run `ollama pull <model>` where apps/api runs, then toggle Local again.')
             : undefined
         }
+        open={modelPickerOpen}
+        onOpenChange={setModelPickerOpen}
       />
       {modelConfig?.thinking.supported ? (
         <ThinkingPicker
@@ -1106,51 +1151,65 @@ export function ChatInput({
         loading={ollamaBalance.loading}
       />
       {voice.enabled ? (
-        <Button
-          type="button"
-          size="icon-sm"
-          variant={voice.active || voice.transcribing ? 'secondary' : 'ghost'}
-          onClick={() => voice.toggle()}
-          aria-label={
-            voice.transcribing
-              ? 'Transcribing voice'
-              : voice.active
-                ? 'Stop voice mode'
-                : 'Start voice mode'
-          }
-          aria-pressed={voice.active}
-          aria-busy={voice.transcribing}
-          title={voice.transcribing ? 'Transcribing…' : 'Voice mode'}
-          className={cn(
-            'shrink-0 rounded-full',
-            (voice.active || voice.transcribing) && 'text-foreground',
-            voice.active && 'w-auto px-2',
-          )}
-        >
-          {voice.active ? (
-            <MicWaveform level={voice.level} />
-          ) : voice.transcribing ? (
-            <Loader2 className="size-4 animate-spin" strokeWidth={2.25} />
-          ) : (
-            <Mic className="size-4" strokeWidth={2.25} />
-          )}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant={voice.active || voice.transcribing ? 'secondary' : 'ghost'}
+              onClick={() => voice.toggle()}
+              aria-label={
+                voice.transcribing
+                  ? 'Transcribing voice'
+                  : voice.active
+                    ? 'Stop voice mode'
+                    : 'Start voice mode'
+              }
+              aria-pressed={voice.active}
+              aria-busy={voice.transcribing}
+              className={cn(
+                'shrink-0 rounded-full',
+                (voice.active || voice.transcribing) && 'text-foreground',
+                voice.active && 'w-auto px-2',
+              )}
+            >
+              {voice.active ? (
+                <MicWaveform level={voice.level} />
+              ) : voice.transcribing ? (
+                <Loader2 className="size-4 animate-spin" strokeWidth={2.25} />
+              ) : (
+                <Mic className="size-4" strokeWidth={2.25} />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Voice mode</TooltipContent>
+        </Tooltip>
       ) : null}
-      <Button
-        type="button"
-        size="icon-sm"
-        variant={showStopButton ? 'secondary' : 'default'}
-        onClick={handlePrimaryAction}
-        disabled={!showStopButton && !canSend}
-        className="shrink-0 rounded-full"
-        aria-label={showStopButton ? 'Stop generating' : 'Send message'}
-      >
-        {showStopButton ? (
-          <Square className="size-3.5 fill-current" strokeWidth={0} />
-        ) : (
-          <ArrowUp className="size-4" strokeWidth={2.25} />
-        )}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant={showStopButton ? 'secondary' : 'default'}
+            onClick={handlePrimaryAction}
+            disabled={!showStopButton && !canSend}
+            className="shrink-0 rounded-full"
+            aria-label={showStopButton ? 'Stop generating' : 'Send message'}
+          >
+            {showStopButton ? (
+              <Square className="size-3.5 fill-current" strokeWidth={0} />
+            ) : (
+              <ArrowUp className="size-4" strokeWidth={2.25} />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <span className="flex items-center gap-1.5">
+            {showStopButton ? 'Stop' : 'Send'}
+            <Kbd>⏎</Kbd>
+          </span>
+        </TooltipContent>
+      </Tooltip>
     </>
   );
 

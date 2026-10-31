@@ -106,6 +106,8 @@ export type RunLoopConfig = {
   pinnedSkills?: string[];
   /** Account capacity gate; children share the parent's. */
   capacity?: CapacityGate;
+  /** Reasoning effort resolved by the host, traced on each llm_request (L1). */
+  reasoningEffort?: string;
 };
 
 /** What a sub-agent inherits from (and reports back to) its parent run. */

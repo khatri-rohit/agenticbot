@@ -95,6 +95,19 @@ export function createSubagentHost(deps: {
         await resolveCallOptions(model, thinking, endpoint, WORKSPACE_MODE.temperature),
       );
     },
+    async reasoningEffortFor(model) {
+      // Mirror modelCall's thinking resolution so child llm_request traces
+      // report the same effort the child actually runs with.
+      let thinking: false | undefined;
+      try {
+        const config = await getOllamaModelConfig(model, endpoint);
+        thinking = config.thinking.values.some((value) => value === false) ? false : undefined;
+      } catch {
+        thinking = undefined;
+      }
+      const opts = await resolveCallOptions(model, thinking, endpoint, WORKSPACE_MODE.temperature);
+      return opts.reasoningEffort;
+    },
     async contextBudget(model) {
       return (await resolveContextBudget(model, endpoint, 'default')).budget;
     },
