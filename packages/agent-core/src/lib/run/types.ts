@@ -81,6 +81,8 @@ export type StartRunOptions = {
   trace?: (event: TraceEvent) => void;
   /** Account capacity gate (host-cached balance). Optional. */
   capacity?: CapacityGate;
+  /** Reasoning effort resolved by the host, traced on each llm_request (L1). */
+  reasoningEffort?: string;
   /** Sub-agent runner; the loop binds it to this run. */
   subagents?: SubagentSpawner;
   /** 0 for a user run, 1 for a sub-agent. */

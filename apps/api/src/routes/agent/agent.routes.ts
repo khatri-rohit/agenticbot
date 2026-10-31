@@ -833,6 +833,9 @@ router.post('/run', async (req: Request, res: Response) => {
     trace: traceSinkFor(store, threadId),
     ...(skillNames.length > 0 ? { pinnedSkills: skillNames } : {}),
     ...(capacity ? { capacity } : {}),
+    ...(callOptions.reasoningEffort
+      ? { reasoningEffort: callOptions.reasoningEffort }
+      : {}),
     onFinished: async (result) => {
       // Not awaited: the balance read after a run must not delay compaction.
       void appendUsageLog(getAgentHome(), {

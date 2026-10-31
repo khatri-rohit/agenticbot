@@ -1917,6 +1917,9 @@ async function runLoopCore(
         runId,
         iteration: iterations,
         estimatedPromptTokens: estimatedPrompt,
+        ...(config.reasoningEffort
+          ? { reasoningEffort: config.reasoningEffort }
+          : {}),
       });
       emit?.({ type: 'turn.started', runId, iteration: iterations });
 

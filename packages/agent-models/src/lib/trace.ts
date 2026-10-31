@@ -40,6 +40,8 @@ export type TraceEvent =
       iteration: number;
       /** Heuristic size of the prompt about to be sent. */
       estimatedPromptTokens?: number;
+      /** Reasoning effort resolved by the host (L1 observability). */
+      reasoningEffort?: string;
     }
   | {
       type: 'llm_response';
