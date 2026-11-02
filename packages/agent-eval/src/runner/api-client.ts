@@ -1,82 +1,101 @@
-import { execSync } from 'node:child_process';
+import type { ThreadLastRun } from '@agent/agent-models';
 
 /**
- * Minimal HTTP client for the eval runner. Talks to a running API
- * (AGENT_HOME=evals/home) via POST /threads, POST /run, SSE wait, and
- * GET /usage/balance. Never calls runLoop directly.
+ * The few API calls a trial needs (base `http://localhost:<port>/api/agent`).
+ * Trials go through the real entry point (G2); nothing here calls the loop.
  */
+export class ApiClient {
+  constructor(private readonly base: string) {}
 
-export type ApiClient = {
-  createThread(opts: { model: string; workspaceRoot?: string }): Promise<{ threadId: string }>;
-  startRun(opts: {
-    threadId: string;
-    prompt: string;
-    posture: string;
-  }): Promise<{ runId: string }>;
-  waitForRun(threadId: string, runId: string): Promise<{ status: string; limitReason?: string }>;
-  getBalance(): Promise<{ percent: number; paused: boolean }>;
-};
-
-function apiBase(): string {
-  return process.env.EVAL_API_URL ?? 'http://localhost:3001';
-}
-
-function curlJson(method: string, path: string, body?: unknown): string {
-  const url = `${apiBase()}${path}`;
-  const args = ['-s', '-X', method, url];
-  if (body) {
-    args.push('-H', 'Content-Type: application/json', '-d', JSON.stringify(body));
+  private async json<T>(method: string, route: string, body?: unknown): Promise<T> {
+    const response = await fetch(`${this.base}${route}`, {
+      method,
+      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`${method} ${route} → ${response.status}: ${text.slice(0, 300)}`);
+    return (text ? JSON.parse(text) : {}) as T;
   }
-  return execSync(`curl ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`, {
-    encoding: 'utf8',
-    timeout: 30_000,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-}
 
-export function createApiClient(): ApiClient {
-  return {
-    async createThread(opts) {
-      const raw = curlJson('POST', '/api/agent/threads', {
-        model: opts.model,
-        ...(opts.workspaceRoot ? { workspaceRoot: opts.workspaceRoot } : {}),
-      });
-      const res = JSON.parse(raw) as { threadId: string };
-      return res;
-    },
+  createThread(input: { workspaceRoot: string; model: string; title: string }): Promise<{ id: string }> {
+    return this.json('POST', '/threads', { kind: 'workspace', ...input });
+  }
 
-    async startRun(opts) {
-      const raw = curlJson('POST', '/api/agent/run', {
-        threadId: opts.threadId,
-        prompt: opts.prompt,
-        posture: opts.posture,
-      });
-      const res = JSON.parse(raw) as { runId: string };
-      return res;
-    },
+  deleteThread(id: string): Promise<unknown> {
+    return this.json('DELETE', `/threads/${id}`);
+  }
 
-    async waitForRun(threadId, runId) {
-      // Poll last-run.json via the API's thread status endpoint.
-      const deadline = Date.now() + 10 * 60 * 1000;
-      while (Date.now() < deadline) {
-        const raw = curlJson('GET', `/api/agent/threads/${threadId}/runs/${runId}`);
-        const res = JSON.parse(raw) as { status: string; limitReason?: string };
-        if (res.status === 'complete' || res.status === 'incomplete' || res.status === 'error') {
-          return res;
+  startRun(input: {
+    threadId: string;
+    content: string;
+    model: string;
+    posture: 'agent' | 'ask';
+  }): Promise<{ runId: string }> {
+    return this.json('POST', '/run', {
+      threadId: input.threadId,
+      message: { content: input.content },
+      model: input.model,
+      posture: input.posture,
+      webSearch: true,
+      contextWindowMode: 'default',
+    });
+  }
+
+  cancelRun(runId: string): Promise<unknown> {
+    return this.json('POST', `/run/${runId}/cancel`);
+  }
+
+  ledger(threadId: string): Promise<{ lastRun?: ThreadLastRun; activeRunId?: string }> {
+    return this.json('GET', `/threads/${threadId}/ledger`);
+  }
+
+  /** `null` when the API has no OLLAMA_API_KEY (local models: no capacity gate). */
+  async balance(): Promise<unknown | null> {
+    try {
+      return await this.json('GET', '/usage/balance');
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('→ 404')) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * Wait for a run to finish: read its SSE stream until `run.settled`,
+   * `run.error`, or `event: done` (the run had already finished). Times out
+   * after `timeoutMs`.
+   */
+  async waitForRun(runId: string, timeoutMs: number): Promise<'settled' | 'error' | 'gone' | 'timeout'> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${this.base}/run/${runId}/events`, { signal: controller.signal });
+      if (response.status === 404) return 'gone';
+      if (!response.ok || !response.body) throw new Error(`events ${runId} → ${response.status}`);
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let split: number;
+        while ((split = buffer.indexOf('\n\n')) >= 0) {
+          const frame = buffer.slice(0, split);
+          buffer = buffer.slice(split + 2);
+          if (/^event: done$/m.test(frame)) return 'settled';
+          const data = frame.match(/^data: (.*)$/m)?.[1];
+          if (!data) continue;
+          const type = (JSON.parse(data) as { type?: string }).type;
+          if (type === 'run.settled') return 'settled';
+          if (type === 'run.error') return 'error';
         }
-        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
-      return { status: 'timeout' };
-    },
-
-    async getBalance() {
-      try {
-        const raw = curlJson('GET', '/api/agent/usage/balance');
-        const res = JSON.parse(raw) as { percent: number; paused: boolean };
-        return res;
-      } catch {
-        return { percent: 100, paused: false };
-      }
-    },
-  };
+      return 'settled';
+    } catch (error) {
+      if (controller.signal.aborted) return 'timeout';
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+    }
+  }
 }

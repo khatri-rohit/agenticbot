@@ -683,6 +683,7 @@ async function runLoopCore(
         evicted: evicted.evicted,
         beforeTokens: evicted.beforeTokens,
         afterTokens: evicted.afterTokens,
+        toolCallIds: evicted.toolCallIds,
       });
     }
 
@@ -702,6 +703,7 @@ async function runLoopCore(
       iteration: iterations,
       beforeTokens: compacted.beforeTokens,
       afterTokens: compacted.afterTokens,
+      toolCallIds: compacted.toolCallIds,
     });
     if (compacted.prefixHeavy) {
       // Prior turns alone keep the prompt over the low mark. Folding one
@@ -1423,6 +1425,7 @@ async function runLoopCore(
       runId,
       iteration: iterations,
       toolName,
+      toolCallId: toolCall.id,
       args,
     });
     emit?.({
@@ -1451,6 +1454,7 @@ async function runLoopCore(
         runId,
         iteration: iterations,
         toolName,
+        toolCallId: toolCall.id,
         durationMs,
         resultPreview: preview(result),
         resultChars: raw.length,
@@ -1529,6 +1533,7 @@ async function runLoopCore(
         runId,
         iteration: iterations,
         toolName,
+        toolCallId: toolCall.id,
         error: errorMessage,
       });
       emit?.({
@@ -1581,6 +1586,7 @@ async function runLoopCore(
         runId,
         iteration: iterations,
         toolName: call.toolName,
+        toolCallId: call.toolCall.id,
         args: call.args,
       });
       emit?.({
@@ -1639,6 +1645,7 @@ async function runLoopCore(
           runId,
           iteration: iterations,
           toolName: call.toolName,
+          toolCallId: call.toolCall.id,
           durationMs,
           resultPreview: preview(item.result),
           resultChars: item.resultChars,
@@ -1721,6 +1728,7 @@ async function runLoopCore(
         runId,
         iteration: iterations,
         toolName: call.toolName,
+        toolCallId: call.toolCall.id,
         error: errorMessage,
       });
       emit?.({

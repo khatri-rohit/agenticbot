@@ -1,20 +1,30 @@
-import { resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+/**
+ * Normalize Windows drive-letter casing to uppercase before Vitest starts.
+ * Nx often starts with a lowercase drive (d:\...), which can load @vitest/runner
+ * twice (d: vs D:) and leave `runner` unset during suite collection.
+ */
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = resolve(import.meta.dirname, '..', '..', '..');
-const shared = resolve(root, 'vitest.config.mts');
-const config = existsSync(shared) ? shared : resolve(import.meta.dirname, '..', 'vitest.config.mts');
+const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const normalized =
+  process.platform === 'win32'
+    ? packageRoot.replace(
+        /^([a-z]):/,
+        (_, letter) => `${letter.toUpperCase()}:`,
+      )
+    : packageRoot;
 
-const args = process.argv.slice(2);
-const mode = args[0] === 'run' ? 'run' : 'watch';
+process.chdir(normalized);
 
-import(`file://${config}`).then(async () => {
-  const { startVitest } = await import('vitest/node');
-  await startVitest(mode === 'run' ? 'test' : [], [], {
-    config: config,
-    root: resolve(import.meta.dirname, '..'),
-  });
-}).catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const result = spawnSync(
+  process.execPath,
+  [
+    path.join(normalized, '../../node_modules/vitest/vitest.mjs'),
+    ...process.argv.slice(2),
+  ],
+  { stdio: 'inherit', env: process.env, cwd: normalized },
+);
+
+process.exit(result.status ?? 1);

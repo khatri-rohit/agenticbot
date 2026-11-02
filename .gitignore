@@ -47,8 +47,8 @@ vite.config.*.timestamp*
 vitest.config.*.timestamp*
 test-output
 
-.claude/worktrees
-.claude/settings.local.json
+.claude/
+
 .nx/polygraph
 .nx/self-healing
 .nx/migrate-runs
@@ -64,12 +64,11 @@ out
 # Personal Compose binds (paths, GPU, etc.) — never commit machine-specific mounts
 docker-compose.override.yml
 
-# Cursor: commit shared rules/skills; ignore local-only junk
-.cursor/*
-!.cursor/rules/
-!.cursor/rules/**
-!.cursor/skills/
-!.cursor/skills/**
+# Cursor (local only — never commit)
+.cursor/
+
+# Local planning docs — never commit
+docs/
 
 # Local agent home (dev DESK_HOME)
 .local/

@@ -1,173 +1,92 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import type { SuiteStats, TaskStats } from './summary.js';
 
-import type { TaskResult } from '../runner/runner.js';
-import { readBaseline, type BaselineRecord } from './baseline.js';
+/** A task fails when it loses this many passing trials (scaled to its trial count). */
+export const MAX_LOST_TRIALS = 2;
+/** The suite fails when its pass rate drops by more than this many points. */
+export const MAX_SUITE_DROP_POINTS = 10;
+/** Median prompt tokens may rise this much on a stable task that passed in both. */
+export const MAX_TOKEN_RISE = 0.1;
 
-export type GateTaskDelta = {
-  taskId: string;
-  baseline: BaselineRecord;
-  current: {
-    successRate: number;
-    medianPromptTokens: number;
-    medianMinutes: number;
-    scopeViolations: number;
-    trials: number;
-  };
-  successDrop: number;
-  tokenIncreasePct: number;
-  scopeViolationIncrease: number;
-  spread: number;
-  passed: boolean;
-  reasons: string[];
-};
-
-export type GateResult = {
+export type Baseline = SuiteStats & {
   suite: string;
-  passed: boolean;
-  harnessSha: string;
-  model: string;
-  baselineHarnessSha: string;
-  baselineModel: string;
-  shaMismatch: boolean;
-  modelMismatch: boolean;
-  deltas: GateTaskDelta[];
+  recordedAt: string;
+  /** Set when written with --accept: why an expected regression was accepted. */
+  acceptReason?: string;
 };
 
-const TOKEN_THRESHOLD_PCT = 0.10;
+export type TaskVerdict = {
+  taskId: string;
+  baseline?: TaskStats;
+  candidate?: TaskStats;
+  failures: string[];
+  notes: string[];
+};
 
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
-    : sorted[mid];
-}
+export type GateResult =
+  | { kind: 'refuse'; reasons: string[] }
+  | { kind: 'verdict'; passed: boolean; suiteFailures: string[]; tasks: TaskVerdict[] };
 
 /**
- * Compare current trial results against a recorded baseline. Gate rules
- * (from the impl plan):
- * - Fail if regression success drops at all (successDrop > 0).
- * - Fail if median prompt tokens rise >10% on any task.
- * - Fail if scope violations rise.
- * - Medians only, never single trials.
- * - Spread >2× on a task flags it unstable → cannot gate.
- *
- * The gate refuses to compare if harnessSha or model differs from the
- * baseline — this makes "never move model and harness together" a
- * mechanical check.
- *
- * Structural separation: this function reads only evals/baselines/ and
- * evals/results/. It never imports or reads evals/analyst/. The Analyst
- * is advisory-only by import graph, not by convention.
+ * Compare a candidate suite run with the baseline (plan §8). Refuses (no
+ * verdict) when the two were measured on a different model, seed or task
+ * definitions; a different harness version is what the gate tests.
  */
-export async function runGate(
-  evalsDir: string,
-  suite: string,
-  currentResults: TaskResult[],
-  harnessSha: string,
-  model: string,
-): Promise<GateResult> {
-  const baseline = await readBaseline(evalsDir, suite);
-  if (!baseline) {
-    return {
-      suite,
-      passed: false,
-      harnessSha,
-      model,
-      baselineHarnessSha: 'none',
-      baselineModel: 'none',
-      shaMismatch: true,
-      modelMismatch: false,
-      deltas: [],
-    };
+export function compareToBaseline(baseline: Baseline, candidate: SuiteStats): GateResult {
+  const refuse: string[] = [];
+  if (baseline.model !== candidate.model) refuse.push(`model differs: baseline ${baseline.model}, candidate ${candidate.model}`);
+  if (baseline.seedHash !== candidate.seedHash) refuse.push('seedHash differs: the eval home was re-seeded with different skills, agents or memory');
+  for (const [taskId, base] of Object.entries(baseline.tasks)) {
+    const cand = candidate.tasks[taskId];
+    if (!cand) refuse.push(`task ${taskId} is in the baseline but did not run`);
+    else if (cand.taskHash !== base.taskHash) refuse.push(`task ${taskId} changed since the baseline (taskHash)`);
+  }
+  if (refuse.length > 0) return { kind: 'refuse', reasons: refuse };
+
+  const tasks: TaskVerdict[] = [];
+  for (const [taskId, cand] of Object.entries(candidate.tasks)) {
+    const base = baseline.tasks[taskId];
+    const verdict: TaskVerdict = { taskId, candidate: cand, failures: [], notes: [] };
+    if (!base) {
+      verdict.notes.push('new task: not in the baseline, no verdict');
+      tasks.push(verdict);
+      continue;
+    }
+    verdict.baseline = base;
+    const trials = Math.max(base.trials, cand.trials);
+    const lost = (base.passRate - cand.passRate) * trials;
+    if (lost >= MAX_LOST_TRIALS - 1e-9) {
+      verdict.failures.push(`lost ${Math.round(lost)} passing trial(s) of ${trials} (${base.passes}/${base.trials} → ${cand.passes}/${cand.trials})`);
+    } else if (lost > 1e-9) {
+      verdict.notes.push(`one trial flipped (${base.passes}/${base.trials} → ${cand.passes}/${cand.trials}): within noise`);
+    }
+    if (cand.scopeViolations > base.scopeViolations) {
+      verdict.failures.push(`scope violations rose ${base.scopeViolations} → ${cand.scopeViolations}`);
+    }
+    if (base.medianPromptTokens !== null && cand.medianPromptTokens !== null) {
+      if (base.stable && cand.stable) {
+        const rise = cand.medianPromptTokens / base.medianPromptTokens - 1;
+        if (rise > MAX_TOKEN_RISE) {
+          verdict.failures.push(`median prompt tokens rose ${Math.round(rise * 100)}% (${base.medianPromptTokens} → ${cand.medianPromptTokens})`);
+        }
+      } else {
+        verdict.notes.push('unstable or too few trials: no token verdict');
+      }
+    }
+    if (cand.errors > 0) verdict.notes.push(`${cand.errors} trial(s) errored (infrastructure, counted as not passing)`);
+    tasks.push(verdict);
   }
 
-  const shaMismatch = baseline.harnessSha !== harnessSha;
-  const modelMismatch = baseline.model !== model;
-
-  // Group current results by taskId.
-  const byTask = new Map<string, TaskResult[]>();
-  for (const result of currentResults) {
-    const arr = byTask.get(result.taskId) ?? [];
-    arr.push(result);
-    byTask.set(result.taskId, arr);
+  // The suite rule also needs MAX_LOST_TRIALS lost trials overall: in a small
+  // suite one flipped trial is already >10 points, which is noise, not signal.
+  const suiteFailures: string[] = [];
+  const drop = (baseline.passRate - candidate.passRate) * 100;
+  const candidateTrials = Object.values(candidate.tasks).reduce((sum, task) => sum + task.trials, 0);
+  const lostOverall = ((baseline.passRate - candidate.passRate) * candidateTrials);
+  if (drop > MAX_SUITE_DROP_POINTS && lostOverall >= MAX_LOST_TRIALS - 1e-9) {
+    suiteFailures.push(
+      `suite pass rate dropped ${Math.round(drop)} points (${Math.round(baseline.passRate * 100)}% → ${Math.round(candidate.passRate * 100)}%, ${Math.round(lostOverall)} trials)`,
+    );
   }
-
-  const deltas: GateTaskDelta[] = [];
-  let allPassed = true;
-
-  for (const baseTask of baseline.tasks) {
-    const trials = byTask.get(baseTask.taskId) ?? [];
-    const successes = trials.filter((t) => t.status === 'pass').length;
-    const tokens = trials
-      .map((t) => t.metrics?.promptTokens.total ?? 0)
-      .filter((n) => n > 0);
-    const minutes = trials
-      .map((t) => (t.metrics?.wallMs ?? 0) / 60_000)
-      .filter((n) => n > 0);
-    const violations = trials.reduce((a, t) => a + t.scopeViolations.length, 0);
-
-    const currentSuccessRate = trials.length > 0 ? successes / trials.length : 0;
-    const currentMedianTokens = median(tokens);
-    const currentMedianMinutes = Math.round(median(minutes) * 100) / 100;
-    const currentViolations = violations;
-
-    const successDrop = baseTask.successRate - currentSuccessRate;
-    const tokenIncreasePct = baseTask.medianPromptTokens > 0
-      ? (currentMedianTokens - baseTask.medianPromptTokens) / baseTask.medianPromptTokens
-      : 0;
-    const scopeViolationIncrease = currentViolations - baseTask.scopeViolations;
-
-    // Spread: max/min of token per-call across trials. >2× = unstable.
-    const tokenValues = trials
-      .map((t) => t.metrics?.promptTokens.total ?? 0)
-      .filter((n) => n > 0);
-    const spread = tokenValues.length > 1 && Math.min(...tokenValues) > 0
-      ? Math.max(...tokenValues) / Math.min(...tokenValues)
-      : 1;
-
-    const reasons: string[] = [];
-    if (successDrop > 0) reasons.push(`success dropped ${successDrop.toFixed(2)}`);
-    if (tokenIncreasePct > TOKEN_THRESHOLD_PCT) reasons.push(`tokens +${(tokenIncreasePct * 100).toFixed(0)}%`);
-    if (scopeViolationIncrease > 0) reasons.push(`scope violations +${scopeViolationIncrease}`);
-    if (spread > 2) reasons.push(`unstable: spread ${spread.toFixed(1)}×`);
-
-    const passed = reasons.length === 0;
-    if (!passed) allPassed = false;
-
-    deltas.push({
-      taskId: baseTask.taskId,
-      baseline: baseTask,
-      current: {
-        successRate: currentSuccessRate,
-        medianPromptTokens: currentMedianTokens,
-        medianMinutes: currentMedianMinutes,
-        scopeViolations: currentViolations,
-        trials: trials.length,
-      },
-      successDrop,
-      tokenIncreasePct,
-      scopeViolationIncrease,
-      spread,
-      passed,
-      reasons,
-    });
-  }
-
-  // SHA/model mismatch blocks the gate entirely.
-  if (shaMismatch || modelMismatch) allPassed = false;
-
-  return {
-    suite,
-    passed: allPassed,
-    harnessSha,
-    model,
-    baselineHarnessSha: baseline.harnessSha,
-    baselineModel: baseline.model,
-    shaMismatch,
-    modelMismatch,
-    deltas,
-  };
+  const passed = suiteFailures.length === 0 && tasks.every((task) => task.failures.length === 0);
+  return { kind: 'verdict', passed, suiteFailures, tasks };
 }

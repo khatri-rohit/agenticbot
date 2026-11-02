@@ -3,30 +3,29 @@ import path from 'node:path';
 
 import type { LedgerEnvelope } from '@agent/agent-models';
 
-/**
- * Read a thread's ledger.jsonl — the durable truth that the UI rebuilds from.
- * Returns envelopes in file order (append order). Corrupt lines are skipped.
- */
-export async function readLedger(
-  home: string,
-  threadId: string,
-): Promise<LedgerEnvelope[]> {
-  const file = path.join(home, 'sessions', threadId, 'ledger.jsonl');
+export type ParsedLedger = {
+  envelopes: LedgerEnvelope[];
+  /** Lines skipped because they were not JSON. */
+  warnings: number;
+};
+
+/** A thread's `ledger.jsonl` in append order. A missing file is an empty ledger. */
+export async function readLedger(home: string, threadId: string): Promise<ParsedLedger> {
   let text: string;
   try {
-    text = await readFile(file, 'utf8');
+    text = await readFile(path.join(home, 'sessions', threadId, 'ledger.jsonl'), 'utf8');
   } catch {
-    return [];
+    return { envelopes: [], warnings: 0 };
   }
-
-  const envelopes: LedgerEnvelope[][] = [];
+  const envelopes: LedgerEnvelope[] = [];
+  let warnings = 0;
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     try {
-      envelopes.push([JSON.parse(line) as LedgerEnvelope]);
+      envelopes.push(JSON.parse(line) as LedgerEnvelope);
     } catch {
-      // Skip corrupt lines — the ledger is append-only and never partial.
+      warnings += 1;
     }
   }
-  return envelopes.flat();
+  return { envelopes, warnings };
 }

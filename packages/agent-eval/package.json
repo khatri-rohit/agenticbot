@@ -20,12 +20,35 @@
         "options": {
           "command": "node scripts/run-vitest.mjs run"
         }
+      },
+      "runs": {
+        "executor": "nx:run-commands",
+        "options": { "command": "node packages/agent-eval/scripts/cli.mjs runs", "cwd": "{workspaceRoot}" }
+      },
+      "metrics": {
+        "executor": "nx:run-commands",
+        "options": { "command": "node packages/agent-eval/scripts/cli.mjs metrics", "cwd": "{workspaceRoot}" }
+      },
+      "seed": {
+        "executor": "nx:run-commands",
+        "options": { "command": "node packages/agent-eval/scripts/cli.mjs seed", "cwd": "{workspaceRoot}" }
+      },
+      "run": {
+        "executor": "nx:run-commands",
+        "options": { "command": "node packages/agent-eval/scripts/cli.mjs run", "cwd": "{workspaceRoot}" }
+      },
+      "baseline": {
+        "executor": "nx:run-commands",
+        "options": { "command": "node packages/agent-eval/scripts/cli.mjs baseline", "cwd": "{workspaceRoot}" }
+      },
+      "gate": {
+        "executor": "nx:run-commands",
+        "options": { "command": "node packages/agent-eval/scripts/cli.mjs gate", "cwd": "{workspaceRoot}" }
       }
     }
   },
   "dependencies": {
     "tslib": "^2.3.0",
-    "@agent/agent-models": "*",
-    "@agent/agent-core": "*"
+    "@agent/agent-models": "*"
   }
 }

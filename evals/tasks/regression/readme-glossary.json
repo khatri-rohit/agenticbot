@@ -1,0 +1,14 @@
+{
+  "id": "readme-glossary",
+  "suite": "regression",
+  "repo": { "source": ".", "commit": "cac96043967af47ca1e7a0ba108e99560d753029" },
+  "prompt": "Add a short \"## Glossary\" section to README.md, placed right before \"## Repository layout (high level)\". Define three terms in one line each: run, thread, sub-agent. Change nothing else.",
+  "posture": "agent",
+  "checks": [{ "run": "git diff --check", "expectExit": 0, "timeoutSec": 30 }],
+  "files": [
+    { "path": "README.md", "mustMatch": "^## Glossary\\s*$" },
+    { "path": "README.md", "mustMatch": "## Glossary[\\s\\S]*\\bsub-agent\\b[\\s\\S]*## Repository layout" }
+  ],
+  "scope": { "allow": ["README.md"] },
+  "budget": { "maxPromptTokens": 300000, "maxMinutes": 6 }
+}

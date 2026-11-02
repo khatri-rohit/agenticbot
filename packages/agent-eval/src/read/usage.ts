@@ -1,11 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-/**
- * One row from `$AGENT_HOME/usage/usage.jsonl`. Written by the API's
- * appendUsageLog (apps/api/src/lib/capacity.ts). Shape is a superset of
- * what we need for capacity monitoring; we keep it loose.
- */
+import type { RunUsage } from '@agent/agent-models';
+
+/** Balance point as written by apps/api/src/lib/capacity.ts (`balancePoint`). */
+export type UsageBalancePoint =
+  | { sessionRemainingPercent: number; weeklyRemainingPercent: number }
+  | { balanceUsd: number; allowanceUsd: number; purchasedUsd?: number };
+
+/** One line of `$AGENT_HOME/usage/usage.jsonl` (`appendUsageLog`). */
 export type UsageRecord = {
   ts: string;
   runId: string;
@@ -14,39 +17,31 @@ export type UsageRecord = {
   endpoint: string;
   status: string;
   limitReason?: string;
-  usage?: {
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-    ownPromptTokens?: number;
-    childPromptTokens?: number;
-  };
-  balanceBefore?: { percent?: number };
-  balanceAfter?: { percent?: number };
-  capacity?: string;
+  usage?: RunUsage;
+  balanceBefore: UsageBalancePoint | null;
+  balanceAfter: UsageBalancePoint | null;
+  capacity: 'open' | 'conserve' | 'pause';
 };
 
-/**
- * Read the usage log. One line per finished run. Best-effort: missing file
- * returns empty array (a fresh home has no usage yet).
- */
-export async function readUsage(home: string): Promise<UsageRecord[]> {
-  const file = path.join(home, 'usage', 'usage.jsonl');
+export type ParsedUsage = { records: UsageRecord[]; warnings: number };
+
+/** The usage log, one record per finished run. A fresh home has none. */
+export async function readUsage(home: string): Promise<ParsedUsage> {
   let text: string;
   try {
-    text = await readFile(file, 'utf8');
+    text = await readFile(path.join(home, 'usage', 'usage.jsonl'), 'utf8');
   } catch {
-    return [];
+    return { records: [], warnings: 0 };
   }
-
   const records: UsageRecord[] = [];
+  let warnings = 0;
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     try {
       records.push(JSON.parse(line) as UsageRecord);
     } catch {
-      // Skip corrupt lines.
+      warnings += 1;
     }
   }
-  return records;
+  return { records, warnings };
 }

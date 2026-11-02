@@ -1,207 +1,266 @@
-import type { TraceEvent } from '@agent/agent-models';
+import type { LedgerEnvelope } from '@agent/agent-models';
+
 import type { RunSummary } from '../read/runs.js';
+import { linesOf, type TraceLine } from '../read/trace.js';
 import type { UsageRecord } from '../read/usage.js';
 
-export type ToolHistogramEntry = {
-  name: string;
-  count: number;
-  /** 'read' | 'write' | 'search' | 'network' | 'delegate' | 'other' */
-  stage: string;
-};
+/** Mirrors the loop's toolStage() for built-ins (packages/agent-core/src/lib/loop/loop.ts). */
+export function toolStage(name: string): string {
+  if (name === 'load_skill') return 'skill';
+  if (['glob', 'grep', 'read_file', 'recall', 'diff'].includes(name)) return 'read';
+  if (name === 'web_search' || name === 'web_fetch') return 'network';
+  if (name === 'delegate') return 'subagent';
+  if (name === 'run_terminal') return 'exec';
+  return 'mutate';
+}
+
+/** A read walk needs at least this many narrow reads of one file in a row. */
+export const READ_WALK_MIN_CALLS = 5;
+/** A read with a smaller `limit` (lines) counts as narrow. */
+export const READ_WALK_MAX_LIMIT = 40;
+
+export type ReadWalk = { path: string; calls: number; fromIteration: number; toIteration: number };
 
 export type RunMetrics = {
   runId: string;
   threadId: string;
-  model: string;
+  model?: string;
+  status: RunSummary['status'];
+  limitReason?: string;
   iterations: number;
   toolCalls: number;
-  toolHistogram: ToolHistogramEntry[];
-  promptTokens: {
-    perCall: number[];
-    median: number;
-    p90: number;
-    max: number;
-    total: number;
+  /** Provider-reported prompt tokens per model call (own calls only). */
+  promptPerCall: { calls: number; median: number; p90: number; max: number } | null;
+  promptTokens: { own: number; children: number; total: number };
+  completionTokens: { own: number; children: number; total: number };
+  /** Prompt ÷ completion over the whole run. */
+  promptToCompletion: number | null;
+  /** Sub-agent share of prompt tokens. */
+  childShare: number | null;
+  toolsByName: Record<string, number>;
+  toolsByStage: Record<string, number>;
+  networkCalls: number;
+  wallClockMs?: number;
+  /** From the ledger's final answer: the whole run, and the last call that wrote it. */
+  runDurationMs?: number;
+  answerWriteMs?: number;
+  edits: number;
+  firstEdit: { iteration: number; promptTokensBefore: number } | null;
+  /** Prompt tokens spent up to the first edit ÷ own prompt tokens (1 when nothing was edited). */
+  idleShare: number | null;
+  readWalks: ReadWalk[];
+  recallCalls: number;
+  /** recall calls + re-reads of evicted paths; null when evictions lack ids (pre-P2 traces). */
+  reReadsAfterEviction: number | null;
+  steering: {
+    stallNudges: number;
+    researchGates: number;
+    toolNotes: number;
+    budgetWarnings: number;
+    evictions: number;
+    inRunCompactions: number;
+    limits: string[];
   };
-  childPromptTokens: number;
-  childShare: number;
-  wallMs: number;
-  /** Prompt tokens before the first successful edit ÷ total prompt tokens. */
-  idleShare: number;
-  /** Tokens and time to the first successful edit_file (Created/Patched). */
-  firstEditAt?: { tokens: number; ms: number; seq: number };
-  /** Re-reads of paths that were evicted (recall + read_file of evicted path). */
-  reReadsAfterEviction: number;
-  /** Steering events: stall_nudge, research_gate, tool_note, budget_warning. */
-  steering: { stallNudge: number; researchGate: number; toolNote: number; budgetWarning: number };
-  /** Limit reasons seen in the trace. */
-  limits: string[];
-  /** Per-call reasoning effort distribution (L1 observability). */
   reasoningEffort: Record<string, number>;
-  /** Capacity cost from usage.jsonl, if available. */
-  capacityCost?: { promptTokens: number; completionTokens: number };
-  finishReason?: string;
+  /** Balance change across the run, from usage.jsonl (legacy session/weekly plans). */
+  capacity: { weeklyPercent: number | null; sessionPercent: number | null } | null;
 };
 
-const WRITE_TOOLS = new Set(['edit_file', 'write_file', 'create_file']);
-const READ_TOOLS = new Set(['read_file', 'recall']);
-const SEARCH_TOOLS = new Set(['grep', 'glob']);
-const NETWORK_TOOLS = new Set(['web_search', 'web_fetch']);
-const DELEGATE_TOOLS = new Set(['delegate']);
-
-function toolStage(name: string): string {
-  if (WRITE_TOOLS.has(name)) return 'write';
-  if (READ_TOOLS.has(name)) return 'read';
-  if (SEARCH_TOOLS.has(name)) return 'search';
-  if (NETWORK_TOOLS.has(name)) return 'network';
-  if (DELEGATE_TOOLS.has(name)) return 'delegate';
-  return 'other';
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+  return sorted[Math.max(0, index)]!;
 }
 
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
-    : sorted[mid];
+function count(map: Record<string, number>, key: string): void {
+  map[key] = (map[key] ?? 0) + 1;
 }
 
-function percentile(values: number[], p: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.min(Math.ceil(sorted.length * p) - 1, sorted.length - 1);
-  return sorted[idx];
+function argPath(args: unknown): string | undefined {
+  const value = (args as { path?: unknown } | null)?.path;
+  return typeof value === 'string' ? value.replace(/\\/g, '/').replace(/^\.\//, '') : undefined;
 }
 
-type EvictionEvent = Extract<TraceEvent, { type: 'context_evicted' }>;
-type ToolStartEvent = Extract<TraceEvent, { type: 'tool_start' }>;
-type ToolCompleteEvent = Extract<TraceEvent, { type: 'tool_complete' }>;
+function argLimit(args: unknown): number | undefined {
+  const value = (args as { limit?: unknown } | null)?.limit;
+  return typeof value === 'number' ? value : undefined;
+}
 
-/**
- * Compute RunMetrics from a RunSummary's events + optional usage record.
- * Pure function — no I/O. This is the single computation point for E1.
- */
-export function computeRunMetrics(
-  run: RunSummary,
-  usage?: UsageRecord,
-): RunMetrics {
-  const events = run.events;
-  const promptPerCall: number[] = [];
-  const effortCounts: Record<string, number> = {};
-  const toolCounts: Record<string, number> = {};
-  const limits: string[] = [];
-  let firstEditTokens = 0;
-  let firstEditMs = 0;
-  let firstEditSeq: number | undefined;
-  let firstEditFound = false;
-  let cumulativePrompt = 0;
-  let steering = { stallNudge: 0, researchGate: 0, toolNote: 0, budgetWarning: 0 };
-  let reReadsAfterEviction = 0;
-  let finishReason: string | undefined;
-  const evictedPaths = new Set<string>();
-  let runStartTs: number | undefined;
+/** Same rule as the loop's isEditSuccess. */
+function isEditSuccess(preview: string): boolean {
+  return preview.startsWith('Created') || preview.startsWith('Patched');
+}
 
-  for (let i = 0; i < events.length; i++) {
-    const event = events[i];
-    const seq = i; // events are already sorted by seq or file order
-
-    if (event.type === 'run_start') {
-      const e = event as Extract<TraceEvent, { type: 'run_start' }>;
-      runStartTs = e.ts ? new Date(e.ts).getTime() : undefined;
-    } else if (event.type === 'llm_request') {
-      const e = event as Extract<TraceEvent, { type: 'llm_request' }>;
-      const tokens = e.estimatedPromptTokens ?? 0;
-      promptPerCall.push(tokens);
-      cumulativePrompt += tokens;
-      if (e.reasoningEffort) {
-        effortCounts[e.reasoningEffort] = (effortCounts[e.reasoningEffort] ?? 0) + 1;
-      }
-    } else if (event.type === 'tool_call') {
-      const e = event as ToolCallEvent;
-      toolCounts[e.name] = (toolCounts[e.name] ?? 0) + 1;
-    } else if (event.type === 'tool_complete') {
-      const e = event as ToolCompleteEvent;
-      if (!firstEditFound && WRITE_TOOLS.has(e.name)) {
-        firstEditFound = true;
-        firstEditTokens = cumulativePrompt;
-        firstEditSeq = seq;
-        if (runStartTs && e.ts) {
-          firstEditMs = new Date(e.ts).getTime() - runStartTs;
-        }
-      }
-    } else if (event.type === 'context_evicted') {
-      const e = event as EvictionEvent;
-      if (e.path) evictedPaths.add(e.path);
-    } else if (event.type === 'tool_call') {
-      const e = event as ToolCallEvent;
-      if (READ_TOOLS.has(e.name) && typeof e.args === 'object' && e.args !== null) {
-        const argPath = (e.args as { path?: string }).path;
-        if (argPath && evictedPaths.has(argPath)) reReadsAfterEviction++;
-      }
-    } else if (event.type === 'stall_nudge') {
-      steering.stallNudge++;
-    } else if (event.type === 'research_gate') {
-      steering.researchGate++;
-    } else if (event.type === 'tool_note') {
-      steering.toolNote++;
-    } else if (event.type === 'budget_warning') {
-      steering.budgetWarning++;
-    } else if (event.type === 'limit') {
-      const e = event as Extract<TraceEvent, { type: 'limit' }>;
-      if (e.reason) limits.push(e.reason);
-    } else if (event.type === 'run_settled') {
-      const e = event as Extract<TraceEvent, { type: 'run_settled' }>;
-      if (e.finishReason) finishReason = e.finishReason;
+function readWalks(lines: TraceLine[]): ReadWalk[] {
+  const walks: ReadWalk[] = [];
+  let current: ReadWalk | null = null;
+  const close = () => {
+    if (current && current.calls >= READ_WALK_MIN_CALLS) walks.push(current);
+    current = null;
+  };
+  for (const start of linesOf(lines, 'tool_start')) {
+    const path = argPath(start.args);
+    const limit = argLimit(start.args);
+    const narrow =
+      start.toolName === 'read_file' && path !== undefined && limit !== undefined && limit < READ_WALK_MAX_LIMIT;
+    if (!narrow) {
+      close();
+      continue;
+    }
+    if (current && current.path === path) {
+      current.calls += 1;
+      current.toIteration = start.iteration;
+    } else {
+      close();
+      current = { path: path!, calls: 1, fromIteration: start.iteration, toIteration: start.iteration };
     }
   }
+  close();
+  return walks;
+}
 
-  const total = promptPerCall.reduce((a, b) => a + b, 0);
-  const toolHistogram: ToolHistogramEntry[] = Object.entries(toolCounts)
-    .map(([name, count]) => ({ name, count, stage: toolStage(name) }))
-    .sort((a, b) => b.count - a.count);
+/** recall calls plus read_file of a path whose earlier result was evicted or folded. */
+function reReads(lines: TraceLine[]): { recall: number; total: number | null } {
+  const recall = linesOf(lines, 'tool_start').filter((line) => line.toolName === 'recall').length;
+  const removals = lines.filter(
+    (line) => line.type === 'context_evicted' || line.type === 'context_compacted_inrun',
+  ) as Extract<TraceLine, { type: 'context_evicted' | 'context_compacted_inrun' }>[];
+  if (removals.some((line) => !line.toolCallIds)) return { recall, total: null };
 
-  const idleShare = total > 0 && firstEditFound
-    ? firstEditTokens / total
-    : total > 0
-      ? 1
-      : 0;
+  const pathByCall = new Map<string, string>();
+  const evicted = new Set<string>();
+  let reread = 0;
+  for (const line of lines) {
+    if (line.type === 'tool_start' && line.toolName === 'read_file') {
+      const path = argPath(line.args);
+      if (!path) continue;
+      if (evicted.has(path)) {
+        reread += 1;
+        evicted.delete(path);
+      }
+      if (line.toolCallId) pathByCall.set(line.toolCallId, path);
+    } else if (line.type === 'context_evicted' || line.type === 'context_compacted_inrun') {
+      for (const id of line.toolCallIds ?? []) {
+        const path = pathByCall.get(id);
+        if (path) evicted.add(path);
+      }
+    }
+  }
+  return { recall, total: recall + reread };
+}
+
+function usageDelta(record: UsageRecord | undefined): RunMetrics['capacity'] {
+  const before = record?.balanceBefore;
+  const after = record?.balanceAfter;
+  if (!before || !after || !('weeklyRemainingPercent' in before) || !('weeklyRemainingPercent' in after)) {
+    return null;
+  }
+  return {
+    weeklyPercent: before.weeklyRemainingPercent - after.weeklyRemainingPercent,
+    sessionPercent: before.sessionRemainingPercent - after.sessionRemainingPercent,
+  };
+}
+
+/**
+ * Metrics for one run, computed only from its trace lines (plus the thread's
+ * ledger and the usage log when given). Pure: no file access.
+ */
+export function computeRunMetrics(input: {
+  run: RunSummary;
+  lines: TraceLine[];
+  ledger?: LedgerEnvelope[];
+  usage?: UsageRecord[];
+}): RunMetrics {
+  const { run, lines } = input;
+  const responses = linesOf(lines, 'llm_response');
+  const perCall = responses
+    .map((line) => line.usage?.promptTokens)
+    .filter((value): value is number => typeof value === 'number');
+  const sorted = [...perCall].sort((a, b) => a - b);
+
+  const ownPrompt = run.usage?.own.promptTokens ?? perCall.reduce((sum, value) => sum + value, 0);
+  const childPrompt = run.usage?.children.promptTokens ?? 0;
+  const ownCompletion =
+    run.usage?.own.completionTokens ??
+    responses.reduce((sum, line) => sum + (line.usage?.completionTokens ?? 0), 0);
+  const childCompletion = run.usage?.children.completionTokens ?? 0;
+  const totalPrompt = ownPrompt + childPrompt;
+  const totalCompletion = ownCompletion + childCompletion;
+
+  const toolsByName: Record<string, number> = {};
+  const toolsByStage: Record<string, number> = {};
+  for (const start of linesOf(lines, 'tool_start')) {
+    count(toolsByName, start.toolName);
+    count(toolsByStage, toolStage(start.toolName));
+  }
+
+  const editCompletes = linesOf(lines, 'tool_complete').filter(
+    (line) => line.toolName === 'edit_file' && isEditSuccess(line.resultPreview),
+  );
+  const firstEditIteration = editCompletes[0]?.iteration;
+  const promptBefore =
+    firstEditIteration === undefined
+      ? null
+      : responses
+          .filter((line) => line.iteration <= firstEditIteration)
+          .reduce((sum, line) => sum + (line.usage?.promptTokens ?? 0), 0);
+
+  const answer = [...(input.ledger ?? [])]
+    .reverse()
+    .find((envelope) => envelope.runId === run.runId && envelope.record.role === 'assistant');
+  const effort: Record<string, number> = {};
+  for (const request of linesOf(lines, 'llm_request')) {
+    count(effort, request.reasoningEffort ?? 'default');
+  }
+  const rereads = reReads(lines);
 
   return {
     runId: run.runId,
     threadId: run.threadId,
-    model: run.model,
+    ...(run.model ? { model: run.model } : {}),
+    status: run.status,
+    ...(run.limitReason ? { limitReason: run.limitReason } : {}),
     iterations: run.iterations,
     toolCalls: run.toolCalls,
-    toolHistogram,
-    promptTokens: {
-      perCall: promptPerCall,
-      median: median(promptPerCall),
-      p90: percentile(promptPerCall, 0.9),
-      max: promptPerCall.length > 0 ? Math.max(...promptPerCall) : 0,
-      total,
+    promptPerCall:
+      sorted.length > 0
+        ? {
+            calls: sorted.length,
+            median: percentile(sorted, 50),
+            p90: percentile(sorted, 90),
+            max: sorted.at(-1)!,
+          }
+        : null,
+    promptTokens: { own: ownPrompt, children: childPrompt, total: totalPrompt },
+    completionTokens: { own: ownCompletion, children: childCompletion, total: totalCompletion },
+    promptToCompletion: totalCompletion > 0 ? totalPrompt / totalCompletion : null,
+    childShare: totalPrompt > 0 ? childPrompt / totalPrompt : null,
+    toolsByName,
+    toolsByStage,
+    networkCalls: toolsByStage.network ?? 0,
+    ...(run.durationMs !== undefined ? { wallClockMs: run.durationMs } : {}),
+    ...(answer?.runDurationMs !== undefined ? { runDurationMs: answer.runDurationMs } : {}),
+    ...(answer?.durationMs !== undefined ? { answerWriteMs: answer.durationMs } : {}),
+    edits: editCompletes.length,
+    firstEdit:
+      firstEditIteration === undefined
+        ? null
+        : { iteration: firstEditIteration, promptTokensBefore: promptBefore ?? 0 },
+    idleShare:
+      ownPrompt > 0 ? (promptBefore === null ? 1 : Math.min(1, promptBefore / ownPrompt)) : null,
+    readWalks: readWalks(lines),
+    recallCalls: rereads.recall,
+    reReadsAfterEviction: rereads.total,
+    steering: {
+      stallNudges: linesOf(lines, 'stall_nudge').length,
+      researchGates: linesOf(lines, 'research_gate').length,
+      toolNotes: linesOf(lines, 'tool_note').length,
+      budgetWarnings: linesOf(lines, 'budget_warning').length,
+      evictions: linesOf(lines, 'context_evicted').length,
+      inRunCompactions: linesOf(lines, 'context_compacted_inrun').length,
+      limits: linesOf(lines, 'limit').map((line) => line.reason),
     },
-    childPromptTokens: run.promptTokensChildren,
-    childShare: total + run.promptTokensChildren > 0
-      ? run.promptTokensChildren / (total + run.promptTokensChildren)
-      : 0,
-    wallMs: run.durationMs,
-    idleShare,
-    ...(firstEditSeq !== undefined
-      ? { firstEditAt: { tokens: firstEditTokens, ms: firstEditMs, seq: firstEditSeq } }
-      : {}),
-    reReadsAfterEviction,
-    steering,
-    limits,
-    reasoningEffort: effortCounts,
-    ...(usage?.usage
-      ? {
-          capacityCost: {
-            promptTokens: usage.usage.promptTokens ?? 0,
-            completionTokens: usage.usage.completionTokens ?? 0,
-          },
-        }
-      : {}),
-    ...(finishReason ? { finishReason } : {}),
+    reasoningEffort: effort,
+    capacity: usageDelta(input.usage?.find((record) => record.runId === run.runId)),
   };
 }

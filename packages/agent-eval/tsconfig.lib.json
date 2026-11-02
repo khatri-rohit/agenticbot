@@ -11,10 +11,7 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "references": [
-    { "path": "../agent-models/tsconfig.lib.json" },
-    { "path": "../agent-core/tsconfig.lib.json" }
-  ],
+  "references": [{ "path": "../agent-models/tsconfig.lib.json" }],
   "exclude": [
     "vitest.config.ts",
     "vitest.config.mts",

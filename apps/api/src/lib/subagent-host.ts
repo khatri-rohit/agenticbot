@@ -27,6 +27,28 @@ export function createSubagentHost(deps: {
   endpoint: OllamaEndpoint;
 }): SubagentHost {
   const { store, endpoint } = deps;
+  // One /api/show lookup per child model for this parent run, shared by
+  // modelCall and reasoningEffortFor.
+  const childOptions = new Map<string, ReturnType<typeof resolveCallOptions>>();
+  function childCallOptions(model: string): ReturnType<typeof resolveCallOptions> {
+    let options = childOptions.get(model);
+    if (!options) {
+      options = (async () => {
+        // Children search and report; turn thinking off where the model allows
+        // it, otherwise keep the model's own default.
+        let thinking: false | undefined;
+        try {
+          const config = await getOllamaModelConfig(model, endpoint);
+          thinking = config.thinking.values.some((value) => value === false) ? false : undefined;
+        } catch {
+          thinking = undefined;
+        }
+        return resolveCallOptions(model, thinking, endpoint, WORKSPACE_MODE.temperature);
+      })();
+      childOptions.set(model, options);
+    }
+    return options;
+  }
   return {
     async createThread(input) {
       const thread = await store.createThread(input.model, input.title, {
@@ -82,31 +104,12 @@ export function createSubagentHost(deps: {
           : role
       ],
     async modelCall(model) {
-      // Children search and report; turn thinking off where the model allows
-      // it, otherwise keep the model's own default.
-      let thinking: false | undefined;
-      try {
-        const config = await getOllamaModelConfig(model, endpoint);
-        thinking = config.thinking.values.some((value) => value === false) ? false : undefined;
-      } catch {
-        thinking = undefined;
-      }
-      return createStreamModelCall(
-        await resolveCallOptions(model, thinking, endpoint, WORKSPACE_MODE.temperature),
-      );
+      return createStreamModelCall(await childCallOptions(model));
     },
+    // Same resolved options as modelCall, so child llm_request traces report
+    // the effort the child actually runs with.
     async reasoningEffortFor(model) {
-      // Mirror modelCall's thinking resolution so child llm_request traces
-      // report the same effort the child actually runs with.
-      let thinking: false | undefined;
-      try {
-        const config = await getOllamaModelConfig(model, endpoint);
-        thinking = config.thinking.values.some((value) => value === false) ? false : undefined;
-      } catch {
-        thinking = undefined;
-      }
-      const opts = await resolveCallOptions(model, thinking, endpoint, WORKSPACE_MODE.temperature);
-      return opts.reasoningEffort;
+      return (await childCallOptions(model)).reasoningEffort;
     },
     async contextBudget(model) {
       return (await resolveContextBudget(model, endpoint, 'default')).budget;

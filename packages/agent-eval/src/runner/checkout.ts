@@ -1,103 +1,105 @@
-import { execSync } from 'node:child_process';
-import { rm, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { EvalTask } from './task.js';
+import { exec, git } from './exec.js';
 
-/**
- * Check out a pinned commit into a workdir. Uses git worktree when the source
- * is a local path, or git clone for a URL. The workdir is ephemeral and pruned
- * by the runner at start.
- */
-export async function checkoutTask(
-  task: EvalTask,
-  workdir: string,
-): Promise<void> {
-  await rm(workdir, { recursive: true, force: true });
-  await mkdir(workdir, { recursive: true });
+export type Checkout = {
+  dir: string;
+  /** How dependencies were provided: linked to the source's node_modules, installed, or none needed. */
+  deps: 'linked' | 'installed' | 'none';
+  depsMs: number;
+};
 
-  const { source, commit } = task.repo;
-  if (source.startsWith('http') || source.startsWith('git@')) {
-    execSync(`git clone ${source} ${workdir}`, { stdio: 'pipe' });
-    execSync(`git checkout ${commit}`, { cwd: workdir, stdio: 'pipe' });
-  } else {
-    // Local path — use worktree to avoid touching the source's working tree.
-    execSync(`git -C ${source} worktree add --detach ${workdir} ${commit}`, {
-      stdio: 'pipe',
-    });
-  }
+const NPM_CI_TIMEOUT_MS = 20 * 60_000;
+
+function isUrl(source: string): boolean {
+  return /^[a-z]+:\/\//i.test(source) || source.startsWith('git@');
 }
 
-/**
- * Run a command in the workdir and return its exit code. Used for end-state
- * checks (tests, typecheck, build).
- */
-export async function runCheck(
-  workdir: string,
-  command: string,
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+async function sameFile(a: string, b: string): Promise<boolean> {
   try {
-    const stdout = execSync(command, {
-      cwd: workdir,
-      encoding: 'utf8',
-      timeout: 120_000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return { exitCode: 0, stdout, stderr: '' };
-  } catch (err) {
-    const e = err as { status?: number; stdout?: string; stderr?: string };
-    return {
-      exitCode: e.status ?? 1,
-      stdout: e.stdout ?? '',
-      stderr: e.stderr ?? '',
-    };
-  }
-}
-
-/**
- * Check file assertions: mustExist and mustMatch (regex against file content).
- */
-export async function checkFiles(
-  workdir: string,
-  files: EvalTask['files'],
-): Promise<{ passed: boolean; violations: string[] }> {
-  const violations: string[] = [];
-  for (const file of files) {
-    const fullPath = path.join(workdir, file.path);
-    let content: string;
-    try {
-      content = await readFile(fullPath, 'utf8');
-    } catch {
-      if (file.mustExist !== false) {
-        violations.push(`missing: ${file.path}`);
-      }
-      continue;
-    }
-    if (file.mustMatch && !new RegExp(file.mustMatch).test(content)) {
-      violations.push(`no match: ${file.path} (expected /${file.mustMatch}/)`);
-    }
-  }
-  return { passed: violations.length === 0, violations };
-}
-
-/**
- * Check scope: git diff --name-only must be a subset of scope.allow.
- */
-export function checkScope(
-  workdir: string,
-  allow: string[],
-): { passed: boolean; violations: string[] } {
-  let changed: string[];
-  try {
-    changed = execSync('git diff --name-only HEAD', {
-      cwd: workdir,
-      encoding: 'utf8',
-    })
-      .split('\n')
-      .filter((line) => line.trim());
+    const [left, right] = await Promise.all([readFile(a), readFile(b)]);
+    return left.equals(right);
   } catch {
-    return { passed: true, violations: [] };
+    return false;
   }
-  const violations = changed.filter((file) => !allow.includes(file));
-  return { passed: violations.length === 0, violations };
+}
+
+/**
+ * Remove a workdir. node_modules may be a junction to the main checkout's
+ * node_modules: unlink it first so no tool ever recurses into the target.
+ */
+async function removeWorkdir(sourceRoot: string | null, dir: string): Promise<void> {
+  const modules = path.join(dir, 'node_modules');
+  try {
+    if ((await lstat(modules)).isSymbolicLink()) await rm(modules, { force: true });
+  } catch {
+    // No node_modules: nothing to unlink.
+  }
+  if (sourceRoot) await git(sourceRoot, ['worktree', 'remove', '--force', dir]);
+  await rm(dir, { recursive: true, force: true });
+}
+
+/** Delete earlier workdirs of this task (`<taskId>-<n>`). */
+export async function pruneWorkdirs(workdirsRoot: string, taskId: string, source: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(workdirsRoot);
+  } catch {
+    return;
+  }
+  const sourceRoot = isUrl(source) ? null : path.resolve(source);
+  for (const name of names) {
+    if (!name.startsWith(`${taskId}-`)) continue;
+    await removeWorkdir(sourceRoot, path.join(workdirsRoot, name));
+  }
+  if (sourceRoot) await git(sourceRoot, ['worktree', 'prune']);
+}
+
+/**
+ * A fresh checkout of `source` at `commit` in `dir`, outside the Nx project
+ * graph (plan §5). A local source becomes a detached git worktree; a URL is
+ * cloned. Dependencies: link the source's node_modules when the lockfiles
+ * match (fast), else `npm ci`.
+ */
+export async function checkout(input: { source: string; commit: string; dir: string }): Promise<Checkout> {
+  await mkdir(path.dirname(input.dir), { recursive: true });
+  const local = !isUrl(input.source);
+  const sourceRoot = local ? path.resolve(input.source) : null;
+  await removeWorkdir(sourceRoot, input.dir);
+  // A workdir deleted by hand stays registered; `worktree add` would refuse it.
+  if (sourceRoot) await git(sourceRoot, ['worktree', 'prune']);
+
+  const created = sourceRoot
+    ? await git(sourceRoot, ['worktree', 'add', '--detach', input.dir, input.commit])
+    : await git(path.dirname(input.dir), ['clone', '--quiet', input.source, input.dir]);
+  if (created.code !== 0) throw new Error(`checkout failed: ${created.out.trim()}`);
+  if (!sourceRoot) {
+    const detached = await git(input.dir, ['checkout', '--quiet', '--detach', input.commit]);
+    if (detached.code !== 0) throw new Error(`checkout of ${input.commit} failed: ${detached.out.trim()}`);
+  }
+
+  const lockfile = path.join(input.dir, 'package-lock.json');
+  try {
+    await lstat(lockfile);
+  } catch {
+    return { dir: input.dir, deps: 'none', depsMs: 0 };
+  }
+  const started = Date.now();
+  if (sourceRoot && (await sameFile(lockfile, path.join(sourceRoot, 'package-lock.json')))) {
+    // A junction needs no admin rights on Windows; a symlink elsewhere.
+    await symlink(
+      path.join(sourceRoot, 'node_modules'),
+      path.join(input.dir, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    return { dir: input.dir, deps: 'linked', depsMs: Date.now() - started };
+  }
+  const installed = await exec('npm', ['ci', '--no-audit', '--no-fund'], {
+    cwd: input.dir,
+    shell: true,
+    timeoutMs: NPM_CI_TIMEOUT_MS,
+  });
+  if (installed.code !== 0) throw new Error(`npm ci failed: ${installed.out.trim().slice(-2000)}`);
+  return { dir: input.dir, deps: 'installed', depsMs: Date.now() - started };
 }

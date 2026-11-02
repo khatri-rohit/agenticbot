@@ -62,6 +62,8 @@ export type TraceEvent =
       runId: string;
       iteration: number;
       toolName: string;
+      /** The model's tool_call id: links start, complete/error, ledger row and evictions. */
+      toolCallId?: string;
       args: unknown;
     }
   | {
@@ -69,6 +71,7 @@ export type TraceEvent =
       runId: string;
       iteration: number;
       toolName: string;
+      toolCallId?: string;
       durationMs: number;
       resultPreview: string;
       /** Full result length before any preview clipping. */
@@ -79,6 +82,7 @@ export type TraceEvent =
       runId: string;
       iteration: number;
       toolName: string;
+      toolCallId?: string;
       error: string;
     }
   | {
@@ -122,6 +126,8 @@ export type TraceEvent =
       evicted: number;
       beforeTokens: number;
       afterTokens: number;
+      /** Tool calls whose results became eviction cards in this pass. */
+      toolCallIds?: string[];
     }
   | {
       /** In-run extractive compaction of older iterations of this turn. */
@@ -130,6 +136,8 @@ export type TraceEvent =
       iteration: number;
       beforeTokens: number;
       afterTokens: number;
+      /** Tool calls whose rows were folded into the recap. */
+      toolCallIds?: string[];
     }
   | {
       type: 'skill_loaded';

@@ -1,186 +1,176 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { TraceEvent } from '@agent/agent-models';
-import { readRunTrace } from './trace.js';
+import type { RunUsage } from '@agent/agent-models';
+
+import { readCatalog } from './catalog.js';
+import { linesOf, readRunTrace, type TraceLine } from './trace.js';
 
 /**
- * Summary of one run, built from the trace file + last-run.json. This is the
- * join point: every downstream consumer (E1 metrics, E4 timeline, E6 analyst)
- * reads RunSummary, not raw traces. No second reader anywhere.
+ * One run, summarised from its trace (+ `last-run.json` for runs whose trace
+ * has no `run_finish`). The single join point: metrics, the viewer and the
+ * runner consume RunSummary; trace lines load on demand from `tracePath`.
  */
 export type RunSummary = {
   runId: string;
   threadId: string;
-  model: string;
-  mode: string;
-  posture: string;
-  depth: number;
-  status: string;
-  limitReason?: string;
-  iterations: number;
-  toolCalls: number;
-  promptTokensOwn: number;
-  promptTokensChildren: number;
-  durationMs: number;
-  startedAt: string;
-  finishedAt?: string;
   tracePath: string;
-  events: (TraceEvent | { type: 'unknown'; raw: unknown })[];
-  traceWarnings: number;
-  childRuns: RunSummary[];
-};
-
-type LastRunJson = {
-  runId: string;
-  status: string;
   model?: string;
   mode?: string;
   posture?: string;
+  /** 0 for a user run, 1 for a sub-agent. */
+  depth: number;
+  parentRunId?: string;
+  /** `run_finish.status`; `unknown` when the run never finished (crash, still running, old trace). */
+  status: 'completed' | 'incomplete' | 'error' | 'unknown';
   limitReason?: string;
+  iterations: number;
+  toolCalls: number;
+  /** Own + sub-agent spend from `run_finish`; absent on runs without one. */
+  usage?: RunUsage;
   startedAt?: string;
   finishedAt?: string;
-  iterations?: number;
-  depth?: number;
+  durationMs?: number;
+  /** Corrupt trace lines skipped while reading. */
+  traceWarnings: number;
+  /** Sub-agent runs started by this run (from their `run_start.parentRunId`). */
+  children: RunSummary[];
 };
 
+type LastRun = { runId?: string; status?: string; limitReason?: string; finishedAt?: string };
+
+const STATUSES = new Set(['completed', 'incomplete', 'error']);
+
+function asStatus(value: unknown): RunSummary['status'] {
+  return typeof value === 'string' && STATUSES.has(value)
+    ? (value as RunSummary['status'])
+    : 'unknown';
+}
+
+/** Pure: a RunSummary from parsed trace lines. Exported for fixtures and the viewer. */
+export function summarizeRun(input: {
+  runId: string;
+  threadId: string;
+  tracePath: string;
+  lines: TraceLine[];
+  warnings: number;
+  lastRun?: LastRun | null;
+}): RunSummary {
+  const { lines } = input;
+  const start = linesOf(lines, 'run_start')[0];
+  const finish = linesOf(lines, 'run_finish').at(-1);
+  const limit = linesOf(lines, 'limit').at(-1);
+  // Only trust last-run.json when it describes this run.
+  const lastRun = input.lastRun?.runId === input.runId ? input.lastRun : null;
+
+  const startedAt = start?.ts ?? lines[0]?.ts;
+  const finishedAt = finish?.ts ?? lastRun?.finishedAt;
+  const limitReason = finish?.limitReason ?? limit?.reason ?? lastRun?.limitReason;
+  const durationMs =
+    finish?.durationMs ??
+    (startedAt && finishedAt ? Date.parse(finishedAt) - Date.parse(startedAt) : undefined);
+
+  return {
+    runId: input.runId,
+    threadId: input.threadId,
+    tracePath: input.tracePath,
+    ...(start?.model ? { model: start.model } : {}),
+    ...(start?.mode ? { mode: start.mode } : {}),
+    ...(start?.posture ? { posture: start.posture } : {}),
+    depth: start?.depth ?? 0,
+    ...(start?.parentRunId ? { parentRunId: start.parentRunId } : {}),
+    status: asStatus(finish?.status ?? lastRun?.status),
+    ...(limitReason ? { limitReason } : {}),
+    iterations: finish?.iterations ?? linesOf(lines, 'llm_response').length,
+    toolCalls: finish?.toolCalls ?? linesOf(lines, 'tool_start').length,
+    ...(finish?.usage ? { usage: finish.usage } : {}),
+    ...(startedAt ? { startedAt } : {}),
+    ...(finishedAt ? { finishedAt } : {}),
+    ...(durationMs !== undefined && Number.isFinite(durationMs) ? { durationMs } : {}),
+    traceWarnings: input.warnings,
+    children: [],
+  };
+}
+
+async function readLastRun(threadDir: string): Promise<LastRun | null> {
+  try {
+    return JSON.parse(await readFile(path.join(threadDir, 'last-run.json'), 'utf8')) as LastRun;
+  } catch {
+    return null;
+  }
+}
+
+async function threadRuns(home: string, threadId: string): Promise<RunSummary[]> {
+  const threadDir = path.join(home, 'sessions', threadId);
+  const tracesDir = path.join(threadDir, 'traces');
+  let files: string[];
+  try {
+    files = (await readdir(tracesDir)).filter((file) => file.endsWith('.jsonl'));
+  } catch {
+    return [];
+  }
+  const lastRun = await readLastRun(threadDir);
+  const runs: RunSummary[] = [];
+  for (const file of files) {
+    const tracePath = path.join(tracesDir, file);
+    const parsed = await readRunTrace(tracePath);
+    runs.push(
+      summarizeRun({
+        runId: file.slice(0, -'.jsonl'.length),
+        threadId,
+        tracePath,
+        lines: parsed.lines,
+        warnings: parsed.warnings,
+        lastRun,
+      }),
+    );
+  }
+  return runs;
+}
+
+/** Threads to read: one thread plus its sub-agent threads, or every thread. */
+async function threadIds(home: string, threadId?: string): Promise<string[]> {
+  if (!threadId) {
+    try {
+      return await readdir(path.join(home, 'sessions'));
+    } catch {
+      return [];
+    }
+  }
+  // Sub-agent runs live in their own threads; the catalog links them.
+  const children = existsSync(path.join(home, 'catalog.db'))
+    ? readCatalog(home)
+        .filter((thread) => thread.parentThreadId === threadId)
+        .map((thread) => thread.id)
+    : [];
+  return [threadId, ...children];
+}
+
 /**
- * List runs for a home, optionally filtered to a thread. Walks
- * `sessions/<threadId>/traces/*.jsonl` and reads `last-run.json` for status.
- * Child runs (parent_run_id set in catalog) are nested under their parent.
+ * Runs under an agent home, newest first, with sub-agent runs nested under
+ * the run that started them. `threadId` limits to one thread (and its
+ * sub-agent threads); `since` (ISO) keeps runs started at or after it.
  */
 export async function listRuns(
   home: string,
   opts: { threadId?: string; since?: string } = {},
 ): Promise<RunSummary[]> {
-  const sessionsDir = path.join(home, 'sessions');
-  let threadDirs: string[];
-  try {
-    threadDirs = await readdir(sessionsDir);
-  } catch {
-    return [];
+  const all: RunSummary[] = [];
+  for (const id of await threadIds(home, opts.threadId)) {
+    all.push(...(await threadRuns(home, id)));
   }
-
-  const runs: RunSummary[] = [];
-  for (const threadId of threadDirs) {
-    if (opts.threadId && threadId !== opts.threadId) continue;
-
-    const threadDir = path.join(sessionsDir, threadId);
-    const statResult = await stat(threadDir).catch(() => null);
-    if (!statResult || !statResult.isDirectory()) continue;
-
-    // last-run.json gives us the most recent run's status.
-    const lastRunPath = path.join(threadDir, 'last-run.json');
-    let lastRun: LastRunJson | null = null;
-    try {
-      lastRun = JSON.parse(await readFile(lastRunPath, 'utf8')) as LastRunJson;
-    } catch {
-      lastRun = null;
-    }
-
-    // Collect all trace files in the thread's traces/ dir.
-    const tracesDir = path.join(threadDir, 'traces');
-    let traceFiles: string[];
-    try {
-      traceFiles = await readdir(tracesDir);
-    } catch {
-      traceFiles = [];
-    }
-
-    for (const traceFile of traceFiles) {
-      if (!traceFile.endsWith('.jsonl')) continue;
-      const runId = traceFile.replace(/\.jsonl$/, '');
-      const tracePath = path.join(tracesDir, traceFile);
-
-      const parsed = await readRunTrace(tracePath);
-      const summary = summarizeFromTrace(
-        runId,
-        threadId,
-        tracePath,
-        parsed.events,
-        parsed.warnings,
-        lastRun,
-      );
-      runs.push(summary);
-    }
+  const byId = new Map(all.map((run) => [run.runId, run]));
+  const roots: RunSummary[] = [];
+  for (const run of all) {
+    const parent = run.parentRunId ? byId.get(run.parentRunId) : undefined;
+    if (parent) parent.children.push(run);
+    else roots.push(run);
   }
-
-  // Nest child runs under parents by matching runId to parentRunId.
-  // We don't have parentRunId on RunSummary directly; the catalog reader
-  // provides that link. For now, flat list — nesting is done by the caller
-  // using ThreadRecord.parentRunId from readCatalog.
-  return runs;
-}
-
-function summarizeFromTrace(
-  runId: string,
-  threadId: string,
-  tracePath: string,
-  events: (TraceEvent | { type: 'unknown'; raw: unknown })[],
-  warnings: number,
-  lastRun: LastRunJson | null,
-): RunSummary {
-  let iterations = 0;
-  let toolCalls = 0;
-  let promptTokensOwn = 0;
-  let promptTokensChildren = 0;
-  let model = lastRun?.model ?? 'unknown';
-  let mode = lastRun?.mode ?? 'workspace';
-  let posture = lastRun?.posture ?? 'default';
-  let depth = lastRun?.depth ?? 0;
-  let startedAt = lastRun?.startedAt ?? '';
-  let finishedAt = lastRun?.finishedAt;
-  let limitReason = lastRun?.limitReason;
-
-  for (const event of events) {
-    if (event.type === 'llm_request') {
-      iterations++;
-      const e = event as Extract<TraceEvent, { type: 'llm_request' }>;
-      if (typeof e.estimatedPromptTokens === 'number') {
-        promptTokensOwn += e.estimatedPromptTokens;
-      }
-    } else if (event.type === 'run_start') {
-      const e = event as Extract<TraceEvent, { type: 'run_start' }>;
-      model = e.model ?? model;
-      mode = e.mode ?? mode;
-      posture = e.posture ?? posture;
-      depth = e.depth ?? depth;
-    } else if (event.type === 'run_finish') {
-      const e = event as Extract<TraceEvent, { type: 'run_finish' }>;
-      finishedAt = e.ts ?? finishedAt;
-      limitReason = e.limitReason ?? limitReason;
-      if (typeof e.toolCalls === 'number') toolCalls = e.toolCalls;
-      if (typeof e.iterations === 'number') iterations = e.iterations;
-    } else if (event.type === 'tool_start') {
-      toolCalls++;
-    }
-  }
-
-  // run_finish has explicit iterations/toolCalls; if we only saw llm_request
-  // and tool_start, use those counts.
-  const durationMs = finishedAt && startedAt
-    ? new Date(finishedAt).getTime() - new Date(startedAt).getTime()
-    : 0;
-
-  return {
-    runId,
-    threadId,
-    model,
-    mode,
-    posture,
-    depth,
-    status: lastRun?.status ?? 'unknown',
-    ...(limitReason ? { limitReason } : {}),
-    iterations,
-    toolCalls,
-    promptTokensOwn,
-    promptTokensChildren,
-    durationMs,
-    startedAt,
-    ...(finishedAt ? { finishedAt } : {}),
-    tracePath,
-    events,
-    traceWarnings: warnings,
-    childRuns: [],
-  };
+  const newestFirst = (a: RunSummary, b: RunSummary) =>
+    (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
+  for (const run of all) run.children.sort(newestFirst);
+  return roots
+    .filter((run) => !opts.since || (run.startedAt ?? '') >= opts.since)
+    .sort(newestFirst);
 }
