@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 
 import { createLogger, createHttpLogger } from './lib/logger';
+import { warnRoleModelsWithoutTools } from './lib/model-runtime';
+import { initSystem1 } from './lib/system1-runtime';
 import { agentRouter } from './routes/agent/agent.routes';
 import { voiceRouter } from './routes/voice/voice.routes';
 
@@ -41,4 +43,7 @@ if (voiceSttProvider === 'speaches') {
 
 app.listen(port, host, () => {
   logger.info({ host, port, voiceSttProvider }, 'api ready');
+  // Logs the System 1 setup and warms the scorer; never blocks or throws.
+  initSystem1();
+  void warnRoleModelsWithoutTools();
 });

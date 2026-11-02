@@ -34,6 +34,7 @@ export type { OnTextDelta, ModelCallOptions } from './lib/model/types';
 export {
   getOllamaModelConfig,
   listOllamaModels,
+  peekOllamaModelConfig,
   resolveReasoningEffort,
 } from './lib/model/ollama-model-config';
 
@@ -42,6 +43,7 @@ export { runLoop } from './lib/loop/loop';
 export type {
   CapacityGate,
   ModelCallFn,
+  ModelCallOverrides,
   RunLoopConfig,
   RunLoopResult,
   RunLoopStatus,
@@ -55,6 +57,19 @@ export {
   type AgentLimits,
 } from './lib/loop/limits';
 export { createStreamModelCall } from './lib/loop/model-call';
+
+// System 1 (optional local scorer for harness decisions)
+export { callSystem1, type System1ClientConfig } from './lib/system1/client';
+export { System1Health } from './lib/system1/health';
+export { createSystem1Port, type System1Port } from './lib/system1/port';
+export {
+  buildEffortLadder,
+  buildEffortPolicy,
+  modelOwnsAuto,
+  resolveProfileThinking,
+  type EffortPolicy,
+  type ProfileThinking,
+} from './lib/system1/effort';
 
 // Tools
 export {

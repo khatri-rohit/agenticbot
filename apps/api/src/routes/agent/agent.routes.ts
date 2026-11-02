@@ -30,11 +30,13 @@ import {
   threadMentions,
   type ContextWindowMode,
   type RunPosture,
+  SYSTEM1_AUTO_THINKING,
 } from '@agent/agent-models';
 import {
   RUN_HANDLE_TTL_MS,
   RunManager,
   assembleContext,
+  buildEffortPolicy,
   buildExtractiveSnapshot,
   chooseCompactThroughSeqForTarget,
   createMemoryTool,
@@ -46,7 +48,9 @@ import {
   listOllamaModels,
   listTools,
   loadWorkspaceRules,
+  modelOwnsAuto,
   packMentionedThread,
+  peekOllamaModelConfig,
   getSkill,
   traceCompactionEvent,
   type MentionedThreadContext,
@@ -64,6 +68,11 @@ import { generateThreadTitle } from '../../lib/generate-thread-title';
 import { pickFolderDialog } from '../../lib/pick-folder';
 import { getAgentHome, getMemoryStore, getThreadStore } from '../../lib/store-instance';
 import { resolveCallOptions, resolveContextBudget } from '../../lib/model-runtime';
+import {
+  system1AutoFor,
+  system1EnforceAvailable,
+  system1PortForRun,
+} from '../../lib/system1-runtime';
 import { createSubagentHost } from '../../lib/subagent-host';
 import { createJsonlTraceSink } from '../../lib/trace-sink.js';
 import { skillsRouter } from './skills.routes';
@@ -773,13 +782,29 @@ router.post('/run', async (req: Request, res: Response) => {
   });
   if (preRunSnapshot) prepared = await prepareRun(prepareInput);
 
-  const callOptions = await resolveCallOptions(
+  // Auto (System 1) starts from the model's default; the router moves from
+  // there. A model that lists its own `auto` level gets that value instead.
+  // Same guard resolveCallOptions applies, so the policy baseline and the
+  // closed-over reasoning_effort always agree.
+  const requestedThinking =
+    typeof thinking === 'boolean' || (typeof thinking === 'string' && thinking.length > 0)
+      ? thinking
+      : undefined;
+  let callOptions = await resolveCallOptions(
     useModel,
-    thinking,
+    requestedThinking === SYSTEM1_AUTO_THINKING ? undefined : requestedThinking,
     endpoint,
     prepared.mode.temperature,
   );
+  // Cached by resolveCallOptions; never refetched here, so a failed
+  // /api/show costs nothing extra (the run then uses a fixed policy).
+  const modelConfig = peekOllamaModelConfig(useModel, endpoint) ?? null;
+  if (requestedThinking === SYSTEM1_AUTO_THINKING && modelConfig && modelOwnsAuto(modelConfig)) {
+    callOptions = await resolveCallOptions(useModel, requestedThinking, endpoint, prepared.mode.temperature);
+  }
   const modelCall = createStreamModelCall(callOptions);
+  const effortPolicy = buildEffortPolicy(modelConfig, requestedThinking, system1EnforceAvailable(endpoint));
+  const system1 = system1PortForRun(endpoint, prepared.mode.limits.maxWallMs);
   // Cloud runs share one account: pause on a spent session/week instead of
   // erroring, and steer tighter when behind even weekly pace.
   const capacity =
@@ -833,6 +858,8 @@ router.post('/run', async (req: Request, res: Response) => {
     trace: traceSinkFor(store, threadId),
     ...(skillNames.length > 0 ? { pinnedSkills: skillNames } : {}),
     ...(capacity ? { capacity } : {}),
+    ...(system1 ? { system1 } : {}),
+    effortPolicy,
     onFinished: async (result) => {
       // Not awaited: the balance read after a run must not delay compaction.
       void appendUsageLog(getAgentHome(), {
@@ -847,6 +874,8 @@ router.post('/run', async (req: Request, res: Response) => {
       });
       try {
         const runStatus = lastRunStatusFrom(result, runManager);
+        // Keeps the System 1 notice across a reload (the SSE event is live-only).
+        const system1Report = system1?.report();
         await store.writeLastRun(threadId, {
           runId: result.runId,
           status: runStatus.status,
@@ -855,6 +884,7 @@ router.post('/run', async (req: Request, res: Response) => {
           toolCalls: result.toolCalls,
           finishedAt: new Date().toISOString(),
           ...(runStatus.limitReason ? { limitReason: runStatus.limitReason } : {}),
+          ...(system1Report?.fallbacks.length ? { system1: system1Report } : {}),
         });
       } catch (error) {
         console.error(
@@ -1056,7 +1086,7 @@ router.get('/models/config', async (req: Request, res: Response) => {
 
   try {
     const config = await getOllamaModelConfig(model, endpoint);
-    return res.json(config);
+    return res.json({ ...config, system1Auto: system1AutoFor(endpoint, config) });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return res.status(502).json({ error: msg });

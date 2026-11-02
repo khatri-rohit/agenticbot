@@ -143,6 +143,8 @@ export class RunManager {
       ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       ...(opts.pinnedSkills?.length ? { pinnedSkills: opts.pinnedSkills } : {}),
       ...(opts.capacity ? { capacity: opts.capacity } : {}),
+      ...(opts.system1 ? { system1: opts.system1 } : {}),
+      ...(opts.effortPolicy ? { effortPolicy: opts.effortPolicy } : {}),
       emit: (event) => {
         if (handle.cancelled && event.type !== 'subrun.settled') return;
         handle.emitter.emit(event);

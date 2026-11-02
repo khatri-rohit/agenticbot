@@ -6,6 +6,7 @@ import {
   type ContextReport,
   type RunPosture,
   type Snapshot,
+  type System1RunReport,
   type ThreadPlan,
 } from '@agent/agent-models';
 import { setContextAnchor } from '../lib/context-anchor';
@@ -107,6 +108,12 @@ export function limitNoticeFromIncomplete(
   return { runId: run.runId, reason: run.limitReason ?? 'Run stopped early (incomplete).' };
 }
 
+/** System 1 fell back during a run; that run used its defaults for those decisions. */
+export type System1Notice = {
+  runId: string;
+  report: System1RunReport;
+};
+
 export type PendingChoice = {
   choiceId: string;
   runId: string;
@@ -120,6 +127,8 @@ export type ChatState = {
   compactionNotice: CompactionNotice | null;
   /** Last limit.hit / incomplete finish, until the next run. */
   limitNotice: LimitNotice | null;
+  /** Last run's System 1 fallbacks, until the next run. */
+  system1Notice: System1Notice | null;
   /** Thread plan. Live above the input while running; pinned as a chip
    *  under the anchor user message once the run settles. */
   plan: ThreadPlan | null;
@@ -139,6 +148,7 @@ export function initialChatState(): ChatState {
     settledToolActivity: [],
     compactionNotice: null,
     limitNotice: null,
+    system1Notice: null,
     plan: null,
     pendingChoices: [],
   };
@@ -199,6 +209,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         settledToolActivity: [],
         compactionNotice: state.compactionNotice,
         limitNotice: null,
+        system1Notice: null,
         plan: state.plan,
         pendingChoices: [],
       };
@@ -396,6 +407,12 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       };
     }
 
+    case 'system1.report': {
+      // Emitted after the loop returns (after run.completed / run.error),
+      // so it must not depend on activeRun.
+      return { ...state, system1Notice: { runId: event.runId, report: event.report } };
+    }
+
     case 'run.settled': {
       // Keep snippets/tools alive until the ledger refetch lands — otherwise
       // the response flashes off→on between activeRun nulling and messages update.
@@ -405,6 +422,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         settledToolActivity: state.activeRun?.toolActivity ?? [],
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
+        system1Notice: state.system1Notice,
         plan: state.plan,
         pendingChoices: [],
       };
@@ -417,6 +435,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         settledToolActivity: state.activeRun?.toolActivity ?? [],
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
+        system1Notice: state.system1Notice,
         plan: state.plan,
         pendingChoices: [],
       };

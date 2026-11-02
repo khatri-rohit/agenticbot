@@ -31,6 +31,8 @@ import {
 } from '../context/residency';
 import { consoleTrace, type TraceEvent } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { createEffortRouter, type EffortSignals } from '../system1/effort';
+import { buildEffortState } from '../system1/state';
 import { getSkill } from '../tools/skills';
 import { BUDGET_WARN_RATIO, resolveLimits } from './limits';
 import type { ModelTurn } from '../model/types';
@@ -395,6 +397,7 @@ export async function runLoop(
     runId,
     trace,
   }, usage, startedAt);
+  await reportSystem1(config, runId, trace);
   trace({
     type: 'run_finish',
     runId,
@@ -406,6 +409,31 @@ export async function runLoop(
     durationMs: Date.now() - startedAt,
   });
   return { ...result, usage };
+}
+
+/**
+ * End-of-run System 1 summary: always to the trace, and to the client when
+ * any decision fell back. Sub-agent runs report through their own trace only.
+ * Never throws — reporting must not change how the run ended.
+ */
+async function reportSystem1(
+  config: RunLoopConfig,
+  runId: string,
+  trace: (event: TraceEvent) => void,
+): Promise<void> {
+  const system1 = config.system1;
+  if (!system1) return;
+  try {
+    await system1.settle();
+    const report = system1.report();
+    if (!report) return;
+    trace({ type: 'system1_report', runId, report });
+    if (report.fallbacks.length > 0 && (config.depth ?? 0) === 0) {
+      config.emit?.({ type: 'system1.report', runId, report });
+    }
+  } catch (error) {
+    console.error('[system1] report failed:', error instanceof Error ? error.message : error);
+  }
 }
 
 type CoreResult = Omit<RunLoopResult, 'usage'>;
@@ -424,7 +452,22 @@ async function runLoopCore(
   runStartedAt: number,
 ): Promise<CoreResult> {
   const limits = resolveLimits(config.limits);
-  const trace = config.trace;
+  // Rule inputs for the effort router, read from events the loop already
+  // traces; cleared after every model call.
+  const turnSignals = { toolError: false, wrote: false, nudged: false };
+  const trace = (event: TraceEvent) => {
+    if (event.type === 'tool_error') turnSignals.toolError = true;
+    else if (
+      event.type === 'tool_start' &&
+      (event.toolName === 'edit_file' || event.toolName === 'run_terminal' || event.toolName === 'delegate')
+    ) {
+      turnSignals.wrote = true;
+    } else if (event.type === 'stall_nudge' || event.type === 'budget_warning') {
+      turnSignals.nudged = true;
+    }
+    config.trace(event);
+  };
+  const effortRouter = createEffortRouter();
   // run.completed and turn.completed carry run spend so the UI meter and
   // offline traces never have to sum per-call usage themselves.
   const emit = config.emit
@@ -1912,11 +1955,43 @@ async function runLoopCore(
         return finishPaused(capacityPause);
       }
 
+      const effortSignals: EffortSignals = {
+        iteration: iterations,
+        steering: turnSignals.nudged || messages[messages.length - 1]?.role === 'user',
+        toolError: turnSignals.toolError,
+        wrote: turnSignals.wrote,
+      };
+      turnSignals.toolError = false;
+      turnSignals.wrote = false;
+      turnSignals.nudged = false;
+      const decisionIteration = iterations;
+      const effort = await effortRouter.decide({
+        policy: config.effortPolicy,
+        system1: config.system1,
+        signals: effortSignals,
+        state: () =>
+          buildEffortState({
+            messages,
+            runStart,
+            signals: effortSignals,
+            ...(limits.maxIterations !== undefined ? { maxIterations: limits.maxIterations } : {}),
+            mode: config.mode,
+          }),
+        ...(signal ? { signal } : {}),
+        onTrace: (decision) =>
+          trace({ type: 'system1_decision', runId, iteration: decisionIteration, decision }),
+      });
+      throwIfAborted(signal);
+      if (effort.trace) {
+        trace({ type: 'system1_decision', runId, iteration: iterations, decision: effort.trace });
+      }
+
       trace({
         type: 'llm_request',
         runId,
         iteration: iterations,
         estimatedPromptTokens: estimatedPrompt,
+        ...(effort.wire !== undefined ? { reasoningEffort: effort.wire } : {}),
       });
       emit?.({ type: 'turn.started', runId, iteration: iterations });
 
@@ -1940,6 +2015,7 @@ async function runLoopCore(
         tools,
         onTextDelta,
         signal,
+        effort.applied && effort.wire !== undefined ? { reasoningEffort: effort.wire } : undefined,
       );
       throwIfAborted(signal);
       const durationMs = Date.now() - startedAt;

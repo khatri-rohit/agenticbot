@@ -4,6 +4,7 @@ import type { MemoryTarget } from './memory.js';
 import type { ThreadPlan } from './plan.js';
 import type { RunPosture, RunUsage, TokenUsage } from './run.js';
 import type { SubagentStatus } from './subagent-types.js';
+import type { System1RunReport } from './system1.js';
 
 /**
  * AgentEvent — the server's streaming protocol to the client.
@@ -42,7 +43,8 @@ export type AgentEvent =
   | LimitHit
   | SubrunStarted
   | SubrunProgress
-  | SubrunSettled;
+  | SubrunSettled
+  | System1Report;
 
 export interface RunStarted {
   seq: number;
@@ -282,6 +284,18 @@ export interface SubrunSettled {
   summary: string;
   limitReason?: string;
   usage?: RunUsage;
+}
+
+/**
+ * System 1 gave no opinion at least once this run (timeout, unreachable,
+ * bad response, …). The run continued on its defaults; this tells the user
+ * which decisions fell back. Emitted once, after the loop returns.
+ */
+export interface System1Report {
+  seq: number;
+  type: 'system1.report';
+  runId: string;
+  report: System1RunReport;
 }
 
 /** Union of event types for filtering. */

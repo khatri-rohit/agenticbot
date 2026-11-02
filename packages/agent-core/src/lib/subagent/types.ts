@@ -1,5 +1,7 @@
 import type { ModelRole } from '@agent/agent-models';
 
+import type { ProfileThinking } from '../system1/effort';
+
 /**
  * A sub-agent profile is data: which model role, which tools (intersected
  * with the parent's at spawn), which limits, what context it starts with,
@@ -26,6 +28,11 @@ export type SubagentProfile = {
   name: string;
   description: string;
   modelRole: ModelRole;
+  /**
+   * Thinking for the child, resolved against the child model's own values:
+   * `off` (if the model offers it), `max` (its highest level), or `default`.
+   */
+  thinking: ProfileThinking;
   /** Wanted tools. The child gets these ∩ the parent's registry − always-stripped. */
   tools: string[];
   limits: SubagentLimits;

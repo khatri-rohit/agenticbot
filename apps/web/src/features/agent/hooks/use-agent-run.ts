@@ -169,6 +169,9 @@ export function useAgentRun(threadId: string | null) {
           ...(limitNoticeFromIncomplete(lastRun)
             ? { limitNotice: limitNoticeFromIncomplete(lastRun) }
             : {}),
+          ...(lastRun?.system1
+            ? { system1Notice: { runId: lastRun.runId, report: lastRun.system1 } }
+            : {}),
         }));
         if (ledger.activeRunId && !chatStateRef.current.activeRun) {
           subscribeToRunRef.current(ledger.activeRunId);

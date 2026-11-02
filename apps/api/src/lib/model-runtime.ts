@@ -71,3 +71,25 @@ export function modelRolesFor(main: string): ModelRoles {
     ...(process.env.AGENT_MODEL_STRONG ? { strong: process.env.AGENT_MODEL_STRONG } : {}),
   });
 }
+
+/**
+ * Boot check: a sub-agent role model without tool support would fail mid-run.
+ * Warns once per configured role; never blocks startup.
+ */
+export async function warnRoleModelsWithoutTools(): Promise<void> {
+  const roles = [
+    ['AGENT_MODEL_FAST', process.env.AGENT_MODEL_FAST?.trim()],
+    ['AGENT_MODEL_STRONG', process.env.AGENT_MODEL_STRONG?.trim()],
+  ] as const;
+  for (const [name, model] of roles) {
+    if (!model) continue;
+    try {
+      const config = await getOllamaModelConfig(model, 'cloud');
+      if (!config.supportsTools) {
+        console.warn(`[models] ${name}=${model} does not list the "tools" capability; sub-agents on it cannot call tools`);
+      }
+    } catch (error) {
+      console.warn(`[models] ${name}=${model}: /api/show failed (${error instanceof Error ? error.message : error})`);
+    }
+  }
+}

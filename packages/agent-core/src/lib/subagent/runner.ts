@@ -74,8 +74,11 @@ export type SubagentHost = {
   writeLastRun(threadId: string, lastRun: ThreadLastRun): Promise<void>;
   /** Model id for a role; `main` is the parent's model. */
   modelFor(role: ModelRole, parentModel: string): string;
-  /** Call function with that model's own options (temperature, thinking, window). */
-  modelCall(model: string): Promise<ModelCallFn>;
+  /**
+   * Call function with that model's own options (temperature, window), with
+   * thinking resolved from the profile against that model's own values.
+   */
+  modelCall(model: string, thinking: SubagentProfile['thinking']): Promise<ModelCallFn>;
   /** Context budget for a model at the default window. */
   contextBudget(model: string): Promise<ContextBudget>;
   agentsMd(workspaceRoot: string): Promise<string>;
@@ -397,7 +400,7 @@ export function createSubagentRunner(deps: {
         });
       }
 
-      const modelCall = await host.modelCall(model);
+      const modelCall = await host.modelCall(model, profile.thinking);
       runManager.start({
         runId: subRunId,
         threadId,

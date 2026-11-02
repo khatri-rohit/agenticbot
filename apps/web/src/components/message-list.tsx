@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { Message } from '@agent/agent-models';
+import type { Message, System1FallbackKind, System1RunReport } from '@agent/agent-models';
 import type {
   ChatState,
   CompactionNotice,
@@ -391,6 +391,12 @@ export function MessageList({
             </div>
           ) : null}
 
+          {chatState.system1Notice ? (
+            <p className="type-caption px-1 text-muted-foreground" role="status">
+              {system1NoticeText(chatState.system1Notice.report)}
+            </p>
+          ) : null}
+
           <div ref={endRef} className="h-6" />
         </div>
       </div>
@@ -401,6 +407,32 @@ export function MessageList({
 /** Stops that leave a handoff to continue from (not cancel, errors, or plan/finish gates). */
 function isResumableLimit(reason: string): boolean {
   return /^limit\.(tokens|wall|iterations|tools|capacity|research):/.test(reason);
+}
+
+const SYSTEM1_KIND_LABEL: Record<System1FallbackKind, string> = {
+  unreachable: 'unreachable',
+  timeout: 'timed out',
+  http_error: 'HTTP error',
+  bad_response: 'unexpected answer',
+  inconsistent: 'inconsistent scores',
+  breaker_open: 'paused after failures',
+  busy: 'busy',
+  budget_exhausted: 'time budget spent',
+  internal: 'internal error',
+};
+
+/** One line: how many decisions fell back, why, and from which step. */
+function system1NoticeText(report: System1RunReport): string {
+  const total = report.fallbacks.reduce((sum, fallback) => sum + fallback.count, 0);
+  const parts = report.fallbacks.map(
+    (fallback) =>
+      `${SYSTEM1_KIND_LABEL[fallback.kind]} ×${fallback.count} from step ${fallback.firstIteration}`,
+  );
+  const what = `System 1 skipped ${total} decision${total === 1 ? '' : 's'} (${parts.join('; ')}).`;
+  // Shadow only observes, so a skipped check changed nothing in the run.
+  return report.mode === 'shadow'
+    ? `${what} It was only observing; the run was not affected.`
+    : `${what} Those steps used the default thinking level.`;
 }
 
 function isCapacityLimit(reason: string): boolean {

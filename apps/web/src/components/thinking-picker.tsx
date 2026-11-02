@@ -1,7 +1,11 @@
 'use client';
 
 import { Brain, ChevronDown } from 'lucide-react';
-import type { OllamaThinkingConfig, ThinkingValue } from '@agent/agent-models';
+import {
+  SYSTEM1_AUTO_THINKING,
+  type OllamaThinkingConfig,
+  type ThinkingValue,
+} from '@agent/agent-models';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -29,6 +33,7 @@ function thinkingFromKey(key: string, values: ThinkingValue[]): ThinkingValue {
 function thinkingLabel(value: ThinkingValue): string {
   if (value === false) return 'Off';
   if (value === true) return 'On';
+  if (value === SYSTEM1_AUTO_THINKING) return 'Auto';
   const text = String(value);
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -38,11 +43,14 @@ export function ThinkingPicker({
   value,
   onChange,
   disabled,
+  autoAvailable = false,
 }: {
   thinking: OllamaThinkingConfig;
   value: ThinkingValue | undefined;
   onChange: (value: ThinkingValue) => void;
   disabled?: boolean;
+  /** System 1 can pick a level per step from this model's own levels. */
+  autoAvailable?: boolean;
 }) {
   if (!thinking.supported || thinking.values.length === 0) return null;
 
@@ -74,9 +82,21 @@ export function ThinkingPicker({
         <DropdownMenuRadioGroup
           value={selectedKey}
           onValueChange={(key) =>
-            onChange(thinkingFromKey(key, thinking.values))
+            onChange(
+              autoAvailable && key === SYSTEM1_AUTO_THINKING
+                ? SYSTEM1_AUTO_THINKING
+                : thinkingFromKey(key, thinking.values),
+            )
           }
         >
+          {autoAvailable ? (
+            <DropdownMenuRadioItem
+              value={SYSTEM1_AUTO_THINKING}
+              title="System 1 picks a level for each step from this model's levels"
+            >
+              Auto
+            </DropdownMenuRadioItem>
+          ) : null}
           {thinking.values.map((option) => {
             const key = thinkingKey(option);
             return (

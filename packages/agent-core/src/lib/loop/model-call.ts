@@ -1,6 +1,6 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import type { ModelCallFn } from './types';
+import type { ModelCallFn, ModelCallOverrides } from './types';
 import type { ModelCallOptions } from '../model/call-options';
 import { streamModelTurn } from '../model/stream';
 import type { ToolRegistry } from '../tools/type';
@@ -17,9 +17,13 @@ export function createStreamModelCall(options?: ModelCallOptions): ModelCallFn {
     tools: ToolRegistry,
     onTextDelta?: (delta: string) => void,
     signal?: AbortSignal,
+    overrides?: ModelCallOverrides,
   ): ReturnType<ModelCallFn> =>
     streamModelTurn(model, messages, tools, onTextDelta, {
       ...options,
       ...(signal ? { signal } : {}),
+      ...(overrides?.reasoningEffort !== undefined
+        ? { reasoningEffort: overrides.reasoningEffort }
+        : {}),
     });
 }

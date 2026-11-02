@@ -33,6 +33,11 @@ export type OllamaModelConfig = {
   thinking: OllamaThinkingConfig;
   supportsTools: boolean;
   supportsVision: boolean;
+  /**
+   * Set by the API, not /api/show: System 1 can choose this model's thinking
+   * level per step (offer "Auto" in the picker).
+   */
+  system1Auto?: boolean;
 };
 
 /**

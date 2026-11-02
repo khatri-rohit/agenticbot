@@ -20,6 +20,8 @@ import type {
   RunLoopResult,
   SubagentSpawner,
 } from '../loop/types';
+import type { EffortPolicy } from '../system1/effort';
+import type { System1Port } from '../system1/port';
 import type { ToolRegistry } from '../tools/type';
 
 /** In-memory run handle status (RunManager; narrower than domain RunStatus). */
@@ -90,4 +92,8 @@ export type StartRunOptions = {
   pinnedSkills?: string[];
   /** Parent run's signal: aborting it cancels this run. */
   parentSignal?: AbortSignal;
+  /** Optional System 1 scorer (see RunLoopConfig.system1). */
+  system1?: System1Port;
+  /** Thinking choices for this run (see RunLoopConfig.effortPolicy). */
+  effortPolicy?: EffortPolicy;
 };

@@ -26,6 +26,7 @@ import type {
 } from '@agent/agent-models';
 import {
   MAX_THREAD_MENTIONS,
+  SYSTEM1_AUTO_THINKING,
   imageAttachments,
   isThreadMention,
   resolveContextWindow,
@@ -888,7 +889,8 @@ export function ChatInput({
     const allowed = modelConfig.thinking.values;
     if (
       options.thinking !== undefined &&
-      allowed.some((v) => Object.is(v, options.thinking))
+      (allowed.some((v) => Object.is(v, options.thinking)) ||
+        (modelConfig.system1Auto === true && options.thinking === SYSTEM1_AUTO_THINKING))
     ) {
       return;
     }
@@ -1070,6 +1072,7 @@ export function ChatInput({
             onComposerOptionsChange({ ...composerOptions, thinking })
           }
           disabled={isRunning}
+          autoAvailable={modelConfig.system1Auto === true}
         />
       ) : null}
       <ContextWindowPicker

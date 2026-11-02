@@ -4,11 +4,13 @@ import {
   WORKSPACE_MODE,
   envelopeToChatMessage,
   type OllamaEndpoint,
+  type ThinkingValue,
 } from '@agent/agent-models';
 import {
   createStreamModelCall,
   getOllamaModelConfig,
   loadWorkspaceRules,
+  resolveProfileThinking,
   type SubagentHost,
 } from '@agent/agent-core';
 
@@ -81,13 +83,12 @@ export function createSubagentHost(deps: {
           ? 'main'
           : role
       ],
-    async modelCall(model) {
-      // Children search and report; turn thinking off where the model allows
-      // it, otherwise keep the model's own default.
-      let thinking: false | undefined;
+    async modelCall(model, preference) {
+      // The profile says off / default / max; the child model's own values
+      // say what that means (off only if it offers off, max = its top level).
+      let thinking: ThinkingValue | undefined;
       try {
-        const config = await getOllamaModelConfig(model, endpoint);
-        thinking = config.thinking.values.some((value) => value === false) ? false : undefined;
+        thinking = resolveProfileThinking(await getOllamaModelConfig(model, endpoint), preference);
       } catch {
         thinking = undefined;
       }

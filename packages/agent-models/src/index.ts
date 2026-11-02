@@ -28,7 +28,20 @@ export type {
   SubrunStarted,
   SubrunProgress,
   SubrunSettled,
+  System1Report,
 } from './lib/event.js';
+
+export { SYSTEM1_AUTO_THINKING } from './lib/system1.js';
+export type {
+  System1EffortTrace,
+  System1Fallback,
+  System1FallbackKind,
+  System1Mode,
+  System1Question,
+  System1RunReport,
+  System1Scores,
+  System1Site,
+} from './lib/system1.js';
 
 export type { Thread, ThreadKind } from './lib/thread.js';
 export {
