@@ -75,12 +75,11 @@ function allowedFor(settings: System1Settings, endpoint: OllamaEndpoint): boolea
 /** A fresh port for one run, or undefined (never consulted). */
 export function system1PortForRun(
   endpoint: OllamaEndpoint,
-  maxWallMs?: number,
+  maxWallMs: number,
 ): System1Port | undefined {
   const settings = system1Settings();
   if (!settings || settings.mode === 'off' || !allowedFor(settings, endpoint)) return undefined;
-  const runBudgetMs =
-    maxWallMs !== undefined ? Math.min(RUN_BUDGET_CAP_MS, maxWallMs * RUN_BUDGET_SHARE) : RUN_BUDGET_CAP_MS;
+  const runBudgetMs = Math.min(RUN_BUDGET_CAP_MS, maxWallMs * RUN_BUDGET_SHARE);
   return createSystem1Port({ client: settings.client, health, mode: settings.mode, runBudgetMs });
 }
 

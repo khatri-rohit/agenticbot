@@ -917,8 +917,9 @@ router.post('/run', async (req: Request, res: Response) => {
   });
   if (preRunSnapshot) emitCompacted(store, assignedRunId, threadId, preRunSnapshot);
 
-  // First turn: title via the same chat model (runs in parallel with the agent).
-  // Await so POST /run returns after ThreadStore has the real title for refreshThreads.
+  // First turn: title via TITLE_MODEL on cloud runs, else the run's model
+  // (runs in parallel with the agent). Await so POST /run returns after
+  // ThreadStore has the real title for refreshThreads.
   if (isFirstUserTurn && message) {
     const title = await generateThreadTitle(
       message.content || 'Image chat',

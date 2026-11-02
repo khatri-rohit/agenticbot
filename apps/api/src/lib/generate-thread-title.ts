@@ -3,7 +3,11 @@ import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/ch
 import { getClient, getOllamaModelConfig, resolveReasoningEffort } from '@agent/agent-core';
 import { clampChatTitle, type OllamaEndpoint } from '@agent/agent-models';
 
-/** Bounds how long POST /run waits on the title (it awaits it). */
+/**
+ * Bounds the completion call itself. POST /run awaits the whole title path,
+ * whose worst case is this plus getOllamaModelConfig's own 15s fetch timeout
+ * (the config lookup runs before the signal applies).
+ */
 const TITLE_TIMEOUT_MS = 4_000;
 
 /**

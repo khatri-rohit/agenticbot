@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useState } from 'react';
 import {
   AlertCircle,
@@ -25,11 +25,11 @@ function formatTokens(tokens: number): string {
 
 /**
  * Sub-agent delegation card in the turn trail — same column as tools.
- * Running: spinner + clickable link to child thread. Settled: expandable
- * digest with status badge and iteration/tool-call counts.
+ * Running: spinner, live progress, and a full-width link to the child
+ * thread's live view. Settled: expandable digest with status badge and
+ * iteration/tool-call counts.
  */
 export function SubagentCard({ activity }: { activity: SubagentActivity }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const running = activity.status === 'running';
 
@@ -52,14 +52,19 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
 
   return (
     <section
-      className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-muted/25"
+      className={cn(
+        'min-w-0 max-w-full overflow-hidden rounded-lg border',
+        running
+          ? 'border-primary/40 bg-primary/5'
+          : 'border-border/60 bg-muted/25',
+      )}
       aria-label={`Sub-agent ${activity.profile}: ${activity.task}`}
       aria-busy={running}
     >
       <button
         type="button"
         className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-        aria-expanded={open}
+        aria-expanded={running ? undefined : open}
         onClick={() => {
           if (!running) setOpen((value) => !value);
         }}
@@ -90,6 +95,15 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
           />
         ) : null}
       </button>
+      {running && activity.subThreadId ? (
+        <Link
+          href={`/chat/${activity.subThreadId}`}
+          className="type-ui flex w-full items-center justify-between gap-2 border-t border-primary/30 px-3 py-2 text-left text-primary transition-colors hover:bg-primary/10"
+        >
+          <span className="min-w-0 truncate">View live conversation</span>
+          <span aria-hidden="true">→</span>
+        </Link>
+      ) : null}
       {!running && open ? (
         <div className="space-y-2 border-t border-border/60 px-3 py-2">
           {activity.summary ? (
@@ -98,13 +112,12 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
             </pre>
           ) : null}
           {activity.subThreadId ? (
-            <button
-              type="button"
+            <Link
+              href={`/chat/${activity.subThreadId}`}
               className="type-ui text-primary hover:underline"
-              onClick={() => router.push(`/chat/${activity.subThreadId}`)}
             >
-              View conversation →
-            </button>
+              View conversation <span aria-hidden="true">→</span>
+            </Link>
           ) : null}
         </div>
       ) : null}
