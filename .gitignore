@@ -49,9 +49,19 @@ test-output
 
 .claude/worktrees
 .claude/settings.local.json
+.claude/launch.json
 .nx/polygraph
 .nx/self-healing
 .nx/migrate-runs
+
+# Local planning notes (not product docs)
+/docs/
+
+# Nx one-shot AI migration prompt packs (scaffold leftovers)
+/tools/ai-migrations/
+
+# Bundled CLI output (root `dist` does not cover this name)
+**/dist-cli/
 
 # Next.js
 .next
