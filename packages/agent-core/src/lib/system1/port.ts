@@ -37,6 +37,12 @@ export interface System1Port {
 }
 
 const DETAIL_MAX = 200;
+/**
+ * Longest wait for a free slot. Kept short and separate from the call
+ * timeout: with parallel runs, a full-timeout queue wait plus the call
+ * itself would double the delay before a step falls back.
+ */
+const SLOT_WAIT_MS = 250;
 
 /** Run-scoped tally of calls, latencies and fallbacks. */
 export class System1Recorder {
@@ -124,11 +130,11 @@ export function createSystem1Port(options: System1PortOptions): System1Port {
         return null;
       }
       const waitStarted = Date.now();
-      const release = await health.acquire(client.timeoutMs);
+      const release = await health.acquire(Math.min(SLOT_WAIT_MS, client.timeoutMs));
       if (!release) {
         health.release();
         spentMs += Date.now() - waitStarted;
-        recorder.fallback(site, 'busy', ctx.iteration, 'no free slot within the timeout');
+        recorder.fallback(site, 'busy', ctx.iteration, `no free slot within ${SLOT_WAIT_MS}ms`);
         return null;
       }
       try {
