@@ -10,7 +10,7 @@ import type {
   ContextReportLayer,
   ContextWindowSource,
 } from '@agent/agent-models';
-import type { ContextMeterSource } from '@/features/agent/hooks/use-context-meter';
+import type { ContextMeterSource } from '@/features/usage/use-context-meter';
 
 const BUCKETS: {
   id: string;

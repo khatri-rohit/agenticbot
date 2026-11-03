@@ -8,7 +8,7 @@ import {
   parseSkillMarkdown,
   type ParsedSkill,
 } from './skills';
-import type { SkillMetadata } from './type';
+import type { SkillMetadata } from './types';
 
 function ctx(): ToolContext {
   return {

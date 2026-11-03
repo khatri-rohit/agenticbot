@@ -2,18 +2,18 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
-import { Sidebar } from './sidebar';
+import { Sidebar } from '../../features/threads/sidebar';
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
-import { cn } from '../lib/utils';
-import { getComposerFocus } from './composer-focus';
+import { cn } from '../../lib/utils';
+import { getComposerFocus } from '../../features/composer/composer-focus';
 import {
   RecentThreadsSwitcher,
   isTypeToFocusKey,
-} from './recent-threads-switcher';
+} from '../../features/threads/recent-threads-switcher';
 
 function TypeToFocusListener() {
   useEffect(() => {

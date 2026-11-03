@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
-import { useStickToBottom } from '../hooks/use-stick-to-bottom';
+import { useStickToBottom } from '../../hooks/use-stick-to-bottom';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -14,10 +14,10 @@ import type {
   ChatState,
   CompactionNotice,
   ToolActivity,
-} from '../features/agent/store/chat-store';
-import { groupMessageTurns } from '../lib/group-message-turns';
-import { buildTurnTimeline } from '../lib/turn-timeline';
-import { formatDuration, formatMessageTime } from '../lib/format-relative-time';
+} from './chat-store';
+import { groupMessageTurns } from './group-message-turns';
+import { buildTurnTimeline } from './turn-timeline';
+import { formatDuration, formatMessageTime } from '../../lib/format-relative-time';
 import { AgentMarkdown } from './agent-markdown';
 import {
   ConversationRail,

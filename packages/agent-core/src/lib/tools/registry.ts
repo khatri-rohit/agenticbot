@@ -6,9 +6,9 @@ import { createDelegateTool } from '../subagent/delegate';
 import { listSubagentProfiles } from '../subagent/profiles';
 import { recall } from './recall';
 import { load_skill } from './skills';
-import type { Tool, ToolRegistry } from './type';
-import { WEB_SEARCH_TOOLS } from './web-search';
-import { WORKSPACE_TOOLS } from './workspace';
+import type { Tool, ToolRegistry } from './types';
+import { WEB_SEARCH_TOOLS } from './web/tools';
+import { WORKSPACE_TOOLS } from './workspace/tools';
 
 /**
  * A source of tools. Built-ins and the sub-agent catalog are providers today;

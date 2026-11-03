@@ -6,13 +6,14 @@ import {
   configureSkillRoots,
   configureSubagentRoot,
   listTools,
+  RunManager,
   skillLintWarnings,
   subagentProfileWarnings,
 } from '@agent/agent-core';
 
 import { resolveAgentHome } from './agent-home.js';
-import { MemoryStore } from './memory-store.js';
-import { openThreadStore, type ThreadStore } from './thread-store.js';
+import { MemoryStore } from '../memory/memory-store.js';
+import { openThreadStore, type ThreadStore } from '../threads/thread-store.js';
 
 function home(): string {
   const resolved = resolveAgentHome({
@@ -63,3 +64,6 @@ export function getMemoryStore(): MemoryStore {
   }
   return memoryStore;
 }
+
+/** In-memory runs for this process: SSE replay, choices, one active run per thread. */
+export const runManager = new RunManager();

@@ -14,10 +14,10 @@ import {
   type SubagentHost,
 } from '@agent/agent-core';
 
-import { capacityState } from './capacity';
-import { modelRolesFor, resolveCallOptions, resolveContextBudget } from './model-runtime';
-import type { ThreadStore } from './thread-store';
-import { createJsonlTraceSink } from './trace-sink.js';
+import { capacityState } from '../models/capacity';
+import { modelRolesFor, resolveCallOptions, resolveContextBudget } from '../models/model-runtime';
+import type { ThreadStore } from '../threads/thread-store';
+import { createJsonlTraceSink } from '../platform/trace-sink.js';
 
 /**
  * API side of the sub-agent contract: persistence on the ThreadStore and

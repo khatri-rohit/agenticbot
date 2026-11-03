@@ -3,7 +3,7 @@ import { DEFAULT_MEMORY_CAPS } from '@agent/agent-models';
 import type { MemoryFiles } from '@agent/agent-models';
 
 import { gateMemoryOps } from '../memory/gate';
-import type { Tool } from './type';
+import type { Tool } from './types';
 
 export type MemoryToolStore = {
   read: () => Promise<MemoryFiles>;

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Check, ChevronDown, Layers, Loader2 } from 'lucide-react';
 
-import type { CompactionNotice } from '../features/agent/store/chat-store';
+import type { CompactionNotice } from './chat-store';
 import { cn } from '@/lib/utils';
 
 /**

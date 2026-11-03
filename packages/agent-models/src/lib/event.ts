@@ -3,7 +3,7 @@ import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
 import type { ThreadPlan } from './plan.js';
 import type { RunPosture, RunUsage, TokenUsage } from './run.js';
-import type { SubagentStatus } from './subagent-types.js';
+import type { SubagentStatus } from './subagent.js';
 import type { System1RunReport } from './system1.js';
 
 /**

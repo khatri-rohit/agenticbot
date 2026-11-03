@@ -1,6 +1,6 @@
 import type { ModeName, RunPosture } from '@agent/agent-models';
 
-import type { ToolRegistry } from '../tools/type';
+import type { ToolRegistry } from '../tools/types';
 import { ANTI_SLOP_CODE_LAW } from './coding-law';
 import { loadAgentIdentity } from './load-agent-identity';
 

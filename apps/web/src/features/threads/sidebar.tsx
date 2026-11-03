@@ -29,26 +29,26 @@ import {
   syncWorkspaceOrder,
   toggleFolderCollapsed,
   useAgentSpace,
-} from '@/features/agent/store/space-store';
-import { clampChatTitle } from '@/lib/thread-title';
-import { useThreads } from '../features/agent/hooks/use-agent-run';
+} from '@/features/threads/space-store';
+import { clampChatTitle } from '@/features/threads/thread-title';
+import { useThreads } from '../conversation/use-agent-run';
 import {
   deleteThread,
   patchThread,
   pickWorkspaceFolder,
-} from '../features/agent/api/thread-client';
+} from '../../api/thread-client';
 import {
   areThreadsLoaded,
   refreshThreads,
-} from '../features/agent/store/thread-cache';
-import { removeRecentThread } from '../features/agent/store/recent-threads-store';
-import { formatRelativeTime } from '../lib/format-relative-time';
+} from './thread-cache';
+import { removeRecentThread } from './recent-threads-store';
+import { formatRelativeTime } from '../../lib/format-relative-time';
 import { toastError } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
-import { SidebarSettings } from '@/components/sidebar-settings';
+import { SidebarSettings } from '@/features/threads/sidebar-settings';
 import {
   DropdownMenu,
   DropdownMenuContent,

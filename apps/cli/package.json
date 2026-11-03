@@ -13,15 +13,15 @@
         "defaultConfiguration": "production",
         "options": {
           "platform": "node",
-          "outputPath": "apps/agent/dist",
+          "outputPath": "apps/cli/dist",
           "format": [
             "cjs"
           ],
           "bundle": true,
-          "main": "apps/agent/src/main.ts",
-          "tsConfig": "apps/agent/tsconfig.app.json",
+          "main": "apps/cli/src/main.ts",
+          "tsConfig": "apps/cli/tsconfig.app.json",
           "assets": [
-            "apps/agent/src/assets"
+            "apps/cli/src/assets"
           ],
           "esbuildOptions": {
             "sourcemap": true,
@@ -50,8 +50,8 @@
         "cache": true,
         "executor": "@nx/js:prune-lockfile",
         "outputs": [
-          "{workspaceRoot}/apps/agent/dist/package.json",
-          "{workspaceRoot}/apps/agent/dist/package-lock.json"
+          "{workspaceRoot}/apps/cli/dist/package.json",
+          "{workspaceRoot}/apps/cli/dist/package-lock.json"
         ],
         "options": {
           "buildTarget": "build"
@@ -63,7 +63,7 @@
         ],
         "cache": true,
         "outputs": [
-          "{workspaceRoot}/apps/agent/dist/workspace_modules"
+          "{workspaceRoot}/apps/cli/dist/workspace_modules"
         ],
         "executor": "@nx/js:copy-workspace-modules",
         "options": {
@@ -129,8 +129,8 @@
         ],
         "options": {
           "commands": [
-            "node ./node_modules/esbuild/bin/esbuild apps/agent/src/eval/run-eval.ts --bundle --platform=node --format=cjs --outfile=apps/agent/dist/run-eval.cjs --packages=external",
-            "node apps/agent/dist/run-eval.cjs"
+            "node ./node_modules/esbuild/bin/esbuild apps/cli/src/eval/run-eval.ts --bundle --platform=node --format=cjs --outfile=apps/cli/dist/run-eval.cjs --packages=external",
+            "node apps/cli/dist/run-eval.cjs"
           ],
           "parallel": false,
           "cwd": "{workspaceRoot}"

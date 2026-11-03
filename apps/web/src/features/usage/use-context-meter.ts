@@ -11,9 +11,9 @@ import {
   fetchContextEstimate,
   type ComposerOptions,
   type ComposerSkillHints,
-} from '@/features/agent/api/agent-client';
-import { getContextAnchor } from '@/features/agent/lib/context-anchor';
-import { estimateDraftTokens } from '@/lib/estimate-tokens';
+} from '@/api/agent-client';
+import { getContextAnchor } from '@/features/conversation/context-anchor';
+import { estimateDraftTokens } from '@/features/usage/estimate-tokens';
 
 /** Stable empty list — never use `= []` in hook args (new ref every render → effect loop). */
 const EMPTY_ATTACHMENTS: MessageAttachment[] = [];

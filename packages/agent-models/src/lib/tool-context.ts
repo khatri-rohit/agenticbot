@@ -1,5 +1,5 @@
 import type { ChoiceRequest, ChoiceResult } from './choice.js';
-import type { SubagentSpec, SubagentResult } from './subagent-types.js';
+import type { SubagentSpec, SubagentResult } from './subagent.js';
 import type { TraceEvent } from './trace.js';
 
 /**

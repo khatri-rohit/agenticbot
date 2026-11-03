@@ -151,12 +151,12 @@ export type {
   SubagentSpec,
   SubagentStatus,
   SubagentThoroughness,
-} from './lib/subagent-types.js';
+} from './lib/subagent.js';
 export {
   encodeSubagentHeader,
   parseSubagentHeader,
   subagentDigestBody,
-} from './lib/subagent-types.js';
+} from './lib/subagent.js';
 
 export type {
   ChoiceOption,

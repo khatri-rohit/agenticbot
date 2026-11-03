@@ -16,9 +16,9 @@ import {
   X,
 } from 'lucide-react';
 import { parseSubagentHeader, subagentDigestBody } from '@agent/agent-models';
-import type { ToolCallRow } from '../lib/turn-timeline';
+import type { ToolCallRow } from './turn-timeline';
 import { SubagentCard } from './subagent-card';
-import type { SubagentActivity } from '../features/agent/store/chat-store';
+import type { SubagentActivity } from './chat-store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 

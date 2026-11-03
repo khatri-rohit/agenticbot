@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import type { Skill, SkillMetadata, Tool } from './type';
+import type { Skill, SkillMetadata, Tool } from './types';
 
 /**
  * Built-in packs: packages/agent-core/skills/<name>/SKILL.md.

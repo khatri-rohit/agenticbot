@@ -1,7 +1,7 @@
 'use client';
 
-import { useBrowserSpeechDictation } from '@/features/agent/hooks/use-browser-speech-dictation';
-import { useVoiceDictation } from '@/features/agent/hooks/use-voice-dictation';
+import { useBrowserSpeechDictation } from '@/features/composer/use-browser-speech-dictation';
+import { useVoiceDictation } from '@/features/composer/use-voice-dictation';
 
 type VoiceSttProvider = 'browser' | 'speaches' | 'off';
 

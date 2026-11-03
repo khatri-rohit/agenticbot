@@ -15,7 +15,7 @@ import {
   applyThemeToDocument,
   persistThemeId,
   readStoredThemeId,
-} from '@/lib/theme-presets';
+} from '@/components/shell/theme-presets';
 
 type ThemeContextValue = {
   themeId: ThemeId;

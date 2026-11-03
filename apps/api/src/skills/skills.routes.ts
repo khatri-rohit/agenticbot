@@ -1,13 +1,13 @@
 import { Router, type Request, type Response } from 'express';
 import { listSkillCatalogs } from '@agent/agent-core';
 
-import { getAgentHome } from '../../lib/store-instance';
+import { getAgentHome } from '../platform/instances';
 import {
   SkillImportError,
   deleteUserSkill,
   installGitHubSkills,
   previewGitHubSkills,
-} from '../../lib/user-skills';
+} from './user-skills';
 
 const router = Router();
 

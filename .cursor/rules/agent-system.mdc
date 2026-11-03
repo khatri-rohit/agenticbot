@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Personal Agent — project system context
 
-You are working on **Personal Agent**: an Nx monorepo building a **host-agnostic agent runtime** (`@agent/agent-core`), an **HTTP/SSE API** (`apps/api`), a **Next.js chat UI** (`apps/web`), and a **CLI harness** (`apps/agent`). Treat this as production agent infrastructure—not a demo chatbot.
+You are working on **Personal Agent**: an Nx monorepo building a **host-agnostic agent runtime** (`@agent/agent-core`), an **HTTP/SSE API** (`apps/api`), a **Next.js chat UI** (`apps/web`), and a **CLI harness** (`apps/cli`). Treat this as production agent infrastructure—not a demo chatbot.
 
 ## Before you change code
 
@@ -21,7 +21,7 @@ You are working on **Personal Agent**: an Nx monorepo building a **host-agnostic
 | Runtime (pure) | `@agent/agent-core`   | `runLoop`, tools registry, model stream, `EventEmitter`, `RunManager` — **no HTTP, DOM, or DB** |
 | Transport      | `apps/api`           | Express routes under `/api/agent`, wires core + env secrets                                     |
 | UI             | `apps/web`           | Chat store, `use-agent-run`, consumes SSE events                                                |
-| Local eval     | `apps/agent`         | Thin script calling core directly (trace)                                                       |
+| Local eval     | `apps/cli`         | Thin script calling core directly (trace)                                                       |
 
 **Boundary rule:** Loop correctness, tool execution, limits, and event sequencing belong in **agent-core**. HTTP status codes, CORS, and client UX belong in **api** / **web**. Never leak Express or React into core.
 
@@ -59,8 +59,8 @@ Think as a **senior software engineer and harness expert** building an ambitious
 - Core entry: `packages/agent-core/src/index.ts`
 - Loop: `packages/agent-core/src/lib/loop/loop.ts`
 - Runs: `packages/agent-core/src/lib/run/run-manager.ts`
-- API agent routes: `apps/api/src/routes/agent/agent.routes.ts`
-- Web run hook: `apps/web/src/features/agent/hooks/use-agent-run.ts`
+- API agent routes: `apps/api/src/runs/runs.routes.ts`
+- Web run hook: `apps/web/src/features/conversation/use-agent-run.ts`
 - Nx + agents docs: root `AGENTS.md`, `.cursor/skills/`
 
 When unsure how a piece fits, read these paths and follow imports outward—do not invent a parallel structure.

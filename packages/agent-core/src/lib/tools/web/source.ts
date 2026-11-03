@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { envelopeUntrustedWeb } from './web-trust';
+import { envelopeUntrustedWeb } from './trust';
 
 /** Teaser kept on the prompt card after a full fetch. */
 export const WEB_CARD_TEASER_CHARS = 2_000;

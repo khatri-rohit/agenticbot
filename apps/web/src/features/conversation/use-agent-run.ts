@@ -22,7 +22,7 @@ import {
   resolveOllamaModel,
   writeStoredComposerLocal,
   writeStoredComposerModel,
-} from '@/lib/ollama-models';
+} from '@/features/composer/ollama-models';
 import {
   applyChatEvent,
   hasSseSeqGap,
@@ -31,7 +31,7 @@ import {
   noticeFromSnapshot,
   persistChatEffects,
   type ChatState,
-} from '../store/chat-store';
+} from './chat-store';
 import { isThreadPlanEmpty, type ThreadPlan } from '@agent/agent-models';
 import {
   startRun,
@@ -39,23 +39,23 @@ import {
   cancelRun,
   resolveChoice,
   type ComposerOptions,
-} from '../api/agent-client';
-import { skillTokensInText } from '@/components/skill-slash-picker';
+} from '../../api/agent-client';
+import { skillTokensInText } from '@/features/composer/skill-slash-picker';
 import {
   fetchLedger,
   fetchThread,
   patchThread,
   seqFromMessageId,
   type LedgerResponse,
-} from '../api/thread-client';
+} from '../../api/thread-client';
 import {
   ensureThreadsLoaded,
   getThreadsSnapshot,
   refreshThreads,
   subscribeThreads,
-} from '../store/thread-cache';
-import { setWorkspaceRoot } from '../store/space-store';
-import { observeRunEvent } from '../lib/run-alerts';
+} from '../threads/thread-cache';
+import { setWorkspaceRoot } from '../threads/space-store';
+import { observeRunEvent } from './run-alerts';
 
 export type QueuedMessage = {
   content: string;

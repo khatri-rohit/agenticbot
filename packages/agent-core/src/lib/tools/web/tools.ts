@@ -1,6 +1,6 @@
-import type { Tool } from './type';
-import { webSearch, webFetch } from './web_search_api';
-import { WEB_SLICE_DEFAULT_CHARS } from './web-source';
+import type { Tool } from '../types';
+import { webSearch, webFetch } from './router';
+import { WEB_SLICE_DEFAULT_CHARS } from './source';
 
 /**
  * Built-in web_search — host-native function tool (not MCP / not a plugin).

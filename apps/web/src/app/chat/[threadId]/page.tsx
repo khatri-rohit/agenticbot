@@ -1,18 +1,18 @@
 'use client';
 
 import { use, useEffect, useRef } from 'react';
-import { ChatHeader } from '../../../components/chat-header';
-import { MessageList } from '../../../components/message-list';
-import { ChatInput } from '../../../components/chat-input';
-import { ThreadPlanCard } from '../../../components/thread-plan-card';
-import { ChoiceCard } from '../../../components/choice-card';
-import { ChatShell } from '../../../components/chat-shell';
+import { ChatHeader } from '@/features/conversation/chat-header';
+import { MessageList } from '@/features/conversation/message-list';
+import { ChatInput } from '@/features/composer/chat-input';
+import { ThreadPlanCard } from '@/features/conversation/thread-plan-card';
+import { ChoiceCard } from '@/features/conversation/choice-card';
+import { ChatShell } from '@/components/shell/chat-shell';
 import {
   useMessages,
   useAgentRun,
-} from '../../../features/agent/hooks/use-agent-run';
-import { takePendingMessage } from '../../../features/agent/api/agent-client';
-import { resolveOllamaModel } from '@/lib/ollama-models';
+} from '@/features/conversation/use-agent-run';
+import { takePendingMessage } from '@/api/agent-client';
+import { resolveOllamaModel } from '@/features/composer/ollama-models';
 
 export default function ChatThreadPage({
   params,

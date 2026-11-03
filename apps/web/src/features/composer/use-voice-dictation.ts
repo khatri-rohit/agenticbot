@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { transcribeAudio } from '@/features/agent/api/voice-client';
-import { isUsableTranscript } from '@/features/agent/lib/voice-transcript';
+import { transcribeAudio } from '@/api/voice-client';
+import { isUsableTranscript } from '@/features/composer/voice-transcript';
 
 /** Mic energy sample interval. */
 const VAD_TICK_MS = 80;

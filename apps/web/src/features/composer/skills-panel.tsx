@@ -16,7 +16,7 @@ import {
   type SkillCatalogItem,
   type SkillCatalogs,
   type SkillPreview,
-} from '@/features/agent/api/skills-client';
+} from '@/api/skills-client';
 import { toastError } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

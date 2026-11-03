@@ -19,7 +19,7 @@ import {
   formatThreadPlanForPrompt,
 } from '@agent/agent-models';
 
-import type { Tool } from './type';
+import type { Tool } from './types';
 
 export type PlanStore = {
   read: () => Promise<ThreadPlan>;

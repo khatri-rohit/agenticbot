@@ -1,6 +1,6 @@
 import type { ToolContext } from '@agent/agent-models';
 
-import type { WebFetchResponse, WebSearchResponse } from './type';
+import type { WebFetchResponse, WebSearchResponse } from '../types';
 import {
   firecrawlFetch,
   firecrawlSearch,
@@ -9,19 +9,19 @@ import {
   ollamaSearch,
   tavilyFetch,
   tavilySearch,
-} from './web-search-providers';
+} from './providers';
 import {
   formatWebSourceCard,
   formatWebSourceMatches,
   formatWebSourceSlice,
   sha256Text,
   WEB_SLICE_DEFAULT_CHARS,
-} from './web-source';
+} from './source';
 import {
   assertPublicHttpUrl,
   canonicalizeWebFetchUrl,
   looksLikeHttpUrl,
-} from './web-url';
+} from './url';
 
 /** Prefetch this many search hits into the source index (cards, not dumps). */
 const AUTO_FETCH_DEPTH = 2;

@@ -4,7 +4,7 @@ import {
   type ChoiceOption,
 } from '@agent/agent-models';
 
-import type { Tool } from './type';
+import type { Tool } from './types';
 
 function parseOptions(raw: unknown): ChoiceOption[] {
   if (!Array.isArray(raw)) return [];

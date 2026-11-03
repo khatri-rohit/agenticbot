@@ -1,5 +1,5 @@
-import type { WebFetchResponse, WebSearchResponse } from './type';
-import { assertPublicHttpUrl } from './web-url';
+import type { WebFetchResponse, WebSearchResponse } from '../types';
+import { assertPublicHttpUrl } from './url';
 
 /** Thrown when a provider response is empty or retryable (429 / 5xx / network). */
 export class RetryableSearchError extends Error {

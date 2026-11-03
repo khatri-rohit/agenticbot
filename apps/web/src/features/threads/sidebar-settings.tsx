@@ -12,12 +12,12 @@ import {
   Volume2,
 } from 'lucide-react';
 import { DEFAULT_MEMORY_CAPS, type MemoryOp } from '@agent/agent-models';
-import { useTheme } from '@/components/theme-provider';
+import { useTheme } from '@/components/shell/theme-provider';
 import {
   fetchMemory,
   revertMemoryOp,
   saveUserMemory,
-} from '@/features/agent/api/agent-client';
+} from '@/api/agent-client';
 import { toastError, toastSuccess } from '@/hooks/use-toast';
 import { formatRelativeTime } from '@/lib/format-relative-time';
 import { Button } from '@/components/ui/button';
@@ -52,7 +52,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { ThemeId } from '@/lib/theme-presets';
+import type { ThemeId } from '@/components/shell/theme-presets';
 import { cn } from '@/lib/utils';
 import {
   enableBrowserNotifications,
@@ -61,7 +61,7 @@ import {
   readSoundPref,
   writeNotifyPref,
   writeSoundPref,
-} from '@/features/agent/lib/run-alerts';
+} from '@/features/conversation/run-alerts';
 
 /** agent-client throws plain Error objects; normalize once for catch blocks. */
 function describeError(error: unknown): string {

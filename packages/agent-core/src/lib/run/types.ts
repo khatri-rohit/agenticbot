@@ -22,7 +22,7 @@ import type {
 } from '../loop/types';
 import type { EffortPolicy } from '../system1/effort';
 import type { System1Port } from '../system1/port';
-import type { ToolRegistry } from '../tools/type';
+import type { ToolRegistry } from '../tools/types';
 
 /** In-memory run handle status (RunManager; narrower than domain RunStatus). */
 export type RunHandleStatus = 'running' | 'completed' | 'error';

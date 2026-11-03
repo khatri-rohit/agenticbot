@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { OllamaBalance } from '@agent/agent-models';
-import { fetchOllamaBalance } from '@/features/agent/api/agent-client';
+import { fetchOllamaBalance } from '@/api/agent-client';
 
 const POLL_MS = 60_000;
 

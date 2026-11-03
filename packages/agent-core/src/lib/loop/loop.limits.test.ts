@@ -3,7 +3,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import { runLoop } from './loop';
 import { createToolRegistry } from '../tools/registry';
-import type { Tool } from '../tools/type';
+import type { Tool } from '../tools/types';
 import type { ModelCallFn } from './types';
 
 const noop: Tool = {

@@ -1,4 +1,4 @@
-import { canonicalizeWebFetchUrl, looksLikeHttpUrl } from './web-url';
+import { canonicalizeWebFetchUrl, looksLikeHttpUrl } from './url';
 
 export const UNTRUSTED_WEB_BEGIN = 'UNTRUSTED_WEB_BEGIN';
 export const UNTRUSTED_WEB_END = 'UNTRUSTED_WEB_END';

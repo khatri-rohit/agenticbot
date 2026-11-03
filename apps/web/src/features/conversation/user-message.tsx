@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Message } from '@agent/agent-models';
 import { imageAttachments, threadMentions } from '@agent/agent-models';
-import { ThreadMentionChip } from '@/components/thread-mention-picker';
-import { MessageActions } from '@/components/message-actions';
+import { ThreadMentionChip } from '@/features/composer/thread-mention-picker';
+import { MessageActions } from '@/features/conversation/message-actions';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';

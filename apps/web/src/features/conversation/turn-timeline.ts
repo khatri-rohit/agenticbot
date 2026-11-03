@@ -9,7 +9,7 @@ import type {
   CompactionNotice,
   SubagentActivity,
   ToolActivity,
-} from '../features/agent/store/chat-store';
+} from './chat-store';
 
 export type ToolCallRow = {
   toolCallId: string;

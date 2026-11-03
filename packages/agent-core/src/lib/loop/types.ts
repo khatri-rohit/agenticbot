@@ -13,12 +13,12 @@ import type {
   SubagentSpec,
   SubagentResult,
   ToolOrigin,
+  TraceEvent,
 } from '@agent/agent-models';
-import type { TraceEvent } from '../events/trace-types';
 import type { ModelTurn } from '../model/types';
 import type { EffortPolicy } from '../system1/effort';
 import type { System1Port } from '../system1/port';
-import type { ToolRegistry } from '../tools/type';
+import type { ToolRegistry } from '../tools/types';
 import type { AgentLimits } from './limits';
 
 /** Terminal status returned by runLoop (in-memory run summary, not persisted Run). */

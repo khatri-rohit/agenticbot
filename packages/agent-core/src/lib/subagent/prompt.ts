@@ -1,7 +1,7 @@
 import type { SubagentReport, SubagentSpec } from '@agent/agent-models';
 
 import { getSkill, skillCore } from '../tools/skills';
-import type { Tool } from '../tools/type';
+import type { Tool } from '../tools/types';
 import {
   DIGEST_MAX_CHARS,
   UNTRUSTED_SUBAGENT_BEGIN,

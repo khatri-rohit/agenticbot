@@ -10,7 +10,7 @@ import {
   XCircle,
 } from 'lucide-react';
 
-import type { SubagentActivity } from '../features/agent/store/chat-store';
+import type { SubagentActivity } from './chat-store';
 import { cn } from '@/lib/utils';
 
 const PROFILE_LABELS: Record<string, string> = {

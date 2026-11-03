@@ -36,18 +36,18 @@ import {
   fetchCloudOllamaModels,
   fetchLocalOllamaModels,
   type ComposerOptions,
-} from '@/features/agent/api/agent-client';
-import type { QueuedMessage } from '@/features/agent/hooks/use-agent-run';
-import { useContextMeter } from '@/features/agent/hooks/use-context-meter';
-import { useOllamaBalance } from '@/features/agent/hooks/use-ollama-balance';
-import { useOllamaModelConfig } from '@/features/agent/hooks/use-ollama-model-config';
-import { useVoiceInput } from '@/features/agent/hooks/use-voice-input';
+} from '@/api/agent-client';
+import type { QueuedMessage } from '@/features/conversation/use-agent-run';
+import { useContextMeter } from '@/features/usage/use-context-meter';
+import { useOllamaBalance } from '@/features/usage/use-ollama-balance';
+import { useOllamaModelConfig } from '@/features/composer/use-ollama-model-config';
+import { useVoiceInput } from '@/features/composer/use-voice-input';
 import {
   MAX_IMAGE_ATTACHMENTS,
   fileToAttachment,
   filesFromDataTransfer,
   imageAttachErrorMessage,
-} from '@/features/agent/lib/image-attachments';
+} from '@/features/composer/image-attachments';
 import { toastError } from '@/hooks/use-toast';
 import {
   CLOUD_OLLAMA_MODELS,
@@ -58,15 +58,15 @@ import {
   readStoredComposerModel,
   writeStoredContextWindowMode,
   type OllamaModel,
-} from '@/lib/ollama-models';
-import { ModelPicker } from '@/components/model-picker';
-import { WorkspacePicker } from '@/components/workspace-picker';
-import { ContextWindowPicker } from '@/components/context-window-picker';
-import { ThinkingPicker } from '@/components/thinking-picker';
-import { ContextUsage } from '@/components/context-usage';
-import { UsageMeter } from '@/components/usage-meter';
-import { SkillsPanel } from '@/components/skills-panel';
-import { registerComposerFocus } from '@/components/composer-focus';
+} from '@/features/composer/ollama-models';
+import { ModelPicker } from '@/features/composer/model-picker';
+import { WorkspacePicker } from '@/features/threads/workspace-picker';
+import { ContextWindowPicker } from '@/features/composer/context-window-picker';
+import { ThinkingPicker } from '@/features/composer/thinking-picker';
+import { ContextUsage } from '@/features/usage/context-usage';
+import { UsageMeter } from '@/features/usage/usage-meter';
+import { SkillsPanel } from '@/features/composer/skills-panel';
+import { registerComposerFocus } from '@/features/composer/composer-focus';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -91,15 +91,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { useThreads } from '@/features/agent/hooks/use-agent-run';
-import { useAgentSpace } from '@/features/agent/store/space-store';
+import { useThreads } from '@/features/conversation/use-agent-run';
+import { useAgentSpace } from '@/features/threads/space-store';
 import {
   ThreadMentionChip,
   ThreadMentionPicker,
   mentionQueryAtCaret,
   rankMentionThreads,
   threadToMention,
-} from '@/components/thread-mention-picker';
+} from '@/features/composer/thread-mention-picker';
 import {
   SkillSlashPicker,
   SkillHighlightMirror,
@@ -107,11 +107,11 @@ import {
   filterSkillCatalog,
   skillQueryAtCaret,
   skillTokensInText,
-} from '@/components/skill-slash-picker';
+} from '@/features/composer/skill-slash-picker';
 import {
   fetchSkillCatalogs,
   type SkillCatalogItem,
-} from '@/features/agent/api/skills-client';
+} from '@/api/skills-client';
 
 type ComposerDraft = {
   content: string;

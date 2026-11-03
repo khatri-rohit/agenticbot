@@ -9,7 +9,7 @@ import {
   type System1RunReport,
   type ThreadPlan,
 } from '@agent/agent-models';
-import { setContextAnchor } from '../lib/context-anchor';
+import { setContextAnchor } from './context-anchor';
 
 /**
  * Ephemeral UI state derived from the event stream.

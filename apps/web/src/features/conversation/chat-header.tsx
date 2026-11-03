@@ -4,12 +4,12 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { type Thread } from '@agent/agent-models';
-import { clampChatTitle } from '@/lib/thread-title';
-import { fetchThread } from '../features/agent/api/thread-client';
+import { clampChatTitle } from '@/features/threads/thread-title';
+import { fetchThread } from '../../api/thread-client';
 import {
   getThreadsSnapshot,
   subscribeThreads,
-} from '../features/agent/store/thread-cache';
+} from '../threads/thread-cache';
 
 export function ChatHeader({ threadId }: { threadId: string }) {
   const router = useRouter();

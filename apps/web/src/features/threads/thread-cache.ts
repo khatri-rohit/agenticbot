@@ -1,5 +1,5 @@
 import type { Thread } from '@agent/agent-models';
-import { listThreads } from '../api/thread-client';
+import { listThreads } from '../../api/thread-client';
 
 type Listener = () => void;
 

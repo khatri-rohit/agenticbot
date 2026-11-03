@@ -8,7 +8,7 @@ import {
   extractFileCitations,
   normalizeAssistantMarkdown,
   rewriteCitationFences,
-} from '../lib/normalize-assistant-markdown';
+} from './normalize-assistant-markdown';
 
 const codePlugins = { code };
 const fullPlugins = { code, mermaid };

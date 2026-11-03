@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import { BookMarked, User } from 'lucide-react';
-import type { SkillCatalogItem } from '@/features/agent/api/skills-client';
+import type { SkillCatalogItem } from '@/api/skills-client';
 import { cn } from '@/lib/utils';
 
 export function skillQueryAtCaret(

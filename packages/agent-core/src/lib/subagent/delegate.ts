@@ -1,7 +1,7 @@
 import type { ToolContext } from '@agent/agent-models';
 import { encodeSubagentHeader, type SubagentSpec } from '@agent/agent-models';
 
-import type { Tool } from '../tools/type';
+import type { Tool } from '../tools/types';
 import type { SubagentProfile } from './types';
 
 const THOROUGHNESS = ['quick', 'medium', 'thorough'] as const;

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { WORKSPACE_TOOLS } from './workspace';
+import { WORKSPACE_TOOLS } from './tools';
 
 function ctx(workspaceRoot: string) {
   return {

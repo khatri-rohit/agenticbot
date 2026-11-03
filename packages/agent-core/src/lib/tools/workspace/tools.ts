@@ -11,14 +11,14 @@ import {
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 
-import type { Tool } from './type';
-import { isOutboundHttpShellCommand } from './web-trust';
+import type { Tool } from '../types';
+import { isOutboundHttpShellCommand } from '../web/trust';
 import {
   globMatch,
   isPathInside,
   resolveWorkspacePath,
   toPosixRelative,
-} from './workspace-path';
+} from './path';
 
 /** M4a: cap tool payloads before they hit the ledger. Stay under assembler stub (8k). */
 export const WORKSPACE_READ_MAX_CHARS = 7_000;

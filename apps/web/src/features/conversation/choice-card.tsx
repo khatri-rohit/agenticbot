@@ -6,7 +6,7 @@ import { MAX_CHOICE_TEXT_CHARS } from '@agent/agent-models';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import type { PendingChoice } from '../features/agent/store/chat-store';
+import type { PendingChoice } from './chat-store';
 
 /**
  * Mid-turn direction: checkboxes + extra text, then Continue or Skip.

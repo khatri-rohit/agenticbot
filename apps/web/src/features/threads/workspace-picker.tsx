@@ -7,8 +7,8 @@ import {
   sameWorkspaceRoot,
   setWorkspaceRoot,
   useAgentSpace,
-} from '@/features/agent/store/space-store';
-import { pickWorkspaceFolder } from '@/features/agent/api/thread-client';
+} from '@/features/threads/space-store';
+import { pickWorkspaceFolder } from '@/api/thread-client';
 import { toastError } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import {

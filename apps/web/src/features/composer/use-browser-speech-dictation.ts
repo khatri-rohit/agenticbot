@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isUsableTranscript } from '@/features/agent/lib/voice-transcript';
+import { isUsableTranscript } from '@/features/composer/voice-transcript';
 
 type BrowserSpeechRecognition = {
   continuous: boolean;

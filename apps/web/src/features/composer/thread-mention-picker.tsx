@@ -7,7 +7,7 @@ import {
   MAX_THREAD_MENTIONS,
   sameWorkspaceRoot,
 } from '@agent/agent-models';
-import { folderNameFromRoot } from '@/features/agent/store/space-store';
+import { folderNameFromRoot } from '@/features/threads/space-store';
 import { cn } from '@/lib/utils';
 import { X } from 'lucide-react';
 

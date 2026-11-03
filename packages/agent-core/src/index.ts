@@ -80,13 +80,13 @@ export {
 } from './lib/tools/registry';
 export { offer_choice } from './lib/tools/offer-choice';
 export { recall } from './lib/tools/recall';
-export type { Tool, ToolGuidance, ToolRegistry, ToolStage } from './lib/tools/type';
-export { WORKSPACE_TOOLS, diffTool } from './lib/tools/workspace';
+export type { Tool, ToolGuidance, ToolRegistry, ToolStage } from './lib/tools/types';
+export { WORKSPACE_TOOLS, diffTool } from './lib/tools/workspace/tools';
 export {
   resolveWorkspacePath,
   isPathInside,
   globMatch,
-} from './lib/tools/workspace-path';
+} from './lib/tools/workspace/path';
 export {
   assembleContext,
   refreshContextReport,
@@ -112,7 +112,7 @@ export {
   packMentionedThread,
 } from './lib/context/compact-snapshot';
 export { toLedgerRecord } from './lib/loop/to-ledger-record';
-export { webSearchTool, webFetchTool } from './lib/tools/web-search';
+export { webSearchTool, webFetchTool } from './lib/tools/web/tools';
 export { createMemoryTool } from './lib/tools/memory';
 export type { MemoryToolStore } from './lib/tools/memory';
 export {
@@ -153,7 +153,7 @@ export type { SubagentHost } from './lib/subagent/runner';
 
 // Events / trace
 export { consoleTrace, teeTrace, traceCompactionEvent } from './lib/events/trace';
-export type { TraceEvent } from './lib/events/trace-types';
+export type { TraceEvent } from '@agent/agent-models';
 export { EventEmitter } from './lib/events/emitter';
 export type { EventSubscriber } from './lib/events/types';
 

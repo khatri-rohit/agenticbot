@@ -29,9 +29,9 @@ import {
   listSkills,
   skillCard,
 } from '../tools/skills';
-import type { ToolRegistry } from '../tools/type';
-import { stubWebSourceCard } from '../tools/web-source';
-import { hostListedWebUrls } from '../tools/web-trust';
+import type { ToolRegistry } from '../tools/types';
+import { stubWebSourceCard } from '../tools/web/source';
+import { hostListedWebUrls } from '../tools/web/trust';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 
 export type MentionedThreadContext = {

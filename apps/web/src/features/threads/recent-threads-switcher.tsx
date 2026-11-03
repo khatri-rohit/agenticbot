@@ -4,20 +4,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Circle, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { clampChatTitle } from '@/lib/thread-title';
+import { clampChatTitle } from '@/features/threads/thread-title';
 import { formatRelativeTime } from '@/lib/format-relative-time';
 import {
   ensureThreadsLoaded,
   getThreadsSnapshot,
-} from '@/features/agent/store/thread-cache';
+} from '@/features/threads/thread-cache';
 import {
   HOME_RECENT_ID,
   MAX_RECENT_THREADS,
   getRecentThreadIds,
   removeRecentThread,
   touchRecentThread,
-} from '@/features/agent/store/recent-threads-store';
-import { setWorkspaceRoot } from '@/features/agent/store/space-store';
+} from '@/features/threads/recent-threads-store';
+import { setWorkspaceRoot } from '@/features/threads/space-store';
 import { isWorkspaceKind } from '@agent/agent-models';
 
 type SwitcherEntry = {

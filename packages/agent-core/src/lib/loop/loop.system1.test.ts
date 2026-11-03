@@ -8,7 +8,7 @@ import { buildEffortPolicy } from '../system1/effort';
 import { System1Health } from '../system1/health';
 import { createSystem1Port, type System1Port } from '../system1/port';
 import { createToolRegistry } from '../tools/registry';
-import type { Tool } from '../tools/type';
+import type { Tool } from '../tools/types';
 import type { ModelCallFn, ModelCallOverrides } from './types';
 
 const LEVELS: OllamaModelConfig = {

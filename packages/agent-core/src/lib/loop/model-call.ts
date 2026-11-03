@@ -3,7 +3,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import type { ModelCallFn, ModelCallOverrides } from './types';
 import type { ModelCallOptions } from '../model/call-options';
 import { streamModelTurn } from '../model/stream';
-import type { ToolRegistry } from '../tools/type';
+import type { ToolRegistry } from '../tools/types';
 
 /**
  * Create a ModelCallFn over the streaming chat.completions path.

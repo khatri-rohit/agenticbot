@@ -17,6 +17,7 @@ import {
   type RunUsage,
   type TokenUsage,
   type ToolContext,
+  type TraceEvent,
 } from '@agent/agent-models';
 
 import {
@@ -29,22 +30,22 @@ import {
   ReadDedupe,
   retireSkillBodies,
 } from '../context/residency';
-import { consoleTrace, type TraceEvent } from '../events/trace';
+import { consoleTrace } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { createEffortRouter, type EffortSignals } from '../system1/effort';
 import { buildEffortState } from '../system1/state';
 import { getSkill } from '../tools/skills';
 import { BUDGET_WARN_RATIO, resolveLimits } from './limits';
 import type { ModelTurn } from '../model/types';
-import type { Tool, ToolRegistry, ToolStage } from '../tools/type';
-import { sha256Text } from '../tools/web-source';
+import type { Tool, ToolRegistry, ToolStage } from '../tools/types';
+import { sha256Text } from '../tools/web/source';
 import {
   extractHttpUrls,
   hostListedWebUrls,
   WEB_FETCH_UNTRUSTED_SHA,
   WEB_FETCH_UNTRUSTED_URL,
-} from '../tools/web-trust';
-import { canonicalizeWebFetchUrl, looksLikeHttpUrl } from '../tools/web-url';
+} from '../tools/web/trust';
+import { canonicalizeWebFetchUrl, looksLikeHttpUrl } from '../tools/web/url';
 import { toLedgerRecord } from './to-ledger-record';
 import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
