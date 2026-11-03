@@ -144,7 +144,8 @@
       }
     },
     "tags": [
-      "scope:agent"
+      "scope:agent",
+      "type:app"
     ]
   },
   "dependencies": {

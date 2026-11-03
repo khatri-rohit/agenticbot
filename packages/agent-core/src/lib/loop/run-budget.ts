@@ -112,12 +112,13 @@ export class RunBudget {
     return null;
   }
 
-  /** Tokens spent, the first time spend crosses the wrap-up mark; afterwards undefined. */
-  takeWarning(): number | undefined {
-    if (this.warned || this.limits.maxPromptTokens === undefined) return undefined;
+  /** Spend and cap, the first time spend crosses the wrap-up mark; afterwards undefined. */
+  takeWarning(): { spent: number; limit: number } | undefined {
+    const limit = this.limits.maxPromptTokens;
+    if (this.warned || limit === undefined) return undefined;
     const spent = this.spent();
-    if (spent < this.limits.maxPromptTokens * BUDGET_WARN_RATIO) return undefined;
+    if (spent < limit * BUDGET_WARN_RATIO) return undefined;
     this.warned = true;
-    return spent;
+    return { spent, limit };
   }
 }

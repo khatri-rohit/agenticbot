@@ -317,8 +317,8 @@ async function runLoopCore(
   let stopContent: string | undefined;
 
   function maybeWarnBudget(): void {
-    const spent = budget.takeWarning();
-    if (spent === undefined) return;
+    const warning = budget.takeWarning();
+    if (!warning) return;
     // Loop control, not a durable turn: joins the live prompt only.
     messages.push({ role: 'user', content: BUDGET_NUDGE });
     trace({
@@ -326,8 +326,8 @@ async function runLoopCore(
       runId,
       iteration: iterations,
       reason: 'prompt tokens',
-      promptTokens: spent,
-      limitPromptTokens: limits.maxPromptTokens!,
+      promptTokens: warning.spent,
+      limitPromptTokens: warning.limit,
     });
   }
 

@@ -2,7 +2,7 @@
 
 Personal **agent harness** in an [Nx](https://nx.dev) monorepo: a host-agnostic runtime (`@agent/agent-core`), Express API with SSE (`apps/api`), Next.js chat UI (`apps/web`), and a CLI eval harness (`apps/cli`). One engine, two bindings: **Home** (chat, optional web) and **Workspace** (folder-bound coding tools).
 
-For Nx-specific conventions (tasks, generators, MCP), see [AGENTS.md](./AGENTS.md). For Cursor/agent context, see [.cursor/rules/agent-system.mdc](./.cursor/rules/agent-system.mdc).
+Before changing code, read [AGENTS.md](./AGENTS.md): ownership and lint-enforced boundaries, where code goes, naming, module design, and Nx conventions.
 
 ---
 
@@ -287,8 +287,8 @@ agent/
 ├── docker/               # Compose docs
 ├── docker-compose.yml
 ├── LICENSE
-├── .cursor/rules/        # Shared agent context
-├── AGENTS.md
+├── .cursor/rules/        # Points Cursor at AGENTS.md
+├── AGENTS.md             # Guide for contributors and coding agents
 └── .env.example
 ```
 
