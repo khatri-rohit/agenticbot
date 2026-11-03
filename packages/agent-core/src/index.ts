@@ -1,35 +1,23 @@
 // @agent/agent-core — host-agnostic agent runtime.
 // Pure library: no HTTP, no DOM, no database.
 // Domain types and modes live in @agent/agent-models — import them from there.
+// This file is the whole public surface: hosts (apps/api, apps/cli) use what
+// is listed here, and everything else stays internal to the package.
 
+// Skills
 export {
   configureSkillRoots,
-  formatPinnedSkills,
-  formatSkillBodies,
-  formatSkillsCatalog,
-  skillCard,
-  skillCore,
-  skillForLoad,
   skillLintWarnings,
-  skillSections,
   getSkill,
   invalidateSkillCatalog,
   listSkillCatalogs,
-  listSkills,
   parseSkillMarkdown,
-  resolveSkillsRoot,
 } from './lib/tools/skills';
 export type { SkillCatalogEntry } from './lib/tools/skills';
 
 // Model layer
-export {
-  getClient,
-  nativeOllamaBaseUrl,
-  resolveOllamaBaseUrl,
-} from './lib/model/client';
+export { getClient, nativeOllamaBaseUrl } from './lib/model/client';
 export { streamModelTurn } from './lib/model/stream';
-export { estimatePromptTokens } from './lib/model/estimate-prompt-tokens';
-export { parseTokenUsage } from './lib/model/parse-usage';
 export type { OnTextDelta, ModelCallOptions } from './lib/model/types';
 export {
   getOllamaModelConfig,
@@ -47,15 +35,8 @@ export type {
   RunLoopConfig,
   RunLoopResult,
   RunLoopStatus,
-  SubagentParent,
-  SubagentSpawner,
 } from './lib/loop/types';
-export {
-  BUDGET_WARN_RATIO,
-  DEFAULT_LIMITS,
-  resolveLimits,
-  type AgentLimits,
-} from './lib/loop/limits';
+export type { AgentLimits } from './lib/loop/limits';
 export { createStreamModelCall } from './lib/loop/model-call';
 
 // System 1 (optional local scorer for harness decisions)
@@ -73,89 +54,55 @@ export {
 
 // Tools
 export {
+  createRunToolset,
   createToolRegistry,
   listTools,
   registerToolProvider,
   type ToolProvider,
 } from './lib/tools/registry';
-export { offer_choice } from './lib/tools/offer-choice';
-export { recall } from './lib/tools/recall';
-export type { Tool, ToolGuidance, ToolRegistry, ToolStage } from './lib/tools/types';
-export { WORKSPACE_TOOLS, diffTool } from './lib/tools/workspace/tools';
-export {
-  resolveWorkspacePath,
-  isPathInside,
-  globMatch,
-} from './lib/tools/workspace/path';
-export {
-  assembleContext,
-  refreshContextReport,
-  stubLiveToolResults,
-} from './lib/context/assemble-context';
-export {
-  compactCurrentRun,
-  evictToolResults,
-  ReadDedupe,
-  retireSkillBodies,
-} from './lib/context/residency';
-export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
-export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
+export type {
+  Tool,
+  ToolGuidance,
+  ToolRegistry,
+  ToolStage,
+} from './lib/tools/types';
+export { createMemoryTool } from './lib/tools/memory';
+export type { MemoryToolStore } from './lib/tools/memory';
+export { createInMemoryPlanStore, createPlanTools } from './lib/tools/plan';
+export type { PlanStore } from './lib/tools/plan';
+export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
+
+// Context
+export { assembleContext } from './lib/context/assemble-context';
 export type {
   AssembleContextInput,
   AssembleContextResult,
   MentionedThreadContext,
 } from './lib/context/assemble-context';
+export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
+export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export {
-  chooseCompactThroughSeq,
   chooseCompactThroughSeqForTarget,
   buildExtractiveSnapshot,
   packMentionedThread,
 } from './lib/context/compact-snapshot';
-export { toLedgerRecord } from './lib/loop/to-ledger-record';
-export { webSearchTool, webFetchTool } from './lib/tools/web/tools';
-export { createMemoryTool } from './lib/tools/memory';
-export type { MemoryToolStore } from './lib/tools/memory';
-export {
-  applyPlanAction,
-  applyTodoUpdate,
-  createInMemoryPlanStore,
-  createPlanTools,
-} from './lib/tools/plan';
-export type { PlanStore } from './lib/tools/plan';
-export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
 
 // Sub-agents
-export { createDelegateTool } from './lib/subagent/delegate';
 export {
   configureSubagentRoot,
-  getSubagentProfile,
-  listSubagentProfiles,
   subagentProfileWarnings,
 } from './lib/subagent/profiles';
-export {
-  CHILD_STRIPPED_TOOLS,
-  DIGEST_MAX_CHARS,
-  MAX_CONCURRENT_SUBAGENTS,
-} from './lib/subagent/types';
-export type {
-  SubagentContext,
-  SubagentLimits,
-  SubagentProfile,
-} from './lib/subagent/types';
-export {
-  buildSubagentPrompt,
-  parseReport,
-  renderDigest,
-  renderReport,
-} from './lib/subagent/prompt';
+export type { SubagentProfile } from './lib/subagent/types';
 export { createSubagentRunner } from './lib/subagent/runner';
 export type { SubagentHost } from './lib/subagent/runner';
 
 // Events / trace
-export { consoleTrace, teeTrace, traceCompactionEvent } from './lib/events/trace';
+export {
+  consoleTrace,
+  teeTrace,
+  traceCompactionEvent,
+} from './lib/events/trace';
 export type { TraceEvent } from '@agent/agent-models';
-export { EventEmitter } from './lib/events/emitter';
-export type { EventSubscriber } from './lib/events/types';
 
 // Run manager
 export { RunManager, RUN_HANDLE_TTL_MS } from './lib/run/run-manager';
@@ -165,7 +112,3 @@ export type {
   RunHandleStatus,
   StartRunOptions,
 } from './lib/run/types';
-
-// Prompts
-export { buildSystemPrompt } from './lib/prompts/system-prompt';
-export { loadAgentIdentity } from './lib/prompts/load-agent-identity';

@@ -4,7 +4,6 @@ import path from 'node:path';
 
 import type { AgentEvent, ModeName, RunPosture } from '@agent/agent-models';
 import {
-  applyPostureToTools,
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
@@ -14,8 +13,7 @@ import {
   runLoop,
   streamModelTurn,
   assembleContext,
-  createToolRegistry,
-  listTools,
+  createRunToolset,
   consoleTrace,
   teeTrace,
   createInMemoryPlanStore,
@@ -86,16 +84,12 @@ async function main() {
           : 'List the files in this workspace and say what the project appears to be.'
         : 'What is value of PI in 3 decimal places?');
 
-    const toolNames = applyPostureToTools(
-      [...new Set([...mode.allowedTools, ...mode.globalTools])],
-      posture,
-    );
     const planStore = createInMemoryPlanStore('cli');
-    const tools = createToolRegistry(
-      [...listTools(), ...createPlanTools(planStore)],
-      toolNames,
+    const tools = createRunToolset({
+      mode,
       posture,
-    );
+      hostTools: createPlanTools(planStore),
+    });
     const plan = await planStore.read();
     const rules = workspaceRoot
       ? await loadWorkspaceRules(workspaceRoot)

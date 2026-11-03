@@ -56,7 +56,10 @@ router.get('/models/config', async (req: Request, res: Response) => {
 
   try {
     const config = await getOllamaModelConfig(model, endpoint);
-    return res.json({ ...config, system1Auto: system1AutoFor(endpoint, config) });
+    return res.json({
+      ...config,
+      system1Auto: system1AutoFor(endpoint, config),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return res.status(502).json({ error: msg });

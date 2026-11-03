@@ -12,8 +12,6 @@ import {
   ArrowUp,
   BookMarked,
   ImagePlus,
-  Loader2,
-  Mic,
   Pencil,
   Plus,
   Square,
@@ -28,7 +26,6 @@ import {
   MAX_THREAD_MENTIONS,
   SYSTEM1_AUTO_THINKING,
   imageAttachments,
-  isThreadMention,
   resolveContextWindow,
   threadMentions,
 } from '@agent/agent-models';
@@ -67,6 +64,13 @@ import { ContextUsage } from '@/features/usage/context-usage';
 import { UsageMeter } from '@/features/usage/usage-meter';
 import { SkillsPanel } from '@/features/composer/skills-panel';
 import { registerComposerFocus } from '@/features/composer/composer-focus';
+import {
+  clearComposerDraft,
+  loadComposerDraft,
+  saveComposerDraft,
+} from '@/features/composer/composer-draft';
+import { PostureToggle } from '@/features/composer/posture-toggle';
+import { VoiceButton } from '@/features/composer/voice-button';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -113,85 +117,6 @@ import {
   type SkillCatalogItem,
 } from '@/api/skills-client';
 
-type ComposerDraft = {
-  content: string;
-  attachments: MessageAttachment[];
-};
-
-function isPersistedAttachment(value: unknown): value is MessageAttachment {
-  if (!value || typeof value !== 'object') return false;
-  const rec = value as MessageAttachment;
-  if (isThreadMention(rec)) {
-    return (
-      typeof rec.id === 'string' &&
-      typeof rec.threadId === 'string' &&
-      typeof rec.title === 'string'
-    );
-  }
-  return (
-    typeof rec.id === 'string' &&
-    typeof rec.mimeType === 'string' &&
-    typeof rec.dataUrl === 'string'
-  );
-}
-
-function draftStorageKey(scope: string): string {
-  return `agent:composerDraft:${scope}`;
-}
-
-function loadComposerDraft(scope: string): ComposerDraft | null {
-  try {
-    const raw = localStorage.getItem(draftStorageKey(scope));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as {
-      content?: unknown;
-      attachments?: unknown;
-    };
-    const content = typeof parsed.content === 'string' ? parsed.content : '';
-    const attachments = Array.isArray(parsed.attachments)
-      ? parsed.attachments.filter(isPersistedAttachment)
-      : [];
-    if (!content.trim() && attachments.length === 0) return null;
-    return { content, attachments };
-  } catch {
-    return null;
-  }
-}
-
-function saveComposerDraft(scope: string, draft: ComposerDraft): void {
-  if (!draft.content.trim() && draft.attachments.length === 0) {
-    try {
-      localStorage.removeItem(draftStorageKey(scope));
-    } catch {
-      /* storage blocked */
-    }
-    return;
-  }
-  try {
-    localStorage.setItem(draftStorageKey(scope), JSON.stringify(draft));
-  } catch {
-    // Quota: keep text if images do not fit.
-    if (draft.attachments.length > 0 && draft.content.trim()) {
-      try {
-        localStorage.setItem(
-          draftStorageKey(scope),
-          JSON.stringify({ content: draft.content, attachments: [] }),
-        );
-      } catch {
-        /* storage blocked */
-      }
-    }
-  }
-}
-
-function clearComposerDraft(scope: string): void {
-  try {
-    localStorage.removeItem(draftStorageKey(scope));
-  } catch {
-    /* storage blocked */
-  }
-}
-
 function composerPlaceholder(opts: {
   voiceActive: boolean;
   voiceTranscribing: boolean;
@@ -201,28 +126,6 @@ function composerPlaceholder(opts: {
   if (opts.voiceTranscribing) return 'Transcribing…';
   if (opts.isHero) return 'Ask anything to start…';
   return 'Send a follow-up…';
-}
-
-const WAVE_BAR_COUNT = 5;
-
-/** Compact waveform that fits inside the mic button while voice is active. */
-function MicWaveform({ level }: { level: number }) {
-  const clamped = Math.max(0, Math.min(1, level));
-  return (
-    <span className="flex h-4 items-end gap-0.5" aria-hidden>
-      {Array.from({ length: WAVE_BAR_COUNT }, (_, i) => {
-        const weight = 1 - Math.abs(i - (WAVE_BAR_COUNT - 1) / 2) * 0.28;
-        const h = 22 + clamped * weight * 78;
-        return (
-          <span
-            key={i}
-            className="w-0.5 rounded-full bg-current transition-[height] duration-75 ease-out"
-            style={{ height: `${h}%` }}
-          />
-        );
-      })}
-    </span>
-  );
 }
 
 export function ChatInput({
@@ -1002,43 +905,12 @@ export function ChatInput({
   // Host run posture is shown separately via run.started.
 
   const postureChips = showPostureChips ? (
-    <div
-      className="flex h-7 shrink-0 items-center rounded-md border border-border/60 p-0.5"
-      role="group"
-      aria-label="Workspace posture"
-    >
-      {(
-        [
-          { id: 'ask', label: 'Ask' },
-          { id: 'agent', label: 'Agent' },
-        ] as const
-      ).map((option) => {
-        const selected = posture === option.id;
-        return (
-          <Button
-            key={option.id}
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-pressed={selected}
-            className={cn(
-              'h-6 px-2 text-xs font-normal',
-              selected
-                ? 'bg-muted text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-            onClick={() =>
-              onComposerOptionsChange({
-                ...composerOptions,
-                posture: option.id,
-              })
-            }
-          >
-            {option.label}
-          </Button>
-        );
-      })}
-    </div>
+    <PostureToggle
+      posture={posture}
+      onChange={(next) =>
+        onComposerOptionsChange({ ...composerOptions, posture: next })
+      }
+    />
   ) : null;
 
   const modelControls = (
@@ -1108,37 +980,7 @@ export function ChatInput({
         balance={ollamaBalance.balance}
         loading={ollamaBalance.loading}
       />
-      {voice.enabled ? (
-        <Button
-          type="button"
-          size="icon-sm"
-          variant={voice.active || voice.transcribing ? 'secondary' : 'ghost'}
-          onClick={() => voice.toggle()}
-          aria-label={
-            voice.transcribing
-              ? 'Transcribing voice'
-              : voice.active
-                ? 'Stop voice mode'
-                : 'Start voice mode'
-          }
-          aria-pressed={voice.active}
-          aria-busy={voice.transcribing}
-          title={voice.transcribing ? 'Transcribing…' : 'Voice mode'}
-          className={cn(
-            'shrink-0 rounded-full',
-            (voice.active || voice.transcribing) && 'text-foreground',
-            voice.active && 'w-auto px-2',
-          )}
-        >
-          {voice.active ? (
-            <MicWaveform level={voice.level} />
-          ) : voice.transcribing ? (
-            <Loader2 className="size-4 animate-spin" strokeWidth={2.25} />
-          ) : (
-            <Mic className="size-4" strokeWidth={2.25} />
-          )}
-        </Button>
-      ) : null}
+      {voice.enabled ? <VoiceButton voice={voice} /> : null}
       <Button
         type="button"
         size="icon-sm"

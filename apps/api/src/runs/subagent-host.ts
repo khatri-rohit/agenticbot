@@ -17,7 +17,7 @@ import {
 import { capacityState } from '../models/capacity';
 import { modelRolesFor, resolveCallOptions, resolveContextBudget } from '../models/model-runtime';
 import type { ThreadStore } from '../threads/thread-store';
-import { createJsonlTraceSink } from '../platform/trace-sink.js';
+import { threadTraceSink } from '../platform/trace-sink.js';
 
 /**
  * API side of the sub-agent contract: persistence on the ThreadStore and
@@ -106,6 +106,6 @@ export function createSubagentHost(deps: {
         return '';
       }
     },
-    trace: (threadId) => createJsonlTraceSink(store.traceDir(threadId)),
+    trace: (threadId) => threadTraceSink(store, threadId),
   };
 }

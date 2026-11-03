@@ -4,6 +4,8 @@ import path from 'node:path';
 import { TRACE_SCHEMA_VERSION } from '@agent/agent-models';
 import type { TraceEvent } from '@agent/agent-core';
 
+import type { ThreadStore } from '../threads/thread-store.js';
+
 /**
  * Process-wide write chains and sequence numbers, keyed by trace file.
  * Several sinks write one run's file (the run's own, the post-run compaction
@@ -54,4 +56,12 @@ export function createJsonlTraceSink(dir: string): (event: TraceEvent) => void {
       if (tails.get(file) === tail) tails.delete(file);
     });
   };
+}
+
+/** A thread's run traces: `<thread>/traces/<runId>.jsonl`. */
+export function threadTraceSink(
+  store: Pick<ThreadStore, 'traceDir'>,
+  threadId: string,
+): (event: TraceEvent) => void {
+  return createJsonlTraceSink(store.traceDir(threadId));
 }

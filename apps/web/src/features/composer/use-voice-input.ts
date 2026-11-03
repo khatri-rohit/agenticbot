@@ -22,7 +22,7 @@ function resolveVoiceSttProvider(): VoiceSttProvider {
   return 'browser';
 }
 
-type VoiceInputController = {
+export type VoiceInputController = {
   enabled: boolean;
   provider: VoiceSttProvider;
   active: boolean;
