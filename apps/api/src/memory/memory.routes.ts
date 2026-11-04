@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { DEFAULT_MEMORY_CAPS } from '@agent/agent-models';
+import { DEFAULT_MEMORY_CAPS, revertedOpId } from '@agent/agent-models';
 import { getMemoryStore } from '../platform/instances';
 import { asyncRoute } from '../platform/http-errors';
 
@@ -16,16 +16,11 @@ router.get('/memory', asyncRoute(async (req: Request, res: Response) => {
     memory.read(workspaceRoot),
     memory.listOps(),
   ]);
-  const reverted = new Set(
-    ops
-      .filter((op) => op.reason.startsWith('revert '))
-      .map((op) => op.reason.slice('revert '.length)),
-  );
+  const reverted = new Set(ops.map(revertedOpId).filter(Boolean));
+  // Reverts and the entries they undo both leave the list.
   const visible = ops.filter(
     (op) =>
-      op.status === 'applied' &&
-      !reverted.has(op.id) &&
-      !op.reason.startsWith('revert '),
+      op.status === 'applied' && !revertedOpId(op) && !reverted.has(op.id),
   );
   return res.json({ files, ops: visible, caps: DEFAULT_MEMORY_CAPS });
 }));

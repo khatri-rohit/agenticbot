@@ -231,7 +231,10 @@ export function createThreadSession(
         chain = chain.then(async () => {
           if (disposed || disconnect !== unsubscribe) return;
           const prev = view.chat;
-          if (hasSseSeqGap(prev.activeRun?.lastSeq ?? 0, event.seq)) {
+          // A run attached from the ledger starts at seq 0 and its first
+          // replayed event is usually far ahead; that read already happened.
+          const lastSeq = prev.activeRun?.lastSeq ?? 0;
+          if (lastSeq > 0 && hasSseSeqGap(lastSeq, event.seq)) {
             void refreshMessages();
           }
           await persistChatEffects(prev, event, threadId);

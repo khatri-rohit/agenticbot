@@ -143,6 +143,7 @@ export type {
   LedgerEnvelope,
   LedgerAppendMeta,
   LedgerResponse,
+  WebTrust,
 } from './lib/ledger.js';
 export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
 
@@ -189,7 +190,11 @@ export type {
   MemoryGateVerdict,
   MemoryGateResult,
 } from './lib/memory.js';
-export { DEFAULT_MEMORY_CAPS, parseMemoryOp } from './lib/memory.js';
+export {
+  DEFAULT_MEMORY_CAPS,
+  parseMemoryOp,
+  revertedOpId,
+} from './lib/memory.js';
 
 export type {
   RunOutcome,

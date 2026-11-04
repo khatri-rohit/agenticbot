@@ -437,8 +437,10 @@ export function createSubagentRunner(deps: {
           ...(host.trace(threadId) ? { trace: host.trace(threadId)! } : {}),
           depth: parent.depth + 1,
           parentRunId: parent.runId,
-          parentSignal: parent.signal,
           ...(parent.capacity ? { capacity: parent.capacity } : {}),
+          ...(profile.context === 'fork' ? { webTrust: parent.webTrust() } : {}),
+        }, {
+          parentSignal: parent.signal,
           // The parent's card holds the result; the child's events are only for progress.
           retainMs: 1_000,
         });

@@ -264,6 +264,19 @@ export class ThreadStore {
     return readFile(path.join(this.threadDir(threadId), 'blobs', sha256));
   }
 
+  /** A text blob, or the [offset, offset + length) slice of it (the loop's readBlob). */
+  async readBlobText(
+    threadId: string,
+    sha256: string,
+    offset?: number,
+    length?: number,
+  ): Promise<string> {
+    const text = (await this.readBlob(threadId, sha256)).toString('utf8');
+    if (offset === undefined && length === undefined) return text;
+    const start = offset ?? 0;
+    return text.slice(start, length === undefined ? undefined : start + length);
+  }
+
   rewind(threadId: string, keepThroughSeq: number): Promise<void> {
     return this.serialize(threadId, () =>
       this.rewindUnlocked(threadId, keepThroughSeq),
@@ -430,6 +443,7 @@ export class ThreadStore {
         ? { runDurationMs: input.meta.runDurationMs }
         : {}),
       ...(input.meta?.toolOutcome ? { toolOutcome: input.meta.toolOutcome } : {}),
+      ...(input.meta?.webTrust ? { webTrust: input.meta.webTrust } : {}),
       ...(input.skills ? { skills: input.skills } : {}),
     };
 

@@ -21,6 +21,7 @@ import type {
   ClaimResult,
   ResolveChoiceResult,
   RunEnd,
+  RunHooks,
   StartRunOptions,
 } from './types';
 
@@ -115,7 +116,7 @@ export class RunManager {
       claim: {
         runId,
         ready: waitForAll(others.map((other) => other.done)),
-        start: (opts) => this.start(handle, opts),
+        start: (opts, hooks = {}) => this.start(handle, opts, hooks),
         release: () => {
           if (handle.phase !== 'claimed') return;
           this.finish(handle, { result: emptyResult(runId), outcome: 'error' }, 0);
@@ -124,7 +125,7 @@ export class RunManager {
     };
   }
 
-  private start(handle: RunHandle, opts: StartRunOptions): void {
+  private start(handle: RunHandle, opts: StartRunOptions, hooks: RunHooks): void {
     if (handle.phase !== 'claimed') return;
     handle.phase = 'running';
     handle.model = opts.model;
@@ -132,45 +133,27 @@ export class RunManager {
     handle.startedAt = new Date().toISOString();
 
     // A child run dies with its parent: parent cancel aborts this run too.
-    const parentSignal = opts.parentSignal;
+    const { parentSignal } = hooks;
     const onParentAbort = () => this.cancel(handle.runId);
     if (parentSignal?.aborted) queueMicrotask(onParentAbort);
     else parentSignal?.addEventListener('abort', onParentAbort, { once: true });
 
-    void this.execute(handle, opts).finally(() =>
+    void this.execute(handle, opts, hooks).finally(() =>
       parentSignal?.removeEventListener('abort', onParentAbort),
     );
   }
 
   private async loop(handle: RunHandle, opts: StartRunOptions): Promise<RunLoopResult> {
+    const { messages, tools, modelCall, ...config } = opts;
     try {
-      return await runLoop(opts.modelCall, opts.messages, opts.tools, {
+      return await runLoop(modelCall, messages, tools, {
+        ...config,
         runId: handle.runId,
         threadId: handle.threadId,
-        model: opts.model,
-        mode: opts.mode,
         posture: handle.posture,
-        limits: opts.limits,
-        estimatedPromptTokens: opts.estimatedPromptTokens,
-        contextReport: opts.contextReport,
         signal: handle.abortController.signal,
-        origin: opts.origin,
-        workspaceRoot: opts.workspaceRoot,
-        ...(opts.putBlob ? { putBlob: opts.putBlob } : {}),
-        ...(opts.readBlob ? { readBlob: opts.readBlob } : {}),
         // offer_choice pause; write/exec tools do not go through this hook.
         offerChoice: (request) => this.requestChoice(handle, request),
-        onMessage: opts.onMessage,
-        hasOpenPlanWork: opts.hasOpenPlanWork,
-        contextBudget: opts.contextBudget,
-        ...(opts.trace ? { trace: opts.trace } : {}),
-        ...(opts.subagents ? { subagents: opts.subagents } : {}),
-        ...(opts.depth !== undefined ? { depth: opts.depth } : {}),
-        ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
-        ...(opts.pinnedSkills?.length ? { pinnedSkills: opts.pinnedSkills } : {}),
-        ...(opts.capacity ? { capacity: opts.capacity } : {}),
-        ...(opts.system1 ? { system1: opts.system1 } : {}),
-        ...(opts.effortPolicy ? { effortPolicy: opts.effortPolicy } : {}),
         emit: (event) => this.gate(handle, event),
       });
     } catch (err) {
@@ -181,7 +164,11 @@ export class RunManager {
     }
   }
 
-  private async execute(handle: RunHandle, opts: StartRunOptions): Promise<void> {
+  private async execute(
+    handle: RunHandle,
+    opts: StartRunOptions,
+    hooks: RunHooks,
+  ): Promise<void> {
     const { runId } = handle;
     // Cancelled while it was being set up: skip the loop, still finish (lastRun).
     const result = handle.cancelled
@@ -192,7 +179,7 @@ export class RunManager {
     handle.phase = 'finishing';
     const outcome = handle.cancelled ? 'cancelled' : result.status;
     try {
-      await opts.onFinished?.(result, outcome);
+      await hooks.onFinished?.(result, outcome);
     } catch (error) {
       // Post-run work must not flip a finished run into an error.
       console.error(
@@ -209,7 +196,7 @@ export class RunManager {
           ? { incomplete: true }
           : {}),
     });
-    this.finish(handle, { result, outcome }, opts.retainMs);
+    this.finish(handle, { result, outcome }, hooks.retainMs);
   }
 
   private finish(handle: RunHandle, end: RunEnd, retainMs = RUN_HANDLE_TTL_MS): void {

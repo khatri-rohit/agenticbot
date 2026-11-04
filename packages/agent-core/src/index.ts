@@ -106,4 +106,5 @@ export type { TraceEvent } from '@agent/agent-models';
 
 // Run manager
 export { RunManager } from './lib/run/run-manager';
+export { webTrustFromLedger } from './lib/loop/web-sources';
 export type { RunClaim, RunEnd } from './lib/run/types';

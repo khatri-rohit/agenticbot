@@ -17,6 +17,7 @@ import {
   type TokenUsage,
   type ToolContext,
   type TraceEvent,
+  type WebTrust,
 } from '@agent/agent-models';
 
 import {
@@ -142,7 +143,13 @@ export async function runLoop(
     usage,
     durationMs: Date.now() - startedAt,
   });
-  return { ...result, usage };
+  return {
+    ...result,
+    usage,
+    ...(config.contextReport
+      ? { contextReport: refreshContextReport(config.contextReport, messages, tools) }
+      : {}),
+  };
 }
 
 /**
@@ -516,7 +523,9 @@ async function runLoopCore(
     emit?.({ type: 'limit.hit', runId, reason });
   }
   const contextBudget = config.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
-  webSources.seed(messages);
+  webSources.seed(messages, config.webTrust);
+  /** What each web call made fetchable, until its row is written. */
+  const trustByCall = new Map<string, WebTrust>();
 
   async function appendDurable(
     message: ChatCompletionMessageParam,
@@ -542,7 +551,13 @@ async function runLoopCore(
 
   const record = new ToolCallRecord(runId, emit, appendDurable, argsPreviewOf);
 
-  function buildToolContext(): ToolContext {
+  /** `toolCallId`: the call this context runs, so web trust lands on its row. */
+  function buildToolContext(toolCallId?: string): ToolContext {
+    const trustOf = (id: string) => {
+      let trust = trustByCall.get(id);
+      if (!trust) trustByCall.set(id, (trust = { urls: [], sources: [] }));
+      return trust;
+    };
     return {
       runId,
       threadId,
@@ -569,6 +584,7 @@ async function runLoopCore(
                 contextBudget,
                 remainingPromptTokens: budget.remaining(),
                 forkMessages,
+                webTrust: () => webSources.snapshot(),
                 ...(config.emit ? { emit: config.emit } : {}),
                 ...(config.pinnedSkills ? { pinnedSkills: config.pinnedSkills } : {}),
                 ...(config.capacity ? { capacity: config.capacity } : {}),
@@ -581,8 +597,20 @@ async function runLoopCore(
       },
       putBlob: (text) => webSources.putBlob(text),
       readBlob: (sha, offset, length) => webSources.readBlob(sha, offset, length),
-      noteTrustedWebUrls: (urls) => webSources.noteTrustedUrls(urls),
-      noteWebSource: (source) => webSources.noteSource(source),
+      noteTrustedWebUrls: (urls) => {
+        webSources.noteTrustedUrls(urls);
+        if (toolCallId) trustOf(toolCallId).urls.push(...urls);
+      },
+      noteWebSource: (source) => {
+        webSources.noteSource(source);
+        if (toolCallId) {
+          trustOf(toolCallId).sources.push({
+            sha256: source.sha256,
+            url: source.url,
+            title: source.title,
+          });
+        }
+      },
       getWebSource: (sha) => webSources.get(sha),
       getWebSourceByUrl: (url) => webSources.getByUrl(url),
       trustsWebUrl: (url) => webSources.trustsUrl(url),
@@ -828,12 +856,15 @@ async function runLoopCore(
       resultChars,
     });
     // Append before outcome halt so I1 always holds for the triggering call.
+    const webTrust = trustByCall.get(toolCall.id);
+    trustByCall.delete(toolCall.id);
     await record.complete(
       toolCall.id,
       toolName,
       result,
       durationMs,
       preview(result, RESULT_PREVIEW_MAX),
+      webTrust ? { webTrust } : {},
     );
     // Mutate + exec: same call + same result = stuck (e.g. write theater,
     // or run_terminal producing the same exit code with no edit between).
@@ -883,7 +914,7 @@ async function runLoopCore(
     startCall(call);
     const startedAt = Date.now();
     try {
-      const raw = await runTool(call, buildToolContext());
+      const raw = await runTool(call, buildToolContext(call.toolCall.id));
       const result = shapeToolResult(call.toolName, call.args, raw, call.toolCall.id);
       return await settleReturned(call, result, raw.length, Date.now() - startedAt);
     } catch (error) {
@@ -898,7 +929,7 @@ async function runLoopCore(
           USER_SKIPPED_CHOICE,
           Date.now() - startedAt,
           preview(USER_SKIPPED_CHOICE, 200),
-          'skipped',
+          { outcome: 'skipped' },
         );
         await record.skip(
           remainingOnAbort.slice(1),
@@ -932,14 +963,13 @@ async function runLoopCore(
       return 'ok';
     }
 
-    const toolCtx = buildToolContext();
     for (const call of batch) startCall(call);
 
     const settled = await Promise.all(
       batch.map(async (call) => {
         const started = Date.now();
         try {
-          const raw = await runTool(call, toolCtx);
+          const raw = await runTool(call, buildToolContext(call.toolCall.id));
           return {
             call,
             ok: true as const,

@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { MemoryFiles, MemoryOp, ProposedMemoryOp } from '@agent/agent-models';
-import { parseMemoryOp, workspaceRootKey } from '@agent/agent-models';
+import { parseMemoryOp, revertedOpId, workspaceRootKey } from '@agent/agent-models';
 import { applyMemoryText, gateMemoryOps } from '@agent/agent-core';
 
 export class MemoryStore {
@@ -158,6 +158,9 @@ export class MemoryStore {
       if (original.target !== 'user' && original.target !== 'notes') {
         throw new Error('Can only revert user or notes ops');
       }
+      if (ops.some((op) => revertedOpId(op) === opId)) {
+        throw new Error('Already reverted');
+      }
 
       const inverse: ProposedMemoryOp = {
         target: original.target,
@@ -185,13 +188,14 @@ export class MemoryStore {
         evidence: original.evidence,
       };
 
-      return this.applyUnlocked(inverse, workspaceRoot);
+      return this.applyUnlocked(inverse, workspaceRoot, opId);
     });
   }
 
   private async applyUnlocked(
     proposed: ProposedMemoryOp,
     workspaceRoot?: string,
+    reverts?: string,
   ): Promise<MemoryOp> {
     const files = await this.read(
       proposed.target === 'notes' ? workspaceRoot : undefined,
@@ -216,6 +220,7 @@ export class MemoryStore {
     if (proposed.action === 'add') {
       op.oldText = (proposed.content ?? '').trim();
     }
+    if (reverts) op.reverts = reverts;
 
     if (proposed.target === 'user') {
       await writeFile(this.userPath(), next, 'utf8');

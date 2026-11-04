@@ -1,5 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
+import type { LedgerEnvelope, WebTrust } from '@agent/agent-models';
+
 import { sha256Text } from '../tools/web/source';
 import { extractHttpUrls, hostListedWebUrls } from '../tools/web/trust';
 import { canonicalizeWebFetchUrl, looksLikeHttpUrl } from '../tools/web/url';
@@ -13,6 +15,51 @@ export type WebSource = {
   title: string;
   content: string;
 };
+
+const WEB_TOOLS = new Set(['web_search', 'web_fetch']);
+
+/**
+ * Trust named by the text of a web tool row written before trust was stored
+ * on rows. Only for those rows: the cards are host-formatted, and page text
+ * inside the untrusted fence is skipped.
+ */
+function webTrustFromText(content: string): WebTrust {
+  const urls = hostListedWebUrls(content);
+  const sha = content.match(/^sha256: ([a-f0-9]{64})$/m)?.[1];
+  const url = content.match(/^URL: (.+)$/m)?.[1]?.trim();
+  const title = content.match(/^title: (.+)$/m)?.[1]?.trim() ?? '';
+  return { urls, sources: sha && url ? [{ sha256: sha, url, title }] : [] };
+}
+
+/**
+ * Everything a thread's web tools made fetchable, across its whole ledger
+ * (compaction never deletes rows, so trust outlives it; a rewind cuts it with
+ * its rows). Envelopes must be hydrated for rows from before trust was stored.
+ */
+export function webTrustFromLedger(envelopes: LedgerEnvelope[]): WebTrust {
+  const trust: WebTrust = { urls: [], sources: [] };
+  const webCalls = new Set<string>();
+  for (const envelope of envelopes) {
+    const record = envelope.record;
+    if (record.role === 'assistant') {
+      for (const call of record.tool_calls ?? []) {
+        if (WEB_TOOLS.has(call.function.name)) webCalls.add(call.id);
+      }
+      continue;
+    }
+    if (record.role !== 'tool') continue;
+    // Rows written since outcomes were stored carry their trust (or none).
+    const rowTrust =
+      envelope.webTrust ??
+      (!envelope.toolOutcome && webCalls.has(record.tool_call_id)
+        ? webTrustFromText(record.content)
+        : undefined);
+    if (!rowTrust) continue;
+    trust.urls.push(...rowTrust.urls);
+    trust.sources.push(...rowTrust.sources);
+  }
+  return trust;
+}
 
 /**
  * The web sources a run may read. web_fetch only reaches a URL the user gave
@@ -35,29 +82,56 @@ export class WebSourceStore {
     },
   ) {}
 
-  /** Trust URLs the user wrote and sources earlier tool results named. */
-  seed(messages: ChatCompletionMessageParam[]): void {
+  /**
+   * Trust URLs the user wrote, plus what earlier web calls made fetchable:
+   * `trust` when the host read it from the ledger, else the text of the web
+   * tool rows in `messages`. No other tool's text can make a URL fetchable.
+   */
+  seed(messages: ChatCompletionMessageParam[], trust?: WebTrust): void {
+    const webCalls = new Set<string>();
     for (const message of messages) {
+      if (message.role === 'assistant') {
+        for (const call of message.tool_calls ?? []) {
+          if (call.type === 'function' && WEB_TOOLS.has(call.function.name)) {
+            webCalls.add(call.id);
+          }
+        }
+        continue;
+      }
       if (typeof message.content !== 'string') continue;
       if (message.role === 'user') {
         this.noteTrustedUrls(extractHttpUrls(message.content));
-      } else if (message.role === 'tool') {
-        this.noteTrustedUrls(hostListedWebUrls(message.content));
-        const sha = message.content.match(/^sha256: ([a-f0-9]{64})$/m)?.[1];
-        const url = message.content.match(/^URL: (.+)$/m)?.[1]?.trim();
-        const title = message.content.match(/^title: (.+)$/m)?.[1]?.trim();
-        if (sha) {
-          const id = sha.toLowerCase();
-          this.trustedShas.add(id);
-          if (url) {
-            const canonical = canonicalizeWebFetchUrl(url);
-            this.meta.set(id, { url: canonical, title: title ?? '' });
-            this.urlToSha.set(canonical, id);
-            this.noteTrustedUrls([canonical]);
-          }
-        }
+      } else if (
+        !trust &&
+        message.role === 'tool' &&
+        webCalls.has(message.tool_call_id)
+      ) {
+        this.trust(webTrustFromText(message.content));
       }
     }
+    if (trust) this.trust(trust);
+  }
+
+  /** What this run trusts, for a child that reads the same conversation. */
+  snapshot(): WebTrust {
+    return {
+      urls: [...this.trustedUrls],
+      sources: [...this.meta].map(([sha256, meta]) => ({ sha256, ...meta })),
+    };
+  }
+
+  private trust(trust: WebTrust): void {
+    this.noteTrustedUrls(trust.urls);
+    for (const source of trust.sources) this.noteSourceMeta(source);
+  }
+
+  private noteSourceMeta(source: { sha256: string; url: string; title: string }): void {
+    const sha = source.sha256.toLowerCase();
+    const url = canonicalizeWebFetchUrl(source.url);
+    this.trustedShas.add(sha);
+    this.meta.set(sha, { url, title: source.title });
+    this.urlToSha.set(url, sha);
+    this.noteTrustedUrls([url]);
   }
 
   noteTrustedUrls(urls: string[]): void {
@@ -69,15 +143,8 @@ export class WebSourceStore {
   }
 
   noteSource(source: WebSource): void {
-    const sha = source.sha256.toLowerCase();
-    this.trustedShas.add(sha);
-    this.bodies.set(sha, source.content);
-    this.meta.set(sha, {
-      url: canonicalizeWebFetchUrl(source.url),
-      title: source.title,
-    });
-    this.urlToSha.set(canonicalizeWebFetchUrl(source.url), sha);
-    this.noteTrustedUrls([source.url]);
+    this.noteSourceMeta(source);
+    this.bodies.set(source.sha256.toLowerCase(), source.content);
   }
 
   trustsUrl(url: string): boolean {

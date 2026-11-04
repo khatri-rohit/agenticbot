@@ -14,6 +14,7 @@ import type {
   SubagentResult,
   ToolOrigin,
   TraceEvent,
+  WebTrust,
 } from '@agent/agent-models';
 import type { ModelTurn } from '../model/types';
 import type { EffortPolicy } from '../system1/effort';
@@ -127,6 +128,11 @@ export type RunLoopConfig = {
    * reasoning_effort the modelCall closure already sends.
    */
   effortPolicy?: EffortPolicy;
+  /**
+   * What this thread's earlier web calls made fetchable (from its ledger).
+   * Without it, only the text of web tool rows in `messages` counts.
+   */
+  webTrust?: WebTrust;
 };
 
 /** What a sub-agent inherits from (and reports back to) its parent run. */
@@ -145,6 +151,8 @@ export type SubagentParent = {
   remainingPromptTokens?: number;
   /** Parent conversation for an advisor fork. */
   forkMessages: () => ChatCompletionMessageParam[];
+  /** What the parent may fetch; an advisor reading its conversation inherits it. */
+  webTrust: () => WebTrust;
   /** Parent stream, for subrun.* markers. */
   emit?: (event: AgentEventWithoutSeq) => void;
   /** The user's `/` picks for this send; profiles may inherit them. */
@@ -170,4 +178,6 @@ export type RunLoopResult = {
   limitReason?: string;
   /** Token spend, own + sub-agents. */
   usage: RunUsage;
+  /** The context after the final answer, when the host passed a starting report. */
+  contextReport?: ContextReport;
 };

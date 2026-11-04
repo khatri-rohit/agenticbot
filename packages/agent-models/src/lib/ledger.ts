@@ -23,6 +23,16 @@ export type LedgerRecord =
   | LedgerAssistantRecord
   | LedgerToolRecord;
 
+/**
+ * Web sources a tool call made fetchable: URLs the user or a search supplied,
+ * and pages stored on the run. Only web tools write it; it is how trust
+ * outlives the run and compaction (the text of a row never grants trust).
+ */
+export type WebTrust = {
+  urls: string[];
+  sources: { sha256: string; url: string; title: string }[];
+};
+
 /** Host-assigned metadata passed alongside a ledger record on append. */
 export type LedgerAppendMeta = {
   /** Assistant response wall-clock duration (model-call + stream time). */
@@ -31,6 +41,8 @@ export type LedgerAppendMeta = {
   runDurationMs?: number;
   /** On tool rows: what happened to the call. */
   toolOutcome?: ToolOutcome;
+  /** On web tool rows: what the call made fetchable. */
+  webTrust?: WebTrust;
 };
 
 export type LedgerSystemRecord = {
@@ -80,6 +92,8 @@ export type LedgerEnvelope = {
   skills?: { selected: string[] };
   /** Tool rows only; absent on rows written before outcomes were stored. */
   toolOutcome?: ToolOutcome;
+  /** Web tool rows only (see WebTrust). */
+  webTrust?: WebTrust;
 };
 
 /** Skip system rows; they are rebuilt by the host each run. */

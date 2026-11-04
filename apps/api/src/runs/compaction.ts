@@ -1,8 +1,6 @@
 import type {
   ContextReport,
   LedgerEnvelope,
-  OllamaEndpoint,
-  RunPosture,
   Snapshot,
 } from '@agent/agent-models';
 import {
@@ -11,14 +9,9 @@ import {
   traceCompactionEvent,
 } from '@agent/agent-core';
 
-import { getThreadStore, runManager } from '../platform/instances';
+import { runManager } from '../platform/instances';
 import { threadTraceSink } from '../platform/trace-sink.js';
 import type { ThreadStore } from '../threads/thread-store';
-import {
-  lastUserEnvelope,
-  prepareRun,
-  resolveRequestedSkills,
-} from './run-context';
 
 /**
  * Write the snapshot core's compaction decision asks for (see planCompaction).
@@ -70,42 +63,27 @@ export function emitCompacted(
   )(traceCompactionEvent({ runId, threadId, snapshot }));
 }
 
+/**
+ * After a run: compact when the run's own closing report (the context after
+ * its final answer) is over the threshold. No re-assembly: the next run's
+ * pre-run pass catches anything this estimate misses.
+ */
 export async function maybeCompactThread(input: {
+  store: ThreadStore;
   threadId: string;
   runId: string;
   model: string;
-  posture: RunPosture;
-  webSearch?: boolean;
-  endpoint?: OllamaEndpoint;
+  report: ContextReport;
 }): Promise<void> {
-  const store = await getThreadStore();
-  const thread = store.getThread(input.threadId);
-  if (!thread) return;
-  const envelopes = await store.hydrateEnvelopes(input.threadId);
-  const lastUser = lastUserEnvelope(envelopes);
-  const prepared = await prepareRun({
-    threadId: input.threadId,
-    thread,
-    webSearch: input.webSearch,
-    posture: input.posture,
-    lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
-    envelopes,
-    model: input.model,
-    endpoint: input.endpoint,
-    skillNames: resolveRequestedSkills(undefined, lastUser?.skills?.selected),
-  });
-  if (!prepared.report.needsCompaction) return;
-  runManager.publish(input.runId, {
-    type: 'context.compacting',
-    runId: input.runId,
-    threadId: input.threadId,
-  });
+  if (!input.report.needsCompaction) return;
+  const { store, threadId, runId } = input;
+  runManager.publish(runId, { type: 'context.compacting', runId, threadId });
   const snapshot = await compactThread({
     store,
-    threadId: input.threadId,
+    threadId,
     model: input.model,
-    envelopes,
-    report: prepared.report,
+    envelopes: await store.hydrateEnvelopes(threadId),
+    report: input.report,
   });
-  if (snapshot) emitCompacted(store, input.runId, input.threadId, snapshot);
+  if (snapshot) emitCompacted(store, runId, threadId, snapshot);
 }

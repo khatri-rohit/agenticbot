@@ -29,7 +29,7 @@ User message (apps/web)
 
 **Threads are host-owned on disk** (`AGENT_HOME` SQLite catalog + per-thread `ledger.jsonl`). The first user turn seeds a sidebar title and refines it with the chat model. The ledger is the durable history of the **active tape**. Retry/edit **rewind** truncates that tape (atomic rewrite) — discarded turns are gone. SSE is a live convenience; after a run handle is cleared (5 minute TTL) a late events subscribe is 404 and the client rebuilds from `GET /ledger`.
 
-**One active run per thread** (enforced in API). **One agent-posture run per workspace folder** (409 `reason: 'workspace'`); ask-posture and Home threads are exempt. Both mutexes are **in-process** (`RunManager` singleton) — not multi-instance. Use `POST /api/agent/run/:runId/cancel` to stop generation.
+**One active run per thread** (enforced by `RunManager`, in-process — not multi-instance). Two threads bound to the same workspace folder can run Agent-posture runs at the same time; nothing locks the folder. Use `POST /api/agent/run/:runId/cancel` to stop generation.
 
 ### Harness mental models
 
@@ -264,7 +264,7 @@ External HTTP for tools belongs in core modules (e.g. `tools/web/router.ts`), no
 | `web_search` fails                     | Keyless Firecrawl/Tavily 429 (shared caps); or `OLLAMA_API_KEY` path — curl tests above                        |
 | `web_fetch` fails                      | Valid public http(s) URL; all scrape layers + local HTTP failed; huge pages are prefixed at 16k chars          |
 | Run stuck “running”                    | SSE disconnect; seq gap should refetch ledger; every run ends with `run.settled`; cancel endpoint              |
-| 409 on new message                     | Thread already running, or another **agent** run in the same workspace (`reason: 'workspace'`); cancel or wait |
+| 409 on new message                     | Thread already running (or a stopped run still finishing after 10 s); cancel or wait                           |
 | Title stays “New Chat”                 | First message must go through `POST /run`; check API logs for `[title] generate failed`                        |
 | Voice / STT errors                     | Speaches health `http://127.0.0.1:8000/health`, model pull per [docker/README.md](./docker/README.md)          |
 | Type errors in API after model changes | Rebuild `packages/agent-models` and `core` `.d.ts` (see above)                                                 |

@@ -4,6 +4,7 @@ import { envelopeUntrustedWeb } from './trust';
 
 /** Teaser kept on the prompt card after a full fetch. */
 export const WEB_CARD_TEASER_CHARS = 2_000;
+
 /** Default / max slice for sha256+offset reads. */
 export const WEB_SLICE_DEFAULT_CHARS = 6_000;
 export const WEB_SLICE_MAX_CHARS = 8_000;
@@ -18,6 +19,11 @@ export type WebSourceRecord = {
 
 export function sha256Text(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** Page titles are untrusted: a newline in one must not start a card line (`URL:` …). */
+export function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 export function extractHeadings(text: string, max = 12): string[] {
@@ -52,7 +58,7 @@ export function formatWebSourceCard(input: {
   const lines = [
     '## Source',
     `URL: ${input.url}`,
-    `title: ${input.title || '(untitled)'}`,
+    `title: ${oneLine(input.title) || '(untitled)'}`,
     `sha256: ${input.sha256}`,
     `chars: ${chars}`,
     ...(headings.length > 0 ? [`headings: ${headings.join(' | ')}`] : []),
@@ -91,7 +97,7 @@ export function formatWebSourceSlice(input: {
   const lines = [
     '## Source slice',
     `URL: ${input.url}`,
-    `title: ${input.title || '(untitled)'}`,
+    `title: ${oneLine(input.title) || '(untitled)'}`,
     `sha256: ${input.sha256}`,
     `chars: ${chars}`,
     `slice: ${offset}–${end} of ${chars}`,
@@ -152,7 +158,7 @@ export function formatWebSourceMatches(input: {
   const head = [
     '## Source matches',
     `URL: ${input.url}`,
-    `title: ${input.title || '(untitled)'}`,
+    `title: ${oneLine(input.title) || '(untitled)'}`,
     `sha256: ${input.sha256}`,
     `chars: ${input.content.length}`,
   ];

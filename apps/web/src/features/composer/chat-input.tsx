@@ -642,10 +642,11 @@ export function ChatInput({
         }
       }
 
-      // Picker is open but empty: still let Escape close it, but let other
-      // keys (Enter, arrows) fall through to normal input handling.
-      if (skillSlashOpen && e.key === 'Escape') {
+      // A picker that is open but empty: Escape still closes it; other keys
+      // (Enter, arrows) fall through to normal input handling.
+      if ((mentionOpen || skillSlashOpen) && e.key === 'Escape') {
         e.preventDefault();
+        setMentionOpen(false);
         setSkillSlashOpen(false);
         return;
       }

@@ -7,6 +7,7 @@ import type {
   AgentEventWithoutSeq,
   LedgerAppendMeta,
   ToolOutcome,
+  WebTrust,
 } from '@agent/agent-models';
 
 /** Cap for refusal and skip texts on the event stream. */
@@ -64,14 +65,20 @@ export class ToolCallRecord {
     });
   }
 
-  /** A started call returned (`skipped` when the user skipped a choice). */
+  /**
+   * A started call returned (`skipped` when the user skipped a choice).
+   * `webTrust`: what a web call made fetchable, stored on its row.
+   */
   async complete(
     toolCallId: string,
     toolName: string,
     content: string,
     durationMs: number,
     resultPreview: string,
-    outcome: Exclude<ToolOutcome, 'failed'> = 'ok',
+    { outcome = 'ok', webTrust }: {
+      outcome?: Exclude<ToolOutcome, 'failed'>;
+      webTrust?: WebTrust;
+    } = {},
   ): Promise<void> {
     this.emit?.({
       type: 'tool.completed',
@@ -82,7 +89,7 @@ export class ToolCallRecord {
       resultPreview,
       outcome,
     });
-    await this.row(toolCallId, content, outcome);
+    await this.row(toolCallId, content, outcome, webTrust);
   }
 
   /** A started call threw. */
@@ -130,7 +137,7 @@ export class ToolCallRecord {
       content,
       0,
       preview(content, NOTICE_PREVIEW_MAX),
-      outcome,
+      { outcome },
     );
   }
 
@@ -138,12 +145,13 @@ export class ToolCallRecord {
     toolCallId: string,
     content: string,
     toolOutcome: ToolOutcome,
+    webTrust?: WebTrust,
   ): Promise<void> {
     if (this.answered.has(toolCallId)) return;
     this.answered.add(toolCallId);
     await this.append(
       { role: 'tool', tool_call_id: toolCallId, content },
-      { toolOutcome },
+      { toolOutcome, ...(webTrust ? { webTrust } : {}) },
     );
   }
 }

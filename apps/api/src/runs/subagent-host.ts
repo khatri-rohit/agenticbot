@@ -68,12 +68,8 @@ export function createSubagentHost(deps: {
       });
     },
     putBlob: (threadId, text) => store.putBlob(threadId, text),
-    async readBlob(threadId, sha256, offset, length) {
-      const text = (await store.readBlob(threadId, sha256)).toString('utf8');
-      if (offset === undefined && length === undefined) return text;
-      const start = offset ?? 0;
-      return text.slice(start, length === undefined ? undefined : start + length);
-    },
+    readBlob: (threadId, sha256, offset, length) =>
+      store.readBlobText(threadId, sha256, offset, length),
     writeLastRun: (threadId, lastRun) => store.writeLastRun(threadId, lastRun),
     // Behind weekly pace, review/advisor run on the main model instead of the
     // strong one; explore already uses fast.

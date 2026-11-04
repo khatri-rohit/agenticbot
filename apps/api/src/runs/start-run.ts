@@ -12,6 +12,7 @@ import {
 import {
   buildEffortPolicy,
   type RunClaim,
+  webTrustFromLedger,
   createStreamModelCall,
   createSubagentRunner,
   getOllamaModelConfig,
@@ -291,16 +292,8 @@ async function startClaimedRun(
     contextBudget: prepared.report.budget,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     putBlob: (text) => store.putBlob(threadId, text),
-    readBlob: async (sha256, offset, length) => {
-      const buf = await store.readBlob(threadId, sha256);
-      const text = buf.toString('utf8');
-      if (offset === undefined && length === undefined) return text;
-      const start = offset ?? 0;
-      return text.slice(
-        start,
-        length === undefined ? undefined : start + length,
-      );
-    },
+    readBlob: (sha256, offset, length) =>
+      store.readBlobText(threadId, sha256, offset, length),
     onMessage: async (record, meta) => {
       if (record.role === 'system') return;
       await store.append({
@@ -326,6 +319,8 @@ async function startClaimedRun(
     ...(capacity ? { capacity } : {}),
     ...(system1 ? { system1 } : {}),
     effortPolicy,
+    webTrust: webTrustFromLedger(envelopes),
+  }, {
     onFinished: async (result, outcome) => {
       // Not awaited: the balance read after a run must not delay compaction.
       void appendUsageLog(getAgentHome(), {
@@ -359,14 +354,13 @@ async function startClaimedRun(
       }
       // A cancelled run leaves compaction to the next run's pre-run pass, so
       // nothing it writes can race that run's rewind.
-      if (outcome === 'cancelled') return;
+      if (outcome === 'cancelled' || !result.contextReport) return;
       await maybeCompactThread({
+        store,
         threadId,
         runId,
         model: useModel,
-        posture: prepared.posture,
-        webSearch,
-        endpoint,
+        report: result.contextReport,
       });
     },
   });

@@ -14,6 +14,7 @@ import {
   formatWebSourceCard,
   formatWebSourceMatches,
   formatWebSourceSlice,
+  oneLine,
   sha256Text,
   WEB_SLICE_DEFAULT_CHARS,
 } from './source';
@@ -206,7 +207,7 @@ export async function webSearch(
     }
 
     lines.push(`### Hit ${i + 1}`);
-    lines.push(`title: ${hit.title || '(untitled)'}`);
+    lines.push(`title: ${oneLine(hit.title ?? '') || '(untitled)'}`);
     lines.push(`URL: ${hit.url}`);
     if (sha256) lines.push(`sha256: ${sha256}`);
     if (chars !== undefined) lines.push(`chars: ${chars}`);
