@@ -1,5 +1,5 @@
 import type { ChoiceRequest, ChoiceResult } from './choice.js';
-import type { SubagentSpec, SubagentResult } from './subagent-types.js';
+import type { SubagentSpec, SubagentResult } from './subagent.js';
 import type { TraceEvent } from './trace.js';
 
 /**
@@ -55,6 +55,10 @@ export type ToolContext = {
   >;
   /** Resolve sha for a URL already fetched this run. */
   getWebSourceByUrl?: (url: string) => string | undefined;
+  /** The user pasted this URL or web_search returned it on this run. */
+  trustsWebUrl?: (url: string) => boolean;
+  /** This run stored a page under this (lower-case) sha256. */
+  trustsWebSha?: (sha256: string) => boolean;
   /**
    * Loop trace sink. Tools that run a core gate (e.g. memory) emit a
    * TraceEvent here so eval/offline replay sees the gate verdict without

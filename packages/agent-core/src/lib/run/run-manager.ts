@@ -4,178 +4,234 @@ import {
   ChoiceSkipped,
   emptyRunUsage,
   MAX_CHOICE_TEXT_CHARS,
+  RUN_CANCELLED_REASON,
+  type ActiveRun,
   type AgentEvent,
+  type AgentEventWithoutSeq,
   type ChoiceRequest,
   type ChoiceResult,
+  type RunPosture,
 } from '@agent/agent-models';
 import { runLoop } from '../loop/loop';
 import type { RunLoopResult } from '../loop/types';
 import { EventEmitter } from '../events/emitter';
 import type { EventSubscriber } from '../events/types';
 import type {
+  CancelResult,
+  ClaimResult,
   ResolveChoiceResult,
-  RunHandle,
+  RunEnd,
+  RunHooks,
   StartRunOptions,
 } from './types';
 
-export type {
-  ResolveChoiceResult,
-  RunHandle,
-  RunHandleStatus,
-  StartRunOptions,
-} from './types';
+/** How long a settled run's events stay for late SSE subscribers; then 404, and the ledger is the truth. */
+const RUN_HANDLE_TTL_MS = 5 * 60_000;
 
-/** Hosts should `clear(runId)` after this so late SSE replay still works. */
-export const RUN_HANDLE_TTL_MS = 5 * 60_000;
+/** How long a new run waits for a cancelled or finishing run on its thread to settle. */
+const PREDECESSOR_WAIT_MS = 10_000;
 
 /**
- * In-memory run manager. Holds live run state and event emitters.
- *
- * One active run per thread (enforced by the caller — the API layer).
- * When a run completes, its handle stays until the host calls `clear`
- * (so late SSE subscribers can still replay). After `RUN_HANDLE_TTL_MS`,
- * a late events subscription is 404 — the ledger is the durable truth.
- * cancel() aborts the run's AbortSignal so in-flight model/tool work stops.
+ * claimed: setting up · running: the loop · finishing: onFinished (last run,
+ * compaction) · settled: done, events kept for late subscribers.
+ */
+type RunPhase = 'claimed' | 'running' | 'finishing' | 'settled';
+
+type PendingChoice = ChoiceRequest & {
+  resolve: (result: ChoiceResult) => void;
+  reject: (error: Error) => void;
+};
+
+type RunHandle = {
+  runId: string;
+  threadId: string;
+  phase: RunPhase;
+  cancelled: boolean;
+  abortController: AbortController;
+  emitter: EventEmitter;
+  pendingChoices: Map<string, PendingChoice>;
+  model?: string;
+  posture: RunPosture;
+  startedAt?: string;
+  done: Promise<RunEnd>;
+  settle: (end: RunEnd) => void;
+};
+
+function emptyResult(runId: string, content = ''): RunLoopResult {
+  return {
+    runId,
+    content,
+    iterations: 0,
+    toolCalls: 0,
+    status: 'error',
+    usage: emptyRunUsage(),
+  };
+}
+
+/**
+ * Owns every run's lifecycle in this process: one run per thread (claimed
+ * synchronously, so two sends cannot both start), one gate for events, one
+ * outcome, cancel, and cleanup. Hosts set a run up between `claim` and
+ * `start`, and send their own events through `publish`.
  */
 export class RunManager {
   private runs = new Map<string, RunHandle>();
 
-  /** Start a run. Returns the runId immediately; the run executes async. */
-  start(opts: StartRunOptions): string {
-    const runId = opts.runId ?? randomUUID();
-    const emitter = new EventEmitter();
-    const abortController = new AbortController();
-    let settle!: (result: RunLoopResult) => void;
-    const done = new Promise<RunLoopResult>((resolve) => {
-      settle = resolve;
-    });
+  /**
+   * Hold `threadId` for a new run. Busy while another run on it is being set
+   * up or is running; a cancelled or finishing run is waited for instead
+   * (`claim.ready`), because its last writes (lastRun, child threads) must not
+   * race the next run's rewind.
+   */
+  claim(threadId: string, runId: string = randomUUID()): ClaimResult {
+    const others = [...this.runs.values()].filter(
+      (handle) => handle.threadId === threadId && handle.phase !== 'settled',
+    );
+    const blocking = others.find(
+      (handle) =>
+        handle.phase === 'claimed' ||
+        (handle.phase === 'running' && !handle.cancelled),
+    );
+    if (blocking) return { ok: false, activeRunId: blocking.runId };
 
+    let settle!: (end: RunEnd) => void;
     const handle: RunHandle = {
       runId,
-      threadId: opts.threadId,
-      status: 'running',
+      threadId,
+      phase: 'claimed',
       cancelled: false,
-      abortController,
-      emitter,
-      result: null,
+      abortController: new AbortController(),
+      emitter: new EventEmitter(),
       pendingChoices: new Map(),
-      posture: opts.posture ?? 'agent',
-      done,
+      posture: 'agent',
+      done: new Promise<RunEnd>((resolve) => {
+        settle = resolve;
+      }),
+      settle: (end) => settle(end),
     };
-
     this.runs.set(runId, handle);
 
-    // A child run dies with its parent: parent cancel aborts this run too.
-    const parentSignal = opts.parentSignal;
-    const onParentAbort = () => this.cancel(runId);
-    if (parentSignal?.aborted) {
-      queueMicrotask(onParentAbort);
-    } else {
-      parentSignal?.addEventListener('abort', onParentAbort, { once: true });
-    }
-
-    // Execute async — don't block the caller.
-    this.executeRun(runId, opts)
-      .catch((err) => {
-        handle.status = 'error';
-        handle.result = {
-          runId,
-          content: `Run manager error: ${err instanceof Error ? err.message : String(err)}`,
-          iterations: 0,
-          toolCalls: 0,
-          status: 'error',
-          usage: emptyRunUsage(),
-        };
-      })
-      .finally(() => {
-        parentSignal?.removeEventListener('abort', onParentAbort);
-        settle(
-          handle.result ?? {
-            runId,
-            content: '',
-            iterations: 0,
-            toolCalls: 0,
-            status: 'error',
-            usage: emptyRunUsage(),
-          },
-        );
-      });
-
-    return runId;
+    return {
+      ok: true,
+      claim: {
+        runId,
+        ready: waitForAll(others.map((other) => other.done)),
+        start: (opts, hooks = {}) => this.start(handle, opts, hooks),
+        release: () => {
+          if (handle.phase !== 'claimed') return;
+          this.finish(handle, { result: emptyResult(runId), outcome: 'error' }, 0);
+        },
+      },
+    };
   }
 
-  /** Resolves once the run has finished (after onFinished). Never rejects. */
-  wait(runId: string): Promise<RunLoopResult> {
+  private start(handle: RunHandle, opts: StartRunOptions, hooks: RunHooks): void {
+    if (handle.phase !== 'claimed') return;
+    handle.phase = 'running';
+    handle.model = opts.model;
+    handle.posture = opts.posture ?? 'agent';
+    handle.startedAt = new Date().toISOString();
+
+    // A child run dies with its parent: parent cancel aborts this run too.
+    const { parentSignal } = hooks;
+    const onParentAbort = () => this.cancel(handle.runId);
+    if (parentSignal?.aborted) queueMicrotask(onParentAbort);
+    else parentSignal?.addEventListener('abort', onParentAbort, { once: true });
+
+    void this.execute(handle, opts, hooks).finally(() =>
+      parentSignal?.removeEventListener('abort', onParentAbort),
+    );
+  }
+
+  private async loop(handle: RunHandle, opts: StartRunOptions): Promise<RunLoopResult> {
+    const { messages, tools, modelCall, ...config } = opts;
+    try {
+      return await runLoop(modelCall, messages, tools, {
+        ...config,
+        runId: handle.runId,
+        threadId: handle.threadId,
+        posture: handle.posture,
+        signal: handle.abortController.signal,
+        // offer_choice pause; write/exec tools do not go through this hook.
+        offerChoice: (request) => this.requestChoice(handle, request),
+        emit: (event) => this.gate(handle, event),
+      });
+    } catch (err) {
+      return emptyResult(
+        handle.runId,
+        `Run manager error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private async execute(
+    handle: RunHandle,
+    opts: StartRunOptions,
+    hooks: RunHooks,
+  ): Promise<void> {
+    const { runId } = handle;
+    // Cancelled while it was being set up: skip the loop, still finish (lastRun).
+    const result = handle.cancelled
+      ? emptyResult(runId)
+      : await this.loop(handle, opts);
+
+    // Still live through onFinished so compaction events reach subscribers.
+    handle.phase = 'finishing';
+    const outcome = handle.cancelled ? 'cancelled' : result.status;
+    try {
+      await hooks.onFinished?.(result, outcome);
+    } catch (error) {
+      // Post-run work must not flip a finished run into an error.
+      console.error(
+        'onFinished failed (run outcome unchanged):',
+        error instanceof Error ? error.message : error,
+      );
+    }
+    handle.emitter.emit({
+      type: 'run.settled',
+      runId,
+      ...(handle.cancelled
+        ? { cancelled: true }
+        : result.status === 'incomplete'
+          ? { incomplete: true }
+          : {}),
+    });
+    this.finish(handle, { result, outcome }, hooks.retainMs);
+  }
+
+  private finish(handle: RunHandle, end: RunEnd, retainMs = RUN_HANDLE_TTL_MS): void {
+    handle.phase = 'settled';
+    handle.settle(end);
+    const timer = setTimeout(() => this.clear(handle.runId), retainMs);
+    timer.unref?.();
+  }
+
+  /** The one gate for a run's events: nothing after a cancel except a child's settle card. */
+  private gate(handle: RunHandle, event: AgentEventWithoutSeq): void {
+    if (handle.phase === 'settled') return;
+    if (handle.cancelled && event.type !== 'subrun.settled') return;
+    handle.emitter.emit(event);
+  }
+
+  /** Host events (plan, memory, compaction) for a run, through the same gate. */
+  publish(runId: string, event: AgentEventWithoutSeq): void {
+    const handle = this.runs.get(runId);
+    if (handle) this.gate(handle, event);
+  }
+
+  /** Resolves once the run has settled (after onFinished). Never rejects. */
+  wait(runId: string): Promise<RunEnd> {
     const handle = this.runs.get(runId);
     if (!handle) return Promise.reject(new Error(`Run not found: ${runId}`));
     return handle.done;
   }
 
-  private async executeRun(
-    runId: string,
-    opts: StartRunOptions,
-  ): Promise<void> {
-    const handle = this.runs.get(runId);
-    if (!handle) return;
-
-    const result = await runLoop(opts.modelCall, opts.messages, opts.tools, {
-      runId,
-      threadId: opts.threadId,
-      model: opts.model,
-      mode: opts.mode,
-      posture: opts.posture ?? 'agent',
-      limits: opts.limits,
-      estimatedPromptTokens: opts.estimatedPromptTokens,
-      contextReport: opts.contextReport,
-      signal: handle.abortController.signal,
-      origin: opts.origin,
-      workspaceRoot: opts.workspaceRoot,
-      ...(opts.putBlob ? { putBlob: opts.putBlob } : {}),
-      ...(opts.readBlob ? { readBlob: opts.readBlob } : {}),
-      // offer_choice pause; write/exec tools do not go through this hook.
-      offerChoice: (request) => this.requestChoice(runId, request),
-      onMessage: opts.onMessage,
-      hasOpenPlanWork: opts.hasOpenPlanWork,
-      contextBudget: opts.contextBudget,
-      ...(opts.trace ? { trace: opts.trace } : {}),
-      ...(opts.subagents ? { subagents: opts.subagents } : {}),
-      ...(opts.depth !== undefined ? { depth: opts.depth } : {}),
-      ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
-      ...(opts.pinnedSkills?.length ? { pinnedSkills: opts.pinnedSkills } : {}),
-      ...(opts.capacity ? { capacity: opts.capacity } : {}),
-      emit: (event) => {
-        if (handle.cancelled && event.type !== 'subrun.settled') return;
-        handle.emitter.emit(event);
-      },
-    });
-
-    // Keep status 'running' through onFinished so compaction SSE reaches
-    // live subscribers, then emit run.settled so the UI can leave the turn.
-    handle.result = result;
-    try {
-      await opts.onFinished?.(result);
-    } catch (error) {
-      // Compaction must not flip a successful run into an error.
-      console.error(
-        'onFinished failed (run status unchanged):',
-        error instanceof Error ? error.message : error,
-      );
-    }
-    handle.status =
-      handle.cancelled || result.status === 'error' ? 'error' : 'completed';
-    if (!handle.cancelled) {
-      handle.emitter.emit({
-        type: 'run.settled',
-        runId,
-        ...(result.status === 'incomplete' ? { incomplete: true } : {}),
-      });
-    }
-  }
-
-  requestChoice(runId: string, request: ChoiceRequest): Promise<ChoiceResult> {
-    const handle = this.runs.get(runId);
-    if (!handle || handle.status !== 'running' || handle.cancelled) {
-      return Promise.reject(new Error('Run cancelled'));
+  private requestChoice(
+    handle: RunHandle,
+    request: ChoiceRequest,
+  ): Promise<ChoiceResult> {
+    if (handle.phase !== 'running' || handle.cancelled) {
+      return Promise.reject(new Error(RUN_CANCELLED_REASON));
     }
 
     const choiceId = randomUUID();
@@ -183,7 +239,7 @@ export class RunManager {
 
     handle.emitter.emit({
       type: 'choice.requested',
-      runId,
+      runId: handle.runId,
       choiceId,
       question: request.question,
       options: request.options,
@@ -195,7 +251,7 @@ export class RunManager {
         reject(
           signal.reason instanceof Error
             ? signal.reason
-            : new Error('Run cancelled'),
+            : new Error(RUN_CANCELLED_REASON),
         );
       };
 
@@ -206,6 +262,7 @@ export class RunManager {
 
       signal.addEventListener('abort', onAbort, { once: true });
       handle.pendingChoices.set(choiceId, {
+        question: request.question,
         options: request.options,
         resolve: (result) => {
           signal.removeEventListener('abort', onAbort);
@@ -227,7 +284,7 @@ export class RunManager {
       | { skipped?: false; optionIds: string[]; text?: string },
   ): ResolveChoiceResult {
     const handle = this.runs.get(runId);
-    if (!handle || handle.status !== 'running' || handle.cancelled) {
+    if (!handle || handle.phase !== 'running' || handle.cancelled) {
       return 'not_found';
     }
     const pending = handle.pendingChoices.get(choiceId);
@@ -275,94 +332,98 @@ export class RunManager {
     return 'ok';
   }
 
-  /** Live run for this thread, if any. Used so the client can reattach after reload. */
-  activeRunIdForThread(threadId: string): string | undefined {
+  /**
+   * The thread's run in progress (running or finishing, not cancelled), so a
+   * reloaded client can show it and answer its choices.
+   */
+  activeRun(threadId: string): ActiveRun | undefined {
     for (const handle of this.runs.values()) {
-      if (handle.threadId === threadId && handle.status === 'running') {
-        return handle.runId;
+      if (
+        handle.threadId !== threadId ||
+        handle.cancelled ||
+        (handle.phase !== 'running' && handle.phase !== 'finishing')
+      ) {
+        continue;
       }
+      return {
+        runId: handle.runId,
+        model: handle.model ?? '',
+        posture: handle.posture,
+        startedAt: handle.startedAt ?? '',
+        pendingChoices: [...handle.pendingChoices].map(([choiceId, choice]) => ({
+          choiceId,
+          question: choice.question,
+          options: choice.options,
+        })),
+      };
     }
     return undefined;
   }
 
-  /** Abort in-flight model/tool work and stop SSE for this run. */
-  cancel(runId: string): boolean {
+  /** Not settled yet: a lastRun written for it is still the start marker. */
+  isActive(runId: string): boolean {
     const handle = this.runs.get(runId);
-    if (!handle || handle.status !== 'running' || handle.cancelled) {
-      return false;
-    }
+    return handle !== undefined && handle.phase !== 'settled';
+  }
+
+  /**
+   * Stop a run. While it is being set up or running: abort in-flight model and
+   * tool work, and end its stream. Once the loop is done the answer is
+   * already saved, so a late cancel changes nothing.
+   */
+  cancel(runId: string): CancelResult {
+    const handle = this.runs.get(runId);
+    if (!handle || handle.phase === 'settled') return 'not_found';
+    if (handle.phase === 'finishing') return 'finishing';
+    if (handle.cancelled) return 'cancelled';
 
     handle.cancelled = true;
-    handle.abortController.abort(new Error('Run cancelled'));
+    handle.abortController.abort(new Error(RUN_CANCELLED_REASON));
     handle.emitter.emit({
       type: 'run.error',
       runId,
-      error: 'Run cancelled',
+      error: RUN_CANCELLED_REASON,
+      cancelled: true,
     });
-    return true;
+    return 'cancelled';
   }
 
-  /** Get a run handle. Returns undefined if not found. */
-  get(runId: string): RunHandle | undefined {
-    return this.runs.get(runId);
-  }
-
-  /** Subscribe to a run's events. Optionally replay from a seq cursor. */
+  /**
+   * Buffered events after `fromSeq`, plus a live subscription until the run
+   * settles. Null when the run is unknown (never existed, or cleared).
+   */
   subscribe(
     runId: string,
     fromSeq: number,
     subscriber: EventSubscriber,
-  ): () => void {
+  ): { replay: AgentEvent[]; live: boolean; unsubscribe: () => void } | null {
     const handle = this.runs.get(runId);
-    if (!handle) {
-      throw new Error(`Run not found: ${runId}`);
+    if (!handle) return null;
+    const replay = handle.emitter.getEventsFromSeq(fromSeq);
+    if (handle.phase === 'settled') {
+      return { replay, live: false, unsubscribe: () => undefined };
     }
-
-    // Replay buffered events after the cursor.
-    const replayEvents = handle.emitter.getEventsFromSeq(fromSeq);
-    for (const event of replayEvents) {
-      subscriber(event);
-    }
-
-    // Subscribe to live events (only if the run is still running).
-    if (handle.status === 'running') {
-      return handle.emitter.subscribe(subscriber);
-    }
-
-    // Run is done — no live events to subscribe to.
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
-    return () => {};
+    return { replay, live: true, unsubscribe: handle.emitter.subscribe(subscriber) };
   }
 
-  /** Get the current event buffer for a run (for SSE replay). */
-  getEvents(runId: string, fromSeq = 0): AgentEvent[] {
-    const handle = this.runs.get(runId);
-    if (!handle) return [];
-    return handle.emitter.getEventsFromSeq(fromSeq);
-  }
-
-  /** Check if a run is still active. */
-  isRunning(runId: string): boolean {
-    const handle = this.runs.get(runId);
-    return handle?.status === 'running';
-  }
-
-  /** Clear a completed run's buffer. */
-  clear(runId: string): void {
-    const handle = this.runs.get(runId);
-    if (handle) {
-      handle.emitter.dispose();
-    }
+  private clear(runId: string): void {
+    this.runs.get(runId)?.emitter.dispose();
     this.runs.delete(runId);
   }
+}
 
-  /** Check if a thread has an active run. */
-  hasActiveRun(threadId: string): boolean {
-    for (const handle of this.runs.values()) {
-      if (handle.threadId === threadId && handle.status === 'running') {
-        return true;
-      }
-    }
-    return false;
-  }
+/** True once every run has settled; false if any is still going after the wait. */
+async function waitForAll(done: Promise<RunEnd>[]): Promise<boolean> {
+  if (done.length === 0) return true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), PREDECESSOR_WAIT_MS);
+    timer.unref?.();
+  });
+  const settled = await Promise.race([
+    Promise.all(done).then(() => true as const),
+    timeout,
+  ]);
+  clearTimeout(timer);
+  return settled;
 }

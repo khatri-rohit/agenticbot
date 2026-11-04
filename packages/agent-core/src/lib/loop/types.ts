@@ -13,19 +13,29 @@ import type {
   SubagentSpec,
   SubagentResult,
   ToolOrigin,
+  TraceEvent,
+  WebTrust,
 } from '@agent/agent-models';
-import type { TraceEvent } from '../events/trace-types';
 import type { ModelTurn } from '../model/types';
-import type { ToolRegistry } from '../tools/type';
+import type { EffortPolicy } from '../system1/effort';
+import type { System1Port } from '../system1/port';
+import type { ToolRegistry } from '../tools/types';
 import type { AgentLimits } from './limits';
 
 /** Terminal status returned by runLoop (in-memory run summary, not persisted Run). */
 export type RunLoopStatus = 'completed' | 'error' | 'incomplete';
 
+/** Per-call changes to the options a ModelCallFn closes over. */
+export type ModelCallOverrides = {
+  /** Replaces the closed-over reasoning_effort for this call only. */
+  reasoningEffort?: string;
+};
+
 /**
  * Transport-agnostic model invocation. The loop supplies onTextDelta so it can
  * wire assistant.delta events with a stable messageId.
  * `signal` aborts in-flight provider work when the run is cancelled.
+ * `overrides` is set only when a per-iteration decision changed something.
  */
 export type ModelCallFn = (
   model: string,
@@ -33,6 +43,7 @@ export type ModelCallFn = (
   tools: ToolRegistry,
   onTextDelta?: (delta: string) => void,
   signal?: AbortSignal,
+  overrides?: ModelCallOverrides,
 ) => Promise<ModelTurn>;
 
 /**
@@ -106,6 +117,22 @@ export type RunLoopConfig = {
   pinnedSkills?: string[];
   /** Account capacity gate; children share the parent's. */
   capacity?: CapacityGate;
+  /**
+   * Optional System 1 scorer for this run. Omitted = never consulted, and
+   * every decision uses its deterministic default (today's behaviour).
+   */
+  system1?: System1Port;
+  /**
+   * Thinking choices for this run, built by the host from the model's own
+   * /api/show values and the user's pick. Its baseline matches the
+   * reasoning_effort the modelCall closure already sends.
+   */
+  effortPolicy?: EffortPolicy;
+  /**
+   * What this thread's earlier web calls made fetchable (from its ledger).
+   * Without it, only the text of web tool rows in `messages` counts.
+   */
+  webTrust?: WebTrust;
 };
 
 /** What a sub-agent inherits from (and reports back to) its parent run. */
@@ -124,6 +151,8 @@ export type SubagentParent = {
   remainingPromptTokens?: number;
   /** Parent conversation for an advisor fork. */
   forkMessages: () => ChatCompletionMessageParam[];
+  /** What the parent may fetch; an advisor reading its conversation inherits it. */
+  webTrust: () => WebTrust;
   /** Parent stream, for subrun.* markers. */
   emit?: (event: AgentEventWithoutSeq) => void;
   /** The user's `/` picks for this send; profiles may inherit them. */
@@ -149,4 +178,6 @@ export type RunLoopResult = {
   limitReason?: string;
   /** Token spend, own + sub-agents. */
   usage: RunUsage;
+  /** The context after the final answer, when the host passed a starting report. */
+  contextReport?: ContextReport;
 };

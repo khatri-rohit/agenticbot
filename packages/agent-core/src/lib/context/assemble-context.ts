@@ -19,6 +19,7 @@ import {
   envelopeToChatMessage,
   formatThreadPlanForPrompt,
   imageAttachments,
+  isResumableStop,
   isThreadPlanEmpty,
 } from '@agent/agent-models';
 
@@ -29,9 +30,9 @@ import {
   listSkills,
   skillCard,
 } from '../tools/skills';
-import type { ToolRegistry } from '../tools/type';
-import { stubWebSourceCard } from '../tools/web-source';
-import { hostListedWebUrls } from '../tools/web-trust';
+import type { ToolRegistry } from '../tools/types';
+import { stubWebSourceCard } from '../tools/web/source';
+import { hostListedWebUrls } from '../tools/web/trust';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 
 export type MentionedThreadContext = {
@@ -105,7 +106,7 @@ function formatLastRunPrompt(lastRun: ThreadLastRun): string | null {
       : 'Run stopped early');
   // Budget, wall-clock, iteration, tool and capacity stops leave a handoff
   // (or the plan) to continue from; re-exploring would re-spend the budget.
-  const resumable = /^limit\.(tokens|wall|iterations|tools|capacity|research)\b/.test(reason);
+  const resumable = isResumableStop(reason);
   return [
     '# Last run',
     `The previous run on this thread ended early (status: ${lastRun.status}).`,

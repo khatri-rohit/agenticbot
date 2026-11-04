@@ -1,5 +1,6 @@
 import type { ContextReportLayer, ContextWindowSource } from './context.js';
 import type { RunUsage, TokenUsage } from './run.js';
+import type { System1EffortTrace, System1RunReport } from './system1.js';
 
 /**
  * Bumped when a TraceEvent field changes meaning or is removed. Adding an
@@ -40,6 +41,8 @@ export type TraceEvent =
       iteration: number;
       /** Heuristic size of the prompt about to be sent. */
       estimatedPromptTokens?: number;
+      /** reasoning_effort sent on this call, when set. */
+      reasoningEffort?: string;
     }
   | {
       type: 'llm_response';
@@ -185,4 +188,17 @@ export type TraceEvent =
       toolName: string;
       note: 'read_creep' | 'web_slices';
       count: number;
+    }
+  | {
+      /** One System 1 effort decision (shadow decisions land after the call). */
+      type: 'system1_decision';
+      runId: string;
+      iteration: number;
+      decision: System1EffortTrace;
+    }
+  | {
+      /** End-of-run System 1 summary, written even when clean. */
+      type: 'system1_report';
+      runId: string;
+      report: System1RunReport;
     };

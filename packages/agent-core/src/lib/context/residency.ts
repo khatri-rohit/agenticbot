@@ -7,7 +7,7 @@ import { CHARS_PER_TOKEN, type ContextBudget } from '@agent/agent-models';
 
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { skillCard } from '../tools/skills';
-import { sha256Text } from '../tools/web-source';
+import { sha256Text } from '../tools/web/source';
 
 /**
  * In-run context residency. assembleContext evicts by user turn when a run

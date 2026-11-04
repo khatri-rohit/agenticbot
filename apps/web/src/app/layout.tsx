@@ -1,10 +1,10 @@
 import './global.css';
 import { Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
-import { Providers } from '@/components/providers';
+import { Providers } from '@/components/shell/providers';
 import {
   DEFAULT_THEME_ID,
   THEME_STORAGE_KEY,
-} from '@/lib/theme-presets';
+} from '@/components/shell/theme-presets';
 
 const sans = Plus_Jakarta_Sans({
   subsets: ['latin'],

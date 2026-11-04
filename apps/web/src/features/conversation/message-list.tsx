@@ -1,0 +1,645 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown } from 'lucide-react';
+import { useStickToBottom } from '../../hooks/use-stick-to-bottom';
+import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
+  isPauseStop,
+  isResumableStop,
+  type Message,
+  type System1FallbackKind,
+  type System1RunReport,
+} from '@agent/agent-models';
+import type {
+  ChatState,
+  CompactionNotice,
+  ToolActivity,
+} from './chat-store';
+import { groupMessageTurns } from './group-message-turns';
+import { buildTurnTimeline } from './turn-timeline';
+import { formatDuration, formatMessageTime } from '../../lib/format-relative-time';
+import { AgentMarkdown } from './agent-markdown';
+import {
+  ConversationRail,
+  shouldShowConversationRail,
+} from './conversation-rail';
+import { MessageActions } from './message-actions';
+import { CompactionCard } from './compaction-card';
+import { SubagentCard } from './subagent-card';
+import { ToolStepList } from './tool-call-panel';
+import { PlanChip } from './thread-plan-card';
+import { UserMessage } from './user-message';
+import { cn } from 'cn';
+
+export function MessageList({
+  messages,
+  chatState,
+  isRunning,
+  threadKind = 'home',
+  onRetryLastResponse,
+  onEditLastUserMessage,
+  onContinue,
+}: {
+  messages: Message[] | undefined;
+  chatState: ChatState;
+  isRunning: boolean;
+  threadKind?: 'home' | 'workspace';
+  onRetryLastResponse: () => void | Promise<void>;
+  /** Start the next run from the last run's handoff (budget/capacity stops). */
+  onContinue?: () => void | Promise<void>;
+  onEditLastUserMessage: (
+    messageId: string,
+    content: string,
+  ) => void | Promise<void>;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const anchorRefs = useRef(new Map<string, HTMLDivElement>());
+
+  const streaming = chatState.activeRun?.streamingMessage;
+  const toolActivity =
+    chatState.activeRun?.toolActivity ?? chatState.settledToolActivity ?? [];
+  const assistantSnippets =
+    chatState.activeRun?.assistantSnippets ?? chatState.settledSnippets ?? [];
+  const activeRunId = chatState.activeRun?.runId;
+  const compactionNotice = chatState.compactionNotice;
+
+  const turns = useMemo(() => groupMessageTurns(messages ?? []), [messages]);
+
+  // Rail indexes turns (user prompt + agent work as a unit), not user messages
+  // alone. Each anchor carries a compact tool count so the rail can show what
+  // the agent actually did in that turn.
+  const turnAnchors = useMemo(() => {
+    return turns.map((turn) => {
+      const isLastTurn = turn === turns[turns.length - 1];
+      const liveActivity = isLastTurn ? toolActivity : [];
+      const liveSnippets = isLastTurn ? assistantSnippets : [];
+      const liveStreaming = isLastTurn ? streaming : null;
+      const turnCompaction = turnOwnsCompaction(
+        turn.replies,
+        compactionNotice,
+        isLastTurn,
+      )
+        ? compactionNotice
+        : null;
+      const steps = buildTurnTimeline({
+        replies: turn.replies,
+        liveActivity,
+        snippets: liveSnippets,
+        activeRunId,
+        streaming: liveStreaming,
+        compaction: turnCompaction,
+        subagentActivity: chatState.activeRun?.subagentActivity,
+      });
+      const toolCount = steps.reduce(
+        (sum, step) => (step.type === 'tools' ? sum + step.rows.length : sum),
+        0,
+      );
+
+      const trimmed = turn.userMessage.content.trim();
+      const attachmentCount = turn.userMessage.attachments?.length ?? 0;
+      let label = trimmed;
+      if (!label) {
+        label =
+          attachmentCount === 1
+            ? '1 image'
+            : attachmentCount > 1
+              ? `${attachmentCount} images`
+              : 'Message';
+      }
+      return { id: turn.userMessage.id, label, toolCount };
+    });
+    // toolCount only sums `tools` steps, which come from toolActivity.
+    // streaming/assistantSnippets produce snippet/stream steps that do not
+    // affect the anchor, so they are excluded to avoid rebuilding every
+    // anchor on every assistant.delta during streaming.
+  }, [
+    turns,
+    toolActivity,
+    compactionNotice,
+    activeRunId,
+  ]);
+
+  const showRail = shouldShowConversationRail(turnAnchors.length);
+
+  const registerAnchor = useCallback(
+    (id: string, el: HTMLDivElement | null) => {
+      if (el) anchorRefs.current.set(id, el);
+      else anchorRefs.current.delete(id);
+    },
+    [],
+  );
+
+  const getAnchorElement = useCallback((id: string) => {
+    return anchorRefs.current.get(id) ?? null;
+  }, []);
+
+  const {
+    showJumpToBottom,
+    followContent,
+    jumpToBottomAndFollow,
+    enableStickToBottom,
+  } = useStickToBottom(scrollRef);
+
+  const prevMessageCount = useRef(0);
+  useEffect(() => {
+    const count = messages?.length ?? 0;
+    if (count > prevMessageCount.current) {
+      enableStickToBottom();
+    }
+    prevMessageCount.current = count;
+  }, [messages?.length, enableStickToBottom]);
+
+  useEffect(() => {
+    followContent('auto');
+  }, [
+    messages,
+    streaming?.content,
+    toolActivity.length,
+    assistantSnippets.length,
+    compactionNotice?.status,
+    compactionNotice?.throughSeq,
+    followContent,
+  ]);
+
+  const hasMessages = (messages?.length ?? 0) > 0;
+  const lastTurnIndex = turns.length - 1;
+
+  const latestAssistantMessageId = useMemo(() => {
+    if (!messages?.length) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
+  const latestUserMessageId = useMemo(() => {
+    if (!messages?.length) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
+  return (
+    <div className="relative flex min-h-0 flex-1">
+      {showJumpToBottom && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-30 flex justify-center">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className="pointer-events-auto size-8 rounded-full border border-border/50 bg-card shadow-sm"
+                onClick={jumpToBottomAndFollow}
+                aria-label="Scroll to latest messages"
+              >
+                <ArrowDown className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Jump to latest</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+      {showRail && (
+        <ConversationRail
+          anchors={turnAnchors}
+          scrollContainerRef={scrollRef}
+          getAnchorElement={getAnchorElement}
+        />
+      )}
+      <div
+        ref={scrollRef}
+        className={cn(
+          'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable [overflow-anchor:none]',
+          // Keep the newest lines reachable above the floating plan card.
+          isRunning && chatState.plan ? 'pb-40' : 'pb-5',
+        )}
+      >
+        <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-5 sm:px-6">
+          {!hasMessages && !isRunning && !streaming?.content && (
+            <p className="type-ui text-center text-muted-foreground/70">
+              Conversation will appear here.
+            </p>
+          )}
+
+          <div className="flex flex-col gap-8">
+            {turns.map((turn, index) => {
+              const isLastTurn = index === lastTurnIndex;
+              const liveActivity = isLastTurn ? toolActivity : [];
+              const liveStreaming = isLastTurn ? streaming : null;
+              const liveSnippets = isLastTurn ? assistantSnippets : [];
+              const turnCompaction = turnOwnsCompaction(
+                turn.replies,
+                compactionNotice,
+                isLastTurn,
+              )
+                ? compactionNotice
+                : null;
+              const steps = buildTurnTimeline({
+                replies: turn.replies,
+                liveActivity,
+                snippets: liveSnippets,
+                activeRunId,
+                streaming: liveStreaming,
+                compaction: turnCompaction,
+                subagentActivity: chatState.activeRun?.subagentActivity,
+              });
+              const showSteps =
+                turn.replies.length > 0 ||
+                liveActivity.length > 0 ||
+                liveSnippets.length > 0 ||
+                Boolean(liveStreaming?.content) ||
+                Boolean(turnCompaction);
+
+              return (
+                <section
+                  key={turn.userMessage.id}
+                  ref={(el) =>
+                    registerAnchor(
+                      turn.userMessage.id,
+                      el as HTMLDivElement | null,
+                    )
+                  }
+                  id={`conversation-anchor-${turn.userMessage.id}`}
+                  className="flex flex-col gap-3.5 scroll-mt-6"
+                  aria-label="Conversation turn"
+                >
+                  <UserMessage
+                    message={turn.userMessage}
+                    canEdit={
+                      isLastTurn && turn.userMessage.id === latestUserMessageId
+                    }
+                    hasResponseBelow={
+                      isLastTurn &&
+                      (turn.replies.length > 0 ||
+                        isRunning ||
+                        Boolean(streaming?.content) ||
+                        Boolean(turnCompaction))
+                    }
+                    onEditSubmit={onEditLastUserMessage}
+                  />
+
+                  {/* The run never replied (start failed, or stopped first). */}
+                  {isLastTurn && !isRunning && !showSteps ? (
+                    <div className="flex items-center gap-3 px-1" role="status">
+                      <p className="type-caption text-muted-foreground">No reply.</p>
+                      <button
+                        type="button"
+                        onClick={() => void onRetryLastResponse()}
+                        className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {/* Settled plan pins under its anchor user message; while
+                      a run is live the plan floats above the composer instead. */}
+                  {isLastTurn && !isRunning ? (
+                    <PlanChip plan={chatState.plan} />
+                  ) : null}
+
+                  {showSteps ? (
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {steps.map((step) => {
+                        if (step.type === 'assistant') {
+                          const isLatestAssistant =
+                            step.message.id === latestAssistantMessageId;
+                          return (
+                            <AssistantMessage
+                              key={step.message.id}
+                              message={step.message}
+                              showMeta={isLatestAssistant}
+                              turnStartedAt={turn.userMessage.createdAt}
+                              showRetry={!isRunning && isLatestAssistant}
+                              onRetry={onRetryLastResponse}
+                              retryDisabled={isRunning}
+                            />
+                          );
+                        }
+                        if (step.type === 'snippet') {
+                          return (
+                            <div
+                              key={`snippet-${step.messageId}`}
+                              className="min-w-0 max-w-full"
+                            >
+                              <article className="chat-prose type-body min-w-0 max-w-full">
+                                <AgentMarkdown content={step.content} />
+                              </article>
+                            </div>
+                          );
+                        }
+                        if (step.type === 'tools') {
+                          return (
+                            <ToolStepList key={step.key} rows={step.rows} />
+                          );
+                        }
+                        if (step.type === 'compaction') {
+                          return (
+                            <CompactionCard
+                              key={`compaction-${step.notice.runId ?? step.notice.throughSeq}`}
+                              notice={step.notice}
+                            />
+                          );
+                        }
+                        if (step.type === 'subagent') {
+                          return (
+                            <SubagentCard
+                              key={`subagent-${step.activity.subRunId}`}
+                              activity={step.activity}
+                            />
+                          );
+                        }
+                        return (
+                          <div key="stream" className="min-w-0 max-w-full">
+                            <article className="chat-prose type-body min-w-0 max-w-full">
+                              <AgentMarkdown content={step.content} streaming />
+                            </article>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  {isLastTurn &&
+                  (isRunning || compactionNotice?.status === 'running') ? (
+                    <TurnStatusLine
+                      toolActivity={toolActivity}
+                      hasStreamingText={Boolean(streaming?.content)}
+                      compacting={compactionNotice?.status === 'running'}
+                      waitingForChoice={chatState.pendingChoices.length > 0}
+                      {...(chatState.activeRun?.runStartedAt
+                        ? { runStartedAt: chatState.activeRun.runStartedAt }
+                        : {})}
+                    />
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
+
+          {chatState.limitNotice ? (
+            <div
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1"
+              role="status"
+            >
+              <p className="type-caption text-muted-foreground">
+                {isPauseStop(chatState.limitNotice.reason)
+                  ? 'Paused'
+                  : 'Run stopped early'}
+                : {chatState.limitNotice.reason}
+              </p>
+              {onContinue &&
+              !isRunning &&
+              isResumableStop(chatState.limitNotice.reason) ? (
+                <button
+                  type="button"
+                  onClick={() => void onContinue()}
+                  className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted"
+                >
+                  Continue
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {chatState.system1Notice ? (
+            <p className="type-caption px-1 text-muted-foreground" role="status">
+              {system1NoticeText(chatState.system1Notice.report)}
+            </p>
+          ) : null}
+
+          <div ref={endRef} className="h-6" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SYSTEM1_KIND_LABEL: Record<System1FallbackKind, string> = {
+  unreachable: 'unreachable',
+  timeout: 'timed out',
+  http_error: 'HTTP error',
+  bad_response: 'unexpected answer',
+  inconsistent: 'inconsistent scores',
+  breaker_open: 'paused after failures',
+  busy: 'busy',
+  budget_exhausted: 'time budget spent',
+  internal: 'internal error',
+};
+
+/** One line: how many decisions fell back, why, and from which step. */
+function system1NoticeText(report: System1RunReport): string {
+  const total = report.fallbacks.reduce((sum, fallback) => sum + fallback.count, 0);
+  const parts = report.fallbacks.map(
+    (fallback) =>
+      `${SYSTEM1_KIND_LABEL[fallback.kind]} ×${fallback.count} from step ${fallback.firstIteration}`,
+  );
+  const what = `System 1 skipped ${total} decision${total === 1 ? '' : 's'} (${parts.join('; ')}).`;
+  // Shadow only observes, so a skipped check changed nothing in the run.
+  return report.mode === 'shadow'
+    ? `${what} It was only observing; the run was not affected.`
+    : `${what} Those steps used the default thinking level.`;
+}
+
+/** Attach compaction to the turn that produced it (by runId), else last turn. */
+function turnOwnsCompaction(
+  replies: Message[],
+  notice: CompactionNotice | null,
+  isLastTurn: boolean,
+): boolean {
+  if (!notice) return false;
+  if (notice.status === 'running') return isLastTurn;
+  if (notice.runId) {
+    return replies.some((message) => message.runId === notice.runId);
+  }
+  return isLastTurn;
+}
+
+/** Quiet “still working” cue for model think gaps when no stream is visible. */
+function TurnStatusLine({
+  toolActivity,
+  hasStreamingText,
+  compacting,
+  waitingForChoice,
+  runStartedAt,
+}: {
+  toolActivity: ToolActivity[];
+  hasStreamingText: boolean;
+  compacting?: boolean;
+  waitingForChoice?: boolean;
+  /** Server start time of the run; shows the total next to the phase clock. */
+  runStartedAt?: string;
+}) {
+  const running = toolActivity.find((t) => t.status === 'running');
+  let label: string | null = null;
+
+  if (compacting) {
+    label = 'Compacting context…';
+  } else if (waitingForChoice) {
+    label = 'Waiting for a choice…';
+  } else if (running) {
+    label = `${running.toolName}…`;
+  } else if (toolActivity.length > 0 && !hasStreamingText) {
+    label = 'Working…';
+  } else if (!hasStreamingText) {
+    label = 'Working…';
+  }
+
+  // Each phase (tool call, think gap) gets its own clock keyed on the label.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    setElapsed(0);
+    if (!label) return;
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, [label]);
+
+  if (!label) return null;
+  // Re-rendered every second by the phase clock above.
+  const started = runStartedAt ? Date.parse(runStartedAt) : NaN;
+  const total = Number.isFinite(started) ? Math.max(0, Date.now() - started) : null;
+
+  return (
+    <p
+      className="type-caption flex items-center gap-1.5 pl-0.5 text-left text-muted-foreground/70 tabular-nums"
+      aria-live="polite"
+    >
+      <span
+        className="size-1.5 shrink-0 rounded-full bg-primary/80 animate-pulse"
+        aria-hidden
+      />
+      {label}
+      <span className="text-muted-foreground/50">
+        {elapsed}s{total != null ? ` · ${formatDuration(total)} total` : ''}
+      </span>
+    </p>
+  );
+}
+
+function MessageTimestamp({
+  iso,
+  durationMs,
+  title,
+}: {
+  iso: string;
+  durationMs?: number;
+  /** Hover detail (finish time, time spent writing the answer). */
+  title?: string;
+}) {
+  const text = formatMessageTime(iso);
+  if (!text) return null;
+  return (
+    <time
+      dateTime={iso}
+      title={title}
+      className="type-caption text-muted-foreground/55 tabular-nums"
+    >
+      {text}
+      {durationMs != null && ` · ${formatDuration(durationMs)}`}
+    </time>
+  );
+}
+
+/**
+ * Footer timing for a turn's final answer: when the run started and how long
+ * the whole run took (every model call, tool and sub-agent), not just the
+ * last call that wrote the answer. Old ledger rows have no runDurationMs:
+ * fall back to the gap from the user's message (over-counts a Retry).
+ */
+function answerTiming(
+  message: Message,
+  turnStartedAt?: string,
+): { iso: string; durationMs?: number; title?: string } {
+  const finished = Date.parse(message.createdAt);
+  let total = message.runDurationMs;
+  if (total == null && turnStartedAt && Number.isFinite(finished)) {
+    const start = Date.parse(turnStartedAt);
+    if (Number.isFinite(start) && finished >= start) total = finished - start;
+  }
+  if (total == null || !Number.isFinite(finished)) {
+    return { iso: message.createdAt, durationMs: message.durationMs };
+  }
+  const writing =
+    message.durationMs != null ? ` · writing the answer ${formatDuration(message.durationMs)}` : '';
+  return {
+    iso: new Date(finished - total).toISOString(),
+    durationMs: total,
+    title: `Finished ${formatMessageTime(message.createdAt)}${writing}`,
+  };
+}
+
+/**
+ * One meta row per message: timestamp left, actions right. Always visible —
+ * hover-gating hides the primary affordances on touch and during streaming.
+ */
+function MessageMetaRow({
+  iso,
+  durationMs,
+  title,
+  children,
+}: {
+  iso?: string;
+  durationMs?: number;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+      <MessageTimestamp iso={iso ?? ''} durationMs={durationMs} title={title} />
+      <div className="flex min-w-0 items-center">{children}</div>
+    </div>
+  );
+}
+
+function AssistantMessage({
+  message,
+  showMeta = true,
+  showRetry,
+  onRetry,
+  retryDisabled,
+  turnStartedAt,
+}: {
+  message: Message;
+  /** Meta footer (start time · run duration · Copy) only on the turn's final response. */
+  showMeta?: boolean;
+  /** The turn's user message time; fallback start for old rows. */
+  turnStartedAt?: string;
+  showRetry?: boolean;
+  onRetry: () => void | Promise<void>;
+  retryDisabled?: boolean;
+}) {
+  if (!message.content.trim()) return null;
+  const timing = answerTiming(message, turnStartedAt);
+
+  return (
+    <div className="min-w-0 max-w-full">
+      <article className="chat-prose type-body min-w-0 max-w-full">
+        <AgentMarkdown content={message.content} />
+      </article>
+      {showMeta ? (
+        <MessageMetaRow
+          iso={timing.iso}
+          durationMs={timing.durationMs}
+          {...(timing.title ? { title: timing.title } : {})}
+        >
+          <MessageActions
+            content={message.content}
+            align="start"
+            showRetry={showRetry}
+            onRetry={onRetry}
+            disabled={retryDisabled}
+          />
+        </MessageMetaRow>
+      ) : null}
+    </div>
+  );
+}

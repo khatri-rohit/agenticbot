@@ -1,5 +1,10 @@
-import type { ContextWindowMode } from './context.js';
-import type { MessageAttachment, PendingToolCall } from './message.js';
+import type { ChoiceRequest } from './choice.js';
+import { parseContextWindowMode, type ContextWindowMode } from './context.js';
+import {
+  parseMessageAttachments,
+  type MessageAttachment,
+  type PendingToolCall,
+} from './message.js';
 import type { ThinkingValue } from './ollama-model.js';
 
 /**
@@ -121,6 +126,19 @@ export function applyPostureToTools(
   return toolNames.filter((name) => !isAskStrippedTool(name));
 }
 
+/**
+ * A run in progress as `GET /ledger` reports it, so a reloaded page can show
+ * and steer it without the stream's opening events.
+ */
+export type ActiveRun = {
+  runId: string;
+  model: string;
+  posture: RunPosture;
+  startedAt: string;
+  /** Choices the run is paused on. */
+  pendingChoices: (ChoiceRequest & { choiceId: string })[];
+};
+
 /** POST /api/agent/run body. History is loaded from the host ledger. */
 export type StartRunRequest = {
   threadId: string;
@@ -155,3 +173,72 @@ export type StartRunRequest = {
   /** Persisted on the thread when present; later runs and compaction reuse it. */
   contextWindowMode?: ContextWindowMode;
 };
+
+const isOptional = (value: unknown, type: 'string' | 'boolean') =>
+  value === undefined || typeof value === type;
+
+/** Trust boundary for `POST /run`: the parsed request, or why it was rejected. */
+export function parseStartRunRequest(raw: unknown): StartRunRequest | string {
+  if (!raw || typeof raw !== 'object') return 'request body must be an object';
+  const body = raw as Record<string, unknown>;
+  if (typeof body.threadId !== 'string' || !body.threadId) {
+    return 'threadId is required';
+  }
+  if (
+    !isOptional(body.model, 'string') ||
+    !isOptional(body.local, 'boolean') ||
+    !isOptional(body.webSearch, 'boolean')
+  ) {
+    return 'model must be a string; local and webSearch must be booleans';
+  }
+  if (
+    body.thinking !== undefined &&
+    typeof body.thinking !== 'boolean' &&
+    typeof body.thinking !== 'string'
+  ) {
+    return 'thinking must be a boolean or a string';
+  }
+  if (
+    body.rewindThroughSeq !== undefined &&
+    !(Number.isInteger(body.rewindThroughSeq) && (body.rewindThroughSeq as number) >= 0)
+  ) {
+    return 'rewindThroughSeq must be a non-negative integer';
+  }
+  const requested = (body.skills as { requested?: unknown } | undefined)?.requested;
+  if (
+    requested !== undefined &&
+    !(Array.isArray(requested) && requested.every((name) => typeof name === 'string'))
+  ) {
+    return 'skills.requested must be a string array';
+  }
+
+  let message: StartRunRequest['message'];
+  if (body.message !== undefined) {
+    const sent = body.message as { content?: unknown; attachments?: unknown } | null;
+    if (!sent || typeof sent.content !== 'string') {
+      return 'message.content must be a string';
+    }
+    const attachments = parseMessageAttachments(sent.attachments);
+    if (typeof attachments === 'string') return attachments;
+    message = {
+      content: sent.content,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    };
+  }
+
+  const contextWindowMode = parseContextWindowMode(body.contextWindowMode);
+  return {
+    threadId: body.threadId,
+    ...(message ? { message } : {}),
+    ...(body.rewindThroughSeq !== undefined
+      ? { rewindThroughSeq: body.rewindThroughSeq as number }
+      : {}),
+    ...(body.model !== undefined ? { model: body.model as string } : {}),
+    ...(body.local !== undefined ? { local: body.local as boolean } : {}),
+    ...(body.webSearch !== undefined ? { webSearch: body.webSearch as boolean } : {}),
+    ...(body.thinking !== undefined ? { thinking: body.thinking as ThinkingValue } : {}),
+    posture: normalizeRunPosture(body.posture),
+    ...(requested ? { skills: { requested: requested as string[] } } : {}),
+    ...(contextWindowMode ? { contextWindowMode } : {}),
+  };
+}

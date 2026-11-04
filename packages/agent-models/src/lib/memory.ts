@@ -23,7 +23,21 @@ export type MemoryOp = {
   by: 'user' | 'foreground' | 'review';
   evidence: 'user-said' | 'observed' | 'external';
   status: 'applied' | 'staged' | 'rejected' | 'reverted';
+  /** Set only by the user's revert: the id of the op this one undoes. */
+  reverts?: string;
 };
+
+/**
+ * The op `op` undoes, if it is a revert. Ops from before `reverts` existed
+ * named it in `reason`; that only counts for the user's own ops, because the
+ * model writes `reason` and must not be able to hide an entry.
+ */
+export function revertedOpId(op: MemoryOp): string | undefined {
+  if (op.reverts) return op.reverts;
+  return op.by === 'user' && op.reason.startsWith('revert ')
+    ? op.reason.slice('revert '.length)
+    : undefined;
+}
 
 /** Parse a memory op from persisted JSONL. Rejects malformed lines. */
 export function parseMemoryOp(raw: unknown): MemoryOp | null {
@@ -79,6 +93,7 @@ export function parseMemoryOp(raw: unknown): MemoryOp | null {
     status: record.status,
     ...(typeof record.oldText === 'string' ? { oldText: record.oldText } : {}),
     ...(typeof record.content === 'string' ? { content: record.content } : {}),
+    ...(typeof record.reverts === 'string' ? { reverts: record.reverts } : {}),
   };
 }
 
@@ -113,7 +128,8 @@ export const DEFAULT_MEMORY_CAPS: MemoryCaps = {
 };
 
 /** Gate input — host assigns id/ts/status after the verdict. */
-export type ProposedMemoryOp = Omit<MemoryOp, 'v' | 'id' | 'ts' | 'status'>;
+/** What a writer proposes; only the store's revert sets `reverts`. */
+export type ProposedMemoryOp = Omit<MemoryOp, 'v' | 'id' | 'ts' | 'status' | 'reverts'>;
 
 export type MemoryGateVerdict = 'apply' | 'stage' | 'reject';
 

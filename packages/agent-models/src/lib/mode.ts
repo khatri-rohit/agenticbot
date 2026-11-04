@@ -18,8 +18,8 @@ export type ModeLimits = {
   toolTimeoutMs: number;
   /** Prompt tokens across all model calls of the run, sub-agents included. */
   maxPromptTokens?: number;
-  /** Wall clock for the whole run. */
-  maxWallMs?: number;
+  /** Wall clock for the whole run. Both modes always set this. */
+  maxWallMs: number;
 };
 
 export interface ModeConfig {

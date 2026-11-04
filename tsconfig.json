@@ -10,7 +10,7 @@
       "path": "./apps/web"
     },
     {
-      "path": "./apps/agent"
+      "path": "./apps/cli"
     },
     {
       "path": "./packages/agent-models"
