@@ -1,7 +1,7 @@
 import type { ToolContext } from '@agent/agent-models';
 import { encodeSubagentHeader, type SubagentSpec } from '@agent/agent-models';
 
-import type { Tool } from '../tools/type';
+import type { Tool } from '../tools/types';
 import type { SubagentProfile } from './types';
 
 const THOROUGHNESS = ['quick', 'medium', 'thorough'] as const;
@@ -73,6 +73,8 @@ export function createDelegateTool(profiles: SubagentProfile[]): Tool {
     },
     risk: 'external',
     stage: 'subagent',
+    // The child run has its own wall-clock limit.
+    ownsTimeout: true,
     async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
       const text = (key: string) =>
         typeof args[key] === 'string' ? (args[key] as string).trim() : '';

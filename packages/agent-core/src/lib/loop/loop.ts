@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import type {
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
@@ -11,12 +10,14 @@ import {
   DEFAULT_CONTEXT_BUDGET,
   emptyRunUsage,
   isAskStrippedTool,
-  totalRunUsage,
+  limitMessage,
   type AgentEventWithoutSeq,
   type LedgerAppendMeta,
   type RunUsage,
   type TokenUsage,
   type ToolContext,
+  type TraceEvent,
+  type WebTrust,
 } from '@agent/agent-models';
 
 import {
@@ -29,21 +30,27 @@ import {
   ReadDedupe,
   retireSkillBodies,
 } from '../context/residency';
-import { consoleTrace, type TraceEvent } from '../events/trace';
+import { consoleTrace } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { createEffortRouter, type EffortSignals } from '../system1/effort';
+import { buildEffortState } from '../system1/state';
 import { getSkill } from '../tools/skills';
-import { BUDGET_WARN_RATIO, resolveLimits } from './limits';
+import { resolveLimits } from './limits';
 import type { ModelTurn } from '../model/types';
-import type { Tool, ToolRegistry, ToolStage } from '../tools/type';
-import { sha256Text } from '../tools/web-source';
+import type { Tool, ToolRegistry, ToolStage } from '../tools/types';
 import {
-  extractHttpUrls,
-  hostListedWebUrls,
-  WEB_FETCH_UNTRUSTED_SHA,
-  WEB_FETCH_UNTRUSTED_URL,
-} from '../tools/web-trust';
-import { canonicalizeWebFetchUrl, looksLikeHttpUrl } from '../tools/web-url';
+  isEditSuccess,
+  outcomeKey,
+  pathFromToolArgs,
+  toolCallKey,
+} from './call-identity';
+import { ProgressSteering } from './progress-steering';
+import { RepetitionGuard } from './repetition-guard';
+import { RunBudget } from './run-budget';
+import { throwIfAborted, withTimeout } from './timeout';
+import { preview, ToolCallRecord } from './tool-call-record';
 import { toLedgerRecord } from './to-ledger-record';
+import { WebSourceStore } from './web-sources';
 import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
 const OPEN_PLAN_WORK_NUDGE =
@@ -52,15 +59,9 @@ const OPEN_PLAN_WORK_NUDGE =
 const USER_SKIPPED_CHOICE =
   'User skipped this choice. Stop. Do not assume a path or keep editing.';
 
-/** A tool's declared stage wins; the name table covers built-ins without one. */
-function toolStage(name: string, tool?: Tool): ToolStage {
-  if (tool?.stage) return tool.stage;
-  if (name === 'load_skill') return 'skill';
-  if (name === 'glob' || name === 'grep' || name === 'read_file') return 'read';
-  if (name === 'web_search' || name === 'web_fetch') return 'network';
-  if (name === 'delegate') return 'subagent';
-  if (name === 'run_terminal') return 'exec';
-  return 'mutate';
+/** A tool without a declared stage (e.g. a future MCP tool) is scheduled as mutate, the strictest class. */
+function toolStage(tool: Tool): ToolStage {
+  return tool.stage ?? 'mutate';
 }
 
 export type {
@@ -80,202 +81,17 @@ export type {
  */
 const RESULT_PREVIEW_MAX = 20_000;
 
-function preview(value: unknown, max = 300): string {
-  const text = typeof value === 'string' ? value : JSON.stringify(value);
-  return text.length > max ? `${text.slice(0, max)}...` : text;
+/** The tool's own compact view of its arguments, so UI labels are not poisoned by truncated text. */
+function toolArgsPreview(tool: Tool | undefined, args: unknown): string {
+  const shaped =
+    tool?.previewArgs && args && typeof args === 'object' && !Array.isArray(args)
+      ? tool.previewArgs(args as Record<string, unknown>)
+      : args;
+  return preview(shaped, 200);
 }
 
-/** Compact preview so UI labels are not poisoned by truncated newText/oldText. */
-function toolArgsPreview(toolName: string, args: unknown): string {
-  if (
-    toolName === 'edit_file' &&
-    args &&
-    typeof args === 'object' &&
-    !Array.isArray(args)
-  ) {
-    const record = args as Record<string, unknown>;
-    const path = typeof record.path === 'string' ? record.path : '';
-    const oldText = typeof record.oldText === 'string' ? record.oldText : '';
-    const intent = oldText.length > 0 ? 'patch' : 'create';
-    return preview({ path, intent }, 200);
-  }
-  if (
-    toolName === 'offer_choice' &&
-    args &&
-    typeof args === 'object' &&
-    !Array.isArray(args)
-  ) {
-    const record = args as Record<string, unknown>;
-    return preview(
-      {
-        question:
-          typeof record.question === 'string'
-            ? record.question.slice(0, 120)
-            : '',
-      },
-      200,
-    );
-  }
-  if (
-    (toolName === 'plan' || toolName === 'todo') &&
-    args &&
-    typeof args === 'object' &&
-    !Array.isArray(args)
-  ) {
-    const record = args as Record<string, unknown>;
-    if (toolName === 'plan') {
-      return preview(
-        {
-          action: record.action,
-          kind: record.kind,
-          text:
-            typeof record.text === 'string'
-              ? record.text.slice(0, 80)
-              : undefined,
-        },
-        200,
-      );
-    }
-    const todos = Array.isArray(record.todos) ? record.todos.length : 0;
-    return preview({ merge: record.merge, todos }, 200);
-  }
-  return preview(args, 200);
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
-  }
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  return `{${keys
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-    .join(',')}}`;
-}
-
-function toolCallKey(toolName: string, args: unknown): string {
-  if (
-    toolName === 'web_fetch' &&
-    args !== null &&
-    typeof args === 'object' &&
-    !Array.isArray(args)
-  ) {
-    const record = args as Record<string, unknown>;
-    if (typeof record.sha256 === 'string' && record.sha256.trim()) {
-      return `${toolName}:${canonicalJson({
-        sha256: record.sha256.trim().toLowerCase(),
-        offset: record.offset ?? 0,
-        limit: record.limit ?? 0,
-        query:
-          typeof record.query === 'string'
-            ? record.query.trim().toLowerCase()
-            : '',
-      })}`;
-    }
-    if (typeof record.url === 'string') {
-      return `${toolName}:${canonicalJson({
-        url: canonicalizeWebFetchUrl(record.url),
-      })}`;
-    }
-  }
-  return `${toolName}:${canonicalJson(args)}`;
-}
-
-/** Sync path key for admission/outcome maps — matches jail aliases like ./a vs a. */
-function canonicalizeToolPath(raw: string): string {
-  let normalized = raw.trim().replaceAll('\\', '/');
-  while (normalized.startsWith('./')) {
-    normalized = normalized.slice(2);
-  }
-  // path.normalize keeps OS separators; re-posix so Windows matches Unix keys.
-  return path.normalize(normalized || '.').split(path.sep).join('/');
-}
-
-function pathFromToolArgs(args: unknown): string | null {
-  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
-    return null;
-  }
-  const raw = (args as Record<string, unknown>).path;
-  return typeof raw === 'string' && raw.trim() ? canonicalizeToolPath(raw) : null;
-}
-
-/**
- * Outcome key for mutate/exec stuck detection. edit_file keys on path+result
- * so varied failing spans on the same file accumulate; run_terminal keys on
- * the exit-code prefix (cwd + exit/signal line) so two builds with the same
- * first error but different file counts don't falsely match; other tools keep
- * call+result (repeat guard already covers identical args).
- */
-function outcomeKey(toolName: string, args: unknown, result: string): string {
-  if (toolName === 'edit_file') {
-    const filePath = pathFromToolArgs(args) ?? toolCallKey(toolName, args);
-    return `${toolName}:${filePath}#${sha256Text(result.slice(0, 2000))}`;
-  }
-  if (toolName === 'run_terminal') {
-    // Result format: "cwd: <path>\nexit <code>\n<body>" / "cwd: <path>\nsignal <n>\n<body>"
-    // Hash the first two lines (cwd + status) — the exit-code-bearing prefix.
-    // Two runs with the same exit code but different output bodies are progress
-    // (different errors being fixed); same exit code + same cwd 3× = stuck.
-    const newlineIdx = result.indexOf('\n');
-    const prefix =
-      newlineIdx === -1
-        ? result
-        : result.slice(0, result.indexOf('\n', newlineIdx + 1));
-    return `${toolCallKey(toolName, args)}#${sha256Text(prefix)}`;
-  }
-  return `${toolCallKey(toolName, args)}#${sha256Text(result.slice(0, 2000))}`;
-}
-
-/** edit_file results start with "Created" or "Patched" on success. */
-function isEditSuccess(result: string): boolean {
-  return result.startsWith('Created') || result.startsWith('Patched');
-}
-
-/** Invented tool names in one run before hard halt (I1 + I6). */
-const MAX_UNKNOWN_TOOL_STREAK = 2;
-/** Distinct read_file admits per path per run (stops offset paging storms). */
-const MAX_READ_FILE_PER_PATH = 30;
-/** run_terminal admits per run (stops shell flood; migrations run 40+ builds). */
-const MAX_TERMINAL_CALLS = 60;
-/** Identical mutate call+result before stuck halt. */
-const MAX_IDENTICAL_OUTCOMES = 3;
-/** Share of maxPromptTokens spent with no progress before the loop steers once. */
-const STALL_NUDGE_RATIO = 0.3;
-/** Past this share with no progress, the parent's own web tools close until progress. */
-const RESEARCH_GATE_RATIO = 0.5;
-/** Tighter marks while the host says account capacity is behind pace. */
-const STALL_NUDGE_RATIO_CONSERVE = 0.2;
-const RESEARCH_GATE_RATIO_CONSERVE = 0.35;
-/** Turns in a row whose every call hit the research gate before the run ends with a handoff. */
-const MAX_GATED_TURNS = 2;
 /** Partial reads of one file (since its last edit) between grep hints. */
 const READ_CREEP_NOTE_EVERY = 3;
-/** In-order slices of one web source between query hints. */
-const WEB_SLICE_NOTE_EVERY = 3;
-
-/** Coded tool rows so UI/ledger can tell skips from real results (I1 + observability). */
-function limitMessage(
-  code:
-    | 'limit.repeat'
-    | 'limit.tools'
-    | 'limit.read_storm'
-    | 'limit.terminal'
-    | 'limit.unknown'
-    | 'limit.outcome'
-    | 'limit.iterations'
-    | 'limit.plan'
-    | 'limit.finish'
-    | 'limit.tokens'
-    | 'limit.wall'
-    | 'limit.research'
-    | 'limit.capacity',
-  detail: string,
-): string {
-  return `${code}: ${detail}`;
-}
 
 const SKIP_LIMIT_REACHED = limitMessage(
   'limit.tools',
@@ -285,85 +101,6 @@ const REPEAT_BLOCKED = limitMessage(
   'limit.repeat',
   'This exact tool call has already been attempted multiple times. Do not repeat it.',
 );
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) return;
-  throw signal.reason instanceof Error
-    ? signal.reason
-    : new Error('Run cancelled');
-}
-
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<T> {
-  if (signal?.aborted) {
-    return Promise.reject(
-      signal.reason instanceof Error
-        ? signal.reason
-        : new Error('Run cancelled'),
-    );
-  }
-
-  if (timeoutMs <= 0) {
-    return new Promise<T>((resolve, reject) => {
-      const onAbort = () => {
-        signal?.removeEventListener('abort', onAbort);
-        reject(
-          signal?.reason instanceof Error
-            ? signal.reason
-            : new Error('Run cancelled'),
-        );
-      };
-      signal?.addEventListener('abort', onAbort, { once: true });
-      promise.then(
-        (value) => {
-          signal?.removeEventListener('abort', onAbort);
-          resolve(value);
-        },
-        (error) => {
-          signal?.removeEventListener('abort', onAbort);
-          reject(error);
-        },
-      );
-    });
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Tool timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    const onAbort = () => {
-      cleanup();
-      reject(
-        signal?.reason instanceof Error
-          ? signal.reason
-          : new Error('Run cancelled'),
-      );
-    };
-
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-    };
-
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    promise.then(
-      (value) => {
-        cleanup();
-        resolve(value);
-      },
-      (error: unknown) => {
-        cleanup();
-        reject(error);
-      },
-    );
-  });
-}
 
 /* ---------- the loop ---------- */
 
@@ -395,6 +132,7 @@ export async function runLoop(
     runId,
     trace,
   }, usage, startedAt);
+  await reportSystem1(config, runId, trace);
   trace({
     type: 'run_finish',
     runId,
@@ -405,7 +143,38 @@ export async function runLoop(
     usage,
     durationMs: Date.now() - startedAt,
   });
-  return { ...result, usage };
+  return {
+    ...result,
+    usage,
+    ...(config.contextReport
+      ? { contextReport: refreshContextReport(config.contextReport, messages, tools) }
+      : {}),
+  };
+}
+
+/**
+ * End-of-run System 1 summary: always to the trace, and to the client when
+ * any decision fell back. Sub-agent runs report through their own trace only.
+ * Never throws — reporting must not change how the run ended.
+ */
+async function reportSystem1(
+  config: RunLoopConfig,
+  runId: string,
+  trace: (event: TraceEvent) => void,
+): Promise<void> {
+  const system1 = config.system1;
+  if (!system1) return;
+  try {
+    await system1.settle();
+    const report = system1.report();
+    if (!report) return;
+    trace({ type: 'system1_report', runId, report });
+    if (report.fallbacks.length > 0 && (config.depth ?? 0) === 0) {
+      config.emit?.({ type: 'system1.report', runId, report });
+    }
+  } catch (error) {
+    console.error('[system1] report failed:', error instanceof Error ? error.message : error);
+  }
 }
 
 type CoreResult = Omit<RunLoopResult, 'usage'>;
@@ -424,15 +193,30 @@ async function runLoopCore(
   runStartedAt: number,
 ): Promise<CoreResult> {
   const limits = resolveLimits(config.limits);
-  const trace = config.trace;
+  // Rule inputs for the effort router, read from events the loop already
+  // traces; cleared after every model call.
+  const turnSignals = { toolError: false, wrote: false, nudged: false };
+  const trace = (event: TraceEvent) => {
+    if (event.type === 'tool_error') turnSignals.toolError = true;
+    else if (
+      event.type === 'tool_start' &&
+      (event.toolName === 'edit_file' || event.toolName === 'run_terminal' || event.toolName === 'delegate')
+    ) {
+      turnSignals.wrote = true;
+    } else if (event.type === 'stall_nudge' || event.type === 'budget_warning') {
+      turnSignals.nudged = true;
+    }
+    config.trace(event);
+  };
+  const effortRouter = createEffortRouter();
   // run.completed and turn.completed carry run spend so the UI meter and
   // offline traces never have to sum per-call usage themselves.
   const emit = config.emit
     ? (event: AgentEventWithoutSeq) => {
         if (event.type === 'run.completed') {
-          config.emit!({ ...event, usage: snapshotUsage() });
+          config.emit!({ ...event, usage: budget.snapshot() });
         } else if (event.type === 'turn.completed') {
-          config.emit!({ ...event, runUsage: snapshotUsage() });
+          config.emit!({ ...event, runUsage: budget.snapshot() });
         } else {
           config.emit!(event);
         }
@@ -443,121 +227,43 @@ async function runLoopCore(
   const signal = config.signal;
   const origin = config.origin ?? 'chat';
 
+  const posture = config.posture ?? 'agent';
+  const budget = new RunBudget(usage, limits, runStartedAt);
+  // Progress steering applies to a capped parent run that can edit. Ask runs
+  // cannot edit, Home has no edit_file, and sub-agents never edit.
+  const steering = new ProgressSteering(
+    budget,
+    limits.maxPromptTokens !== undefined &&
+      (config.depth ?? 0) === 0 &&
+      posture === 'agent' &&
+      tools.byName.has('edit_file'),
+    () => config.capacity?.conserve() === true,
+  );
+  const guard = new RepetitionGuard();
+  const webSources = new WebSourceStore({
+    ...(config.putBlob ? { putBlob: config.putBlob } : {}),
+    ...(config.readBlob ? { readBlob: config.readBlob } : {}),
+  });
+
   let iterations = 0;
   let totalToolCalls = 0;
   let planWorkNudges = 0;
-  let unknownToolCount = 0;
-  let terminalCalls = 0;
   let lastLimitReason: string | undefined;
-  const readFileByPath = new Map<string, number>();
-  const repeatedCalls = new Map<string, number>();
-  const repeatedOutcomes = new Map<string, number>();
-  // Exec-stage outcome keys tracked so a successful edit_file can clear them:
-  // an edit between identical build exits is progress, not stuck-ness.
-  const execOutcomeKeys = new Set<string>();
   // Index of the first message this run appends; in-run compaction never
   // touches anything before it (system layers + prior turns stay cacheable).
   const runStart = messages.length;
   const readDedupe = new ReadDedupe();
   // load_skill results still resident in full: tool_call_id → name + iteration.
   const skillLoads = new Map<string, { name: string; iteration: number }>();
-  let budgetWarned = false;
-  // Progress steering (parent agent runs only): prompt spend since the last
-  // successful edit or sub-agent report.
-  let spentAtProgress = 0;
-  let childCallsAtProgress = 0;
-  let stallNudged = false;
-  let researchGateTraced = false;
-  // Research-gate refusals in the current turn, and turns in a row that were
-  // nothing but refusals (each still costs a full model call).
-  let gatedThisTurn = 0;
-  let gatedTurnStreak = 0;
-  // Partial reads per path since its last edit; in-order slices per web source.
+  // Partial reads per path since its last edit.
   const partialReadsByPath = new Map<string, number>();
-  const webSlicesBySha = new Map<string, number>();
   let advisorHinted = false;
   let prefixHeavy = false;
   let stopContent: string | undefined;
 
-  function snapshotUsage(): RunUsage {
-    return {
-      own: { ...usage.own },
-      children: { ...usage.children },
-    };
-  }
-
-  /**
-   * Charge one model call. Without provider usage (local Ollama, streams
-   * without include_usage) the local estimate is charged instead, so the
-   * token budget never goes blind. Returns true when estimated.
-   */
-  function chargeOwnUsage(
-    turnUsage: TokenUsage | undefined,
-    estimatedPrompt: number,
-    content: string | null | undefined,
-  ): boolean {
-    usage.own.calls += 1;
-    if (turnUsage) {
-      usage.own.promptTokens += turnUsage.promptTokens;
-      usage.own.completionTokens += turnUsage.completionTokens;
-      return false;
-    }
-    usage.own.estimatedCalls += 1;
-    usage.own.promptTokens += estimatedPrompt;
-    usage.own.completionTokens += Math.ceil((content ?? '').length / CHARS_PER_TOKEN);
-    return true;
-  }
-
-  function chargeChildUsage(child: RunUsage): void {
-    const total = totalRunUsage(child);
-    usage.children.promptTokens += total.promptTokens;
-    usage.children.completionTokens += total.completionTokens;
-    usage.children.calls += total.calls;
-    usage.children.estimatedCalls += total.estimatedCalls;
-  }
-
-  function remainingPromptTokens(): number | undefined {
-    if (limits.maxPromptTokens === undefined) return undefined;
-    return Math.max(0, limits.maxPromptTokens - totalRunUsage(usage).promptTokens);
-  }
-
-  /**
-   * Token and wall-clock gates. Checked before every model call. `nextCall`
-   * (the estimate of the call about to be sent) stops the run before a call
-   * that would cross the cap, so only the final answer can go over it.
-   */
-  function budgetExceeded(nextCall = 0): string | null {
-    const spent = totalRunUsage(usage).promptTokens;
-    if (limits.maxPromptTokens !== undefined && spent >= limits.maxPromptTokens) {
-      return limitMessage(
-        'limit.tokens',
-        `prompt token budget spent (${spent} of ${limits.maxPromptTokens})`,
-      );
-    }
-    if (
-      limits.maxPromptTokens !== undefined &&
-      nextCall > 0 &&
-      spent + nextCall > limits.maxPromptTokens
-    ) {
-      return limitMessage(
-        'limit.tokens',
-        `prompt token budget nearly spent: the next call (~${nextCall}) would pass the cap (${spent} of ${limits.maxPromptTokens})`,
-      );
-    }
-    if (limits.maxWallMs !== undefined && Date.now() - runStartedAt >= limits.maxWallMs) {
-      return limitMessage(
-        'limit.wall',
-        `wall clock budget spent (${Math.round(limits.maxWallMs / 1000)}s)`,
-      );
-    }
-    return null;
-  }
-
   function maybeWarnBudget(): void {
-    if (budgetWarned || limits.maxPromptTokens === undefined) return;
-    const spent = totalRunUsage(usage).promptTokens;
-    if (spent < limits.maxPromptTokens * BUDGET_WARN_RATIO) return;
-    budgetWarned = true;
+    const warning = budget.takeWarning();
+    if (!warning) return;
     // Loop control, not a durable turn: joins the live prompt only.
     messages.push({ role: 'user', content: BUDGET_NUDGE });
     trace({
@@ -565,57 +271,16 @@ async function runLoopCore(
       runId,
       iteration: iterations,
       reason: 'prompt tokens',
-      promptTokens: spent,
-      limitPromptTokens: limits.maxPromptTokens,
+      promptTokens: warning.spent,
+      limitPromptTokens: warning.limit,
     });
   }
 
-  /**
-   * Progress steering applies to a capped parent run that can edit. Ask runs
-   * cannot edit, Home has no edit_file, and sub-agents never edit.
-   */
-  function progressSteering(): boolean {
-    return (
-      limits.maxPromptTokens !== undefined &&
-      (config.depth ?? 0) === 0 &&
-      posture === 'agent' &&
-      tools.byName.has('edit_file')
-    );
-  }
-
-  function markProgress(): void {
-    spentAtProgress = totalRunUsage(usage).promptTokens;
-    childCallsAtProgress = usage.children.calls;
-    stallNudged = false;
-    researchGateTraced = false;
-  }
-
-  /** Prompt tokens spent since the last progress. A finished sub-agent counts as progress. */
-  function idleTokens(): number {
-    if (usage.children.calls > childCallsAtProgress) markProgress();
-    return totalRunUsage(usage).promptTokens - spentAtProgress;
-  }
-
-  function conserving(): boolean {
-    return config.capacity?.conserve() === true;
-  }
-
-  function researchGated(): boolean {
-    const ratio = conserving() ? RESEARCH_GATE_RATIO_CONSERVE : RESEARCH_GATE_RATIO;
-    return (
-      progressSteering() &&
-      idleTokens() >= limits.maxPromptTokens! * ratio
-    );
-  }
-
   function maybeSteerProgress(): void {
-    if (stallNudged || !progressSteering()) return;
-    const max = limits.maxPromptTokens!;
-    const idle = idleTokens();
-    const ratio = conserving() ? STALL_NUDGE_RATIO_CONSERVE : STALL_NUDGE_RATIO;
-    if (idle < max * ratio) return;
-    stallNudged = true;
-    const spent = totalRunUsage(usage).promptTokens;
+    const stall = steering.takeStallNudge();
+    if (!stall) return;
+    const { idle, max } = stall;
+    const spent = budget.spent();
     const perCall = Math.max(1, estimatePromptTokens(messages, tools.definitions));
     const callsLeft = Math.floor(Math.max(0, max - spent) / perCall);
     const delegate = tools.byName.has('delegate')
@@ -656,9 +321,7 @@ async function runLoopCore(
       contextBudget.skillResidentIterations,
     )) {
       // A reload after retirement is legitimate, not a repeat.
-      for (const key of [...repeatedCalls.keys()]) {
-        if (key.startsWith('load_skill:')) repeatedCalls.delete(key);
-      }
+      guard.forgetSkillLoads();
       trace({
         type: 'skill_evicted',
         runId,
@@ -672,7 +335,7 @@ async function runLoopCore(
       messages,
       contextBudget,
       tools.definitions,
-      putBlob,
+      (text) => webSources.putBlob(text),
     );
     if (evicted) {
       readDedupe.forget(evicted.toolCallIds);
@@ -748,12 +411,8 @@ async function runLoopCore(
 
   /** Every few in-order slices of one web source, point at query (or explore). */
   function withWebSliceNote(args: Record<string, unknown>, result: string): string {
-    const sha = typeof args.sha256 === 'string' ? args.sha256.trim().toLowerCase() : '';
-    const query = typeof args.query === 'string' ? args.query.trim() : '';
-    if (!sha || query || !result.startsWith('## Source slice')) return result;
-    const count = (webSlicesBySha.get(sha) ?? 0) + 1;
-    webSlicesBySha.set(sha, count);
-    if (count % WEB_SLICE_NOTE_EVERY !== 0) return result;
+    const count = webSources.sliceNoteDue(args, result);
+    if (count === undefined) return result;
     trace({
       type: 'tool_note',
       runId,
@@ -866,94 +525,9 @@ async function runLoopCore(
     emit?.({ type: 'limit.hit', runId, reason });
   }
   const contextBudget = config.contextBudget ?? DEFAULT_CONTEXT_BUDGET;
-  const trustedWebUrls = new Set<string>();
-  const trustedWebShas = new Set<string>();
-  const webBodies = new Map<string, string>();
-  const webMeta = new Map<string, { url: string; title: string }>();
-  const urlToSha = new Map<string, string>();
-
-  function noteTrustedWebUrls(urls: string[]): void {
-    for (const raw of urls) {
-      const trimmed = raw.trim();
-      if (!looksLikeHttpUrl(trimmed)) continue;
-      trustedWebUrls.add(canonicalizeWebFetchUrl(trimmed));
-    }
-  }
-
-  function noteWebSource(source: {
-    sha256: string;
-    url: string;
-    title: string;
-    content: string;
-  }): void {
-    const sha = source.sha256.toLowerCase();
-    trustedWebShas.add(sha);
-    webBodies.set(sha, source.content);
-    webMeta.set(sha, {
-      url: canonicalizeWebFetchUrl(source.url),
-      title: source.title,
-    });
-    urlToSha.set(canonicalizeWebFetchUrl(source.url), sha);
-    noteTrustedWebUrls([source.url]);
-  }
-
-  async function putBlob(text: string): Promise<string> {
-    if (config.putBlob) {
-      const sha = (await config.putBlob(text)).toLowerCase();
-      webBodies.set(sha, text);
-      return sha;
-    }
-    const sha = sha256Text(text);
-    webBodies.set(sha, text);
-    return sha;
-  }
-
-  async function getWebSource(
-    sha256: string,
-  ): Promise<
-    { sha256: string; url: string; title: string; content: string } | undefined
-  > {
-    const sha = sha256.toLowerCase();
-    if (!trustedWebShas.has(sha)) return undefined;
-    let content = webBodies.get(sha);
-    if (!content && config.readBlob) {
-      content = await config.readBlob(sha);
-      if (content) webBodies.set(sha, content);
-    }
-    if (!content) return undefined;
-    const meta = webMeta.get(sha) ?? { url: '', title: '' };
-    return { sha256: sha, url: meta.url, title: meta.title, content };
-  }
-
-  function getWebSourceByUrl(url: string): string | undefined {
-    return urlToSha.get(canonicalizeWebFetchUrl(url));
-  }
-
-  function seedTrustedWebUrls(): void {
-    for (const message of messages) {
-      if (typeof message.content !== 'string') continue;
-      if (message.role === 'user') {
-        noteTrustedWebUrls(extractHttpUrls(message.content));
-      } else if (message.role === 'tool') {
-        noteTrustedWebUrls(hostListedWebUrls(message.content));
-        const sha = message.content.match(/^sha256: ([a-f0-9]{64})$/m)?.[1];
-        const url = message.content.match(/^URL: (.+)$/m)?.[1]?.trim();
-        const title = message.content.match(/^title: (.+)$/m)?.[1]?.trim();
-        if (sha) {
-          const id = sha.toLowerCase();
-          trustedWebShas.add(id);
-          if (url) {
-            const canonical = canonicalizeWebFetchUrl(url);
-            webMeta.set(id, { url: canonical, title: title ?? '' });
-            urlToSha.set(canonical, id);
-            noteTrustedWebUrls([canonical]);
-          }
-        }
-      }
-    }
-  }
-
-  seedTrustedWebUrls();
+  webSources.seed(messages, config.webTrust);
+  /** What each web call made fetchable, until its row is written. */
+  const trustByCall = new Map<string, WebTrust>();
 
   async function appendDurable(
     message: ChatCompletionMessageParam,
@@ -965,37 +539,27 @@ async function runLoopCore(
     }
   }
 
-  function isToolAnswered(toolCallId: string): boolean {
-    return messages.some(
-      (message) =>
-        message.role === 'tool' &&
-        'tool_call_id' in message &&
-        message.tool_call_id === toolCallId,
-    );
-  }
-
-  function unansweredToolCalls(
-    toolCalls: ChatCompletionMessageToolCall[],
-  ): ChatCompletionMessageToolCall[] {
-    return toolCalls.filter((toolCall) => !isToolAnswered(toolCall.id));
-  }
-
-  /** I1: every tool_call_id gets one durable tool row; never double-answer. */
-  async function skipToolCalls(
-    toolCalls: ChatCompletionMessageToolCall[],
-    reason: string,
-  ): Promise<void> {
-    for (const toolCall of toolCalls) {
-      if (isToolAnswered(toolCall.id)) continue;
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: reason,
-      });
+  /** Args preview for a call that never ran; unparsable arguments preview as empty. */
+  function argsPreviewOf(toolCall: ChatCompletionMessageToolCall): string {
+    if (toolCall.type !== 'function') return '';
+    let args: unknown = {};
+    try {
+      args = JSON.parse(toolCall.function.arguments);
+    } catch {
+      // keep the empty preview
     }
+    return toolArgsPreview(tools.byName.get(toolCall.function.name), args);
   }
 
-  function buildToolContext(): ToolContext {
+  const record = new ToolCallRecord(runId, emit, appendDurable, argsPreviewOf);
+
+  /** `toolCallId`: the call this context runs, so web trust lands on its row. */
+  function buildToolContext(toolCallId?: string): ToolContext {
+    const trustOf = (id: string) => {
+      let trust = trustByCall.get(id);
+      if (!trust) trustByCall.set(id, (trust = { urls: [], sources: [] }));
+      return trust;
+    };
     return {
       runId,
       threadId,
@@ -1020,37 +584,39 @@ async function runLoopCore(
                   : {}),
                 toolNames: [...tools.byName.keys()],
                 contextBudget,
-                remainingPromptTokens: remainingPromptTokens(),
+                remainingPromptTokens: budget.remaining(),
                 forkMessages,
+                webTrust: () => webSources.snapshot(),
                 ...(config.emit ? { emit: config.emit } : {}),
                 ...(config.pinnedSkills ? { pinnedSkills: config.pinnedSkills } : {}),
                 ...(config.capacity ? { capacity: config.capacity } : {}),
-                chargeUsage: chargeChildUsage,
+                chargeUsage: (child) => budget.chargeChild(child),
               }),
           }
         : {}),
       requestStop: (content) => {
         stopContent = content;
       },
-      putBlob,
-      readBlob: async (sha, offset, length) => {
-        const key = sha.toLowerCase();
-        const cached = (await getWebSource(key))?.content ?? webBodies.get(key);
-        if (cached !== undefined) {
-          if (offset === undefined && length === undefined) return cached;
-          const start = offset ?? 0;
-          return cached.slice(
-            start,
-            length === undefined ? undefined : start + length,
-          );
-        }
-        if (!config.readBlob) throw new Error(`Blob not found: ${sha}`);
-        return config.readBlob(key, offset, length);
+      putBlob: (text) => webSources.putBlob(text),
+      readBlob: (sha, offset, length) => webSources.readBlob(sha, offset, length),
+      noteTrustedWebUrls: (urls) => {
+        webSources.noteTrustedUrls(urls);
+        if (toolCallId) trustOf(toolCallId).urls.push(...urls);
       },
-      noteTrustedWebUrls,
-      noteWebSource,
-      getWebSource,
-      getWebSourceByUrl,
+      noteWebSource: (source) => {
+        webSources.noteSource(source);
+        if (toolCallId) {
+          trustOf(toolCallId).sources.push({
+            sha256: source.sha256,
+            url: source.url,
+            title: source.title,
+          });
+        }
+      },
+      getWebSource: (sha) => webSources.get(sha),
+      getWebSourceByUrl: (url) => webSources.getByUrl(url),
+      trustsWebUrl: (url) => webSources.trustsUrl(url),
+      trustsWebSha: (sha) => webSources.trustsSha(sha),
       trace,
     };
   }
@@ -1087,64 +653,32 @@ async function runLoopCore(
   async function admitToolCall(
     toolCall: ChatCompletionMessageToolCall,
   ): Promise<AdmitResult> {
+    // Rejects always get a tool row (I1) but do not burn maxToolCalls (D10).
     if (toolCall.type !== 'function') {
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: 'Unsupported tool call type.',
-      });
+      await record.refuse(toolCall, 'Unsupported tool call type.');
       return { kind: 'filled' };
     }
 
     const toolName = toolCall.function.name;
     const tool = tools.byName.get(toolName);
 
-    // Rejects always get a tool row (I1) but do not burn maxToolCalls (D10).
     if (!tool) {
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: `Tool "${toolName}" does not exist.`,
-      });
-      unknownToolCount += 1;
-      if (unknownToolCount >= MAX_UNKNOWN_TOOL_STREAK) {
-        noteLimit(
-          limitMessage(
-            'limit.unknown',
-            `unknown tool streak exceeded (${MAX_UNKNOWN_TOOL_STREAK})`,
-          ),
-        );
+      await record.refuse(toolCall, `Tool "${toolName}" does not exist.`);
+      const streakLimit = guard.unknownTool();
+      if (streakLimit) {
+        noteLimit(streakLimit);
         return { kind: 'halt', reason: 'limit', toolCall };
       }
       return { kind: 'filled' };
     }
 
-    // Valid tool breaks the unknown streak (lifetime total was ending runs early).
-    unknownToolCount = 0;
+    guard.knownTool();
 
     if (posture === 'ask' && isAskStrippedTool(toolName)) {
-      const blocked =
-        'Blocked: this run is Ask (read-only). Switch the composer to Agent to edit files or run commands.';
-      emit?.({
-        type: 'tool.started',
-        runId,
-        toolCallId: toolCall.id,
-        toolName,
-        argsPreview: toolArgsPreview(toolName, {}),
-      });
-      emit?.({
-        type: 'tool.completed',
-        runId,
-        toolCallId: toolCall.id,
-        toolName,
-        durationMs: 0,
-        resultPreview: preview(blocked, 200),
-      });
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: blocked,
-      });
+      await record.refuse(
+        toolCall,
+        'Blocked: this run is Ask (read-only). Switch the composer to Agent to edit files or run commands.',
+      );
       return { kind: 'filled' };
     }
 
@@ -1152,116 +686,25 @@ async function runLoopCore(
     try {
       args = JSON.parse(toolCall.function.arguments);
     } catch {
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: 'Invalid tool arguments. Expected valid JSON.',
-      });
+      await record.refuse(toolCall, 'Invalid tool arguments. Expected valid JSON.');
       return { kind: 'filled' };
     }
 
-    if (toolName === 'web_fetch') {
-      const sha =
-        typeof args.sha256 === 'string' ? args.sha256.trim().toLowerCase() : '';
-      const url = typeof args.url === 'string' ? args.url.trim() : '';
-      if (sha) {
-        if (!trustedWebShas.has(sha)) {
-          const blocked = WEB_FETCH_UNTRUSTED_SHA;
-          emit?.({
-            type: 'tool.started',
-            runId,
-            toolCallId: toolCall.id,
-            toolName,
-            argsPreview: toolArgsPreview(toolName, args),
-          });
-          emit?.({
-            type: 'tool.completed',
-            runId,
-            toolCallId: toolCall.id,
-            toolName,
-            durationMs: 0,
-            resultPreview: preview(blocked, 200),
-          });
-          await appendDurable({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: blocked,
-          });
-          return { kind: 'filled' };
-        }
-      } else if (looksLikeHttpUrl(url)) {
-        const canonical = canonicalizeWebFetchUrl(url);
-        if (!trustedWebUrls.has(canonical)) {
-          const blocked = WEB_FETCH_UNTRUSTED_URL;
-          emit?.({
-            type: 'tool.started',
-            runId,
-            toolCallId: toolCall.id,
-            toolName,
-            argsPreview: toolArgsPreview(toolName, args),
-          });
-          emit?.({
-            type: 'tool.completed',
-            runId,
-            toolCallId: toolCall.id,
-            toolName,
-            durationMs: 0,
-            resultPreview: preview(blocked, 200),
-          });
-          await appendDurable({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: blocked,
-          });
-          return { kind: 'filled' };
-        }
-      }
-    } else if (toolName === 'web_search') {
-      const candidate = String(args.query ?? '').trim();
-      if (looksLikeHttpUrl(candidate)) {
-        const canonical = canonicalizeWebFetchUrl(candidate);
-        if (!trustedWebUrls.has(canonical)) {
-          const blocked = WEB_FETCH_UNTRUSTED_URL;
-          emit?.({
-            type: 'tool.started',
-            runId,
-            toolCallId: toolCall.id,
-            toolName,
-            argsPreview: toolArgsPreview(toolName, args),
-          });
-          emit?.({
-            type: 'tool.completed',
-            runId,
-            toolCallId: toolCall.id,
-            toolName,
-            durationMs: 0,
-            resultPreview: preview(blocked, 200),
-          });
-          await appendDurable({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: blocked,
-          });
-          return { kind: 'filled' };
-        }
-      }
+    const refusal = tool.admit?.(args, buildToolContext());
+    if (refusal) {
+      await record.refuse(toolCall, refusal);
+      return { kind: 'filled' };
     }
 
     // Research gate: after half the budget with no edit or sub-agent report,
     // the parent's own web tools close until progress. A refusal row, not a
     // halt: reads, edits and delegate(explore) still work.
-    if ((toolName === 'web_search' || toolName === 'web_fetch') && researchGated()) {
-      const idle = idleTokens();
+    if (tool.research && steering.researchGated()) {
+      const idle = steering.idleTokens();
       const delegate = tools.byName.has('delegate')
         ? ' If one specific fact is still missing, delegate(explore) with that question.'
         : '';
-      const blocked = limitMessage(
-        'limit.research',
-        `Web research is paused for this run: ${Math.round((idle / limits.maxPromptTokens!) * 100)}% of the budget went to steps with no edit. It reopens after your next edit or sub-agent report. Use what you have.${delegate}`,
-      );
-      gatedThisTurn += 1;
-      if (!researchGateTraced) {
-        researchGateTraced = true;
+      if (steering.noteGated()) {
         trace({
           type: 'research_gate',
           runId,
@@ -1270,51 +713,23 @@ async function runLoopCore(
           idleTokens: idle,
         });
       }
-      emit?.({
-        type: 'tool.started',
-        runId,
-        toolCallId: toolCall.id,
-        toolName,
-        argsPreview: toolArgsPreview(toolName, args),
-      });
-      emit?.({
-        type: 'tool.completed',
-        runId,
-        toolCallId: toolCall.id,
-        toolName,
-        durationMs: 0,
-        resultPreview: preview(blocked, 200),
-      });
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: blocked,
-      });
+      await record.refuse(
+        toolCall,
+        limitMessage(
+          'limit.research',
+          `Web research is paused for this run: ${Math.round((idle / limits.maxPromptTokens!) * 100)}% of the budget went to steps with no edit. It reopens after your next edit or sub-agent report. Use what you have.${delegate}`,
+        ),
+      );
       return { kind: 'filled' };
     }
 
     const readPath =
       toolName === 'read_file' ? pathFromToolArgs(args) : null;
-    if (readPath !== null) {
-      const pathCount = readFileByPath.get(readPath) ?? 0;
-      if (pathCount >= MAX_READ_FILE_PER_PATH) {
-        noteLimit(
-          limitMessage(
-            'limit.read_storm',
-            `read_file path storm blocked (${MAX_READ_FILE_PER_PATH} per path)`,
-          ),
-        );
-        return { kind: 'halt', reason: 'limit', toolCall };
-      }
-    }
-
-    if (toolName === 'run_terminal' && terminalCalls >= MAX_TERMINAL_CALLS) {
-      noteLimit(
-        limitMessage(
-          'limit.terminal',
-          `run_terminal storm blocked (${MAX_TERMINAL_CALLS} per run)`,
-        ),
-      );
+    const stormLimit =
+      (readPath !== null ? guard.readStorm(readPath) : null) ??
+      (toolName === 'run_terminal' ? guard.terminalStorm() : null);
+    if (stormLimit) {
+      noteLimit(stormLimit);
       return { kind: 'halt', reason: 'limit', toolCall };
     }
 
@@ -1331,9 +746,7 @@ async function runLoopCore(
       return { kind: 'halt', reason: 'limit', toolCall };
     }
 
-    const callKey = toolCallKey(toolName, args);
-    const repeatCount = (repeatedCalls.get(callKey) ?? 0) + 1;
-    repeatedCalls.set(callKey, repeatCount);
+    const repeatCount = guard.countCall(toolCallKey(toolName, args));
 
     // Exec tools (run_terminal) are exempt from the arg-repeat guard: re-running
     // the same build after an edit is legitimate verification, and outcome dedup
@@ -1341,7 +754,7 @@ async function runLoopCore(
     // stays for mutate/read/network/skill.
     if (
       repeatCount > limits.maxRepeatedToolCalls &&
-      toolStage(toolName, tool) !== 'exec'
+      toolStage(tool) !== 'exec'
     ) {
       noteLimit(
         limitMessage('limit.repeat', `repeated tool call blocked: ${toolName}`),
@@ -1350,12 +763,7 @@ async function runLoopCore(
     }
 
     totalToolCalls += 1;
-    if (readPath !== null) {
-      readFileByPath.set(readPath, (readFileByPath.get(readPath) ?? 0) + 1);
-    }
-    if (toolName === 'run_terminal') {
-      terminalCalls += 1;
-    }
+    guard.admitted(toolName, readPath);
 
     return {
       kind: 'ready',
@@ -1368,20 +776,14 @@ async function runLoopCore(
     fromIndex: number,
     toolCalls: ChatCompletionMessageToolCall[],
   ): Promise<CoreResult> {
-    const triggerAnswered = isToolAnswered(halt.toolCall.id);
+    const triggerAnswered = record.isAnswered(halt.toolCall.id);
     if (halt.reason === 'repeat') {
-      if (!triggerAnswered) {
-        await appendDurable({
-          role: 'tool',
-          tool_call_id: halt.toolCall.id,
-          content: REPEAT_BLOCKED,
-        });
-      }
-      await skipToolCalls(toolCalls.slice(fromIndex + 1), SKIP_LIMIT_REACHED);
+      if (!triggerAnswered) await record.refuse(halt.toolCall, REPEAT_BLOCKED);
+      await record.skip(toolCalls.slice(fromIndex + 1), SKIP_LIMIT_REACHED);
     } else if (triggerAnswered) {
-      await skipToolCalls(toolCalls.slice(fromIndex + 1), SKIP_LIMIT_REACHED);
+      await record.skip(toolCalls.slice(fromIndex + 1), SKIP_LIMIT_REACHED);
     } else {
-      await skipToolCalls(toolCalls.slice(fromIndex), SKIP_LIMIT_REACHED);
+      await record.skip(toolCalls.slice(fromIndex), SKIP_LIMIT_REACHED);
     }
     return completeAfterLimit();
   }
@@ -1413,140 +815,134 @@ async function runLoopCore(
     };
   }
 
-  async function executeReadyCall(
-    call: ReadyToolCall,
-    remainingOnAbort: ChatCompletionMessageToolCall[],
-  ): Promise<'ok' | 'deferred' | 'halted'> {
-    const { toolCall, toolName, tool, args } = call;
-    const toolCtx = buildToolContext();
-
+  function startCall(call: ReadyToolCall): void {
     trace({
       type: 'tool_start',
       runId,
       iteration: iterations,
-      toolName,
-      toolCallId: toolCall.id,
-      args,
+      toolName: call.toolName,
+      toolCallId: call.toolCall.id,
+      args: call.args,
     });
-    emit?.({
-      type: 'tool.started',
+    record.start(
+      call.toolCall.id,
+      call.toolName,
+      toolArgsPreview(call.tool, call.args),
+    );
+  }
+
+  /** A tool that owns its timeout (exec tools always do) is not raced by the loop's, which would leak its child. */
+  function runTool(call: ReadyToolCall, toolCtx: ToolContext): Promise<string> {
+    const ownsTimeout = call.tool.ownsTimeout === true || call.tool.risk === 'exec';
+    return withTimeout(
+      call.tool.execute(call.args, toolCtx),
+      ownsTimeout ? 0 : limits.toolTimeoutMs,
+      signal,
+    );
+  }
+
+  /** A call returned: record it, then the stuck guard and edit progress. */
+  async function settleReturned(
+    call: ReadyToolCall,
+    result: string,
+    resultChars: number,
+    durationMs: number,
+  ): Promise<'ok' | 'halted'> {
+    const { toolCall, toolName, tool, args } = call;
+    trace({
+      type: 'tool_complete',
       runId,
-      toolCallId: toolCall.id,
+      iteration: iterations,
       toolName,
-      argsPreview: toolArgsPreview(toolName, args),
+      toolCallId: toolCall.id,
+      durationMs,
+      resultPreview: preview(result),
+      resultChars,
     });
-
-    const startedAt = Date.now();
-
-    try {
-      // exec tools and delegate own their timeout + process-tree kill.
-      // The loop's withTimeout would race the tool's timer and leak the child.
-      const ownsTimeout = toolName === 'offer_choice' || tool.risk === 'exec' || toolName === 'delegate';
-      const raw = await withTimeout(
-        tool.execute(args, toolCtx),
-        ownsTimeout ? 0 : limits.toolTimeoutMs,
-        signal,
+    // Append before outcome halt so I1 always holds for the triggering call.
+    const webTrust = trustByCall.get(toolCall.id);
+    trustByCall.delete(toolCall.id);
+    await record.complete(
+      toolCall.id,
+      toolName,
+      result,
+      durationMs,
+      preview(result, RESULT_PREVIEW_MAX),
+      webTrust ? { webTrust } : {},
+    );
+    // Mutate + exec: same call + same result = stuck (e.g. write theater,
+    // or run_terminal producing the same exit code with no edit between).
+    const stage = toolStage(tool);
+    if (stage === 'mutate' || stage === 'exec') {
+      const outcome = guard.recordOutcome(
+        outcomeKey(toolName, args, result),
+        stage === 'exec',
       );
-      const result = shapeToolResult(toolName, args, raw, toolCall.id);
-      const durationMs = Date.now() - startedAt;
-      trace({
-        type: 'tool_complete',
-        runId,
-        iteration: iterations,
-        toolName,
-        toolCallId: toolCall.id,
-        durationMs,
-        resultPreview: preview(result),
-        resultChars: raw.length,
-      });
-      emit?.({
-        type: 'tool.completed',
-        runId,
-        toolCallId: toolCall.id,
-        toolName,
-        durationMs,
-        resultPreview: preview(result, RESULT_PREVIEW_MAX),
-      });
-      // Append before outcome halt so I1 always holds for the triggering call.
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: result,
-      });
-      // Mutate + exec: same call + same result = stuck (e.g. write theater,
-      // or run_terminal producing the same exit code with no edit between).
-      const stage = toolStage(toolName, tool);
-      if (stage === 'mutate' || stage === 'exec') {
-        const key = outcomeKey(toolName, args, result);
-        const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
-        repeatedOutcomes.set(key, outcomeCount);
-        if (stage === 'exec') execOutcomeKeys.add(key);
-        if (outcomeCount === MAX_IDENTICAL_OUTCOMES - 1) maybeSuggestAdvisor();
-        if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
-          noteLimit(
-            limitMessage(
-              'limit.outcome',
-              `repeated identical tool outcome blocked: ${toolName}`,
-            ),
-          );
-          return 'halted';
-        }
+      if (outcome.nearStuck) maybeSuggestAdvisor();
+      if (outcome.stuck) {
+        noteLimit(
+          limitMessage(
+            'limit.outcome',
+            `repeated identical tool outcome blocked: ${toolName}`,
+          ),
+        );
+        return 'halted';
       }
-      // A successful edit_file is progress: prior exec outcomes (build/lint
-      // exits) are now stale. Clear them so the next verification cycle starts
-      // fresh instead of accumulating toward a false stuck-ness halt.
-      if (toolName === 'edit_file' && isEditSuccess(result)) {
-        for (const k of execOutcomeKeys) repeatedOutcomes.delete(k);
-        execOutcomeKeys.clear();
-        markProgress();
-      }
-      return 'ok';
+    }
+    // A successful edit_file is progress: prior exec outcomes (build/lint
+    // exits) are now stale. Clear them so the next verification cycle starts
+    // fresh instead of accumulating toward a false stuck-ness halt.
+    if (toolName === 'edit_file' && isEditSuccess(result)) {
+      guard.editSucceeded();
+      steering.markProgress();
+    }
+    return 'ok';
+  }
+
+  async function settleThrown(call: ReadyToolCall, error: unknown): Promise<void> {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    trace({
+      type: 'tool_error',
+      runId,
+      iteration: iterations,
+      toolName: call.toolName,
+      toolCallId: call.toolCall.id,
+      error: errorMessage,
+    });
+    await record.fail(call.toolCall.id, errorMessage);
+  }
+
+  async function executeReadyCall(
+    call: ReadyToolCall,
+    remainingOnAbort: ChatCompletionMessageToolCall[],
+  ): Promise<'ok' | 'deferred' | 'halted'> {
+    startCall(call);
+    const startedAt = Date.now();
+    try {
+      const raw = await runTool(call, buildToolContext(call.toolCall.id));
+      const result = shapeToolResult(call.toolName, call.args, raw, call.toolCall.id);
+      return await settleReturned(call, result, raw.length, Date.now() - startedAt);
     } catch (error) {
       if (signal?.aborted) {
-        await skipToolCalls(remainingOnAbort, 'Skipped: run cancelled.');
+        await record.skip(remainingOnAbort, 'Skipped: run cancelled.');
         throwIfAborted(signal);
       }
       if (error instanceof ChoiceSkipped) {
-        emit?.({
-          type: 'tool.completed',
-          runId,
-          toolCallId: toolCall.id,
-          toolName,
-          durationMs: Date.now() - startedAt,
-          resultPreview: preview(USER_SKIPPED_CHOICE, 200),
-        });
-        await appendDurable({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: USER_SKIPPED_CHOICE,
-        });
-        await skipToolCalls(
+        await record.complete(
+          call.toolCall.id,
+          call.toolName,
+          USER_SKIPPED_CHOICE,
+          Date.now() - startedAt,
+          preview(USER_SKIPPED_CHOICE, 200),
+          { outcome: 'skipped' },
+        );
+        await record.skip(
           remainingOnAbort.slice(1),
           'Skipped: user deferred this choice.',
         );
         return 'deferred';
       }
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      trace({
-        type: 'tool_error',
-        runId,
-        iteration: iterations,
-        toolName,
-        toolCallId: toolCall.id,
-        error: errorMessage,
-      });
-      emit?.({
-        type: 'tool.failed',
-        runId,
-        toolCallId: toolCall.id,
-        error: errorMessage,
-      });
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: `Tool execution failed: ${errorMessage}`,
-      });
+      await settleThrown(call, error);
       return 'ok';
     }
   }
@@ -1555,17 +951,10 @@ async function runLoopCore(
     batch: ReadyToolCall[],
     remainingAfter: ChatCompletionMessageToolCall[],
   ): Promise<'ok' | 'deferred' | 'halted'> {
-    // write/exec and interactive tools stay serial even if they slip into a batch.
+    // write/exec tools stay serial even if they slip into a parallel stage.
     if (
       batch.length === 1 ||
-      batch.some((call) => {
-        const risk = call.tool.risk ?? 'read';
-        return (
-          risk === 'write' ||
-          risk === 'exec' ||
-          call.toolName === 'offer_choice'
-        );
-      })
+      batch.some((call) => call.tool.risk === 'write' || call.tool.risk === 'exec')
     ) {
       for (let i = 0; i < batch.length; i++) {
         const call = batch[i];
@@ -1579,37 +968,13 @@ async function runLoopCore(
       return 'ok';
     }
 
-    const toolCtx = buildToolContext();
-    for (const call of batch) {
-      trace({
-        type: 'tool_start',
-        runId,
-        iteration: iterations,
-        toolName: call.toolName,
-        toolCallId: call.toolCall.id,
-        args: call.args,
-      });
-      emit?.({
-        type: 'tool.started',
-        runId,
-        toolCallId: call.toolCall.id,
-        toolName: call.toolName,
-        argsPreview: toolArgsPreview(call.toolName, call.args),
-      });
-    }
+    for (const call of batch) startCall(call);
 
     const settled = await Promise.all(
       batch.map(async (call) => {
         const started = Date.now();
         try {
-          // exec tools and delegate own their timeout + process-tree kill.
-          const ownsTimeout =
-            call.toolName === 'offer_choice' || call.tool.risk === 'exec' || call.toolName === 'delegate';
-          const raw = await withTimeout(
-            call.tool.execute(call.args, toolCtx),
-            ownsTimeout ? 0 : limits.toolTimeoutMs,
-            signal,
-          );
+          const raw = await runTool(call, buildToolContext(call.toolCall.id));
           return {
             call,
             ok: true as const,
@@ -1618,130 +983,34 @@ async function runLoopCore(
             durationMs: Date.now() - started,
           };
         } catch (error) {
-          return {
-            call,
-            ok: false as const,
-            error,
-            durationMs: Date.now() - started,
-          };
+          return { call, ok: false as const, error };
         }
       }),
     );
 
+    // A cancel discards results already back: the run is ending anyway.
     if (signal?.aborted) {
-      await skipToolCalls(
+      await record.skip(
         [...batch.map((call) => call.toolCall), ...remainingAfter],
         'Skipped: run cancelled.',
       );
       throwIfAborted(signal);
     }
 
+    // Record every call before returning halted, so the batch stays whole.
     let outcomeHalted = false;
     for (const item of settled) {
-      const { call, durationMs } = item;
       if (item.ok) {
-        trace({
-          type: 'tool_complete',
-          runId,
-          iteration: iterations,
-          toolName: call.toolName,
-          toolCallId: call.toolCall.id,
-          durationMs,
-          resultPreview: preview(item.result),
-          resultChars: item.resultChars,
-        });
-        emit?.({
-          type: 'tool.completed',
-          runId,
-          toolCallId: call.toolCall.id,
-          toolName: call.toolName,
-          durationMs,
-          resultPreview: preview(item.result, RESULT_PREVIEW_MAX),
-        });
-        await appendDurable({
-          role: 'tool',
-          tool_call_id: call.toolCall.id,
-          content: item.result,
-        });
-        // Mutate-stage only; finish appending the batch before returning halted.
-        if (toolStage(call.toolName, call.tool) === 'mutate') {
-          const key = outcomeKey(call.toolName, call.args, item.result);
-          const outcomeCount = (repeatedOutcomes.get(key) ?? 0) + 1;
-          repeatedOutcomes.set(key, outcomeCount);
-          if (outcomeCount >= MAX_IDENTICAL_OUTCOMES) {
-            noteLimit(
-              limitMessage(
-                'limit.outcome',
-                `repeated identical tool outcome blocked: ${call.toolName}`,
-              ),
-            );
-            outcomeHalted = true;
-          }
-        }
-        continue;
-      }
-
-      if (signal?.aborted) {
-        await skipToolCalls(
-          [
-            call.toolCall,
-            ...settled
-              .slice(settled.indexOf(item) + 1)
-              .map((entry) => entry.call.toolCall),
-            ...remainingAfter,
-          ],
-          'Skipped: run cancelled.',
+        const outcome = await settleReturned(
+          item.call,
+          item.result,
+          item.resultChars,
+          item.durationMs,
         );
-        throwIfAborted(signal);
+        if (outcome === 'halted') outcomeHalted = true;
+      } else {
+        await settleThrown(item.call, item.error);
       }
-
-      if (item.error instanceof ChoiceSkipped) {
-        emit?.({
-          type: 'tool.completed',
-          runId,
-          toolCallId: call.toolCall.id,
-          toolName: call.toolName,
-          durationMs,
-          resultPreview: preview(USER_SKIPPED_CHOICE, 200),
-        });
-        await appendDurable({
-          role: 'tool',
-          tool_call_id: call.toolCall.id,
-          content: USER_SKIPPED_CHOICE,
-        });
-        await skipToolCalls(
-          [
-            ...settled
-              .slice(settled.indexOf(item) + 1)
-              .map((entry) => entry.call.toolCall),
-            ...remainingAfter,
-          ],
-          'Skipped: user deferred this choice.',
-        );
-        return 'deferred';
-      }
-
-      const errorMessage =
-        item.error instanceof Error ? item.error.message : String(item.error);
-      trace({
-        type: 'tool_error',
-        runId,
-        iteration: iterations,
-        toolName: call.toolName,
-        toolCallId: call.toolCall.id,
-        error: errorMessage,
-      });
-      emit?.({
-        type: 'tool.failed',
-        runId,
-        toolCallId: call.toolCall.id,
-        error: errorMessage,
-      });
-      await appendDurable({
-        role: 'tool',
-        tool_call_id: call.toolCall.id,
-        content: `Tool execution failed: ${errorMessage}`,
-      });
     }
     return outcomeHalted ? 'halted' : 'ok';
   }
@@ -1775,7 +1044,7 @@ async function runLoopCore(
     const content = turn.content ?? '';
     const durationMs = Date.now() - startedAt;
     // The tool-less finalize prompt is everything in `messages` right now.
-    chargeOwnUsage(turn.usage, estimatePromptTokens(messages), turn.content);
+    budget.chargeOwn(turn.usage, estimatePromptTokens(messages), turn.content);
 
     await appendDurable(
       {
@@ -1844,7 +1113,6 @@ async function runLoopCore(
     };
   }
 
-  const posture = config.posture ?? 'agent';
   trace({
     type: 'run_start',
     runId,
@@ -1908,7 +1176,7 @@ async function runLoopCore(
 
       const estimatedPrompt = estimatePromptTokens(messages, tools.definitions);
       // The first call always runs: skipping it to finalize would cost the same.
-      const overBudget = budgetExceeded(iterations > 1 ? estimatedPrompt : 0);
+      const overBudget = budget.exceeded(iterations > 1 ? estimatedPrompt : 0);
       if (overBudget) {
         iterations--;
         noteLimit(overBudget);
@@ -1920,14 +1188,43 @@ async function runLoopCore(
         return finishPaused(capacityPause);
       }
 
+      const effortSignals: EffortSignals = {
+        iteration: iterations,
+        steering: turnSignals.nudged || messages[messages.length - 1]?.role === 'user',
+        toolError: turnSignals.toolError,
+        wrote: turnSignals.wrote,
+      };
+      turnSignals.toolError = false;
+      turnSignals.wrote = false;
+      turnSignals.nudged = false;
+      const decisionIteration = iterations;
+      const effort = await effortRouter.decide({
+        policy: config.effortPolicy,
+        system1: config.system1,
+        signals: effortSignals,
+        state: () =>
+          buildEffortState({
+            messages,
+            runStart,
+            signals: effortSignals,
+            ...(limits.maxIterations !== undefined ? { maxIterations: limits.maxIterations } : {}),
+            mode: config.mode,
+          }),
+        ...(signal ? { signal } : {}),
+        onTrace: (decision) =>
+          trace({ type: 'system1_decision', runId, iteration: decisionIteration, decision }),
+      });
+      throwIfAborted(signal);
+      if (effort.trace) {
+        trace({ type: 'system1_decision', runId, iteration: iterations, decision: effort.trace });
+      }
+
       trace({
         type: 'llm_request',
         runId,
         iteration: iterations,
         estimatedPromptTokens: estimatedPrompt,
-        ...(config.reasoningEffort
-          ? { reasoningEffort: config.reasoningEffort }
-          : {}),
+        ...(effort.wire !== undefined ? { reasoningEffort: effort.wire } : {}),
       });
       emit?.({ type: 'turn.started', runId, iteration: iterations });
 
@@ -1951,10 +1248,11 @@ async function runLoopCore(
         tools,
         onTextDelta,
         signal,
+        effort.applied && effort.wire !== undefined ? { reasoningEffort: effort.wire } : undefined,
       );
       throwIfAborted(signal);
       const durationMs = Date.now() - startedAt;
-      const usageEstimated = chargeOwnUsage(turn.usage, estimatedPrompt, turn.content);
+      const usageEstimated = budget.chargeOwn(turn.usage, estimatedPrompt, turn.content);
 
       trace({
         type: 'llm_response',
@@ -1992,10 +1290,10 @@ async function runLoopCore(
         const ready: ReadyToolCall[] = [];
         let halt: Extract<AdmitResult, { kind: 'halt' }> | null = null;
         let haltIndex = 0;
-        gatedThisTurn = 0;
+        steering.startTurn();
         for (let index = 0; index < turn.toolCalls.length; index++) {
           if (signal?.aborted) {
-            await skipToolCalls(
+            await record.skip(
               turn.toolCalls.slice(index),
               'Skipped: run cancelled.',
             );
@@ -2003,7 +1301,7 @@ async function runLoopCore(
           }
 
           const toolCall = turn.toolCalls[index];
-          if (!toolCall || toolCall.type !== 'function') continue;
+          if (!toolCall) continue;
 
           const admitted = await admitToolCall(toolCall);
           if (admitted.kind === 'halt') {
@@ -2017,15 +1315,12 @@ async function runLoopCore(
 
         // A model that only retries closed web tools spends a full call per
         // refusal; after MAX_GATED_TURNS such turns, end with a handoff.
-        gatedTurnStreak =
-          !halt && gatedThisTurn > 0 && gatedThisTurn === turn.toolCalls.length
-            ? gatedTurnStreak + 1
-            : 0;
-        if (gatedTurnStreak >= MAX_GATED_TURNS) {
+        const gatedStreak = steering.endTurn(halt !== null, turn.toolCalls.length);
+        if (gatedStreak !== null) {
           noteLimit(
             limitMessage(
               'limit.research',
-              `${gatedTurnStreak} turns in a row only retried closed web tools`,
+              `${gatedStreak} turns in a row only retried closed web tools`,
             ),
           );
           return await completeAfterLimit();
@@ -2040,7 +1335,7 @@ async function runLoopCore(
           mutate: [],
         };
         for (const call of ready) {
-          staged[toolStage(call.toolName, call.tool)].push(call);
+          staged[toolStage(call.tool)].push(call);
         }
 
         const runSerial = async (batch: ReadyToolCall[]) => {
@@ -2086,7 +1381,7 @@ async function runLoopCore(
           const skipDetail = lastLimitReason?.startsWith('limit.outcome:')
             ? limitMessage('limit.outcome', 'Skipped: tool call limit reached.')
             : SKIP_LIMIT_REACHED;
-          await skipToolCalls(unansweredToolCalls(turn.toolCalls), skipDetail);
+          await record.skip(turn.toolCalls, skipDetail);
           return await completeAfterLimit();
         }
         if (halt) {
@@ -2221,8 +1516,8 @@ async function runLoopCore(
     // tool_call_ids without a durable tool row; the ledger is the truth.
     if (turnToolCalls.length > 0) {
       try {
-        await skipToolCalls(
-          unansweredToolCalls(turnToolCalls),
+        await record.skip(
+          turnToolCalls,
           capacityReason ? 'Skipped: account usage limit reached.' : 'Skipped: run errored.',
         );
       } catch {

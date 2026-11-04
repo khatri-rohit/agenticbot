@@ -112,6 +112,14 @@ function cacheKey(endpoint: OllamaEndpoint, model: string): string {
   return `${endpoint}:${model}`;
 }
 
+/** Cached config only — never touches the network. */
+export function peekOllamaModelConfig(
+  model: string,
+  endpoint: OllamaEndpoint = 'cloud',
+): OllamaModelConfig | undefined {
+  return configCache.get(cacheKey(endpoint, model));
+}
+
 export async function getOllamaModelConfig(
   model: string,
   endpoint: OllamaEndpoint = 'cloud',

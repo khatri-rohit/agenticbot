@@ -1,4 +1,4 @@
-import type { RunPosture } from '@agent/agent-models';
+import type { ModeConfig, RunPosture } from '@agent/agent-models';
 import { applyPostureToTools } from '@agent/agent-models';
 
 import { offer_choice } from './offer-choice';
@@ -6,9 +6,9 @@ import { createDelegateTool } from '../subagent/delegate';
 import { listSubagentProfiles } from '../subagent/profiles';
 import { recall } from './recall';
 import { load_skill } from './skills';
-import type { Tool, ToolRegistry } from './type';
-import { WEB_SEARCH_TOOLS } from './web-search';
-import { WORKSPACE_TOOLS } from './workspace';
+import type { Tool, ToolRegistry } from './types';
+import { WEB_SEARCH_TOOLS } from './web/tools';
+import { WORKSPACE_TOOLS } from './workspace/tools';
 
 /**
  * A source of tools. Built-ins and the sub-agent catalog are providers today;
@@ -80,4 +80,23 @@ export function createToolRegistry(
     definitions: filtered.map((t) => t.definition),
     byName: new Map(filtered.map((t) => [t.definition.function.name, t])),
   };
+}
+
+/**
+ * The tools one run may call: every provider's tools plus the host's own
+ * (plan, memory), narrowed to the mode's always-on tools, its other tools
+ * unless web search is switched off, and the posture.
+ */
+export function createRunToolset(input: {
+  mode: ModeConfig;
+  posture: RunPosture;
+  webSearch?: boolean;
+  hostTools: Tool[];
+}): ToolRegistry {
+  const { mode } = input;
+  const allowed = [
+    ...mode.globalTools,
+    ...(input.webSearch !== false ? mode.allowedTools : []),
+  ];
+  return createToolRegistry([...listTools(), ...input.hostTools], allowed, input.posture);
 }

@@ -3,7 +3,9 @@ import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
 import type { ThreadPlan } from './plan.js';
 import type { RunPosture, RunUsage, TokenUsage } from './run.js';
-import type { SubagentStatus } from './subagent-types.js';
+import type { SubagentStatus } from './subagent.js';
+import type { System1RunReport } from './system1.js';
+import type { ToolOutcome } from './tool-outcome.js';
 
 /**
  * AgentEvent — the server's streaming protocol to the client.
@@ -42,7 +44,8 @@ export type AgentEvent =
   | LimitHit
   | SubrunStarted
   | SubrunProgress
-  | SubrunSettled;
+  | SubrunSettled
+  | System1Report;
 
 export interface RunStarted {
   seq: number;
@@ -116,6 +119,8 @@ export interface ToolCompleted {
   durationMs: number;
   /** Bounded preview (RESULT_PREVIEW_MAX, ~20KB) for UI display. Full result lives in the host ledger. */
   resultPreview: unknown;
+  /** A call that threw emits `tool.failed` instead. */
+  outcome: Exclude<ToolOutcome, 'failed'>;
 }
 
 export interface ToolFailed {
@@ -158,6 +163,8 @@ export interface RunError {
   type: 'run.error';
   runId: string;
   error: string;
+  /** The user cancelled the run (the only source of run.error today); `run.settled` follows. */
+  cancelled?: true;
 }
 
 export interface LimitHit {
@@ -233,12 +240,18 @@ export interface ContextCompacted {
  * Post-run host work finished (compaction attempted or skipped).
  * Client may clear ephemeral activeRun after this.
  */
+/**
+ * Every run's last event, after post-run work (last run, compaction), so the
+ * ledger is complete when it arrives. A cancelled run sends `run.error` at
+ * the cancel and still ends with this.
+ */
 export interface RunSettled {
   seq: number;
   type: 'run.settled';
   runId: string;
   /** True when the loop finished incomplete (limit / open plan / etc.). */
   incomplete?: boolean;
+  cancelled?: true;
 }
 
 /**
@@ -282,6 +295,18 @@ export interface SubrunSettled {
   summary: string;
   limitReason?: string;
   usage?: RunUsage;
+}
+
+/**
+ * System 1 gave no opinion at least once this run (timeout, unreachable,
+ * bad response, …). The run continued on its defaults; this tells the user
+ * which decisions fell back. Emitted once, after the loop returns.
+ */
+export interface System1Report {
+  seq: number;
+  type: 'system1.report';
+  runId: string;
+  report: System1RunReport;
 }
 
 /** Union of event types for filtering. */

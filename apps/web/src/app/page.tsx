@@ -4,18 +4,14 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { MessageAttachment } from '@agent/agent-models';
-import { ChatInput } from '../components/chat-input';
-import { ChatShell } from '../components/chat-shell';
+import { ChatInput } from '@/features/composer/chat-input';
+import { ChatShell } from '@/components/shell/chat-shell';
 import {
   stashPendingMessage,
   type ComposerOptions,
-} from '../features/agent/api/agent-client';
-import {
-  createThread,
-  deleteThread,
-} from '../features/agent/api/thread-client';
-import { useThreads } from '../features/agent/hooks/use-agent-run';
-import { refreshThreads } from '../features/agent/store/thread-cache';
+} from '@/api/agent-client';
+import { useThreads } from '@/features/conversation/use-agent-run';
+import { createThread, removeThread } from '@/features/threads/thread-cache';
 import { toastError } from '@/hooks/use-toast';
 import {
   readStoredComposerLocal,
@@ -23,15 +19,14 @@ import {
   readStoredContextWindowMode,
   writeStoredComposerLocal,
   writeStoredComposerModel,
-} from '@/lib/ollama-models';
-import { clampChatTitle } from '@/lib/thread-title';
-import { formatRelativeTime } from '../lib/format-relative-time';
+} from '@/features/composer/ollama-models';
+import { clampChatTitle } from '@/features/threads/thread-title';
+import { formatRelativeTime } from '@/lib/format-relative-time';
 import {
   folderNameFromRoot,
-  ensureWorkspaceInOrder,
   setWorkspaceRoot,
   useAgentSpace,
-} from '@/features/agent/store/space-store';
+} from '@/features/threads/space-store';
 
 /** Must match ChatInput draft key for the home composer. */
 const HOME_DRAFT_SCOPE = '__home__';
@@ -132,11 +127,7 @@ export default function HomePage() {
                 kind: bound ? 'workspace' : 'home',
                 ...(bound && workspaceRoot ? { workspaceRoot } : {}),
               });
-              if (thread.workspaceRoot) {
-                ensureWorkspaceInOrder(thread.workspaceRoot);
-                setWorkspaceRoot(thread.workspaceRoot);
-              }
-              await refreshThreads();
+              if (thread.workspaceRoot) setWorkspaceRoot(thread.workspaceRoot);
               const stashed = stashPendingMessage({
                 content,
                 webSearch: options.webSearch,
@@ -155,8 +146,7 @@ export default function HomePage() {
                   : {}),
               });
               if (!stashed) {
-                await deleteThread(thread.id);
-                await refreshThreads();
+                await removeThread(thread.id);
                 setPendingContent(false);
                 restoreHomeDraft(content, attachments);
                 setDraftEpoch((n) => n + 1);

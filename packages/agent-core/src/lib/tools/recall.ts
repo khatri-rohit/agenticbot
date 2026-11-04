@@ -1,4 +1,4 @@
-import type { Tool } from './type';
+import type { Tool } from './types';
 
 export const RECALL_MAX_CHARS = 8_000;
 

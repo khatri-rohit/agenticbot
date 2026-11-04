@@ -14,7 +14,7 @@ import type {
 } from './call-options';
 import { parseTokenUsage } from './parse-usage';
 import type { ModelTurn, OnTextDelta } from './types';
-import type { ToolRegistry } from '../tools/type';
+import type { ToolRegistry } from '../tools/types';
 
 export type { OnTextDelta } from './types';
 

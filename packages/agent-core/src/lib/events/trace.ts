@@ -1,8 +1,4 @@
-import type { Snapshot, TokenUsage } from '@agent/agent-models';
-
-import type { TraceEvent } from './trace-types';
-
-export type { TraceEvent } from './trace-types';
+import type { Snapshot, TokenUsage, TraceEvent } from '@agent/agent-models';
 
 export function consoleTrace(event: TraceEvent): void {
   const prefix = `[agent:${event.runId}]`;

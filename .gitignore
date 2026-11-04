@@ -47,11 +47,21 @@ vite.config.*.timestamp*
 vitest.config.*.timestamp*
 test-output
 
-.claude/
-
+.claude/worktrees
+.claude/settings.local.json
+.claude/launch.json
 .nx/polygraph
 .nx/self-healing
 .nx/migrate-runs
+
+# Local planning notes (not product docs)
+/docs/
+
+# Nx one-shot AI migration prompt packs (scaffold leftovers)
+/tools/ai-migrations/
+
+# Bundled CLI output (root `dist` does not cover this name)
+**/dist-cli/
 
 # Next.js
 .next
@@ -64,11 +74,12 @@ out
 # Personal Compose binds (paths, GPU, etc.) — never commit machine-specific mounts
 docker-compose.override.yml
 
-# Cursor (local only — never commit)
-.cursor/
-
-# Local planning docs — never commit
-docs/
+# Cursor: commit shared rules/skills; ignore local-only junk
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/skills/
+!.cursor/skills/**
 
 # Local agent home (dev DESK_HOME)
 .local/

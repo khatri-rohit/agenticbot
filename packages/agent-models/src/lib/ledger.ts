@@ -1,10 +1,14 @@
-import type { ChatMessage, ChatContentPart } from './run.js';
+import type { Snapshot } from './context.js';
+import type { ThreadPlan } from './plan.js';
+import type { ActiveRun, ChatMessage, ChatContentPart } from './run.js';
+import type { ThreadLastRun } from './thread-last-run.js';
 import type {
   Message,
   MessageAttachment,
   PendingToolCall,
 } from './message.js';
 import { isImageAttachment } from './message.js';
+import { legacyToolOutcome, type ToolOutcome } from './tool-outcome.js';
 
 /**
  * One durable turn for the thread ledger.
@@ -19,15 +23,26 @@ export type LedgerRecord =
   | LedgerAssistantRecord
   | LedgerToolRecord;
 
+/**
+ * Web sources a tool call made fetchable: URLs the user or a search supplied,
+ * and pages stored on the run. Only web tools write it; it is how trust
+ * outlives the run and compaction (the text of a row never grants trust).
+ */
+export type WebTrust = {
+  urls: string[];
+  sources: { sha256: string; url: string; title: string }[];
+};
+
 /** Host-assigned metadata passed alongside a ledger record on append. */
 export type LedgerAppendMeta = {
   /** Assistant response wall-clock duration (model-call + stream time). */
   durationMs?: number;
   /** On a run's final answer: wall clock from run start (tools, sub-agents and every model call). */
   runDurationMs?: number;
-  /** Sub-run linkage: set when this record belongs to a delegated sub-agent. */
-  parentRunId?: string;
-  subRunId?: string;
+  /** On tool rows: what happened to the call. */
+  toolOutcome?: ToolOutcome;
+  /** On web tool rows: what the call made fetchable. */
+  webTrust?: WebTrust;
 };
 
 export type LedgerSystemRecord = {
@@ -75,6 +90,10 @@ export type LedgerEnvelope = {
   runDurationMs?: number;
   /** User-requested skill names for the run that consumed this user turn. */
   skills?: { selected: string[] };
+  /** Tool rows only; absent on rows written before outcomes were stored. */
+  toolOutcome?: ToolOutcome;
+  /** Web tool rows only (see WebTrust). */
+  webTrust?: WebTrust;
 };
 
 /** Skip system rows; they are rebuilt by the host each run. */
@@ -172,7 +191,21 @@ export function envelopeToUiMessage(
     role: 'tool',
     content: chat.content,
     toolCallId: chat.tool_call_id,
+    toolOutcome: envelope.toolOutcome ?? legacyToolOutcome(chat.content),
     status: 'complete',
     createdAt: envelope.ts,
   };
 }
+
+/** `GET /threads/:id/ledger`: everything a client needs to rebuild a thread. */
+export type LedgerResponse = {
+  messages: Message[];
+  lastSeq: number;
+  lastUserSeq?: number;
+  snapshot: Snapshot | null;
+  plan: ThreadPlan | null;
+  /** The last settled run; absent while a run is in progress or after a rewind cut it. */
+  lastRun?: ThreadLastRun;
+  /** The run in progress, if any (reattach, pending choices). */
+  activeRun?: ActiveRun;
+};

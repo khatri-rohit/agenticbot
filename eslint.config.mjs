@@ -21,10 +21,23 @@ export default [
         {
           enforceBuildableLibDependency: true,
           allow: ['^.*/eslint(\\.base)?\\.config\\.[cm]?[jt]s$'],
+          // agent-models ← agent-core ← api/cli; web sees only agent-models.
           depConstraints: [
             {
-              sourceTag: '*',
-              onlyDependOnLibsWithTags: ['*'],
+              sourceTag: 'type:data',
+              onlyDependOnLibsWithTags: ['type:data'],
+            },
+            {
+              sourceTag: 'type:logic',
+              onlyDependOnLibsWithTags: ['type:data'],
+            },
+            {
+              sourceTag: 'type:app',
+              onlyDependOnLibsWithTags: ['type:data', 'type:logic'],
+            },
+            {
+              sourceTag: 'scope:web',
+              onlyDependOnLibsWithTags: ['type:data'],
             },
           ],
         },

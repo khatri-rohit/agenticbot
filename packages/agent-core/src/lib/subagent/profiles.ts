@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { ModelRole } from '@agent/agent-models';
 
+import type { ProfileThinking } from '../system1/effort';
 import { getSkill } from '../tools/skills';
 import type { SubagentContext, SubagentLimits, SubagentProfile } from './types';
 
@@ -17,6 +18,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description:
       'Read-only search of the workspace (and the web when the parent has it). Use for questions that need more than ~5 files or several searches. Returns findings with path:line evidence.',
     modelRole: 'fast',
+    // Search and report: routine steps, no design calls.
+    thinking: 'off',
     tools: ['glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
     limits: { maxIterations: 20, maxToolCalls: 60, maxWallMs: 5 * 60_000, maxPromptTokens: 300_000 },
     context: 'none',
@@ -35,6 +38,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description:
       'Fresh-context review of uncommitted changes against the user request and project rules. Run once after edits pass verification. Returns issues with location, problem, fix, severity.',
     modelRole: 'strong',
+    // Finding real defects is the hard part; give it the model's full depth.
+    thinking: 'max',
     tools: ['diff', 'glob', 'grep', 'read_file', 'recall'],
     limits: { maxIterations: 15, maxToolCalls: 50, maxWallMs: 5 * 60_000, maxPromptTokens: 300_000 },
     context: 'diff',
@@ -54,6 +59,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description:
       'Second opinion from a stronger model that sees this whole conversation. Use when stuck (same failure twice) or before a risky design choice. Ask one specific question.',
     modelRole: 'strong',
+    thinking: 'max',
     tools: [],
     limits: { maxIterations: 2, maxToolCalls: 0, maxWallMs: 3 * 60_000, maxPromptTokens: 600_000 },
     context: 'fork',
@@ -103,6 +109,7 @@ function frontmatter(raw: string): { fields: Map<string, string>; body: string }
 }
 
 const ROLES: ModelRole[] = ['main', 'fast', 'strong'];
+const THINKING: ProfileThinking[] = ['off', 'default', 'max'];
 const USER_CONTEXTS: SubagentContext[] = ['none', 'diff'];
 
 function parseUserProfile(file: string, raw: string): SubagentProfile | string {
@@ -114,6 +121,8 @@ function parseUserProfile(file: string, raw: string): SubagentProfile | string {
   if (!body) return `${file}: prompt body is empty`;
   const role = (fields.get('model') ?? 'main') as ModelRole;
   if (!ROLES.includes(role)) return `${file}: model must be one of ${ROLES.join(', ')}`;
+  const thinking = (fields.get('thinking') ?? 'default') as ProfileThinking;
+  if (!THINKING.includes(thinking)) return `${file}: thinking must be one of ${THINKING.join(', ')}`;
   const context = (fields.get('context') ?? 'none') as SubagentContext;
   if (!USER_CONTEXTS.includes(context)) return `${file}: context must be none or diff`;
   const tools = (fields.get('tools') ?? 'glob, grep, read_file, recall')
@@ -137,6 +146,7 @@ function parseUserProfile(file: string, raw: string): SubagentProfile | string {
     name,
     description,
     modelRole: role,
+    thinking,
     tools,
     limits,
     context,
