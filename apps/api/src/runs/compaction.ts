@@ -2,11 +2,12 @@ import type {
   ContextReport,
   LedgerEnvelope,
   OllamaEndpoint,
+  RunPosture,
   Snapshot,
 } from '@agent/agent-models';
 import {
   buildExtractiveSnapshot,
-  chooseCompactThroughSeqForTarget,
+  planCompaction,
   traceCompactionEvent,
 } from '@agent/agent-core';
 
@@ -20,10 +21,9 @@ import {
 } from './run-context';
 
 /**
- * Extractive compaction (no LLM): when `report` says the thread is over
- * compactAtRatio, cut older turns until history fits compactToRatio and write
- * the snapshot. Returns the snapshot, or null when nothing was compacted.
- * Runs after every run and, for an oversized start, before one.
+ * Write the snapshot core's compaction decision asks for (see planCompaction).
+ * Returns it, or null when nothing was compacted. Runs after every run that
+ * was not cancelled and, for an oversized start, before one.
  */
 export async function compactThread(input: {
   store: ThreadStore;
@@ -32,22 +32,8 @@ export async function compactThread(input: {
   envelopes: LedgerEnvelope[];
   report: ContextReport;
 }): Promise<Snapshot | null> {
-  const { store, envelopes, report } = input;
-  if (!report.needsCompaction) return null;
-  const { budget, layers, occupiedTokens } = report;
-  const historyTokens =
-    layers.find((layer) => layer.id === 'conversation')?.tokens ?? 0;
-  const fixedTokens = Math.max(0, occupiedTokens - historyTokens);
-  const targetTokens = Math.max(
-    1,
-    (budget.windowTokens - budget.outputReserveTokens) * budget.compactToRatio -
-      fixedTokens,
-  );
-  const throughSeq = chooseCompactThroughSeqForTarget(
-    envelopes,
-    budget.keepToolResultsForTurns,
-    targetTokens,
-  );
+  const { store, envelopes } = input;
+  const throughSeq = planCompaction(envelopes, input.report);
   if (throughSeq == null) return null;
   const existing = await store.readSnapshot(input.threadId);
   if (existing && existing.throughSeq >= throughSeq) return null;
@@ -69,7 +55,7 @@ export function emitCompacted(
   threadId: string,
   snapshot: Snapshot,
 ): void {
-  runManager.get(runId)?.emitter.emit({
+  runManager.publish(runId, {
     type: 'context.compacted',
     runId,
     threadId,
@@ -88,6 +74,7 @@ export async function maybeCompactThread(input: {
   threadId: string;
   runId: string;
   model: string;
+  posture: RunPosture;
   webSearch?: boolean;
   endpoint?: OllamaEndpoint;
 }): Promise<void> {
@@ -100,6 +87,7 @@ export async function maybeCompactThread(input: {
     threadId: input.threadId,
     thread,
     webSearch: input.webSearch,
+    posture: input.posture,
     lastUserSeq: store.lastUserSeq(envelopes) ?? 0,
     envelopes,
     model: input.model,
@@ -107,7 +95,7 @@ export async function maybeCompactThread(input: {
     skillNames: resolveRequestedSkills(undefined, lastUser?.skills?.selected),
   });
   if (!prepared.report.needsCompaction) return;
-  runManager.get(input.runId)?.emitter.emit({
+  runManager.publish(input.runId, {
     type: 'context.compacting',
     runId: input.runId,
     threadId: input.threadId,

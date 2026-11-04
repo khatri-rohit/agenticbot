@@ -1,26 +1,19 @@
-import { randomUUID } from 'node:crypto';
 import 'dotenv/config';
 import path from 'node:path';
 
-import type { AgentEvent, ModeName, RunPosture } from '@agent/agent-models';
+import type { ModeName, RunPosture } from '@agent/agent-models';
 import {
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
-  planHasOpenWork,
 } from '@agent/agent-models';
 import {
-  runLoop,
   streamModelTurn,
-  assembleContext,
-  createRunToolset,
   consoleTrace,
   teeTrace,
-  createInMemoryPlanStore,
-  createPlanTools,
-  loadWorkspaceRules,
   type ModelCallFn,
 } from '@agent/agent-core';
+import { runLocally } from './local-run.js';
 import { createJsonlTraceSink } from './trace-sink.js';
 
 
@@ -84,80 +77,31 @@ async function main() {
           : 'List the files in this workspace and say what the project appears to be.'
         : 'What is value of PI in 3 decimal places?');
 
-    const planStore = createInMemoryPlanStore('cli');
-    const tools = createRunToolset({
-      mode,
-      posture,
-      hostTools: createPlanTools(planStore),
-    });
-    const plan = await planStore.read();
-    const rules = workspaceRoot
-      ? await loadWorkspaceRules(workspaceRoot)
-      : { agentsMd: '', project: '' };
-    const { messages } = assembleContext({
-      tools,
-      memory: {
-        user: '',
-        notes: '',
-        ...(rules.agentsMd ? { agentsMd: rules.agentsMd } : {}),
-        ...(rules.project ? { project: rules.project } : {}),
-      },
-      snapshot: null,
-      plan,
-      envelopes: [
-        {
-          v: 1,
-          seq: 1,
-          ts: new Date().toISOString(),
-          threadId: 'cli',
-          runId: null,
-          record: { role: 'user', content: query },
-        },
-      ],
-      mode: mode.name,
-      posture,
-    });
-
-    const events: AgentEvent[] = [];
     const callOptions = { temperature: mode.temperature };
     const modelCall: ModelCallFn = (model, msgs, t, onDelta) =>
       streamModelTurn(model, msgs, t, onDelta, callOptions);
-
-    const runId = randomUUID();
     const tracesDir = path.join(__dirname, '..', 'traces');
 
-    console.log(
-      `Profile: ${mode.name} / ${posture} (streaming)`,
-    );
+    console.log(`Profile: ${mode.name} / ${posture} (streaming)`);
     if (workspaceRoot) console.log(`Workspace: ${workspaceRoot}`);
     console.log('================================================');
 
-    const result = await runLoop(modelCall, messages, tools, {
-      runId,
-      model: mode.model,
-      mode: mode.name,
+    const { result, outcome } = await runLocally({
+      query,
+      mode,
       posture,
-      limits: mode.limits,
-      hasOpenPlanWork: async () => planHasOpenWork(await planStore.read()),
+      model: mode.model,
+      modelCall,
       ...(workspaceRoot ? { workspaceRoot } : {}),
-      offerChoice: async (request) => {
-        const first = request.options[0];
-        if (!first) return { optionIds: [] };
-        console.log(`[auto-choice] ${request.question} → ${first.label}`);
-        return { optionIds: [first.id] };
-      },
       trace: teeTrace(consoleTrace, createJsonlTraceSink(tracesDir)),
-      emit: (event) => {
-        events.push({ seq: 0, ...event } as AgentEvent);
-        if (event.type === 'assistant.delta') {
-          process.stdout.write(event.delta);
-        }
+      onEvent: (event) => {
+        if (event.type === 'assistant.delta') process.stdout.write(event.delta);
       },
     });
 
     console.log('');
     console.log('================================================');
-    console.log('Status:', result.status, '| iterations:', result.iterations);
+    console.log('Status:', outcome, '| iterations:', result.iterations);
   } catch (err) {
     console.error(err);
     process.exitCode = 1;

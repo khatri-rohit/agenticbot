@@ -17,12 +17,9 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import type {
-  ContextReport,
-  MessageAttachment,
-  RunPosture,
-} from '@agent/agent-models';
+import type { MessageAttachment, RunPosture } from '@agent/agent-models';
 import {
+  MAX_IMAGE_ATTACHMENTS,
   MAX_THREAD_MENTIONS,
   SYSTEM1_AUTO_THINKING,
   imageAttachments,
@@ -34,13 +31,13 @@ import {
   fetchLocalOllamaModels,
   type ComposerOptions,
 } from '@/api/agent-client';
-import type { QueuedMessage } from '@/features/conversation/use-agent-run';
+import type { ChatRunState } from '@/features/conversation/chat-store';
+import type { QueuedMessage } from '@/features/conversation/thread-session';
 import { useContextMeter } from '@/features/usage/use-context-meter';
 import { useOllamaBalance } from '@/features/usage/use-ollama-balance';
 import { useOllamaModelConfig } from '@/features/composer/use-ollama-model-config';
 import { useVoiceInput } from '@/features/composer/use-voice-input';
 import {
-  MAX_IMAGE_ATTACHMENTS,
   fileToAttachment,
   filesFromDataTransfer,
   imageAttachErrorMessage,
@@ -139,21 +136,12 @@ export function ChatInput({
   onStop,
   variant = 'dock',
   threadId,
-  occupiedTokens,
-  runPromptTokens,
-  runPromptCap,
-  runUsageEstimated,
-  occupiedCoversStream,
-  estimatedPromptTokens,
-  contextReport,
-  streamingContent,
-  runModel,
+  activeRun,
   /** localStorage draft scope — thread id or home key; remount via `key` when it changes. */
   draftScope,
   hideWebSearch = false,
   showWorkspacePicker = false,
   showPostureChips = false,
-  runPosture: _runPosture,
 }: {
   onSend: (
     content: string,
@@ -174,25 +162,13 @@ export function ChatInput({
   onStop?: () => void;
   variant?: 'dock' | 'hero';
   threadId?: string;
-  occupiedTokens?: number;
-  /** Run spend so far (prompt tokens, own + sub-agents). */
-  runPromptTokens?: number;
-  /** The run's prompt-token cap, from run.started. */
-  runPromptCap?: number;
-  /** Some calls had no provider usage and were estimated. */
-  runUsageEstimated?: boolean;
-  occupiedCoversStream?: boolean;
-  estimatedPromptTokens?: number;
-  contextReport?: ContextReport;
-  streamingContent?: string | null;
-  runModel?: string;
+  /** The thread's live run: its usage drives the context meter. */
+  activeRun?: ChatRunState | null;
   draftScope: string;
   hideWebSearch?: boolean;
   showWorkspacePicker?: boolean;
   /** Workspace-only Ask | Agent. Home stays chip-less. */
   showPostureChips?: boolean;
-  /** Host-applied posture for the in-flight run (from run.started). */
-  runPosture?: RunPosture;
 }) {
   const [input, setInput] = useState(
     () => loadComposerDraft(draftScope)?.content ?? '',
@@ -389,12 +365,7 @@ export function ChatInput({
     queuedAttachments: queuedMessage?.attachments,
     composerOptions,
     contextLimit,
-    streamingContent,
-    liveOccupiedTokens: occupiedTokens,
-    occupiedCoversStream,
-    liveEstimatedPromptTokens: estimatedPromptTokens,
-    liveContextReport: contextReport,
-    liveRunModel: runModel,
+    liveRun: activeRun ?? null,
     skillHints: { requested: skillTokensInText(input) },
   });
 
@@ -964,11 +935,15 @@ export function ChatInput({
         layers={contextMeter.layers}
         reserve={contextMeter.reserve}
         windowSource={contextMeter.windowSource}
-        {...(runPromptTokens !== undefined ? { runPromptTokens } : {})}
-        {...(runPromptCap !== undefined ? { runPromptCap } : {})}
-        {...(runUsageEstimated ? { runUsageEstimated } : {})}
-        {...(contextReport?.trimmedSkills?.length
-          ? { trimmedSkills: contextReport.trimmedSkills }
+        {...(activeRun?.runPromptTokens !== undefined
+          ? { runPromptTokens: activeRun.runPromptTokens }
+          : {})}
+        {...(activeRun?.runPromptCap !== undefined
+          ? { runPromptCap: activeRun.runPromptCap }
+          : {})}
+        {...(activeRun?.runUsageEstimated ? { runUsageEstimated: true } : {})}
+        {...(activeRun?.contextReport?.trimmedSkills?.length
+          ? { trimmedSkills: activeRun.contextReport.trimmedSkills }
           : {})}
       />
     </>

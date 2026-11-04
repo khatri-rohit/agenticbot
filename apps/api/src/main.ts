@@ -4,6 +4,7 @@ import cors from 'cors';
 import { memoryRouter } from './memory/memory.routes';
 import { warnRoleModelsWithoutTools } from './models/model-runtime';
 import { modelsRouter } from './models/models.routes';
+import { errorHandler } from './platform/http-errors';
 import { createLogger, createHttpLogger } from './platform/logger';
 import { runsRouter } from './runs/runs.routes';
 import { initSystem1 } from './runs/system1-runtime';
@@ -51,6 +52,8 @@ app.use(
 if (voiceSttProvider === 'speaches') {
   app.use('/api/voice', voiceRouter);
 }
+
+app.use(errorHandler);
 
 app.listen(port, host, () => {
   logger.info({ host, port, voiceSttProvider }, 'api ready');

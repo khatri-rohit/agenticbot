@@ -4,6 +4,7 @@ import type {
   ModeConfig,
   OllamaEndpoint,
   Thread,
+  ThreadLastRun,
   ThreadPlan,
 } from '@agent/agent-models';
 import {
@@ -29,7 +30,7 @@ import {
 } from '@agent/agent-core';
 
 import { resolveContextBudget } from '../models/model-runtime';
-import { getMemoryStore, getThreadStore } from '../platform/instances';
+import { getMemoryStore, getThreadStore, runManager } from '../platform/instances';
 import type { ThreadStore } from '../threads/thread-store';
 
 export function endpointFromLocal(local: boolean | undefined): OllamaEndpoint {
@@ -224,7 +225,7 @@ export async function prepareRun(input: {
 
   const skillNames = input.skillNames ?? [];
   const lastRun =
-    input.threadId === 'draft' ? null : await store.readLastRun(input.threadId);
+    input.threadId === 'draft' ? null : await readSettledLastRun(store, input.threadId);
   const { messages, report } = assembleContext(
     {
       tools,
@@ -248,4 +249,16 @@ export async function prepareRun(input: {
     mode,
     posture,
   };
+}/**
+ * The thread's last settled run. While a run is live, its lastRun is only the
+ * "interrupted" marker written at start, so it is not reported.
+ */
+export async function readSettledLastRun(
+  store: ThreadStore,
+  threadId: string,
+): Promise<ThreadLastRun | null> {
+  const lastRun = await store.readLastRun(threadId);
+  return lastRun && !runManager.isActive(lastRun.runId) ? lastRun : null;
 }
+
+

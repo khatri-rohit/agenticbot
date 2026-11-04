@@ -9,7 +9,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { Message, System1FallbackKind, System1RunReport } from '@agent/agent-models';
+import {
+  isPauseStop,
+  isResumableStop,
+  type Message,
+  type System1FallbackKind,
+  type System1RunReport,
+} from '@agent/agent-models';
 import type {
   ChatState,
   CompactionNotice,
@@ -281,6 +287,20 @@ export function MessageList({
                     onEditSubmit={onEditLastUserMessage}
                   />
 
+                  {/* The run never replied (start failed, or stopped first). */}
+                  {isLastTurn && !isRunning && !showSteps ? (
+                    <div className="flex items-center gap-3 px-1" role="status">
+                      <p className="type-caption text-muted-foreground">No reply.</p>
+                      <button
+                        type="button"
+                        onClick={() => void onRetryLastResponse()}
+                        className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : null}
+
                   {/* Settled plan pins under its anchor user message; while
                       a run is live the plan floats above the composer instead. */}
                   {isLastTurn && !isRunning ? (
@@ -372,14 +392,14 @@ export function MessageList({
               role="status"
             >
               <p className="type-caption text-muted-foreground">
-                {isCapacityLimit(chatState.limitNotice.reason)
+                {isPauseStop(chatState.limitNotice.reason)
                   ? 'Paused'
                   : 'Run stopped early'}
                 : {chatState.limitNotice.reason}
               </p>
               {onContinue &&
               !isRunning &&
-              isResumableLimit(chatState.limitNotice.reason) ? (
+              isResumableStop(chatState.limitNotice.reason) ? (
                 <button
                   type="button"
                   onClick={() => void onContinue()}
@@ -402,11 +422,6 @@ export function MessageList({
       </div>
     </div>
   );
-}
-
-/** Stops that leave a handoff to continue from (not cancel, errors, or plan/finish gates). */
-function isResumableLimit(reason: string): boolean {
-  return /^limit\.(tokens|wall|iterations|tools|capacity|research):/.test(reason);
 }
 
 const SYSTEM1_KIND_LABEL: Record<System1FallbackKind, string> = {
@@ -433,10 +448,6 @@ function system1NoticeText(report: System1RunReport): string {
   return report.mode === 'shadow'
     ? `${what} It was only observing; the run was not affected.`
     : `${what} Those steps used the default thinking level.`;
-}
-
-function isCapacityLimit(reason: string): boolean {
-  return reason.startsWith('limit.capacity:');
 }
 
 /** Attach compaction to the turn that produced it (by runId), else last turn. */

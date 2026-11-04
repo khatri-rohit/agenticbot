@@ -3,6 +3,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 
 import {
   emptyRunUsage,
+  lastRunFrom,
   type ContextBudget,
   type LedgerAppendMeta,
   type LedgerRecord,
@@ -17,7 +18,6 @@ import {
 
 import type {
   ModelCallFn,
-  RunLoopResult,
   SubagentParent,
   SubagentSpawner,
 } from '../loop/types';
@@ -105,14 +105,6 @@ function lastUserRequest(
       .join('\n');
   }
   return undefined;
-}
-
-function childStatus(
-  result: RunLoopResult,
-  cancelled: boolean,
-): SubagentStatus {
-  if (cancelled) return 'cancelled';
-  return result.status;
 }
 
 /** Bounded wait queue: at most `max` children run at once per parent run. */
@@ -380,6 +372,81 @@ export function createSubagentRunner(deps: {
     }
 
     async function startAndSettle(carve: number): Promise<SubagentResult> {
+      // Claim the child thread before announcing it: a resume of a child that
+      // is still running must not start a second run on the same thread.
+      const claimed = runManager.claim(threadId, subRunId);
+      if (!claimed.ok) {
+        return failure(
+          spec,
+          'error',
+          `Sub-agent ${threadId} is still running. Wait for its report or start a new one.`,
+          threadId,
+        );
+      }
+      const { claim } = claimed;
+      try {
+        if (!(await claim.ready)) {
+          claim.release();
+          return failure(spec, 'error', `Sub-agent ${threadId} is still stopping. Try again shortly.`, threadId);
+        }
+        // Persist the opening brief so the child thread reads as a conversation.
+        const opening = messages[messages.length - 1];
+        if (opening?.role === 'user' && typeof opening.content === 'string') {
+          await host.append({
+            threadId,
+            runId: subRunId,
+            record: { role: 'user', content: opening.content },
+          });
+        }
+        const modelCall = await host.modelCall(model, profile.thinking);
+        // Replaced when the run finishes; survives only if the server stops first.
+        await host
+          .writeLastRun(threadId, lastRunFrom({ runId: subRunId, outcome: 'interrupted', iterations: 0, toolCalls: 0 }))
+          .catch(() => undefined);
+        claim.start({
+          model,
+          mode: 'workspace',
+          posture: parent.posture,
+          messages,
+          tools,
+          modelCall,
+          limits: {
+            maxIterations: profile.limits.maxIterations,
+            maxToolCalls: profile.limits.maxToolCalls,
+            maxRepeatedToolCalls: 3,
+            toolTimeoutMs: 60_000,
+            maxWallMs: profile.limits.maxWallMs,
+            maxPromptTokens: carve,
+          },
+          contextBudget,
+          ...(parent.workspaceRoot
+            ? { workspaceRoot: parent.workspaceRoot }
+            : {}),
+          putBlob: (text) => host.putBlob(threadId, text),
+          readBlob: (sha, offset, length) =>
+            host.readBlob(threadId, sha, offset, length),
+          onMessage: async (record, meta) => {
+            if (record.role === 'system') return;
+            await host.append({
+              threadId,
+              runId: subRunId,
+              record,
+              ...(meta ? { meta } : {}),
+            });
+          },
+          ...(host.trace(threadId) ? { trace: host.trace(threadId)! } : {}),
+          depth: parent.depth + 1,
+          parentRunId: parent.runId,
+          parentSignal: parent.signal,
+          ...(parent.capacity ? { capacity: parent.capacity } : {}),
+          // The parent's card holds the result; the child's events are only for progress.
+          retainMs: 1_000,
+        });
+      } catch (error) {
+        claim.release();
+        throw error;
+      }
+
       parent.emit?.({
         type: 'subrun.started',
         runId: parent.runId,
@@ -390,62 +457,11 @@ export function createSubagentRunner(deps: {
         task: spec.objective,
       });
 
-      // Persist the opening brief so the child thread reads as a conversation.
-      const opening = messages[messages.length - 1];
-      if (opening?.role === 'user' && typeof opening.content === 'string') {
-        await host.append({
-          threadId,
-          runId: subRunId,
-          record: { role: 'user', content: opening.content },
-        });
-      }
-
-      const modelCall = await host.modelCall(model, profile.thinking);
-      runManager.start({
-        runId: subRunId,
-        threadId,
-        model,
-        mode: 'workspace',
-        posture: parent.posture,
-        messages,
-        tools,
-        modelCall,
-        limits: {
-          maxIterations: profile.limits.maxIterations,
-          maxToolCalls: profile.limits.maxToolCalls,
-          maxRepeatedToolCalls: 3,
-          toolTimeoutMs: 60_000,
-          maxWallMs: profile.limits.maxWallMs,
-          maxPromptTokens: carve,
-        },
-        contextBudget,
-        ...(parent.workspaceRoot
-          ? { workspaceRoot: parent.workspaceRoot }
-          : {}),
-        putBlob: (text) => host.putBlob(threadId, text),
-        readBlob: (sha, offset, length) =>
-          host.readBlob(threadId, sha, offset, length),
-        onMessage: async (record, meta) => {
-          if (record.role === 'system') return;
-          await host.append({
-            threadId,
-            runId: subRunId,
-            record,
-            meta: { ...(meta ?? {}), parentRunId: parent.runId, subRunId },
-          });
-        },
-        ...(host.trace(threadId) ? { trace: host.trace(threadId)! } : {}),
-        depth: parent.depth + 1,
-        parentRunId: parent.runId,
-        parentSignal: parent.signal,
-        ...(parent.capacity ? { capacity: parent.capacity } : {}),
-      });
-
       // Throttled progress for the parent's card.
       let toolCalls = 0;
       let lastTool: string | undefined;
       let lastSent = 0;
-      const unsubscribe = runManager.subscribe(subRunId, 0, (event) => {
+      const progress = runManager.subscribe(subRunId, 0, (event) => {
         if (event.type !== 'tool.completed') return;
         toolCalls += 1;
         lastTool = event.toolName;
@@ -461,21 +477,24 @@ export function createSubagentRunner(deps: {
         });
       });
 
-      const result = await runManager.wait(subRunId);
-      unsubscribe();
-      const cancelled =
-        parent.signal.aborted || runManager.get(subRunId)?.cancelled === true;
-      setTimeout(() => runManager.clear(subRunId), 1_000);
+      const { result, outcome } = await runManager.wait(subRunId);
+      progress?.unsubscribe();
+      const status: SubagentStatus =
+        parent.signal.aborted || outcome === 'cancelled' ? 'cancelled' : result.status;
 
-      const status = childStatus(result, cancelled);
       const body = report
         ? renderReport(report)
         : result.content.trim() || '(no answer)';
       // Full body lives with the parent so the parent's `recall` can read it.
-      const reportSha = await host.putBlob(
-        parent.threadId,
-        report ? `${body}\n\n${JSON.stringify(report, null, 2)}` : body,
-      );
+      let reportSha: string | undefined;
+      try {
+        reportSha = await host.putBlob(
+          parent.threadId,
+          report ? `${body}\n\n${JSON.stringify(report, null, 2)}` : body,
+        );
+      } catch {
+        // The digest still carries the bounded body.
+      }
       const prefix =
         status === 'completed'
           ? ''
@@ -484,31 +503,20 @@ export function createSubagentRunner(deps: {
 
       parent.chargeUsage(result.usage);
       try {
-        await host.writeLastRun(threadId, {
-          runId: subRunId,
-          status: status === 'completed' ? 'completed' : 'error',
-          incomplete: status === 'incomplete',
-          iterations: result.iterations,
-          toolCalls: result.toolCalls,
-          finishedAt: new Date().toISOString(),
-          ...(result.limitReason ? { limitReason: result.limitReason } : {}),
-        });
+        await host.writeLastRun(
+          threadId,
+          lastRunFrom({
+            runId: subRunId,
+            outcome: status,
+            iterations: result.iterations,
+            toolCalls: result.toolCalls,
+            ...(result.limitReason ? { limitReason: result.limitReason } : {}),
+          }),
+        );
       } catch {
         // lastRun is a resume hint; the ledger already holds the run.
       }
 
-      const settled: SubagentResult = {
-        subRunId,
-        subThreadId: threadId,
-        profile: profile.name,
-        status,
-        digest,
-        iterations: result.iterations,
-        toolCalls: result.toolCalls,
-        usage: result.usage,
-        reportSha,
-        ...(result.limitReason ? { limitReason: result.limitReason } : {}),
-      };
       parent.emit?.({
         type: 'subrun.settled',
         runId: parent.runId,
@@ -522,7 +530,18 @@ export function createSubagentRunner(deps: {
         usage: result.usage,
         ...(result.limitReason ? { limitReason: result.limitReason } : {}),
       });
-      return settled;
+      return {
+        subRunId,
+        subThreadId: threadId,
+        profile: profile.name,
+        status,
+        digest,
+        iterations: result.iterations,
+        toolCalls: result.toolCalls,
+        usage: result.usage,
+        ...(reportSha ? { reportSha } : {}),
+        ...(result.limitReason ? { limitReason: result.limitReason } : {}),
+      };
     }
   }
 

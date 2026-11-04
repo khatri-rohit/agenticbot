@@ -1,14 +1,12 @@
-import {
-  isLimitSkipToolContent,
-  type Message,
-  type PendingToolCall,
-} from '@agent/agent-models';
+import type { Message, PendingToolCall } from '@agent/agent-models';
 
-import type {
-  AssistantSnippet,
-  CompactionNotice,
-  SubagentActivity,
-  ToolActivity,
+import {
+  toolStatusOf,
+  type AssistantSnippet,
+  type CompactionNotice,
+  type SubagentActivity,
+  type ToolActivity,
+  type ToolStatus,
 } from './chat-store';
 
 export type ToolCallRow = {
@@ -16,7 +14,7 @@ export type ToolCallRow = {
   toolName: string;
   args?: string;
   result?: string;
-  status: 'running' | 'done' | 'failed' | 'skipped';
+  status: ToolStatus;
   durationMs?: number;
 };
 
@@ -52,20 +50,11 @@ function rowFromCall(
   activity: ToolActivity | undefined,
 ): ToolCallRow {
   // Settled ledger with no tool row = interrupted (pre-I1 / crash), not in-flight.
-  let status: ToolCallRow['status'] = 'failed';
+  let status: ToolStatus = 'failed';
   if (activity) {
     status = activity.status;
-  } else if (toolMessage) {
-    if (toolMessage.status === 'interrupted') {
-      status = 'failed';
-    } else if (
-      typeof toolMessage.content === 'string' &&
-      isLimitSkipToolContent(toolMessage.content)
-    ) {
-      status = 'skipped';
-    } else {
-      status = 'done';
-    }
+  } else if (toolMessage && toolMessage.status !== 'interrupted') {
+    status = toolStatusOf(toolMessage.toolOutcome ?? 'ok');
   }
 
   const liveArgs = previewToArgs(activity?.argsPreview);

@@ -13,7 +13,7 @@ Before changing code, read [AGENTS.md](./AGENTS.md): ownership and lint-enforced
 | Domain types   | `@agent/agent-models` | `Run`, `Thread`, `AgentEvent`, `HOME_MODE` / `WORKSPACE_MODE`, chat shapes                   |
 | Runtime (pure) | `@agent/agent-core`   | `runLoop`, `RunManager`, tools, model invoke/stream, system prompt — **no HTTP, DOM, or DB** |
 | Transport      | `apps/api`            | Express: `/api/agent/*`, disk thread store, voice STT proxy                                  |
-| UI             | `apps/web`            | Chat UI + SSE via `use-agent-run` (threads from API catalog)                                 |
+| UI             | `apps/web`            | Chat UI + SSE via `thread-session` (threads from API catalog)                                 |
 | Local eval     | `apps/cli`            | Thin script calling core directly                                                            |
 
 ### Request flow (chat)
@@ -41,7 +41,7 @@ How to think about this system when changing it or prompting it. (Response branc
 
 3. **The gate is the constitution; the model is a petitioner.** Memory writes, posture, and the workspace path jail are deterministic (`packages/agent-core/src/lib/memory/gate.ts`). Same input → same verdict. Ship the gate in the same change as the capability. Write/exec tools run without an Allow/Deny pause.
 
-4. **Events are the product; the ledger is the truth; SSE is a convenience.** `AgentEvent` is the live API. Any UI state that cannot be rebuilt from `GET /ledger` is a bug. A seq gap on the stream refetches the ledger (`use-agent-run`).
+4. **Events are the product; the ledger is the truth; SSE is a convenience.** `AgentEvent` is the live API. Any UI state that cannot be rebuilt from `GET /ledger` is a bug. A seq gap on the stream refetches the ledger (`thread-session`).
 
 5. **Determinism is load-bearing.** Everything except the model is deterministic. Compaction is extractive (no LLM on the request path). Model calls belong in maintenance (thread title), not admission or assembly.
 
@@ -220,7 +220,7 @@ npx nx affected -t typecheck build lint test
 | API routes                | `apps/api/src/<topic>/<topic>.routes.ts` (runs, threads, memory, models, skills) |
 | Voice STT proxy           | `apps/api/src/voice/voice.routes.ts`                                             |
 | Web SSE client            | `apps/web/src/api/agent-client.ts`                                               |
-| Web run hook              | `apps/web/src/features/conversation/use-agent-run.ts`                            |
+| Web thread session        | `apps/web/src/features/conversation/thread-session.ts` (hook: `use-agent-run.ts`) |
 | Event → UI state          | `apps/web/src/features/conversation/chat-store.ts`                               |
 
 ---
@@ -231,7 +231,7 @@ npx nx affected -t typecheck build lint test
 | ------ | ---------------------------------------- | ----------------------------------------------------------------------- |
 | `POST` | `/api/agent/run`                         | Append optional user turn, start run; first turn also titles the thread |
 | `GET`  | `/api/agent/run/:runId/events?fromSeq=N` | SSE stream of `AgentEvent`s                                             |
-| `POST` | `/api/agent/run/:runId/cancel`           | Cancel in-flight run                                                    |
+| `POST` | `/api/agent/run/:runId/cancel`           | Cancel in-flight run (`finishing: true` once only post-run work is left) |
 | `*`    | `/api/agent/threads…`                    | Disk-backed thread catalog / ledger                                     |
 
 Client tool wiring (`apps/web/src/api/agent-client.ts`):
@@ -263,7 +263,7 @@ External HTTP for tools belongs in core modules (e.g. `tools/web/router.ts`), no
 | No tools / wrong tools                 | Request body `allowedTools`; server merge with profile `globalTools`; `createToolRegistry` filter              |
 | `web_search` fails                     | Keyless Firecrawl/Tavily 429 (shared caps); or `OLLAMA_API_KEY` path — curl tests above                        |
 | `web_fetch` fails                      | Valid public http(s) URL; all scrape layers + local HTTP failed; huge pages are prefixed at 16k chars          |
-| Run stuck “running”                    | SSE disconnect; seq gap should refetch ledger; `run.settled` / `run.error`; cancel endpoint                    |
+| Run stuck “running”                    | SSE disconnect; seq gap should refetch ledger; every run ends with `run.settled`; cancel endpoint              |
 | 409 on new message                     | Thread already running, or another **agent** run in the same workspace (`reason: 'workspace'`); cancel or wait |
 | Title stays “New Chat”                 | First message must go through `POST /run`; check API logs for `[title] generate failed`                        |
 | Voice / STT errors                     | Speaches health `http://127.0.0.1:8000/health`, model pull per [docker/README.md](./docker/README.md)          |

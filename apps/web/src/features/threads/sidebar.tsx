@@ -32,16 +32,12 @@ import {
 } from '@/features/threads/space-store';
 import { clampChatTitle } from '@/features/threads/thread-title';
 import { useThreads } from '../conversation/use-agent-run';
-import {
-  deleteThread,
-  patchThread,
-  pickWorkspaceFolder,
-} from '../../api/thread-client';
+import { pickWorkspaceFolder } from '../../api/thread-client';
 import {
   areThreadsLoaded,
-  refreshThreads,
+  removeThread,
+  updateThread,
 } from './thread-cache';
-import { removeRecentThread } from './recent-threads-store';
 import { formatRelativeTime } from '../../lib/format-relative-time';
 import { toastError } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -623,17 +619,14 @@ function ThreadItem({
   }, [isEditing]);
 
   const handleDelete = async () => {
-    await deleteThread(thread.id);
-    removeRecentThread(thread.id);
-    await refreshThreads();
+    await removeThread(thread.id);
     if (pathname === `/chat/${thread.id}`) {
       router.push('/');
     }
   };
 
   const handlePinToggle = async () => {
-    await patchThread(thread.id, { pinned: !isPinned });
-    await refreshThreads();
+    await updateThread(thread.id, { pinned: !isPinned });
   };
 
   const startRename = () => {
@@ -653,8 +646,7 @@ function ThreadItem({
       return;
     }
     setIsEditing(false);
-    await patchThread(thread.id, { title });
-    await refreshThreads();
+    await updateThread(thread.id, { title });
   };
 
   const handleRenameKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

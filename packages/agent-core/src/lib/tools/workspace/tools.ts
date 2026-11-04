@@ -275,6 +275,7 @@ export const globTool: Tool = {
     ],
   },
   risk: 'read',
+  stage: 'read',
   execute: async (args, ctx) => {
     const root = await workspaceRootReal(ctx.workspaceRoot);
     if (!root) return 'No workspace is bound to this run';
@@ -332,6 +333,7 @@ export const grepTool: Tool = {
     ],
   },
   risk: 'read',
+  stage: 'read',
   execute: async (args, ctx) => {
     const root = await workspaceRootReal(ctx.workspaceRoot);
     if (!root) return 'No workspace is bound to this run';
@@ -422,6 +424,7 @@ export const readFileTool: Tool = {
     ],
   },
   risk: 'read',
+  stage: 'read',
   execute: async (args, ctx) => {
     const resolved = await resolveWorkspacePath(
       ctx.workspaceRoot,
@@ -539,6 +542,11 @@ export const editFileTool: Tool = {
     ],
   },
   risk: 'write',
+  // newText/oldText would swamp the label; path and intent say enough.
+  previewArgs: (args) => ({
+    path: typeof args.path === 'string' ? args.path : '',
+    intent: typeof args.oldText === 'string' && args.oldText.length > 0 ? 'patch' : 'create',
+  }),
   execute: async (args, ctx) => {
     const resolved = await resolveWorkspacePath(
       ctx.workspaceRoot,
@@ -666,6 +674,9 @@ export const runTerminalTool: Tool = {
     ],
   },
   risk: 'exec',
+  stage: 'exec',
+  // Kills the whole process tree on its own timeout.
+  ownsTimeout: true,
   execute: async (args, ctx) => {
     const root = ctx.workspaceRoot;
     if (!root) return 'No workspace is bound to this run';

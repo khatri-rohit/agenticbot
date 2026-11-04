@@ -1,5 +1,4 @@
 import {
-  isLimitSkipToolContent,
   occupiedFromUsage,
   type AgentEvent,
   type ChoiceOption,
@@ -8,6 +7,7 @@ import {
   type Snapshot,
   type System1RunReport,
   type ThreadPlan,
+  type ToolOutcome,
 } from '@agent/agent-models';
 import { setContextAnchor } from './context-anchor';
 
@@ -17,10 +17,18 @@ import { setContextAnchor } from './context-anchor';
  * exists only for the live run view. `persistChatEffects` keeps the
  * localStorage context anchor in sync with provider usage.
  */
+export type ToolStatus = 'running' | 'done' | 'failed' | 'skipped';
+
+/** Refused and skipped calls both render as skipped. */
+export function toolStatusOf(outcome: ToolOutcome): ToolStatus {
+  if (outcome === 'ok') return 'done';
+  return outcome === 'failed' ? 'failed' : 'skipped';
+}
+
 export type ToolActivity = {
   toolCallId: string;
   toolName: string;
-  status: 'running' | 'done' | 'failed' | 'skipped';
+  status: ToolStatus;
   /** Event seq — orders live tools against settled assistant snippets. */
   seq: number;
   durationMs?: number;
@@ -295,11 +303,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
 
     case 'tool.completed': {
       if (!state.activeRun) return state;
-      const preview =
-        typeof event.resultPreview === 'string' ? event.resultPreview : '';
-      const doneStatus = isLimitSkipToolContent(preview)
-        ? ('skipped' as const)
-        : ('done' as const);
+      const doneStatus = toolStatusOf(event.outcome);
       const existing = state.activeRun.toolActivity.some(
         (t) => t.toolCallId === event.toolCallId,
       );
@@ -416,10 +420,13 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     case 'run.settled': {
       // Keep snippets/tools alive until the ledger refetch lands — otherwise
       // the response flashes off→on between activeRun nulling and messages update.
+      // After a cancel, run.error already moved the turn into the bridge.
       return {
         activeRun: null,
-        settledSnippets: state.activeRun?.assistantSnippets ?? [],
-        settledToolActivity: state.activeRun?.toolActivity ?? [],
+        settledSnippets:
+          state.activeRun?.assistantSnippets ?? state.settledSnippets,
+        settledToolActivity:
+          state.activeRun?.toolActivity ?? state.settledToolActivity,
         compactionNotice: state.compactionNotice,
         limitNotice: state.limitNotice,
         system1Notice: state.system1Notice,
@@ -626,8 +633,11 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
       };
     }
 
-    default:
-      return state;
+    default: {
+      // A new event type must be handled above (or ignored on purpose there).
+      const unhandled: never = event;
+      return unhandled;
+    }
   }
 }
 

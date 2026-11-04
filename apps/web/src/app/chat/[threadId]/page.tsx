@@ -7,10 +7,7 @@ import { ChatInput } from '@/features/composer/chat-input';
 import { ThreadPlanCard } from '@/features/conversation/thread-plan-card';
 import { ChoiceCard } from '@/features/conversation/choice-card';
 import { ChatShell } from '@/components/shell/chat-shell';
-import {
-  useMessages,
-  useAgentRun,
-} from '@/features/conversation/use-agent-run';
+import { useAgentRun } from '@/features/conversation/use-agent-run';
 import { takePendingMessage } from '@/api/agent-client';
 import { resolveOllamaModel } from '@/features/composer/ollama-models';
 
@@ -21,6 +18,7 @@ export default function ChatThreadPage({
 }) {
   const { threadId } = use(params);
   const {
+    messages,
     chatState,
     sendMessage,
     sendQueuedNow,
@@ -33,11 +31,9 @@ export default function ChatThreadPage({
     resolvePendingChoice,
     retryLastResponse,
     editLastUserMessage,
-    ledgerEpoch,
     threadKind,
     isSubagentThread,
   } = useAgentRun(threadId);
-  const messages = useMessages(threadId, ledgerEpoch);
   const sentPendingRef = useRef(false);
 
   useEffect(() => {
@@ -109,18 +105,9 @@ export default function ChatThreadPage({
             onEditQueued={editQueuedMessage}
             composerOptions={composerOptions}
             showPostureChips={threadKind === 'workspace'}
-            runPosture={chatState.activeRun?.posture}
             onComposerOptionsChange={setComposerOptions}
             onStop={() => void stopGeneration()}
-            occupiedTokens={chatState.activeRun?.occupiedTokens}
-            runPromptTokens={chatState.activeRun?.runPromptTokens}
-            runPromptCap={chatState.activeRun?.runPromptCap}
-            runUsageEstimated={chatState.activeRun?.runUsageEstimated}
-            occupiedCoversStream={chatState.activeRun?.occupiedCoversStream}
-            estimatedPromptTokens={chatState.activeRun?.estimatedPromptTokens}
-            contextReport={chatState.activeRun?.contextReport}
-            streamingContent={chatState.activeRun?.streamingMessage?.content}
-            runModel={chatState.activeRun?.model}
+            activeRun={chatState.activeRun}
           />
           )}
         </div>

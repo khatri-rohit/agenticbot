@@ -1,11 +1,12 @@
 import {
   CHARS_PER_TOKEN,
+  limitMessage,
   totalRunUsage,
   type RunUsage,
   type TokenUsage,
 } from '@agent/agent-models';
 
-import { BUDGET_WARN_RATIO, limitMessage, type AgentLimits } from './limits';
+import { BUDGET_WARN_RATIO, type AgentLimits } from './limits';
 
 /**
  * What a run has spent (its own model calls plus its sub-agents') against

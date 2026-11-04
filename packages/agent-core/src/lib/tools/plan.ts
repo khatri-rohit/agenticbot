@@ -307,6 +307,11 @@ export function createPlanTools(store: PlanStore): Tool[] {
       ],
     },
     risk: 'write',
+    previewArgs: (args) => ({
+      action: args.action,
+      kind: args.kind,
+      text: typeof args.text === 'string' ? args.text.slice(0, 80) : undefined,
+    }),
     execute: async (args) => {
       const rawAction = args.action;
       let action = parseAction(rawAction);
@@ -387,6 +392,10 @@ export function createPlanTools(store: PlanStore): Tool[] {
       ],
     },
     risk: 'write',
+    previewArgs: (args) => ({
+      merge: args.merge,
+      todos: Array.isArray(args.todos) ? args.todos.length : 0,
+    }),
     execute: async (args, _ctx: ToolContext) => {
       const merge = args.merge !== false;
       const rawTodos = Array.isArray(args.todos) ? args.todos : [];

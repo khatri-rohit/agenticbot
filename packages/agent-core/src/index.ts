@@ -82,7 +82,7 @@ export type {
 export { loadWorkspaceRules } from './lib/context/load-workspace-rules';
 export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export {
-  chooseCompactThroughSeqForTarget,
+  planCompaction,
   buildExtractiveSnapshot,
   packMentionedThread,
 } from './lib/context/compact-snapshot';
@@ -105,10 +105,5 @@ export {
 export type { TraceEvent } from '@agent/agent-models';
 
 // Run manager
-export { RunManager, RUN_HANDLE_TTL_MS } from './lib/run/run-manager';
-export type {
-  ResolveChoiceResult,
-  RunHandle,
-  RunHandleStatus,
-  StartRunOptions,
-} from './lib/run/types';
+export { RunManager } from './lib/run/run-manager';
+export type { RunClaim, RunEnd } from './lib/run/types';

@@ -1,20 +1,13 @@
-import type { MessageAttachment } from '@agent/agent-models';
-
-/** Max images on one composer send. */
-export const MAX_IMAGE_ATTACHMENTS = 20;
-
-/** Max decoded image size before attach (~wire size grows with base64). */
-export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+import {
+  IMAGE_MIME_TYPES,
+  MAX_IMAGE_ATTACHMENTS,
+  MAX_IMAGE_BYTES,
+  approximateDataUrlBytes,
+  type MessageAttachment,
+} from '@agent/agent-models';
 
 /** Longest edge after client resize — keeps vision payloads practical. */
 export const MAX_IMAGE_EDGE_PX = 1568;
-
-const ALLOWED_IMAGE_MIME = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/gif',
-]);
 
 type ImageAttachError =
   'unsupported_type' | 'too_large' | 'too_many' | 'read_failed';
@@ -42,15 +35,9 @@ function validateImageFile(
   currentCount: number,
 ): ImageAttachError | null {
   if (currentCount >= MAX_IMAGE_ATTACHMENTS) return 'too_many';
-  if (!ALLOWED_IMAGE_MIME.has(file.type)) return 'unsupported_type';
+  if (!IMAGE_MIME_TYPES.includes(file.type)) return 'unsupported_type';
   if (file.size > MAX_IMAGE_BYTES) return 'too_large';
   return null;
-}
-
-function approximateDataUrlBytes(dataUrl: string): number {
-  const comma = dataUrl.indexOf(',');
-  const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-  return Math.ceil((base64.length * 3) / 4);
 }
 
 function readFileAsDataUrl(blob: Blob): Promise<string> {

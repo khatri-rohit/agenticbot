@@ -3,7 +3,6 @@ import type { AgentEvent } from '@agent/agent-models';
 const SOUND_KEY = 'desk:alerts-sound';
 const NOTIFY_KEY = 'desk:alerts-notify';
 const SEQ_KEY_PREFIX = 'desk:alerts-seq:';
-const CANCELLED_ERROR = 'Run cancelled';
 const BODY_MAX = 140;
 
 export type RunAlertKind = 'attention' | 'finished_ok' | 'finished_fail';
@@ -81,9 +80,10 @@ function classifyAlert(event: AgentEvent): RunAlertKind | null {
   }
   // Incomplete (limit/gate) is not a success chime — same class as soft failure.
   if (event.type === 'run.settled') {
+    if (event.cancelled) return null;
     return event.incomplete ? 'finished_fail' : 'finished_ok';
   }
-  if (event.type === 'run.error' && event.error !== CANCELLED_ERROR) {
+  if (event.type === 'run.error' && !event.cancelled) {
     return 'finished_fail';
   }
   return null;

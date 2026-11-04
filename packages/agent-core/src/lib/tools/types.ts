@@ -30,6 +30,18 @@ export type Tool = {
   stage?: ToolStage;
   /** Hard cap on result chars before the result joins the prompt. */
   outputCap?: number;
+  /** Runs its own timeout (and process-tree kill); the loop's would race it. */
+  ownsTimeout?: boolean;
+  /** Web research: closes while the run's research gate is shut. */
+  research?: boolean;
+  /**
+   * A gate that ships with the tool: the refusal text when this call must not
+   * run, checked once the arguments parse. Refusals do not count toward
+   * maxToolCalls.
+   */
+  admit?: (args: Record<string, unknown>, ctx: ToolContext) => string | null;
+  /** What the UI shows of the arguments, when the raw arguments are too long or noisy. */
+  previewArgs?: (args: Record<string, unknown>) => unknown;
   execute: (
     args: Record<string, unknown>,
     ctx: ToolContext,

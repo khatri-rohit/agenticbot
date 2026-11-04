@@ -84,6 +84,11 @@ export const offer_choice: Tool = {
     },
   },
   risk: 'external',
+  // Waits for the user; a loop timeout would cut the pause short.
+  ownsTimeout: true,
+  previewArgs: (args) => ({
+    question: typeof args.question === 'string' ? args.question.slice(0, 120) : '',
+  }),
   guidance: {
     whenToUse: [
       'Two or more viable next actions would produce different work, or you need a checklist of attributes (style, scope, trade-offs).',

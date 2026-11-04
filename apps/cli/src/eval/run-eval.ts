@@ -1,12 +1,6 @@
 import { HOME_MODE } from '@agent/agent-models';
-import {
-  runLoop,
-  createStreamModelCall,
-  assembleContext,
-  createToolRegistry,
-  listTools,
-  type TraceEvent,
-} from '@agent/agent-core';
+import { createStreamModelCall, type TraceEvent } from '@agent/agent-core';
+import { runLocally } from '../local-run';
 import { formatReport, scoreScenario, type ScenarioRunInput } from './metrics';
 import { EVAL_SCENARIOS } from './scenarios';
 
@@ -34,41 +28,23 @@ async function runScenario(
   scenarioId: string,
   query: string,
 ): Promise<ScenarioRunInput & { answer: string }> {
-  const tools = createToolRegistry(listTools());
-  const { messages } = assembleContext({
-    tools,
-    memory: { user: '', notes: '' },
-    snapshot: null,
-    envelopes: [
-      {
-        v: 1,
-        seq: 1,
-        ts: new Date().toISOString(),
-        threadId: 'eval',
-        runId: null,
-        record: { role: 'user', content: query },
-      },
-    ],
-    mode: 'home',
-  });
   const stats: RunStats = { toolCalls: 0, iterations: 0, toolNames: [] };
 
-  const result = await runLoop(
-    createStreamModelCall({ temperature: HOME_MODE.temperature }),
-    messages,
-    tools,
-    {
-      model,
-      mode: 'home',
-      trace: createTraceCollector(stats),
-      limits: {
-        maxIterations: 8,
-        maxToolCalls: 12,
-        maxRepeatedToolCalls: 2,
-        toolTimeoutMs: 30_000,
-      },
+  // The Home tool set and lifecycle real runs use (not every registered tool).
+  const { result } = await runLocally({
+    query,
+    mode: HOME_MODE,
+    posture: 'agent',
+    model,
+    modelCall: createStreamModelCall({ temperature: HOME_MODE.temperature }),
+    trace: createTraceCollector(stats),
+    limits: {
+      maxIterations: 8,
+      maxToolCalls: 12,
+      maxRepeatedToolCalls: 2,
+      toolTimeoutMs: 30_000,
     },
-  );
+  });
 
   return {
     scenarioId,

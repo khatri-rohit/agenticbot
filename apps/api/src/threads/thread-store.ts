@@ -429,6 +429,7 @@ export class ThreadStore {
       ...(input.meta?.runDurationMs != null
         ? { runDurationMs: input.meta.runDurationMs }
         : {}),
+      ...(input.meta?.toolOutcome ? { toolOutcome: input.meta.toolOutcome } : {}),
       ...(input.skills ? { skills: input.skills } : {}),
     };
 
@@ -493,6 +494,12 @@ export class ThreadStore {
       .run(lastSeq, now, threadId);
     await this.invalidateSnapshot(threadId, keepThroughSeq);
     await this.restorePlanAfterRewind(threadId, keepThroughSeq);
+    // The cut run's "ended early" note would tell the next run to resume from
+    // a handoff that no longer exists.
+    const lastRun = await this.readLastRun(threadId);
+    if (lastRun && touchedRuns.has(lastRun.runId)) {
+      await rm(this.lastRunPath(threadId), { force: true });
+    }
   }
 
   private async readJsonFile<T>(

@@ -1,5 +1,6 @@
 import type { Tool } from '../types';
 import { webSearch, webFetch } from './router';
+import { admitWebFetch, admitWebSearch } from './trust';
 import { WEB_SLICE_DEFAULT_CHARS } from './source';
 
 /**
@@ -49,6 +50,9 @@ export const webSearchTool: Tool = {
     ],
   },
   risk: 'network',
+  stage: 'network',
+  research: true,
+  admit: admitWebSearch,
   execute: async (args, ctx) => {
     const query = String(args.query ?? '');
     return webSearch(query, 5, ctx);
@@ -116,6 +120,9 @@ export const webFetchTool: Tool = {
     ],
   },
   risk: 'network',
+  stage: 'network',
+  research: true,
+  admit: admitWebFetch,
   execute: async (args, ctx) => {
     return webFetch(
       {

@@ -1,3 +1,5 @@
+import type { ToolContext } from '@agent/agent-models';
+
 import { canonicalizeWebFetchUrl, looksLikeHttpUrl } from './url';
 
 export const UNTRUSTED_WEB_BEGIN = 'UNTRUSTED_WEB_BEGIN';
@@ -8,6 +10,31 @@ export const WEB_FETCH_UNTRUSTED_URL =
 
 export const WEB_FETCH_UNTRUSTED_SHA =
   'Blocked: unknown sha256. Fetch an allowlisted URL first; only sources stored on this run can be paged.';
+
+/** web_fetch gate: only a page this run stored, or a URL the user or web_search supplied. */
+export function admitWebFetch(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): string | null {
+  const sha =
+    typeof args.sha256 === 'string' ? args.sha256.trim().toLowerCase() : '';
+  if (sha) return ctx.trustsWebSha?.(sha) ? null : WEB_FETCH_UNTRUSTED_SHA;
+  const url = typeof args.url === 'string' ? args.url.trim() : '';
+  return looksLikeHttpUrl(url) && !ctx.trustsWebUrl?.(url)
+    ? WEB_FETCH_UNTRUSTED_URL
+    : null;
+}
+
+/** web_search gate: a query that is itself an untrusted URL is a fetch in disguise. */
+export function admitWebSearch(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): string | null {
+  const query = String(args.query ?? '').trim();
+  return looksLikeHttpUrl(query) && !ctx.trustsWebUrl?.(query)
+    ? WEB_FETCH_UNTRUSTED_URL
+    : null;
+}
 
 const HTTP_URL_RE = /https?:\/\/[^\s<>"'`)\]}]+/gi;
 

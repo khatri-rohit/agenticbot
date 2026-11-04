@@ -67,6 +67,11 @@ export type {
 } from './lib/message.js';
 export {
   MAX_THREAD_MENTIONS,
+  MAX_IMAGE_ATTACHMENTS,
+  MAX_IMAGE_BYTES,
+  IMAGE_MIME_TYPES,
+  approximateDataUrlBytes,
+  parseMessageAttachments,
   isThreadMention,
   isImageAttachment,
   imageAttachments,
@@ -74,6 +79,7 @@ export {
 } from './lib/message.js';
 
 export type {
+  ActiveRun,
   Run,
   RunStatus,
   ModelTurn,
@@ -90,6 +96,7 @@ export {
   totalRunUsage,
   ASK_STRIPPED_TOOLS,
   normalizeRunPosture,
+  parseStartRunRequest,
   applyPostureToTools,
   isAskStrippedTool,
 } from './lib/run.js';
@@ -135,6 +142,7 @@ export type {
   LedgerToolRecord,
   LedgerEnvelope,
   LedgerAppendMeta,
+  LedgerResponse,
 } from './lib/ledger.js';
 export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
 
@@ -184,13 +192,24 @@ export type {
 export { DEFAULT_MEMORY_CAPS, parseMemoryOp } from './lib/memory.js';
 
 export type {
+  RunOutcome,
   ThreadLastRun,
   ThreadLastRunStatus,
 } from './lib/thread-last-run.js';
+export { lastRunFrom, parseThreadLastRun } from './lib/thread-last-run.js';
+
+export type { LimitCode } from './lib/limits.js';
 export {
-  isLimitSkipToolContent,
-  parseThreadLastRun,
-} from './lib/thread-last-run.js';
+  RUN_CANCELLED_REASON,
+  RUN_INTERRUPTED_REASON,
+  limitMessage,
+  limitCodeOf,
+  isResumableStop,
+  isPauseStop,
+} from './lib/limits.js';
+
+export type { ToolOutcome } from './lib/tool-outcome.js';
+export { legacyToolOutcome } from './lib/tool-outcome.js';
 
 export type {
   PlanAction,

@@ -1,18 +1,16 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import type {
-  ChoiceOption,
-  ChoiceResult,
   ContextBudget,
   ContextReport,
   LedgerAppendMeta,
   LedgerRecord,
+  RunOutcome,
   RunPosture,
   ToolOrigin,
   TraceEvent,
 } from '@agent/agent-models';
 
-import type { EventEmitter } from '../events/emitter';
 import type { AgentLimits } from '../loop/limits';
 import type {
   CapacityGate,
@@ -24,36 +22,34 @@ import type { EffortPolicy } from '../system1/effort';
 import type { System1Port } from '../system1/port';
 import type { ToolRegistry } from '../tools/types';
 
-/** In-memory run handle status (RunManager; narrower than domain RunStatus). */
-export type RunHandleStatus = 'running' | 'completed' | 'error';
-
-export type PendingChoiceWaiter = {
-  options: ChoiceOption[];
-  resolve: (result: ChoiceResult) => void;
-  reject: (error: Error) => void;
-};
-
 export type ResolveChoiceResult = 'ok' | 'not_found' | 'invalid';
 
-export type RunHandle = {
+/** cancelled: stopping now · finishing: the loop is done, post-run work only. */
+export type CancelResult = 'cancelled' | 'finishing' | 'not_found';
+
+/** What `wait` resolves with once a run has settled (after onFinished). */
+export type RunEnd = { result: RunLoopResult; outcome: RunOutcome };
+
+/**
+ * A thread held for one run. The holder sets the run up, then starts it, or
+ * releases the thread if setup fails.
+ */
+export type RunClaim = {
   runId: string;
-  threadId: string;
-  status: RunHandleStatus;
-  cancelled: boolean;
-  abortController: AbortController;
-  emitter: EventEmitter;
-  result: RunLoopResult | null;
-  pendingChoices: Map<string, PendingChoiceWaiter>;
-  /** Posture: ask runs are read-only. */
-  posture?: RunPosture;
-  /** Settles with the result after onFinished. */
-  done: Promise<RunLoopResult>;
+  /**
+   * Waits for a cancelled or finishing run on the same thread to settle.
+   * False when it did not settle in time: release and report busy.
+   */
+  ready: Promise<boolean>;
+  start(opts: StartRunOptions): void;
+  release(): void;
 };
 
+export type ClaimResult =
+  | { ok: true; claim: RunClaim }
+  | { ok: false; activeRunId: string };
+
 export type StartRunOptions = {
-  /** Fixed id (sub-agents use the id they announced in subrun.started). */
-  runId?: string;
-  threadId: string;
   model: string;
   /** Mode name for run.started (e.g. HOME_MODE.name). */
   mode: string;
@@ -73,10 +69,10 @@ export type StartRunOptions = {
     offset?: number,
     length?: number,
   ) => Promise<string>;
-  /** Host persistence seam (ledger append in M1). */
+  /** Host persistence seam (ledger append). */
   onMessage?: (record: LedgerRecord, meta?: LedgerAppendMeta) => void | Promise<void>;
-  /** After the loop returns (success or error). Used for M4 compaction. */
-  onFinished?: (result: RunLoopResult) => void | Promise<void>;
+  /** After the loop returns, before the run settles. Its events still stream. */
+  onFinished?: (result: RunLoopResult, outcome: RunOutcome) => void | Promise<void>;
   hasOpenPlanWork?: () => boolean | Promise<boolean>;
   contextBudget?: ContextBudget;
   /** Trace sink for offline replay / eval debugging. Optional. */
@@ -96,4 +92,6 @@ export type StartRunOptions = {
   system1?: System1Port;
   /** Thinking choices for this run (see RunLoopConfig.effortPolicy). */
   effortPolicy?: EffortPolicy;
+  /** How long the settled run's events stay for late subscribers. Default RUN_HANDLE_TTL_MS. */
+  retainMs?: number;
 };

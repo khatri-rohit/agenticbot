@@ -1,3 +1,4 @@
+import { RUN_CANCELLED_REASON, RUN_INTERRUPTED_REASON } from './limits.js';
 import type { System1RunReport } from './system1.js';
 
 /**
@@ -58,11 +59,45 @@ function isSystem1Report(raw: unknown): raw is System1RunReport {
   );
 }
 
-/** Tool result content that means the call was skipped by a loop gate. */
-export function isLimitSkipToolContent(content: string): boolean {
-  return (
-    /^limit\.(repeat|tools|read_storm|terminal|unknown|outcome|iterations|plan|finish):/i.test(
-      content,
-    ) || content.startsWith('Skipped: tool call limit')
-  );
+/** How a run ended. `interrupted`: the server stopped before the run finished. */
+export type RunOutcome =
+  | 'completed'
+  | 'incomplete'
+  | 'cancelled'
+  | 'error'
+  | 'interrupted';
+
+/** The one mapping from how a run ended to its durable summary (user and sub-agent runs). */
+export function lastRunFrom(run: {
+  runId: string;
+  outcome: RunOutcome;
+  iterations: number;
+  toolCalls: number;
+  limitReason?: string;
+  system1?: System1RunReport | null;
+}): ThreadLastRun {
+  const { outcome } = run;
+  const limitReason =
+    outcome === 'cancelled'
+      ? RUN_CANCELLED_REASON
+      : outcome === 'interrupted'
+        ? RUN_INTERRUPTED_REASON
+        : outcome === 'incomplete'
+          ? run.limitReason
+          : undefined;
+  return {
+    runId: run.runId,
+    status:
+      outcome === 'completed'
+        ? 'completed'
+        : outcome === 'error' || outcome === 'interrupted'
+          ? 'error'
+          : 'incomplete',
+    incomplete: outcome !== 'completed' && outcome !== 'error',
+    iterations: run.iterations,
+    toolCalls: run.toolCalls,
+    finishedAt: new Date().toISOString(),
+    ...(limitReason ? { limitReason } : {}),
+    ...(run.system1?.fallbacks.length ? { system1: run.system1 } : {}),
+  };
 }

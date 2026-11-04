@@ -257,6 +257,7 @@ describe('runLoop limits', () => {
         usage: ['call'],
       },
       risk: 'read',
+      stage: 'read',
       execute: async () => 'file contents',
     };
     const tools = createToolRegistry([readFile]);

@@ -28,26 +28,6 @@ export type AgentLimits = {
 /** Share of maxPromptTokens at which the loop nudges the model to wrap up. */
 export const BUDGET_WARN_RATIO = 0.8;
 
-export type LimitCode =
-  | 'limit.repeat'
-  | 'limit.tools'
-  | 'limit.read_storm'
-  | 'limit.terminal'
-  | 'limit.unknown'
-  | 'limit.outcome'
-  | 'limit.iterations'
-  | 'limit.plan'
-  | 'limit.finish'
-  | 'limit.tokens'
-  | 'limit.wall'
-  | 'limit.research'
-  | 'limit.capacity';
-
-/** Coded tool rows so UI/ledger can tell skips from real results (I1 + observability). */
-export function limitMessage(code: LimitCode, detail: string): string {
-  return `${code}: ${detail}`;
-}
-
 /**
  * Merge host overrides. When the host passes a limits object, omitted
  * iteration/tool caps stay uncapped (do not fall back to Home defaults).

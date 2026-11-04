@@ -10,12 +10,8 @@ import {
   stashPendingMessage,
   type ComposerOptions,
 } from '@/api/agent-client';
-import {
-  createThread,
-  deleteThread,
-} from '@/api/thread-client';
 import { useThreads } from '@/features/conversation/use-agent-run';
-import { refreshThreads } from '@/features/threads/thread-cache';
+import { createThread, removeThread } from '@/features/threads/thread-cache';
 import { toastError } from '@/hooks/use-toast';
 import {
   readStoredComposerLocal,
@@ -28,7 +24,6 @@ import { clampChatTitle } from '@/features/threads/thread-title';
 import { formatRelativeTime } from '@/lib/format-relative-time';
 import {
   folderNameFromRoot,
-  ensureWorkspaceInOrder,
   setWorkspaceRoot,
   useAgentSpace,
 } from '@/features/threads/space-store';
@@ -132,11 +127,7 @@ export default function HomePage() {
                 kind: bound ? 'workspace' : 'home',
                 ...(bound && workspaceRoot ? { workspaceRoot } : {}),
               });
-              if (thread.workspaceRoot) {
-                ensureWorkspaceInOrder(thread.workspaceRoot);
-                setWorkspaceRoot(thread.workspaceRoot);
-              }
-              await refreshThreads();
+              if (thread.workspaceRoot) setWorkspaceRoot(thread.workspaceRoot);
               const stashed = stashPendingMessage({
                 content,
                 webSearch: options.webSearch,
@@ -155,8 +146,7 @@ export default function HomePage() {
                   : {}),
               });
               if (!stashed) {
-                await deleteThread(thread.id);
-                await refreshThreads();
+                await removeThread(thread.id);
                 setPendingContent(false);
                 restoreHomeDraft(content, attachments);
                 setDraftEpoch((n) => n + 1);

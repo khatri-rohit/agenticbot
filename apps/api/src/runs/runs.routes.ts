@@ -1,17 +1,20 @@
 import { Router, type Request, type Response } from 'express';
 import type {
+  AgentEvent,
   LedgerEnvelope,
-  MessageAttachment,
   StartRunRequest,
 } from '@agent/agent-models';
 import {
   HOME_MODE,
   normalizeRunPosture,
   parseContextWindowMode,
+  parseMessageAttachments,
+  parseStartRunRequest,
   type RunPosture,
 } from '@agent/agent-models';
 
 import { getThreadStore, runManager } from '../platform/instances';
+import { asyncRoute } from '../platform/http-errors';
 import {
   endpointFromLocal,
   prepareRun,
@@ -25,14 +28,16 @@ const router = Router();
  * POST /api/agent/run
  * Append optional user turn to the host ledger, then start a run.
  */
-router.post('/run', async (req: Request, res: Response) => {
-  const result = await startThreadRun(req.body as StartRunRequest);
+router.post('/run', asyncRoute(async (req: Request, res: Response) => {
+  const request = parseStartRunRequest(req.body);
+  if (typeof request === 'string') return res.status(400).json({ error: request });
+  const result = await startThreadRun(request);
   if (result.ok) return res.json({ runId: result.runId });
   return res.status(REJECTION_STATUS[result.reason]).json({
     error: result.error,
     ...(result.runId !== undefined ? { runId: result.runId } : {}),
   });
-});
+}));
 
 const REJECTION_STATUS = { invalid: 400, not_found: 404, busy: 409 } as const;
 
@@ -40,7 +45,7 @@ const REJECTION_STATUS = { invalid: 400, not_found: 404, busy: 409 } as const;
  * POST /api/agent/context/estimate
  * Same assembler as /run: host ledger + memory files + optional draft.
  */
-router.post('/context/estimate', async (req: Request, res: Response) => {
+router.post('/context/estimate', asyncRoute(async (req: Request, res: Response) => {
   const {
     threadId,
     draft,
@@ -54,7 +59,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
   } = req.body as {
     threadId?: string;
     draft?: string;
-    attachments?: MessageAttachment[];
+    attachments?: unknown;
     model?: string;
     webSearch?: boolean;
     local?: boolean;
@@ -63,6 +68,10 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     contextWindowMode?: unknown;
   };
   const previewWindowMode = parseContextWindowMode(contextWindowMode);
+  const parsedAttachments = parseMessageAttachments(attachments);
+  if (typeof parsedAttachments === 'string') {
+    return res.status(400).json({ error: parsedAttachments });
+  }
 
   const store = await getThreadStore();
   let envelopes: LedgerEnvelope[] = [];
@@ -76,7 +85,7 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
   }
 
   const trimmed = typeof draft === 'string' ? draft.trim() : '';
-  if (trimmed || (attachments?.length ?? 0) > 0) {
+  if (trimmed || parsedAttachments.length > 0) {
     const seq = (envelopes.at(-1)?.seq ?? 0) + 1;
     envelopes = [
       ...envelopes,
@@ -87,7 +96,9 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
         threadId: id,
         runId: null,
         record: { role: 'user', content: trimmed },
-        ...(attachments?.length ? { attachments } : {}),
+        ...(parsedAttachments.length > 0
+          ? { attachments: parsedAttachments }
+          : {}),
       },
     ];
   }
@@ -113,19 +124,19 @@ router.post('/context/estimate', async (req: Request, res: Response) => {
     source: 'estimate' as const,
     contextReport: report,
   });
-});
+}));
 
 /**
  * POST /api/agent/run/:runId/cancel
- * Cancel an in-flight run so the thread can accept a new run.
+ * Stop an in-flight run. `finishing`: the answer is already saved and only
+ * post-run work is left, so nothing is cancelled; wait for run.settled.
  */
 router.post('/run/:runId/cancel', (req: Request, res: Response) => {
-  const { runId } = req.params;
-  const ok = runManager.cancel(runId);
-  if (!ok) {
+  const result = runManager.cancel(req.params.runId);
+  if (result === 'not_found') {
     return res.status(404).json({ error: 'Run not found or not active' });
   }
-  return res.json({ ok: true });
+  return res.json({ ok: true, ...(result === 'finishing' ? { finishing: true } : {}) });
 });
 
 function parseChoiceOptionIds(value: unknown): string[] | null {
@@ -194,49 +205,44 @@ router.post('/run/:runId/choice', (req: Request, res: Response) => {
 
 /**
  * GET /api/agent/run/:runId/events?fromSeq=N
- * SSE stream of AgentEvents for a run.
- *
- * Replays buffered events from seq > fromSeq, then streams live events.
+ * SSE stream of AgentEvents for a run: replays buffered events after fromSeq,
+ * then streams live ones. The response ends with run.settled, or with
+ * `event: done` for a run already settled.
  */
 router.get('/run/:runId/events', (req: Request, res: Response) => {
-  const { runId } = req.params;
   const fromSeq = Number(req.query.fromSeq ?? 0);
-
-  const handle = runManager.get(runId);
-  if (!handle) {
+  let ended = false;
+  const send = (event: AgentEvent) => {
+    if (ended) return;
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    if (event.type === 'run.settled') end();
+  };
+  const subscription = runManager.subscribe(req.params.runId, fromSeq, send);
+  if (!subscription) {
     return res.status(404).json({ error: 'Run not found' });
   }
+  function end() {
+    if (ended) return;
+    ended = true;
+    subscription?.unsubscribe();
+    res.end();
+  }
 
-  // SSE headers
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
-
-  // Write a comment to flush headers immediately
+  // Flush headers immediately.
   res.write(': connected\n\n');
-
-  // Subscribe to events (replays + live)
-  const unsubscribe = runManager.subscribe(runId, fromSeq, (event) => {
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
-  });
-
-  // Already-finished run: send `done` so the client can close without
-  // waiting for run.settled/run.error replay. Live runs close client-side
-  // on those events; `done` is the fallback for the late-subscriber case.
-  if (handle.status !== 'running') {
-    res.write('event: done\ndata: {}\n\n');
-    res.end();
+  for (const event of subscription.replay) send(event);
+  if (!subscription.live) {
+    if (!ended) res.write('event: done\ndata: {}\n\n');
+    end();
     return;
   }
-
-  // Clean up on client disconnect
-  req.on('close', () => {
-    unsubscribe();
-  });
-
+  req.on('close', end);
   return;
 });
 

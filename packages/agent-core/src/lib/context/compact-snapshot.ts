@@ -1,4 +1,9 @@
-import { CHARS_PER_TOKEN, type LedgerEnvelope, type Snapshot } from '@agent/agent-models';
+import {
+  CHARS_PER_TOKEN,
+  type ContextReport,
+  type LedgerEnvelope,
+  type Snapshot,
+} from '@agent/agent-models';
 
 const BRIEF_MAX = 1_200;
 const SUMMARY_MAX = 8_000;
@@ -60,6 +65,32 @@ export function chooseCompactThroughSeqForTarget(
     if (tailChars / CHARS_PER_TOKEN <= targetTokens || keep === 1) return throughSeq;
   }
   return null;
+}
+
+/**
+ * The compaction decision (no LLM): when the report is over compactAtRatio,
+ * the last seq to fold into the snapshot so the remaining history fits
+ * compactToRatio next to the fixed layers. Null when nothing should be cut.
+ */
+export function planCompaction(
+  envelopes: LedgerEnvelope[],
+  report: ContextReport,
+): number | null {
+  if (!report.needsCompaction) return null;
+  const { budget, layers, occupiedTokens } = report;
+  const historyTokens =
+    layers.find((layer) => layer.id === 'conversation')?.tokens ?? 0;
+  const fixedTokens = Math.max(0, occupiedTokens - historyTokens);
+  const targetTokens = Math.max(
+    1,
+    (budget.windowTokens - budget.outputReserveTokens) * budget.compactToRatio -
+      fixedTokens,
+  );
+  return chooseCompactThroughSeqForTarget(
+    envelopes,
+    budget.keepToolResultsForTurns,
+    targetTokens,
+  );
 }
 
 /**

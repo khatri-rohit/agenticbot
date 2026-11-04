@@ -8,14 +8,10 @@ import {
 import {
   isWorkspaceKind,
   normalizeRunPosture,
-  type AgentEvent,
-  type Message,
   type MessageAttachment,
   type ThreadKind,
 } from '@agent/agent-models';
-import { toastError } from '@/hooks/use-toast';
 import {
-  modelSupportsVision,
   readStoredComposerLocal,
   readStoredComposerModel,
   readStoredContextWindowMode,
@@ -23,67 +19,31 @@ import {
   writeStoredComposerLocal,
   writeStoredComposerModel,
 } from '@/features/composer/ollama-models';
-import {
-  applyChatEvent,
-  hasSseSeqGap,
-  initialChatState,
-  limitNoticeFromIncomplete,
-  noticeFromSnapshot,
-  persistChatEffects,
-  type ChatState,
-} from './chat-store';
-import { isThreadPlanEmpty, type ThreadPlan } from '@agent/agent-models';
-import {
-  startRun,
-  subscribeRun,
-  cancelRun,
-  resolveChoice,
-  type ComposerOptions,
-} from '../../api/agent-client';
-import { skillTokensInText } from '@/features/composer/skill-slash-picker';
-import {
-  fetchLedger,
-  fetchThread,
-  patchThread,
-  seqFromMessageId,
-  type LedgerResponse,
-} from '../../api/thread-client';
+import type { ComposerOptions } from '../../api/agent-client';
+import { fetchThread } from '../../api/thread-client';
 import {
   ensureThreadsLoaded,
   getThreadsSnapshot,
-  refreshThreads,
   subscribeThreads,
+  updateThread,
 } from '../threads/thread-cache';
 import { setWorkspaceRoot } from '../threads/space-store';
-import { observeRunEvent } from './run-alerts';
+import { initialChatState } from './chat-store';
+import {
+  createThreadSession,
+  type ChoiceAnswer,
+  type ThreadSession,
+  type ThreadView,
+} from './thread-session';
 
-export type QueuedMessage = {
-  content: string;
-  options: ComposerOptions;
-  attachments?: MessageAttachment[];
+const EMPTY_VIEW: ThreadView = {
+  messages: [],
+  chat: initialChatState(),
+  queued: null,
+  starting: false,
 };
-
-/**
- * A plan is current iff it was written after the thread's last user message
- * (plan revisions are stamped with the ledger seq of the tool row that
- * followed their write). Older plans belong to settled turns — they render
- * as chips from history, never as live state.
- */
-function planIsCurrent(
-  plan: ThreadPlan | null | undefined,
-  lastUserSeq: number | undefined,
-): boolean {
-  if (!plan || isThreadPlanEmpty(plan)) return false;
-  if (lastUserSeq === undefined) return false;
-  return (plan.ledgerSeq ?? 0) > lastUserSeq;
-}
-
-/** Ledger plan → live state, or null when the plan predates the last turn. */
-function planFromLedger(ledger: LedgerResponse): ThreadPlan | null {
-  return planIsCurrent(ledger.plan, ledger.lastUserSeq)
-    ? (ledger.plan ?? null)
-    : null;
-}
+const getEmptyView = () => EMPTY_VIEW;
+const noSubscription = () => () => undefined;
 
 const defaultComposerOptions = (): ComposerOptions => {
   const local = readStoredComposerLocal();
@@ -97,93 +57,52 @@ const defaultComposerOptions = (): ComposerOptions => {
 };
 
 /**
- * Hook for managing an active agent run.
- * Starts a run, subscribes to SSE events, reduces them into ephemeral
- * ChatState; durable history comes from the host ledger.
+ * React adapter over one thread's session (see thread-session.ts) plus the
+ * composer's options, which are UI preferences and live here.
  */
-export function useAgentRun(threadId: string | null) {
-  const [chatState, setChatState] = useState<ChatState>(initialChatState());
-  const [queuedMessage, setQueuedMessage] = useState<QueuedMessage | null>(
-    null,
-  );
+export function useAgentRun(threadId: string) {
+  const [session, setSession] = useState<ThreadSession | null>(null);
+  // Callbacks read the live session, including effects in the same commit.
+  const sessionRef = useRef<ThreadSession | null>(null);
   const [composerOptions, setComposerOptions] = useState<ComposerOptions>(
     defaultComposerOptions,
   );
-
-  const unsubscribeRef = useRef<(() => void) | null>(null);
-  const subscribeToRunRef = useRef<(runId: string) => void>(() => {
-    /* filled after subscribeToRun is defined */
-  });
-  const chatStateRef = useRef(chatState);
-  chatStateRef.current = chatState;
-  const threadIdRef = useRef(threadId);
-  threadIdRef.current = threadId;
-  const wasRunningRef = useRef(false);
-  const syncedThreadModelRef = useRef<string | null>(null);
   const [threadKind, setThreadKind] = useState<ThreadKind>('home');
   const [isSubagentThread, setIsSubagentThread] = useState(false);
-  const [ledgerEpoch, setLedgerEpoch] = useState(0);
-  const bumpLedger = useCallback(() => {
-    setLedgerEpoch((n) => n + 1);
-  }, []);
 
   useEffect(() => {
-    setChatState(initialChatState());
-    if (!threadId) return;
+    const next = createThreadSession(threadId);
+    sessionRef.current = next;
+    setSession(next);
+    return () => {
+      next.dispose();
+      if (sessionRef.current === next) sessionRef.current = null;
+    };
+  }, [threadId]);
+
+  const view = useSyncExternalStore(
+    session?.subscribe ?? noSubscription,
+    session?.getSnapshot ?? getEmptyView,
+    getEmptyView,
+  );
+
+  useEffect(() => {
     let cancelled = false;
     void fetchThread(threadId).then((thread) => {
       if (cancelled || !thread) return;
-      if (syncedThreadModelRef.current === thread.id) return;
-      syncedThreadModelRef.current = thread.id;
       const workspace = isWorkspaceKind(thread.kind);
       setThreadKind(workspace ? 'workspace' : 'home');
       setIsSubagentThread(thread.parentThreadId !== undefined);
-      if (workspace && thread.workspaceRoot) {
-        setWorkspaceRoot(thread.workspaceRoot);
-      } else {
-        setWorkspaceRoot(null);
-      }
-      setComposerOptions((prev) => {
-        const local = prev.local === true;
-        const model = resolveOllamaModel(thread.model, local);
-        return {
-          ...prev,
-          model,
-          webSearch: prev.webSearch,
-          contextWindowMode:
-            thread.contextWindowMode ?? prev.contextWindowMode ?? 'default',
-        };
-      });
+      setWorkspaceRoot(workspace && thread.workspaceRoot ? thread.workspaceRoot : null);
+      setComposerOptions((prev) => ({
+        ...prev,
+        model: resolveOllamaModel(thread.model, prev.local === true),
+        contextWindowMode:
+          thread.contextWindowMode ?? prev.contextWindowMode ?? 'default',
+      }));
     });
-    void fetchLedger(threadId)
-      .then((ledger) => {
-        if (cancelled) return;
-        const lastRun = ledger.lastRun;
-        setChatState((prev) => ({
-          ...prev,
-          ...(ledger.snapshot
-            ? { compactionNotice: noticeFromSnapshot(ledger.snapshot) }
-            : {}),
-          plan: planFromLedger(ledger),
-          // Rebuild stop caption from durable last-run (SSE limitNotice is ephemeral).
-          ...(limitNoticeFromIncomplete(lastRun)
-            ? { limitNotice: limitNoticeFromIncomplete(lastRun) }
-            : {}),
-          ...(lastRun?.system1
-            ? { system1Notice: { runId: lastRun.runId, report: lastRun.system1 } }
-            : {}),
-        }));
-        if (ledger.activeRunId && !chatStateRef.current.activeRun) {
-          subscribeToRunRef.current(ledger.activeRunId);
-        }
-      })
-      .catch(() => {
-        /* ledger hydrate is best-effort for the compaction card */
-      });
     return () => {
       cancelled = true;
-      unsubscribeRef.current?.();
-      unsubscribeRef.current = null;
     };
   }, [threadId]);
 
@@ -191,226 +110,13 @@ export function useAgentRun(threadId: string | null) {
     (options: ComposerOptions) => {
       const local = options.local === true;
       const model = resolveOllamaModel(options.model, local);
-      const next = { ...options, local, model };
-      setComposerOptions(next);
+      setComposerOptions({ ...options, local, model });
       writeStoredComposerLocal(local);
       writeStoredComposerModel(model, local);
-      if (!threadId || !model) return;
-      void fetchThread(threadId).then((thread) => {
-        if (!thread || thread.model === model) return;
-        void patchThread(threadId, { model }).then(() => refreshThreads());
-      });
+      if (model) void updateThread(threadId, { model });
     },
     [threadId],
   );
-
-  const disconnect = useCallback(() => {
-    unsubscribeRef.current?.();
-    unsubscribeRef.current = null;
-  }, []);
-
-  const subscribeToRun = useCallback(
-    (runId: string) => {
-      if (!threadId) return;
-
-      const prior = chatStateRef.current;
-      // Same run: keep UI + lastSeq; new run: clear active run, keep compaction card.
-      let currentState =
-        prior.activeRun?.runId === runId
-          ? prior
-          : {
-              ...initialChatState(),
-              compactionNotice: prior.compactionNotice,
-            };
-      const fromSeq = currentState.activeRun?.lastSeq ?? 0;
-      let eventChain = Promise.resolve();
-      disconnect();
-      unsubscribeRef.current = subscribeRun(
-        runId,
-        fromSeq,
-        (event: AgentEvent) => {
-          eventChain = eventChain.then(async () => {
-            if (threadIdRef.current !== threadId) return;
-            const prev = currentState;
-            const lastSeq = prev.activeRun?.lastSeq ?? fromSeq;
-            if (hasSseSeqGap(lastSeq, event.seq)) {
-              bumpLedger();
-            }
-            const next = applyChatEvent(prev, event);
-            await persistChatEffects(prev, event, threadId);
-            if (threadIdRef.current !== threadId) return;
-            currentState = next;
-            setChatState(next);
-            observeRunEvent({
-              event,
-              subscribedRunId: runId,
-              subscribedThreadId: threadId,
-              liveThreadId: threadIdRef.current,
-            });
-            if (
-              event.type === 'run.settled' ||
-              event.type === 'run.error' ||
-              event.type === 'context.compacted'
-            ) {
-              bumpLedger();
-              void refreshThreads();
-            }
-            if (event.type === 'run.settled' || event.type === 'run.error') {
-              // Sync card with snapshot.json (rewind may have deleted it).
-              void fetchLedger(threadId)
-                .then((ledger) => {
-                  setChatState((prev) => {
-                    const withPlan = {
-                      ...prev,
-                      plan: planFromLedger(ledger),
-                      // Ledger has the committed messages now — drop the bridge.
-                      settledSnippets: [],
-                      settledToolActivity: [],
-                    };
-                    if (ledger.snapshot) {
-                      const fromDisk = noticeFromSnapshot(ledger.snapshot);
-                      if (
-                        prev.compactionNotice &&
-                        prev.compactionNotice.throughSeq > fromDisk.throughSeq
-                      ) {
-                        return withPlan;
-                      }
-                      return { ...withPlan, compactionNotice: fromDisk };
-                    }
-                    if (prev.compactionNotice?.runId === event.runId) {
-                      return withPlan;
-                    }
-                    return { ...withPlan, compactionNotice: null };
-                  });
-                })
-                .catch(() => {
-                  /* ignore */
-                });
-            }
-          });
-        },
-        (error) => {
-          console.error('SSE error:', error);
-        },
-      );
-    },
-    [threadId, disconnect, bumpLedger],
-  );
-  subscribeToRunRef.current = subscribeToRun;
-
-  const startRunForMessages = useCallback(
-    async (
-      content: string,
-      options: ComposerOptions,
-      {
-        skipQueue,
-        attachments,
-      }: { skipQueue?: boolean; attachments?: MessageAttachment[] } = {},
-    ) => {
-      if (!threadId) return;
-
-      // Defense in depth for cloud catalog; local models rely on live /api/show
-      // (composer) + server vision check — catalog flags are not available.
-      if (
-        (attachments?.length ?? 0) > 0 &&
-        options.local !== true &&
-        !modelSupportsVision(options.model)
-      ) {
-        toastError(
-          'This model does not support images. Pick a vision model.',
-          'Vision not supported',
-        );
-        return;
-      }
-
-      if (chatStateRef.current.activeRun && !skipQueue) {
-        setQueuedMessage({ content, options, attachments });
-        return;
-      }
-
-      const local = options.local === true;
-      const runId = await startRun(threadId, {
-        message: { content, attachments },
-        webSearch: options.webSearch,
-        model: resolveOllamaModel(options.model, local),
-        local,
-        thinking: options.thinking,
-        posture: normalizeRunPosture(options.posture),
-        ...(options.skills ? { skills: options.skills } : {}),
-        ...(options.contextWindowMode
-          ? { contextWindowMode: options.contextWindowMode }
-          : {}),
-      });
-
-      setChatState((prev) => ({
-        ...initialChatState(),
-        compactionNotice: prev.compactionNotice,
-      }));
-      bumpLedger();
-      // Server writes a model-generated title on first turn before /run returns.
-      void refreshThreads();
-
-      subscribeToRun(runId);
-    },
-    [threadId, subscribeToRun, bumpLedger],
-  );
-
-  const resolvePendingChoice = useCallback(
-    async (
-      choiceId: string,
-      body: { skipped: true } | { optionIds: string[]; text?: string },
-    ) => {
-      const runId = chatStateRef.current.activeRun?.runId;
-      if (!runId) return;
-      try {
-        await resolveChoice(
-          runId,
-          'skipped' in body
-            ? { choiceId, skipped: true }
-            : {
-                choiceId,
-                optionIds: body.optionIds,
-                ...(body.text ? { text: body.text } : {}),
-              },
-        );
-      } catch (err) {
-        toastError(
-          err instanceof Error ? err.message : 'Could not send choice',
-          'Choice failed',
-        );
-        throw err;
-      }
-    },
-    [],
-  );
-
-  const interruptActiveRun = useCallback(async () => {
-    const state = chatStateRef.current;
-    const run = state.activeRun;
-    if (!run) return;
-
-    if (run.status === 'running') {
-      try {
-        await cancelRun(run.runId);
-      } catch (err) {
-        toastError(
-          err instanceof Error ? err.message : 'Could not stop the run',
-          'Stop failed',
-        );
-        return;
-      }
-    }
-
-    disconnect();
-    const next: ChatState = {
-      ...initialChatState(),
-      compactionNotice: chatStateRef.current.compactionNotice,
-    };
-    // Ref must clear in this turn — setState alone leaves sendQueuedNow
-    // seeing a stale activeRun and dropping the flushed message.
-    chatStateRef.current = next;
-    setChatState(next);
-  }, [disconnect]);
 
   const sendMessage = useCallback(
     async (
@@ -419,197 +125,52 @@ export function useAgentRun(threadId: string | null) {
       attachments?: MessageAttachment[],
     ) => {
       const local = options.local ?? composerOptions.local === true;
-      const merged: ComposerOptions = {
-        webSearch: options.webSearch ?? composerOptions.webSearch,
-        local,
-        model: resolveOllamaModel(
-          options.model ?? composerOptions.model,
+      await sessionRef.current?.send(
+        content,
+        {
+          webSearch: options.webSearch ?? composerOptions.webSearch,
           local,
-        ),
-        thinking: options.thinking ?? composerOptions.thinking,
-        posture: normalizeRunPosture(
-          options.posture ?? composerOptions.posture,
-        ),
-        ...(options.skills ? { skills: options.skills } : {}),
-        contextWindowMode:
-          options.contextWindowMode ?? composerOptions.contextWindowMode ?? 'default',
-      };
-
-      if (chatStateRef.current.activeRun) {
-        setQueuedMessage({ content, options: merged, attachments });
-        return;
-      }
-
-      await startRunForMessages(content, merged, { attachments });
+          model: resolveOllamaModel(options.model ?? composerOptions.model, local),
+          thinking: options.thinking ?? composerOptions.thinking,
+          posture: normalizeRunPosture(options.posture ?? composerOptions.posture),
+          ...(options.skills ? { skills: options.skills } : {}),
+          contextWindowMode:
+            options.contextWindowMode ?? composerOptions.contextWindowMode ?? 'default',
+        },
+        attachments,
+      );
     },
-    [composerOptions, startRunForMessages],
+    [composerOptions],
   );
 
-  const sendQueuedNow = useCallback(async () => {
-    if (!queuedMessage) return;
-    const { content, options, attachments } = queuedMessage;
-    // Live chip wins over posture frozen at enqueue.
-    const flushOptions: ComposerOptions = {
-      ...options,
-      posture: normalizeRunPosture(composerOptions.posture),
+  const editQueuedMessage = useCallback(() => {
+    const queued = sessionRef.current?.takeQueued();
+    if (!queued) return null;
+    return {
+      content: queued.content,
+      attachments: queued.attachments,
+      skills: queued.options.skills,
     };
-    setQueuedMessage(null);
-    await interruptActiveRun();
-    if (chatStateRef.current.activeRun) {
-      // Stop failed; the run is still active. Restore the queued message so
-      // the user's text and attachments are not silently lost.
-      setQueuedMessage({ content, options, attachments });
-      return;
-    }
-    await startRunForMessages(content, flushOptions, {
-      skipQueue: true,
-      attachments,
-    });
-  }, [
-    queuedMessage,
-    composerOptions.posture,
-    interruptActiveRun,
-    startRunForMessages,
-  ]);
-
-  const editQueuedMessage = useCallback((): {
-    content: string;
-    attachments?: MessageAttachment[];
-    skills?: ComposerOptions['skills'];
-  } | null => {
-    if (!queuedMessage) return null;
-    const { content, attachments, options } = queuedMessage;
-    setQueuedMessage(null);
-    return { content, attachments, skills: options.skills };
-  }, [queuedMessage]);
-
-  const clearQueuedMessage = useCallback(() => {
-    setQueuedMessage(null);
   }, []);
 
-  const retryLastResponse = useCallback(async () => {
-    if (!threadId) return;
-    if (chatStateRef.current.activeRun) return;
-
-    const ledger = await fetchLedger(threadId);
-    if (ledger.lastUserSeq === undefined) return;
-    if (ledger.lastUserSeq === ledger.lastSeq) return;
-
-    const local = composerOptions.local === true;
-    const runId = await startRun(threadId, {
-      rewindThroughSeq: ledger.lastUserSeq,
-      webSearch: composerOptions.webSearch,
-      model: resolveOllamaModel(composerOptions.model, local),
-      local,
-      thinking: composerOptions.thinking,
-      posture: normalizeRunPosture(composerOptions.posture),
-      contextWindowMode: composerOptions.contextWindowMode ?? 'default',
-    });
-
-    const restored = await fetchLedger(threadId);
-    setChatState((prev) => ({
-      ...initialChatState(),
-      compactionNotice: restored.snapshot
-        ? noticeFromSnapshot(restored.snapshot)
-        : prev.compactionNotice,
-      plan: planFromLedger(restored),
-    }));
-    bumpLedger();
-    subscribeToRun(runId);
-  }, [threadId, composerOptions, subscribeToRun, bumpLedger]);
-
-  const editLastUserMessage = useCallback(
-    async (messageId: string, newContent: string) => {
-      if (!threadId) return;
-      const trimmed = newContent.trim();
-
-      if (chatStateRef.current.activeRun) {
-        await interruptActiveRun();
-      }
-
-      const ledger = await fetchLedger(threadId);
-      let lastUser: Message | null = null;
-      for (let i = ledger.messages.length - 1; i >= 0; i--) {
-        if (ledger.messages[i].role === 'user') {
-          lastUser = ledger.messages[i];
-          break;
-        }
-      }
-      if (!lastUser || lastUser.id !== messageId) return;
-      if (!trimmed && !(lastUser.attachments?.length ?? 0)) return;
-
-      const userSeq = seqFromMessageId(messageId);
-      if (userSeq === undefined) return;
-
-      const local = composerOptions.local === true;
-      const requested = skillTokensInText(trimmed);
-      const runId = await startRun(threadId, {
-        rewindThroughSeq: userSeq - 1,
-        message: { content: trimmed, attachments: lastUser.attachments },
-        webSearch: composerOptions.webSearch,
-        model: resolveOllamaModel(composerOptions.model, local),
-        local,
-        thinking: composerOptions.thinking,
-        posture: normalizeRunPosture(composerOptions.posture),
-        ...(requested.length > 0 ? { skills: { requested } } : {}),
-        contextWindowMode: composerOptions.contextWindowMode ?? 'default',
-      });
-
-      const restored = await fetchLedger(threadId);
-      setChatState((prev) => ({
-        ...initialChatState(),
-        compactionNotice: restored.snapshot
-          ? noticeFromSnapshot(restored.snapshot)
-          : prev.compactionNotice,
-        plan: planFromLedger(restored),
-      }));
-      bumpLedger();
-      subscribeToRun(runId);
-    },
-    [threadId, composerOptions, subscribeToRun, interruptActiveRun, bumpLedger],
-  );
-
-  useEffect(() => {
-    // activeRun stays until run.settled (covers post-loop compaction).
-    const busy = chatState.activeRun !== null;
-    if (wasRunningRef.current && !busy && queuedMessage) {
-      const { content, options, attachments } = queuedMessage;
-      // Live chip wins over posture frozen at enqueue.
-      const flushOptions: ComposerOptions = {
-        ...options,
-        posture: normalizeRunPosture(composerOptions.posture),
-      };
-      setQueuedMessage(null);
-      void startRunForMessages(content, flushOptions, {
-        skipQueue: true,
-        attachments,
-      });
-    }
-    wasRunningRef.current = busy;
-  }, [
-    chatState.activeRun,
-    queuedMessage,
-    composerOptions.posture,
-    startRunForMessages,
-  ]);
-
   return {
-    chatState,
+    messages: view.messages,
+    chatState: view.chat,
+    queuedMessage: view.queued,
     composerOptions,
     setComposerOptions: setComposerOptionsPersisted,
-    queuedMessage,
     sendMessage,
-    sendQueuedNow,
+    sendQueuedNow: () =>
+      sessionRef.current?.sendQueuedNow(normalizeRunPosture(composerOptions.posture)),
     editQueuedMessage,
-    clearQueuedMessage,
-    retryLastResponse,
-    editLastUserMessage,
-    disconnect,
-    stopGeneration: interruptActiveRun,
-    resolvePendingChoice,
-    // Busy through post-loop compaction until run.settled clears activeRun.
-    isRunning: chatState.activeRun !== null,
-    ledgerEpoch,
+    retryLastResponse: () => sessionRef.current?.retry(composerOptions),
+    editLastUserMessage: (messageId: string, content: string) =>
+      sessionRef.current?.edit(messageId, content, composerOptions),
+    stopGeneration: () => sessionRef.current?.stop(),
+    resolvePendingChoice: (choiceId: string, answer: ChoiceAnswer) =>
+      sessionRef.current?.answerChoice(choiceId, answer) ?? Promise.resolve(),
+    // Busy from the send through post-loop compaction, until run.settled.
+    isRunning: view.starting || view.chat.activeRun !== null,
     threadKind,
     isSubagentThread,
   };
@@ -625,28 +186,4 @@ export function useThreads() {
     ensureThreadsLoaded();
   }, []);
   return threads;
-}
-
-export function useMessages(threadId: string | null, ledgerEpoch = 0) {
-  const [messages, setMessages] = useState<Message[]>([]);
-
-  useEffect(() => {
-    if (!threadId) {
-      setMessages([]);
-      return;
-    }
-    let cancelled = false;
-    void fetchLedger(threadId)
-      .then((ledger) => {
-        if (!cancelled) setMessages(ledger.messages);
-      })
-      .catch((error) => {
-        console.error('Failed to load ledger', error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [threadId, ledgerEpoch]);
-
-  return messages;
 }

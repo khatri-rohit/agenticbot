@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { listSkillCatalogs } from '@agent/agent-core';
 
 import { getAgentHome } from '../platform/instances';
+import { asyncRoute } from '../platform/http-errors';
 import {
   SkillImportError,
   deleteUserSkill,
@@ -30,15 +31,15 @@ router.get('/skills', (_req: Request, res: Response) => {
   }
 });
 
-router.post('/skills/preview', async (req: Request, res: Response) => {
+router.post('/skills/preview', asyncRoute(async (req: Request, res: Response) => {
   try {
     res.json(await previewGitHubSkills(String(req.body?.repoUrl ?? '')));
   } catch (error) {
     fail(res, error);
   }
-});
+}));
 
-router.post('/skills/install', async (req: Request, res: Response) => {
+router.post('/skills/install', asyncRoute(async (req: Request, res: Response) => {
   try {
     const skills = Array.isArray(req.body?.skills) ? req.body.skills : [];
     await installGitHubSkills({
@@ -56,15 +57,15 @@ router.post('/skills/install', async (req: Request, res: Response) => {
   } catch (error) {
     fail(res, error);
   }
-});
+}));
 
-router.delete('/skills/:folder', async (req: Request, res: Response) => {
+router.delete('/skills/:folder', asyncRoute(async (req: Request, res: Response) => {
   try {
     await deleteUserSkill(getAgentHome(), String(req.params.folder ?? ''));
     res.json(listSkillCatalogs());
   } catch (error) {
     fail(res, error);
   }
-});
+}));
 
 export { router as skillsRouter };

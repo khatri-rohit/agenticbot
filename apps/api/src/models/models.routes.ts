@@ -3,10 +3,11 @@ import type { OllamaEndpoint } from '@agent/agent-models';
 import { getOllamaModelConfig, listOllamaModels } from '@agent/agent-core';
 import { BalanceError, capacityEnabled, getOllamaBalance } from './capacity';
 import { system1AutoFor } from '../runs/system1-runtime';
+import { asyncRoute } from '../platform/http-errors';
 
 const router = Router();
 
-router.get('/usage/balance', async (_req: Request, res: Response) => {
+router.get('/usage/balance', asyncRoute(async (_req: Request, res: Response) => {
   if (!capacityEnabled()) {
     res.status(404).json({ error: 'No OLLAMA_API_KEY configured' });
     return;
@@ -23,7 +24,7 @@ router.get('/usage/balance', async (_req: Request, res: Response) => {
       error: error instanceof Error ? error.message : 'Balance fetch failed',
     });
   }
-});
+}));
 
 /** Returns null when the query is present but not a known endpoint. */
 function parseEndpointQuery(
@@ -40,7 +41,7 @@ function parseEndpointQuery(
  * Proxy for Ollama /api/show (context length, thinking values).
  * Registered before /models so a future /models/:id never shadows this path.
  */
-router.get('/models/config', async (req: Request, res: Response) => {
+router.get('/models/config', asyncRoute(async (req: Request, res: Response) => {
   const model =
     typeof req.query.model === 'string' ? req.query.model.trim() : '';
   if (!model) {
@@ -64,13 +65,13 @@ router.get('/models/config', async (req: Request, res: Response) => {
     const msg = err instanceof Error ? err.message : String(err);
     return res.status(502).json({ error: msg });
   }
-});
+}));
 
 /**
  * GET /api/agent/models?endpoint=local|cloud
  * Proxy for Ollama GET /api/tags (installed models). Defaults to local.
  */
-router.get('/models', async (req: Request, res: Response) => {
+router.get('/models', asyncRoute(async (req: Request, res: Response) => {
   const endpoint = parseEndpointQuery(req.query.endpoint, 'local');
   if (!endpoint) {
     return res
@@ -84,6 +85,6 @@ router.get('/models', async (req: Request, res: Response) => {
     const msg = err instanceof Error ? err.message : String(err);
     return res.status(502).json({ error: msg });
   }
-});
+}));
 
 export { router as modelsRouter };

@@ -1,11 +1,4 @@
-import type {
-  Message,
-  Snapshot,
-  Thread,
-  ThreadKind,
-  ThreadLastRun,
-  ThreadPlan,
-} from '@agent/agent-models';
+import type { LedgerResponse, Thread, ThreadKind } from '@agent/agent-models';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3333';
 
@@ -125,20 +118,6 @@ export async function deleteThread(id: string): Promise<void> {
     );
   }
 }
-
-export type LedgerResponse = {
-  messages: Message[];
-  lastSeq: number;
-  lastUserSeq?: number;
-  /** Present when M4 compaction has written snapshot.json for this thread. */
-  snapshot?: Snapshot | null;
-  /** Thread-scoped plan journal + todos. */
-  plan?: ThreadPlan | null;
-  /** Last finished run outcome (survives SSE TTL; rebuilds limitNotice). */
-  lastRun?: ThreadLastRun | null;
-  /** Live run to reattach after reload (in-flight turn, offer_choice pause). */
-  activeRunId?: string;
-};
 
 export async function fetchLedger(threadId: string): Promise<LedgerResponse> {
   const res = await fetch(`${API_BASE}/api/agent/threads/${threadId}/ledger`);

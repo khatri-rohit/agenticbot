@@ -1,4 +1,4 @@
-import { limitMessage } from './limits';
+import { limitMessage } from '@agent/agent-models';
 
 /** Invented tool names in one run before hard halt (I1 + I6). */
 const MAX_UNKNOWN_TOOL_STREAK = 2;

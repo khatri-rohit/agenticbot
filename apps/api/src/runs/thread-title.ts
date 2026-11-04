@@ -3,10 +3,12 @@ import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/ch
 import { getClient, getOllamaModelConfig, resolveReasoningEffort } from '@agent/agent-core';
 import { clampChatTitle, type OllamaEndpoint } from '@agent/agent-models';
 
+import type { ThreadStore } from '../threads/thread-store';
+
 /**
- * Bounds the completion call itself. POST /run awaits the whole title path,
- * whose worst case is this plus getOllamaModelConfig's own 15s fetch timeout
- * (the config lookup runs before the signal applies).
+ * Bounds the completion call itself. The whole title path can also wait on
+ * getOllamaModelConfig's own 15s fetch timeout (it runs before the signal
+ * applies), which is why it never runs on the request path.
  */
 const TITLE_TIMEOUT_MS = 4_000;
 
@@ -33,7 +35,7 @@ async function titleReasoningEffort(model: string, endpoint: OllamaEndpoint): Pr
 }
 
 /** Fallback when the model call fails or the message is empty. */
-export function seedThreadTitle(firstMessage: string): string {
+function seedThreadTitle(firstMessage: string): string {
   const trimmed = firstMessage.trim();
   if (!trimmed) return 'New Chat';
   return clampChatTitle(trimmed);
@@ -45,7 +47,7 @@ export function seedThreadTitle(firstMessage: string): string {
  * can leave the title empty. Falls back to a clamped first-message snippet
  * when the call fails, times out, or returns nothing.
  */
-export async function generateThreadTitle(
+async function generateThreadTitle(
   firstMessage: string,
   model: string,
   endpoint: OllamaEndpoint = 'cloud',
@@ -86,4 +88,25 @@ export async function generateThreadTitle(
     console.error('[title] generate failed:', message);
     return fallback;
   }
+}
+
+/**
+ * First turn: write the seed title now, so POST /run returns at once, and the
+ * model's title when it arrives, unless the thread was renamed or deleted in
+ * the meantime. The web picks it up on its next thread refresh.
+ */
+export function titleNewThread(
+  store: ThreadStore,
+  threadId: string,
+  firstMessage: string,
+  model: string,
+  endpoint: OllamaEndpoint,
+): void {
+  const seed = seedThreadTitle(firstMessage);
+  store.updateThread(threadId, { title: seed, model });
+  void generateThreadTitle(firstMessage, model, endpoint).then((title) => {
+    if (store.getThread(threadId)?.title === seed) {
+      store.updateThread(threadId, { title });
+    }
+  });
 }

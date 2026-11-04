@@ -73,6 +73,8 @@ export function createDelegateTool(profiles: SubagentProfile[]): Tool {
     },
     risk: 'external',
     stage: 'subagent',
+    // The child run has its own wall-clock limit.
+    ownsTimeout: true,
     async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
       const text = (key: string) =>
         typeof args[key] === 'string' ? (args[key] as string).trim() : '';

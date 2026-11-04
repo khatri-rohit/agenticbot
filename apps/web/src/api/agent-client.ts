@@ -153,7 +153,7 @@ export function subscribeRun(
           cursor = Math.max(cursor, event.seq);
         }
         onEvent(event);
-        if (event.type === 'run.settled' || event.type === 'run.error') {
+        if (event.type === 'run.settled') {
           closed = true;
           es.close();
         }
@@ -328,14 +328,17 @@ export async function revertMemoryOp(opId: string): Promise<MemoryOp> {
   return op;
 }
 
-export async function cancelRun(runId: string): Promise<void> {
+/** False when the run is no longer active (it already ended). */
+export async function cancelRun(runId: string): Promise<boolean> {
   const res = await fetch(`${API_BASE}/api/agent/run/${runId}/cancel`, {
     method: 'POST',
   });
+  if (res.status === 404) return false;
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Failed to cancel run: ${res.status}`);
   }
+  return true;
 }
 
 export async function resolveChoice(

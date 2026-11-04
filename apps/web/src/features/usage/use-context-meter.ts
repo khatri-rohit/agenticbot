@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type {
-  ContextReport,
   ContextReportLayer,
   ContextWindowSource,
   MessageAttachment,
@@ -12,7 +11,11 @@ import {
   type ComposerOptions,
   type ComposerSkillHints,
 } from '@/api/agent-client';
-import { getContextAnchor } from '@/features/conversation/context-anchor';
+import type { ChatRunState } from '@/features/conversation/chat-store';
+import {
+  getContextAnchor,
+  type ContextAnchor,
+} from '@/features/conversation/context-anchor';
 import { estimateDraftTokens } from '@/features/usage/estimate-tokens';
 
 /** Stable empty list — never use `= []` in hook args (new ref every render → effect loop). */
@@ -34,22 +37,112 @@ export type ContextMeter = {
   windowSource?: ContextWindowSource;
 };
 
+type ServerEstimate = {
+  tokens: number;
+  layers: ContextReportLayer[];
+  reserve: number;
+  windowTokens: number;
+  windowSource?: ContextWindowSource;
+};
+
+/**
+ * Which reading the meter shows, best first: the live run's measured usage,
+ * then its start estimate, then the last usage measured for the thread, then
+ * the server's estimate, then the draft alone. The live run and the anchor
+ * must already be for the composer's model.
+ */
+export function selectMeterReading(input: {
+  liveRun: ChatRunState | null;
+  anchor: ContextAnchor | null;
+  estimate: ServerEstimate | null;
+  /** Catalog window, until a report or estimate gives the assembler's. */
+  contextLimit: number | null;
+  composerTokens: number;
+  streamingTokens: number;
+}): ContextMeter {
+  const { liveRun, anchor, estimate, composerTokens, streamingTokens } = input;
+  const report = liveRun?.contextReport;
+  const limit =
+    report?.budget.windowTokens ??
+    estimate?.windowTokens ??
+    anchor?.windowTokens ??
+    input.contextLimit ??
+    null;
+  const windowSource =
+    report?.windowSource ?? estimate?.windowSource ?? anchor?.windowSource;
+  const reserve =
+    report?.budget.outputReserveTokens ?? estimate?.reserve ?? anchor?.reserve ?? 0;
+  const layers = report?.layers.length
+    ? report.layers
+    : (estimate?.layers ?? anchor?.layers ?? []);
+
+  if (liveRun?.occupiedTokens !== undefined) {
+    const extra = composerTokens + streamingTokens;
+    return {
+      used: liveRun.occupiedTokens + extra,
+      limit,
+      source: 'measured',
+      approximate: extra > 0,
+      layers,
+      reserve,
+      windowSource,
+    };
+  }
+  if (liveRun?.estimatedPromptTokens !== undefined) {
+    return {
+      used: liveRun.estimatedPromptTokens + composerTokens + streamingTokens,
+      limit,
+      source: 'estimate',
+      approximate: true,
+      layers,
+      reserve,
+      windowSource,
+    };
+  }
+  if (anchor) {
+    return {
+      used: anchor.occupiedTokens + composerTokens,
+      limit,
+      source: 'measured',
+      approximate: composerTokens > 0,
+      layers,
+      reserve,
+      windowSource,
+    };
+  }
+  if (estimate) {
+    return {
+      used: estimate.tokens + streamingTokens,
+      limit,
+      source: 'estimate',
+      approximate: true,
+      layers: estimate.layers,
+      reserve: estimate.reserve,
+      windowSource,
+    };
+  }
+  return {
+    used: composerTokens + streamingTokens,
+    limit,
+    source: 'estimate',
+    approximate: true,
+    layers: [],
+    reserve: 0,
+    windowSource,
+  };
+}
+
 export function useContextMeter(options: {
   threadId?: string;
   draft: string;
   pendingAttachments: MessageAttachment[];
   queuedContent?: string | null;
   queuedAttachments?: MessageAttachment[];
-  streamingContent?: string | null;
   composerOptions: ComposerOptions;
   /** Soft fallback only until live report or /context/estimate returns. */
   contextLimit: number | null;
-  liveOccupiedTokens?: number;
-  /** Last measured usage already includes the current streaming text. */
-  occupiedCoversStream?: boolean;
-  liveEstimatedPromptTokens?: number;
-  liveContextReport?: ContextReport;
-  liveRunModel?: string;
+  /** The thread's live run, if any. */
+  liveRun: ChatRunState | null;
   skillHints?: ComposerSkillHints;
 }): ContextMeter {
   const {
@@ -58,74 +151,48 @@ export function useContextMeter(options: {
     pendingAttachments,
     queuedContent,
     queuedAttachments: queuedAttachmentsOption,
-    streamingContent,
     composerOptions,
     contextLimit,
-    liveOccupiedTokens,
-    occupiedCoversStream = false,
-    liveEstimatedPromptTokens,
-    liveContextReport,
-    liveRunModel,
     skillHints,
   } = options;
   const queuedAttachments = queuedAttachmentsOption ?? EMPTY_ATTACHMENTS;
 
-  const [serverEstimate, setServerEstimate] = useState<{
-    tokens: number;
-    layers: ContextReportLayer[];
-    reserve: number;
-    windowTokens: number;
-    windowSource?: ContextWindowSource;
-  } | null>(null);
-
-  const sameModel =
-    liveRunModel === undefined || liveRunModel === composerOptions.model;
-  const liveOccupied =
-    sameModel && liveOccupiedTokens !== undefined ? liveOccupiedTokens : null;
-  const liveEstimated =
-    sameModel && liveEstimatedPromptTokens !== undefined
-      ? liveEstimatedPromptTokens
-      : null;
-  const liveLayers =
-    sameModel && liveContextReport ? liveContextReport.layers : [];
-  const liveWindowTokens =
-    sameModel && liveContextReport
-      ? liveContextReport.budget.windowTokens
-      : null;
-  const liveWindowSource =
-    sameModel && liveContextReport ? liveContextReport.windowSource : undefined;
-
-  const persisted =
-    liveOccupied == null && liveEstimated == null && threadId
-      ? getContextAnchor(threadId)
-      : null;
-  const persistedForModel =
-    persisted && persisted.model === composerOptions.model ? persisted : null;
-  const persistedOccupied = persistedForModel?.occupiedTokens ?? null;
-  const persistedWindowTokens = persistedForModel?.windowTokens ?? null;
-  const persistedWindowSource = persistedForModel?.windowSource;
-  const persistedLayers = persistedForModel?.layers ?? [];
-  const persistedReserve = persistedForModel?.reserve ?? 0;
-
-  const composerTokens = estimateDraftTokens(
-    [draft, queuedContent].filter(Boolean).join('\n') || null,
-    pendingAttachments.length + queuedAttachments.length,
+  const [serverEstimate, setServerEstimate] = useState<ServerEstimate | null>(
+    null,
   );
-  const streamingTokens = occupiedCoversStream
-    ? 0
-    : estimateDraftTokens(streamingContent);
+
+  // A run on another model says nothing about the composer's model.
+  const liveRun =
+    options.liveRun && options.liveRun.model === composerOptions.model
+      ? options.liveRun
+      : null;
+  const liveUsage =
+    liveRun?.occupiedTokens !== undefined ||
+    liveRun?.estimatedPromptTokens !== undefined;
+  const savedAnchor = !liveUsage && threadId ? getContextAnchor(threadId) : null;
+  const anchor =
+    savedAnchor && savedAnchor.model === composerOptions.model
+      ? savedAnchor
+      : null;
 
   const combinedDraft = [draft, queuedContent].filter(Boolean).join('\n');
   const attachmentCount = pendingAttachments.length + queuedAttachments.length;
   const hasDraft = combinedDraft.length > 0 || attachmentCount > 0;
+  const composerTokens = estimateDraftTokens(
+    combinedDraft || null,
+    attachmentCount,
+  );
+  const streamingTokens = liveRun?.occupiedCoversStream
+    ? 0
+    : estimateDraftTokens(liveRun?.streamingMessage?.content);
 
-  const hasLiveReport = liveLayers.length > 0;
+  const hasLiveReport = Boolean(liveRun?.contextReport?.layers.length);
 
   // Success-only hydrate mark — cancel/fail leaves thread unset so we retry.
   const lastEstimateDraftLen = useRef(0);
   // Key by thread + the options that change the estimate (model, local,
-  // webSearch, posture, skills). A model or posture change after a successful
-  // hydrate must re-fetch, not serve a stale windowTokens from the old config.
+  // webSearch, posture, skills, window). A change after a successful hydrate
+  // must re-fetch, not serve a stale windowTokens from the old config.
   const estimateKey = `${threadId ?? ''}|${composerOptions.model ?? ''}|${composerOptions.local ?? ''}|${composerOptions.webSearch ?? ''}|${composerOptions.posture ?? ''}|${skillHints?.requested?.join(',') ?? ''}|${composerOptions.contextWindowMode ?? ''}`;
   const lastEstimateKey = useRef<string | undefined>(undefined);
   // In-flight hydrate for this key; blocks re-schedule while typing churns deps.
@@ -145,7 +212,7 @@ export function useContextMeter(options: {
       : {}),
   };
 
-  // Hydrate once per thread (success-gated). Not tied to draft keystrokes.
+  // Hydrate once per estimate key (success-gated). Not tied to draft keystrokes.
   useEffect(() => {
     if (!threadId && !hasDraft) {
       setServerEstimate(null);
@@ -193,8 +260,8 @@ export function useContextMeter(options: {
         hydrateRequestedKey.current = undefined;
       }
     };
-    // Draft length intentionally omitted — threshold effect handles large pastes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate on thread/options only
+    // Hydrate on thread/options only: draft length is left out on purpose,
+    // the threshold effect below handles large pastes.
   }, [
     hasLiveReport,
     threadId,
@@ -203,6 +270,7 @@ export function useContextMeter(options: {
     composerOptions.local,
     composerOptions.webSearch,
     composerOptions.posture,
+    composerOptions.contextWindowMode,
     skillHints?.requested,
   ]);
 
@@ -242,7 +310,7 @@ export function useContextMeter(options: {
       cancelled = true;
       window.clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- threshold watches draft size
+    // Watches draft size; the request args are rebuilt every render.
   }, [
     hasLiveReport,
     threadId,
@@ -254,87 +322,16 @@ export function useContextMeter(options: {
     composerOptions.local,
     composerOptions.webSearch,
     composerOptions.posture,
+    composerOptions.contextWindowMode,
     skillHints?.requested,
   ]);
 
-  // Assembler/report window first; catalog contextLimit only until estimate lands.
-  const limit =
-    liveWindowTokens ??
-    serverEstimate?.windowTokens ??
-    persistedWindowTokens ??
-    contextLimit ??
-    null;
-  const windowSource =
-    liveWindowSource ??
-    serverEstimate?.windowSource ??
-    persistedWindowSource ??
-    undefined;
-
-  const liveReserve =
-    liveContextReport?.budget.outputReserveTokens ??
-    serverEstimate?.reserve ??
-    persistedReserve;
-  const layers =
-    liveLayers.length > 0
-      ? liveLayers
-      : (serverEstimate?.layers ?? persistedLayers);
-
-  if (liveOccupied != null) {
-    const extra = composerTokens + streamingTokens;
-    return {
-      used: liveOccupied + extra,
-      limit,
-      source: 'measured',
-      approximate: extra > 0,
-      layers,
-      reserve: liveReserve,
-      windowSource,
-    };
-  }
-
-  if (liveEstimated != null) {
-    return {
-      used: liveEstimated + composerTokens + streamingTokens,
-      limit,
-      source: 'estimate',
-      approximate: true,
-      layers,
-      reserve: liveReserve,
-      windowSource,
-    };
-  }
-
-  if (persistedOccupied != null) {
-    return {
-      used: persistedOccupied + composerTokens,
-      limit,
-      source: 'measured',
-      approximate: composerTokens > 0,
-      layers,
-      reserve: liveReserve,
-      windowSource,
-    };
-  }
-
-  if (serverEstimate != null) {
-    return {
-      used: serverEstimate.tokens + streamingTokens,
-      limit,
-      source: 'estimate',
-      approximate: true,
-      layers: serverEstimate.layers,
-      reserve: serverEstimate.reserve,
-      windowSource,
-    };
-  }
-
-  return {
-    used: composerTokens + streamingTokens,
-    limit,
-    source: 'estimate',
-    approximate: true,
-    layers: [],
-    reserve: 0,
-    windowSource,
-  };
+  return selectMeterReading({
+    liveRun,
+    anchor,
+    estimate: serverEstimate,
+    contextLimit,
+    composerTokens,
+    streamingTokens,
+  });
 }

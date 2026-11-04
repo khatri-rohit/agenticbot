@@ -49,7 +49,7 @@ Organise by **what the code is about**, not by what kind of file it is. Look for
 
 **`apps/web/src/`**:
 - `app/`: Next.js routes only.
-- `features/conversation/`: the thread view (message list, cards, chat store, `use-agent-run`).
+- `features/conversation/`: the thread view (message list, cards, chat store, `thread-session` and its hook `use-agent-run`).
 - `features/composer/`: the input box and everything it controls (pickers, voice, skills, drafts).
 - `features/threads/`: sidebar, thread lists, spaces, workspace picker.
 - `features/usage/`: context and account usage meters.

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { ThreadKind } from '@agent/agent-models';
+import type { LedgerResponse, ThreadKind } from '@agent/agent-models';
 import {
   HOME_MODE,
   isWorkspaceKind,
@@ -9,6 +9,8 @@ import {
   parseThreadKind,
 } from '@agent/agent-models';
 import { getThreadStore, runManager } from '../platform/instances';
+import { asyncRoute } from '../platform/http-errors';
+import { readSettledLastRun } from '../runs/run-context';
 import { pickFolderDialog } from './pick-folder';
 
 const router = Router();
@@ -33,7 +35,7 @@ async function resolveWorkspaceDir(
  * Opens a native folder dialog on the API host and returns the absolute path.
  * 204 = cancelled, 500 = dialog failed, 200 = { workspaceRoot }.
  */
-router.post('/workspace/pick', async (req: Request, res: Response) => {
+router.post('/workspace/pick', asyncRoute(async (req: Request, res: Response) => {
   const initial =
     typeof req.body?.initialDir === 'string' && req.body.initialDir.trim()
       ? path.resolve(req.body.initialDir.trim())
@@ -54,9 +56,9 @@ router.post('/workspace/pick', async (req: Request, res: Response) => {
     return res.status(400).json({ error: resolved.error });
   }
   return res.json({ workspaceRoot: resolved.root });
-});
+}));
 
-router.get('/threads', async (req: Request, res: Response) => {
+router.get('/threads', asyncRoute(async (req: Request, res: Response) => {
   const store = await getThreadStore();
   const kind = parseThreadKind(req.query.kind);
   const workspaceRoot =
@@ -72,9 +74,9 @@ router.get('/threads', async (req: Request, res: Response) => {
       ...(includeSubagents ? { includeSubagents: true } : {}),
     }),
   });
-});
+}));
 
-router.post('/threads', async (req: Request, res: Response) => {
+router.post('/threads', asyncRoute(async (req: Request, res: Response) => {
   const model =
     typeof req.body?.model === 'string' && req.body.model.trim()
       ? req.body.model.trim()
@@ -103,27 +105,34 @@ router.post('/threads', async (req: Request, res: Response) => {
     workspaceRoot,
   });
   return res.status(201).json(thread);
-});
+}));
 
-router.get('/threads/:id', async (req: Request, res: Response) => {
+router.get('/threads/:id', asyncRoute(async (req: Request, res: Response) => {
   const store = await getThreadStore();
   const thread = store.getThread(req.params.id);
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
   return res.json(thread);
-});
+}));
 
-router.patch('/threads/:id', async (req: Request, res: Response) => {
+router.patch('/threads/:id', asyncRoute(async (req: Request, res: Response) => {
   const store = await getThreadStore();
   const body = req.body as {
     title?: string;
     model?: string;
     pinned?: boolean;
     kind?: ThreadKind;
-    workspaceRoot?: string | null;
+    workspaceRoot?: unknown;
     contextWindowMode?: unknown;
   };
   const contextWindowMode = parseContextWindowMode(body.contextWindowMode);
-  let workspaceRoot = body.workspaceRoot;
+  if (
+    body.workspaceRoot !== undefined &&
+    body.workspaceRoot !== null &&
+    typeof body.workspaceRoot !== 'string'
+  ) {
+    return res.status(400).json({ error: 'workspaceRoot must be a string or null' });
+  }
+  let workspaceRoot = body.workspaceRoot as string | null | undefined;
   if (typeof workspaceRoot === 'string' && workspaceRoot.trim()) {
     const resolved = await resolveWorkspaceDir(workspaceRoot);
     if (!resolved.ok) return res.status(400).json({ error: resolved.error });
@@ -140,16 +149,16 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
   });
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
   return res.json(thread);
-});
+}));
 
-router.delete('/threads/:id', async (req: Request, res: Response) => {
+router.delete('/threads/:id', asyncRoute(async (req: Request, res: Response) => {
   const store = await getThreadStore();
   const ok = await store.deleteThread(req.params.id);
   if (!ok) return res.status(404).json({ error: 'Thread not found' });
   return res.json({ ok: true });
-});
+}));
 
-router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
+router.get('/threads/:id/ledger', asyncRoute(async (req: Request, res: Response) => {
   const store = await getThreadStore();
   const thread = store.getThread(req.params.id);
   if (!thread) return res.status(404).json({ error: 'Thread not found' });
@@ -159,17 +168,18 @@ router.get('/threads/:id/ledger', async (req: Request, res: Response) => {
   const lastUserSeq = store.lastUserSeq(envelopes);
   const snapshot = await store.readSnapshot(req.params.id);
   const plan = await store.readPlan(req.params.id);
-  const lastRun = await store.readLastRun(req.params.id);
-  const activeRunId = runManager.activeRunIdForThread(req.params.id);
-  return res.json({
+  const lastRun = await readSettledLastRun(store, req.params.id);
+  const activeRun = runManager.activeRun(req.params.id);
+  const ledger: LedgerResponse = {
     messages,
     lastSeq,
-    lastUserSeq,
+    ...(lastUserSeq !== undefined ? { lastUserSeq } : {}),
     snapshot,
     plan,
     ...(lastRun ? { lastRun } : {}),
-    ...(activeRunId ? { activeRunId } : {}),
-  });
-});
+    ...(activeRun ? { activeRun } : {}),
+  };
+  return res.json(ledger);
+}));
 
 export { router as threadsRouter };
