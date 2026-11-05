@@ -2,7 +2,14 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { RunUsage } from '@agent/agent-models';
+import {
+  limitCodeOf,
+  parseThreadLastRun,
+  RUN_CANCELLED_REASON,
+  RUN_INTERRUPTED_REASON,
+  type RunUsage,
+  type ThreadLastRun,
+} from '@agent/agent-models';
 
 import { readCatalog } from './catalog.js';
 import { linesOf, readRunTrace, type TraceLine } from './trace.js';
@@ -22,8 +29,16 @@ export type RunSummary = {
   /** 0 for a user run, 1 for a sub-agent. */
   depth: number;
   parentRunId?: string;
-  /** `run_finish.status`; `unknown` when the run never finished (crash, still running, old trace). */
-  status: 'completed' | 'incomplete' | 'error' | 'unknown';
+  /**
+   * `run_finish.status`, except:
+   * - `cancelled`: the thread's last-run says the user (or the eval runner) cancelled it.
+   * - `interrupted`: no `run_finish` and the last-run still holds the marker written
+   *   at run start: the server stopped mid-run, or the run is still going. An offline
+   *   reader cannot tell those apart; the API's ledger `activeRun` can.
+   * - `unknown`: no `run_finish` and no last-run for this run (older run on the thread, old trace).
+   * last-run.json only describes a thread's latest run, so older cancelled runs read as their `run_finish.status`.
+   */
+  status: 'completed' | 'incomplete' | 'cancelled' | 'interrupted' | 'error' | 'unknown';
   limitReason?: string;
   iterations: number;
   toolCalls: number;
@@ -38,14 +53,30 @@ export type RunSummary = {
   children: RunSummary[];
 };
 
-type LastRun = { runId?: string; status?: string; limitReason?: string; finishedAt?: string };
+const FINISH_STATUSES = new Set(['completed', 'incomplete', 'error']);
 
-const STATUSES = new Set(['completed', 'incomplete', 'error']);
-
-function asStatus(value: unknown): RunSummary['status'] {
-  return typeof value === 'string' && STATUSES.has(value)
+function finishStatus(value: unknown): RunSummary['status'] {
+  return typeof value === 'string' && FINISH_STATUSES.has(value)
     ? (value as RunSummary['status'])
     : 'unknown';
+}
+
+function statusOf(finishLine: { status?: string } | undefined, lastRun: ThreadLastRun | null): RunSummary['status'] {
+  if (lastRun?.limitReason === RUN_CANCELLED_REASON) return 'cancelled';
+  if (finishLine) return finishStatus(finishLine.status);
+  if (lastRun?.limitReason === RUN_INTERRUPTED_REASON) return 'interrupted';
+  return lastRun ? lastRun.status : 'unknown';
+}
+
+/**
+ * Short label for a stop reason: its `limit.*` code, `cancelled`,
+ * `interrupted`, or `other`. The one place readers turn reasons into labels.
+ */
+export function stopLabel(reason: string | undefined): string {
+  if (!reason) return '';
+  if (reason === RUN_CANCELLED_REASON) return 'cancelled';
+  if (reason === RUN_INTERRUPTED_REASON) return 'interrupted';
+  return limitCodeOf(reason) ?? 'other';
 }
 
 /** Pure: a RunSummary from parsed trace lines. Exported for fixtures and the viewer. */
@@ -55,7 +86,7 @@ export function summarizeRun(input: {
   tracePath: string;
   lines: TraceLine[];
   warnings: number;
-  lastRun?: LastRun | null;
+  lastRun?: ThreadLastRun | null;
 }): RunSummary {
   const { lines } = input;
   const start = linesOf(lines, 'run_start')[0];
@@ -65,8 +96,13 @@ export function summarizeRun(input: {
   const lastRun = input.lastRun?.runId === input.runId ? input.lastRun : null;
 
   const startedAt = start?.ts ?? lines[0]?.ts;
-  const finishedAt = finish?.ts ?? lastRun?.finishedAt;
-  const limitReason = finish?.limitReason ?? limit?.reason ?? lastRun?.limitReason;
+  const status = statusOf(finish, lastRun);
+  // A cancel or crash is the reason the run stopped, whatever the loop wrote last.
+  const finishedAt = finish?.ts ?? (status === 'interrupted' ? undefined : lastRun?.finishedAt);
+  const limitReason =
+    status === 'cancelled' || status === 'interrupted'
+      ? lastRun?.limitReason
+      : (finish?.limitReason ?? limit?.reason ?? lastRun?.limitReason);
   const durationMs =
     finish?.durationMs ??
     (startedAt && finishedAt ? Date.parse(finishedAt) - Date.parse(startedAt) : undefined);
@@ -80,7 +116,7 @@ export function summarizeRun(input: {
     ...(start?.posture ? { posture: start.posture } : {}),
     depth: start?.depth ?? 0,
     ...(start?.parentRunId ? { parentRunId: start.parentRunId } : {}),
-    status: asStatus(finish?.status ?? lastRun?.status),
+    status,
     ...(limitReason ? { limitReason } : {}),
     iterations: finish?.iterations ?? linesOf(lines, 'llm_response').length,
     toolCalls: finish?.toolCalls ?? linesOf(lines, 'tool_start').length,
@@ -93,9 +129,9 @@ export function summarizeRun(input: {
   };
 }
 
-async function readLastRun(threadDir: string): Promise<LastRun | null> {
+async function readLastRun(threadDir: string): Promise<ThreadLastRun | null> {
   try {
-    return JSON.parse(await readFile(path.join(threadDir, 'last-run.json'), 'utf8')) as LastRun;
+    return parseThreadLastRun(JSON.parse(await readFile(path.join(threadDir, 'last-run.json'), 'utf8')));
   } catch {
     return null;
   }

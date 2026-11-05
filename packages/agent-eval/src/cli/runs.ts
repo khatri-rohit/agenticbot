@@ -1,4 +1,4 @@
-import { listRuns, type RunSummary } from '../read/runs.js';
+import { listRuns, stopLabel, type RunSummary } from '../read/runs.js';
 import { agentHome, flag, has, type Args } from './args.js';
 import { duration, table, tokens } from './format.js';
 
@@ -10,7 +10,7 @@ function rows(runs: RunSummary[], indent = ''): string[][] {
       run.model ?? '-',
       String(run.depth),
       run.status,
-      (run.limitReason ?? '').split(':')[0] ?? '',
+      stopLabel(run.limitReason),
       String(run.iterations),
       String(run.toolCalls),
       `${tokens(run.usage?.own.promptTokens)}/${tokens(run.usage?.children.promptTokens)}`,

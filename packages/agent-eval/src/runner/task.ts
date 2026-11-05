@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import type { ThinkingValue } from '@agent/agent-models';
+
 export type TaskSuite = 'regression' | 'capability';
 
 /** One eval task (`evals/tasks/<suite>/<id>.json`). Graded on the end state, not the transcript. */
@@ -11,6 +13,8 @@ export type EvalTask = {
   repo: { source: string; commit: string };
   prompt: string;
   posture: 'agent' | 'ask';
+  /** Sent as `thinking` on every run; absent = the model default. The CLI's --thinking overrides it. */
+  thinking?: ThinkingValue;
   checks: { run: string; expectExit: number; timeoutSec?: number }[];
   files: { path: string; mustMatch: string }[];
   scope: { allow: string[] };
@@ -47,12 +51,17 @@ export function parseTask(file: string, raw: unknown): EvalTask {
   if (!Array.isArray(scope.allow)) fail(file, '"scope.allow" must be an array');
   const posture = t.posture ?? 'agent';
   if (posture !== 'agent' && posture !== 'ask') fail(file, '"posture" must be agent or ask');
+  const thinking = t.thinking;
+  if (thinking !== undefined && typeof thinking !== 'boolean' && typeof thinking !== 'string') {
+    fail(file, '"thinking" must be a boolean or a string');
+  }
   return {
     id: str(file, t.id, 'id'),
     suite,
     repo: { source: str(file, repo.source, 'repo.source'), commit: str(file, repo.commit, 'repo.commit') },
     prompt: str(file, t.prompt, 'prompt'),
     posture,
+    ...(thinking !== undefined ? { thinking } : {}),
     checks: (t.checks as Record<string, unknown>[]).map((check, i) => ({
       run: str(file, check.run, `checks[${i}].run`),
       expectExit: typeof check.expectExit === 'number' ? check.expectExit : 0,

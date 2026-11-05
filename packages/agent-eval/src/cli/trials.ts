@@ -14,8 +14,9 @@ export const SEED_HELP = `seed [--home <personal home>] [--eval-home <dir>]
 
 export const RUN_HELP = `run (--task <id> | --suite regression|capability) [--repeat 1] [--model <id>]
     [--api http://localhost:3333/api/agent] [--continues 2] [--max-weekly-percent 10]
-    [--label <name>] [--tasks-dir evals/tasks] [--eval-home <dir>]
-  Run trials through a running API whose AGENT_HOME is the eval home; grade each from its end state.`;
+    [--label <name>] [--tasks-dir evals/tasks] [--eval-home <dir>] [--thinking <value>]
+  Run trials through a running API whose AGENT_HOME is the eval home; grade each from its end state.
+  --thinking: sent on every run, overriding the task's own (e.g. auto = System 1 picks; needs SYSTEMONE_MODE=enforce).`;
 
 export async function seedCommand(args: Args): Promise<number> {
   const info = await seedEvalHome(agentHome(args), evalHome(args));
@@ -38,6 +39,10 @@ export async function runCommandFor(
   const tasks = await loadTasks(path.resolve(flag(args, 'tasks-dir') ?? 'evals/tasks'), select);
   const repeat = intFlag(args, 'repeat', 1);
   const model = flag(args, 'model') ?? WORKSPACE_MODE.model;
+  const thinkingFlag = flag(args, 'thinking');
+  // Booleans are what models without levels take; anything else is a level name or 'auto'.
+  const thinking =
+    thinkingFlag === 'true' ? true : thinkingFlag === 'false' ? false : thinkingFlag;
 
   // Cost estimate from the personal usage log, before spending anything.
   const rate = capacityRates((await readUsage(agentHome(args))).records).find((r) => r.model === model);
@@ -54,6 +59,7 @@ export async function runCommandFor(
     evalHome: evalHome(args),
     apiBase: flag(args, 'api') ?? 'http://localhost:3333/api/agent',
     model,
+    ...(thinking !== undefined ? { thinking } : {}),
     continues: intFlag(args, 'continues', 2),
     maxWeeklyPercent: intFlag(args, 'max-weekly-percent', 10),
     label: flag(args, 'label') ?? (select.id ?? select.suite ?? 'run'),

@@ -4,7 +4,10 @@ import type { RunSummary } from '../read/runs.js';
 import { linesOf, type TraceLine } from '../read/trace.js';
 import type { UsageRecord } from '../read/usage.js';
 
-/** Mirrors the loop's toolStage() for built-ins (packages/agent-core/src/lib/loop/loop.ts). */
+/**
+ * A copy of each built-in tool's `stage` (agent-core `Tool.stage`), because
+ * `tool_start` does not carry it yet (gap E9). Unknown tools count as mutate.
+ */
 export function toolStage(name: string): string {
   if (name === 'load_skill') return 'skill';
   if (['glob', 'grep', 'read_file', 'recall', 'diff'].includes(name)) return 'read';
@@ -20,6 +23,23 @@ export const READ_WALK_MIN_CALLS = 5;
 export const READ_WALK_MAX_LIMIT = 40;
 
 export type ReadWalk = { path: string; calls: number; fromIteration: number; toIteration: number };
+
+/** System 1 over one run, from its `system1_decision` and `system1_report` lines. */
+export type System1Metrics = {
+  mode: 'shadow' | 'enforce';
+  /** Requests sent to the scorer (from the report; null when the run has none). */
+  calls: number | null;
+  decisions: number;
+  /** Decisions that changed what was sent to the main model (enforce only). */
+  applied: number;
+  /** Decisions whose choice differed from the baseline: in shadow, what enforce would have changed. */
+  changed: number;
+  /** `baseline→chosen` wire values, counted (`default` when unset). */
+  transitions: Record<string, number>;
+  /** Fallbacks by kind, summed over sites. */
+  fallbacks: Record<string, number>;
+  latencyMs: { p50: number; p95: number } | null;
+};
 
 export type RunMetrics = {
   runId: string;
@@ -59,9 +79,18 @@ export type RunMetrics = {
     budgetWarnings: number;
     evictions: number;
     inRunCompactions: number;
+    /** In-run compaction could not get under its low mark. */
+    prefixHeavy: number;
+    /** Thread compactions after the run (`context_compacted`). */
+    threadCompactions: number;
     limits: string[];
   };
+  skills: { loaded: number; loadedTokens: number; evicted: number };
+  /** `memory_gate` verdicts (`apply` / `reject` / `stage`), counted. */
+  memoryGate: Record<string, number>;
   reasoningEffort: Record<string, number>;
+  /** Null when the run has no System 1 lines (System 1 off). */
+  system1: System1Metrics | null;
   /** Balance change across the run, from usage.jsonl (legacy session/weekly plans). */
   capacity: { weeklyPercent: number | null; sessionPercent: number | null } | null;
 };
@@ -149,6 +178,42 @@ function reReads(lines: TraceLine[]): { recall: number; total: number | null } {
   return { recall, total: recall + reread };
 }
 
+function system1Metrics(lines: TraceLine[]): System1Metrics | null {
+  const decisions = linesOf(lines, 'system1_decision').map((line) => line.decision);
+  const report = linesOf(lines, 'system1_report').at(-1)?.report;
+  const mode = report?.mode ?? decisions[0]?.mode;
+  if (!mode) return null;
+
+  const transitions: Record<string, number> = {};
+  let changed = 0;
+  for (const decision of decisions) {
+    const baseline = decision.baseline ?? 'default';
+    const chosen = decision.chosen ?? baseline;
+    count(transitions, `${baseline}→${chosen}`);
+    if (chosen !== baseline) changed += 1;
+  }
+  const fallbacks: Record<string, number> = {};
+  for (const fallback of report?.fallbacks ?? []) {
+    fallbacks[fallback.kind] = (fallbacks[fallback.kind] ?? 0) + fallback.count;
+  }
+  const latencies = decisions
+    .map((decision) => decision.latencyMs)
+    .filter((value): value is number => typeof value === 'number')
+    .sort((a, b) => a - b);
+  return {
+    mode,
+    calls: report?.calls ?? null,
+    decisions: decisions.length,
+    applied: decisions.filter((decision) => decision.applied).length,
+    changed,
+    transitions,
+    fallbacks,
+    latencyMs:
+      report?.latencyMs ??
+      (latencies.length > 0 ? { p50: percentile(latencies, 50), p95: percentile(latencies, 95) } : null),
+  };
+}
+
 function usageDelta(record: UsageRecord | undefined): RunMetrics['capacity'] {
   const before = record?.balanceBefore;
   const after = record?.balanceAfter;
@@ -213,6 +278,9 @@ export function computeRunMetrics(input: {
     count(effort, request.reasoningEffort ?? 'default');
   }
   const rereads = reReads(lines);
+  const skillsLoaded = linesOf(lines, 'skill_loaded');
+  const memoryGate: Record<string, number> = {};
+  for (const gate of linesOf(lines, 'memory_gate')) count(memoryGate, gate.verdict);
 
   return {
     runId: run.runId,
@@ -258,9 +326,18 @@ export function computeRunMetrics(input: {
       budgetWarnings: linesOf(lines, 'budget_warning').length,
       evictions: linesOf(lines, 'context_evicted').length,
       inRunCompactions: linesOf(lines, 'context_compacted_inrun').length,
+      prefixHeavy: linesOf(lines, 'context_prefix_heavy').length,
+      threadCompactions: linesOf(lines, 'context_compacted').length,
       limits: linesOf(lines, 'limit').map((line) => line.reason),
     },
+    skills: {
+      loaded: skillsLoaded.length,
+      loadedTokens: skillsLoaded.reduce((sum, line) => sum + line.tokens, 0),
+      evicted: linesOf(lines, 'skill_evicted').length,
+    },
+    memoryGate,
     reasoningEffort: effort,
+    system1: system1Metrics(lines),
     capacity: usageDelta(input.usage?.find((record) => record.runId === run.runId)),
   };
 }

@@ -3,6 +3,7 @@ import {
   listRuns,
   loadRunMetrics,
   readRunTrace,
+  stopLabel,
   type RunMetrics,
   type TraceLine,
 } from '@agent/agent-eval';
@@ -24,6 +25,9 @@ const MARKERS = new Set([
   'tool_note',
   'skill_loaded',
   'skill_evicted',
+  'memory_gate',
+  'context_compacted',
+  'system1_report',
 ]);
 
 function describe(line: TraceLine): string {
@@ -60,10 +64,26 @@ function describe(line: TraceLine): string {
       return `skill loaded · ${line.name} (${line.source}, ~${tokens(line.tokens)})`;
     case 'skill_evicted':
       return `skill retired · ${line.name}`;
+    case 'memory_gate':
+      return `memory gate · ${line.verdict} ${line.target} — ${clip(line.why, 120)}`;
+    case 'context_compacted':
+      return `thread compacted through #${line.throughSeq} — ${clip(line.briefPreview, 120)}`;
+    case 'system1_decision': {
+      const d = line.decision;
+      return `system 1 · ${d.mode} · ${d.baseline ?? 'default'} → ${d.chosen ?? d.baseline ?? 'default'}${d.applied ? ' (applied)' : ''} · ${d.reason}${d.latencyMs !== undefined ? ` · ${d.latencyMs}ms` : ''}`;
+    }
+    case 'system1_report': {
+      const r = line.report;
+      const fallbacks = r.fallbacks.map((f) => `${f.kind} ×${f.count}`).join(', ');
+      return `system 1 report · ${r.mode} · ${r.calls} calls, ${r.applied} applied${r.latencyMs ? ` · p50 ${r.latencyMs.p50}ms / p95 ${r.latencyMs.p95}ms` : ''}${fallbacks ? ` · fallbacks ${fallbacks}` : ''}`;
+    }
     case 'run_finish':
       return `run finish · ${line.status ?? ''}${line.limitReason ? ` · ${line.limitReason}` : ''} · ${duration(line.durationMs)}`;
-    default:
-      return `${line.type} ${clip(JSON.stringify(line), 160)}`;
+    default: {
+      // Every known type is handled; newer traces can still carry types this viewer predates.
+      const unknown = line as { type: string };
+      return `${unknown.type} ${clip(JSON.stringify(unknown), 160)}`;
+    }
   }
 }
 
@@ -74,7 +94,7 @@ function iterationOf(line: TraceLine): number | undefined {
 
 function MetricsPanel({ m }: { m: RunMetrics }) {
   const cards: [string, string][] = [
-    ['Status', `${m.status}${m.limitReason ? ` · ${m.limitReason.split(':')[0]}` : ''}`],
+    ['Status', `${m.status}${m.limitReason ? ` · ${stopLabel(m.limitReason)}` : ''}`],
     ['Iterations / tools', `${m.iterations} / ${m.toolCalls}`],
     ['Prompt total', `${tokens(m.promptTokens.total)} (sub-agents ${percent(m.childShare)})`],
     ['Per call median / p90', m.promptPerCall ? `${tokens(m.promptPerCall.median)} / ${tokens(m.promptPerCall.p90)}` : '–'],
@@ -86,6 +106,14 @@ function MetricsPanel({ m }: { m: RunMetrics }) {
     ['Re-reads after eviction', m.reReadsAfterEviction === null ? 'n/a (old trace)' : String(m.reReadsAfterEviction)],
     ['Steering', `stall ${m.steering.stallNudges} · gate ${m.steering.researchGates} · notes ${m.steering.toolNotes}`],
     ['Capacity', m.capacity ? `weekly ${m.capacity.weeklyPercent}%` : '–'],
+    [
+      'System 1',
+      m.system1
+        ? `${m.system1.mode} · ${m.system1.decisions} decisions · ${m.system1.mode === 'shadow' ? 'would change' : 'applied'} ${m.system1.mode === 'shadow' ? m.system1.changed : m.system1.applied}${m.system1.latencyMs ? ` · p95 ${m.system1.latencyMs.p95}ms` : ''}`
+        : 'off',
+    ],
+    ['Memory gate', Object.entries(m.memoryGate).map(([verdict, n]) => `${verdict} ${n}`).join(' · ') || 'none'],
+    ['Skills', `loaded ${m.skills.loaded} (~${tokens(m.skills.loadedTokens)}) · retired ${m.skills.evicted}`],
   ];
   return (
     <div className="grid">

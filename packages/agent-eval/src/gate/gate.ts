@@ -26,15 +26,33 @@ export type GateResult =
   | { kind: 'refuse'; reasons: string[] }
   | { kind: 'verdict'; passed: boolean; suiteFailures: string[]; tasks: TaskVerdict[] };
 
+/** What the comparison is for. `system1`: baseline and candidate differ only in their System 1 setup (plan N5). */
+export type GateCompare = 'harness' | 'system1';
+
 /**
  * Compare a candidate suite run with the baseline (plan §8). Refuses (no
- * verdict) when the two were measured on a different model, seed or task
- * definitions; a different harness version is what the gate tests.
+ * verdict) when the two were measured on a different model, seed, task
+ * definitions or System 1 setup; a different harness version is what the
+ * gate tests. With `compare: 'system1'` the setups must differ, and the
+ * candidate must also lower the median prompt tokens of the tasks that
+ * passed in both (same pass rate, fewer tokens).
  */
-export function compareToBaseline(baseline: Baseline, candidate: SuiteStats): GateResult {
+export function compareToBaseline(
+  baseline: Baseline,
+  candidate: SuiteStats,
+  compare: GateCompare = 'harness',
+): GateResult {
   const refuse: string[] = [];
   if (baseline.model !== candidate.model) refuse.push(`model differs: baseline ${baseline.model}, candidate ${candidate.model}`);
   if (baseline.seedHash !== candidate.seedHash) refuse.push('seedHash differs: the eval home was re-seeded with different skills, agents or memory');
+  // Baselines recorded before setups were tracked have none.
+  const baseSetup = baseline.system1Setup ?? 'unrecorded';
+  if (compare === 'harness' && baseSetup !== candidate.system1Setup) {
+    refuse.push(`System 1 setup differs: baseline ${baseSetup}, candidate ${candidate.system1Setup}. Pass --compare system1 to compare setups`);
+  }
+  if (compare === 'system1' && baseSetup === candidate.system1Setup) {
+    refuse.push(`--compare system1 needs different setups; both are ${baseSetup}`);
+  }
   for (const [taskId, base] of Object.entries(baseline.tasks)) {
     const cand = candidate.tasks[taskId];
     if (!cand) refuse.push(`task ${taskId} is in the baseline but did not run`);
@@ -86,6 +104,18 @@ export function compareToBaseline(baseline: Baseline, candidate: SuiteStats): Ga
     suiteFailures.push(
       `suite pass rate dropped ${Math.round(drop)} points (${Math.round(baseline.passRate * 100)}% → ${Math.round(candidate.passRate * 100)}%, ${Math.round(lostOverall)} trials)`,
     );
+  }
+  if (compare === 'system1') {
+    const shared = tasks.filter(
+      (task) => task.baseline?.medianPromptTokens != null && task.candidate?.medianPromptTokens != null,
+    );
+    const base = shared.reduce((sum, task) => sum + task.baseline!.medianPromptTokens!, 0);
+    const cand = shared.reduce((sum, task) => sum + task.candidate!.medianPromptTokens!, 0);
+    if (shared.length === 0) {
+      suiteFailures.push('no task passed in both setups: tokens cannot be compared');
+    } else if (cand >= base) {
+      suiteFailures.push(`${candidate.system1Setup} did not lower median prompt tokens (${base} → ${cand} over ${shared.length} task(s))`);
+    }
   }
   const passed = suiteFailures.length === 0 && tasks.every((task) => task.failures.length === 0);
   return { kind: 'verdict', passed, suiteFailures, tasks };

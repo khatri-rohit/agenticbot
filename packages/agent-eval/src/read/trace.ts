@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type { TraceEvent } from '@agent/agent-models';
 
 /**
- * One trace line. The JSONL sink (apps/api/src/lib/trace-sink.ts) stamps
+ * One trace line. The JSONL sink (apps/api/src/platform/trace-sink.ts) stamps
  * `v`, `ts` and `seq` on each line; they are not part of TraceEvent. Read
  * timing and order from here, never from fields the event union lacks.
  */

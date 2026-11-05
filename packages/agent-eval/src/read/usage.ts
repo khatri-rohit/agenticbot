@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import type { RunUsage } from '@agent/agent-models';
 
-/** Balance point as written by apps/api/src/lib/capacity.ts (`balancePoint`). */
+/** Balance point as written by apps/api/src/models/capacity.ts (`balancePoint`). */
 export type UsageBalancePoint =
   | { sessionRemainingPercent: number; weeklyRemainingPercent: number }
   | { balanceUsd: number; allowanceUsd: number; purchasedUsd?: number };

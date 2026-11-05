@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { isPauseStop, isResumableStop, type ThinkingValue } from '@agent/agent-models';
+
 import { readCatalog } from '../read/catalog.js';
 import { listRuns } from '../read/runs.js';
 import { flattenRuns, loadRunMetrics } from '../metrics/load.js';
@@ -14,9 +16,11 @@ import { gradeTrial, type Grade } from './score.js';
 import { readSeed } from './seed.js';
 import type { LoadedTask, TaskSuite } from './task.js';
 
-/** Same set the UI offers Continue for (message-list.tsx isResumableLimit). */
-const RESUMABLE = /^limit\.(tokens|wall|iterations|tools|capacity|research):/;
 const CONTINUE_MESSAGE = 'Continue from where the last run stopped.';
+/** After cancelling a run past its deadline, how long to wait for it to settle before giving up on the trial. */
+const CANCEL_SETTLE_MS = 120_000;
+/** Reason prefix of trials skipped because the account ran out; the rest of the suite is skipped too. */
+const CAPACITY_SKIP = 'capacity';
 
 export type TrialStatus = 'passed' | 'failed' | 'skipped' | 'error';
 
@@ -30,6 +34,13 @@ export type TrialResult = {
   seedHash: string;
   taskHash: string;
   model: string;
+  /** `thinking` sent on every run of the trial; absent = the model default. */
+  thinking?: ThinkingValue;
+  /**
+   * The System 1 setup the trial ran under (`system1SetupOf`). The gate
+   * compares only like setups unless asked to compare them (plan D-2).
+   */
+  system1Setup?: string;
   status: TrialStatus;
   /** Why it was skipped or errored. */
   reason?: string;
@@ -59,6 +70,8 @@ export type RunnerOptions = {
   evalHome: string;
   apiBase: string;
   model: string;
+  /** `--thinking`; overrides the task's own `thinking`. */
+  thinking?: ThinkingValue;
   /** Continue messages allowed per trial on resumable limits. */
   continues: number;
   /** Stop the suite once this many weekly-% points were used since it started. */
@@ -87,6 +100,17 @@ async function harnessVersion(root: string): Promise<{ sha: string; dirty: strin
     sha: head.stdout.trim(),
     dirty: diff.stdout.trim() ? createHash('sha256').update(diff.stdout).digest('hex').slice(0, 16) : null,
   };
+}
+
+/**
+ * `<mode>/thinking=<value>`, e.g. `enforce/thinking=auto`. The mode is what
+ * the traces show (`off` without System 1 lines, `mixed` when runs disagree),
+ * not what the API was asked for.
+ */
+export function system1SetupOf(metrics: RunMetrics[], thinking: ThinkingValue | undefined): string {
+  const modes = new Set(metrics.map((m) => m.system1?.mode ?? 'off'));
+  const mode = modes.size === 0 ? 'off' : modes.size === 1 ? [...modes][0]! : 'mixed';
+  return `${mode}/thinking=${thinking === undefined ? 'default' : String(thinking)}`;
 }
 
 /** The API must be serving the eval home; a thread it creates must appear in that catalog. */
@@ -130,12 +154,14 @@ async function runTrial(
 ): Promise<TrialResult> {
   const { task } = loaded;
   const startedAt = new Date();
+  const thinking = opts.thinking ?? task.thinking;
   const result: TrialResult = {
     ...base,
     taskId: task.id,
     suite: task.suite,
     trial,
     taskHash: loaded.taskHash,
+    ...(thinking !== undefined ? { thinking } : {}),
     status: 'error',
     continues: 0,
     runIds: [],
@@ -164,16 +190,28 @@ async function runTrial(
     let message = task.prompt;
     let limitReason: string | undefined;
     for (;;) {
-      const { runId } = await api.startRun({ threadId: thread.id, content: message, model: opts.model, posture: task.posture });
+      const { runId } = await api.startRun({
+        threadId: thread.id,
+        content: message,
+        model: opts.model,
+        posture: task.posture,
+        ...(thinking !== undefined ? { thinking } : {}),
+      });
       result.runIds.push(runId);
-      const outcome = await api.waitForRun(runId, Math.max(60_000, deadline - Date.now()));
-      if (outcome === 'timeout') {
+      const end = await api.waitForRun(runId, Math.max(60_000, deadline - Date.now()));
+      if (end === 'timeout') {
         await api.cancelRun(runId).catch(() => undefined);
+        // Grade only a settled workspace: a cancelled run can still be finishing a write.
+        if ((await api.waitForRun(runId, CANCEL_SETTLE_MS)) === 'timeout') {
+          throw new Error(`run ${runId} did not settle within ${CANCEL_SETTLE_MS / 1000}s of its cancel; workspace not graded`);
+        }
         limitReason = 'eval.timeout: trial passed its hard deadline';
         break;
       }
       limitReason = (await api.ledger(thread.id)).lastRun?.limitReason;
-      if (!limitReason || !RESUMABLE.test(limitReason) || result.continues >= opts.continues) break;
+      // A pause (account ran out) is resumable for a person, not for a trial.
+      if (!limitReason || !isResumableStop(limitReason) || isPauseStop(limitReason)) break;
+      if (result.continues >= opts.continues) break;
       result.continues += 1;
       message = CONTINUE_MESSAGE;
     }
@@ -184,6 +222,15 @@ async function runTrial(
     );
     const metrics = await loadRunMetrics(opts.evalHome, runs);
     result.metrics = metrics;
+    result.system1Setup = system1SetupOf(metrics, thinking);
+
+    // The account ran out, not the agent: the trial gets no grade (plan D-3).
+    if (limitReason && isPauseStop(limitReason)) {
+      result.status = 'skipped';
+      result.reason = `${CAPACITY_SKIP}: ${limitReason}`;
+      result.finishedAt = new Date().toISOString();
+      return result;
+    }
     const promptTokens = metrics.reduce((sum, m) => sum + m.promptTokens.total, 0);
     const minutes = (Date.now() - startedAt.getTime()) / 60_000;
     result.promptTokens = promptTokens;
@@ -250,7 +297,7 @@ export async function runSuite(opts: RunnerOptions): Promise<SuiteRun> {
       }
       const capacity =
         (now.session !== null && now.session <= 1) || (now.weekly !== null && now.weekly <= 1)
-          ? 'capacity: session or weekly allowance spent'
+          ? `${CAPACITY_SKIP}: session or weekly allowance spent`
           : undefined;
       const skip = stopped ?? capacity;
       const result: TrialResult = skip
@@ -269,6 +316,8 @@ export async function runSuite(opts: RunnerOptions): Promise<SuiteRun> {
           }
         : await runTrial(api, opts, loaded, trial, base);
       results.push(result);
+      // A run paused on capacity: every later trial would pause too.
+      if (!stopped && !skip && result.status === 'skipped') stopped = result.reason;
       await writeFile(
         path.join(resultsDir, `${loaded.task.id}-${trial}.json`),
         `${JSON.stringify(result, null, 2)}\n`,

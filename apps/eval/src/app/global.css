@@ -112,11 +112,13 @@ td.wrap {
   color: var(--ok);
 }
 
-.status-incomplete {
+.status-incomplete,
+.status-cancelled {
   color: var(--warn);
 }
 
 .status-error,
+.status-interrupted,
 .status-unknown {
   color: var(--bad);
 }

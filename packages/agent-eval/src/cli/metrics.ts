@@ -1,13 +1,28 @@
 import { findRun, flattenRuns, loadRunMetrics } from '../metrics/load.js';
 import type { RunMetrics } from '../metrics/run-metrics.js';
 import { capacityRates, summarizeMetrics } from '../metrics/thread-metrics.js';
-import { listRuns } from '../read/runs.js';
+import { listRuns, stopLabel } from '../read/runs.js';
 import { readUsage } from '../read/usage.js';
 import { agentHome, flag, has, type Args } from './args.js';
 import { duration, percent, table, tokens } from './format.js';
 
 export const METRICS_HELP = `metrics (--run <id> | --thread <id> | --since <iso>) [--home <dir>] [--json]
   Per-run metrics from traces, ledger and usage log; a summary when several runs match.`;
+
+function counts(map: Record<string, number>): string {
+  return Object.entries(map).map(([key, n]) => `${key} ${n}`).join(', ') || '-';
+}
+
+function describeSystem1(s1: RunMetrics['system1']): string {
+  if (!s1) return 'off (no System 1 lines)';
+  return [
+    `${s1.mode}, ${s1.decisions} decisions (applied ${s1.applied}, ${s1.mode === 'shadow' ? 'would change' : 'changed'} ${s1.changed})`,
+    `calls ${s1.calls ?? '-'}`,
+    `latency ${s1.latencyMs ? `p50 ${s1.latencyMs.p50}ms / p95 ${s1.latencyMs.p95}ms` : '-'}`,
+    `fallbacks ${counts(s1.fallbacks)}`,
+    `baseline→chosen ${counts(s1.transitions)}`,
+  ].join('; ');
+}
 
 function describe(m: RunMetrics): string {
   const lines = [
@@ -23,10 +38,13 @@ function describe(m: RunMetrics): string {
     `edits ${m.edits}${m.firstEdit ? `, first at iteration ${m.firstEdit.iteration} after ${tokens(m.firstEdit.promptTokensBefore)}` : ''}; idle share ${percent(m.idleShare)}`,
     `read walks: ${m.readWalks.length ? m.readWalks.map((w) => `${w.path} ×${w.calls} (it ${w.fromIteration}–${w.toIteration})`).join('; ') : 'none'}`,
     `re-reads after eviction: ${m.reReadsAfterEviction ?? 'n/a (trace predates eviction ids)'} (recall ${m.recallCalls})`,
-    `steering: stall ${m.steering.stallNudges}, research gate ${m.steering.researchGates}, notes ${m.steering.toolNotes}, budget warnings ${m.steering.budgetWarnings}, evictions ${m.steering.evictions}, in-run compactions ${m.steering.inRunCompactions}`,
+    `steering: stall ${m.steering.stallNudges}, research gate ${m.steering.researchGates}, notes ${m.steering.toolNotes}, budget warnings ${m.steering.budgetWarnings}, evictions ${m.steering.evictions}, in-run compactions ${m.steering.inRunCompactions}, prefix heavy ${m.steering.prefixHeavy}, thread compactions ${m.steering.threadCompactions}`,
     `limits: ${m.steering.limits.join(' | ') || 'none'}`,
     `tools: ${Object.entries(m.toolsByName).sort((a, b) => b[1] - a[1]).map(([name, n]) => `${name} ${n}`).join(', ')}`,
-    `reasoning effort: ${Object.entries(m.reasoningEffort).map(([k, n]) => `${k} ${n}`).join(', ') || '-'}`,
+    `skills: loaded ${m.skills.loaded} (~${tokens(m.skills.loadedTokens)}), retired ${m.skills.evicted}`,
+    `memory gate: ${counts(m.memoryGate)}`,
+    `reasoning effort: ${counts(m.reasoningEffort)}`,
+    `system 1: ${describeSystem1(m.system1)}`,
     `capacity: ${m.capacity ? `weekly ${m.capacity.weeklyPercent}%, session ${m.capacity.sessionPercent}%` : 'no usage row'}`,
   ];
   return lines.join('\n');
@@ -73,7 +91,7 @@ export async function metricsCommand(args: Args): Promise<number> {
         String(m.readWalks.length),
         String(m.networkCalls),
         String(m.steering.stallNudges),
-        m.limitReason?.split(':')[0] ?? '',
+        stopLabel(m.limitReason),
       ]),
     ),
   );
@@ -81,6 +99,13 @@ export async function metricsCommand(args: Args): Promise<number> {
   console.log(
     `\n${summary.runs} runs, ${tokens(summary.promptTokens)} prompt tokens, ${summary.edits} edits, median idle share ${percent(summary.medianIdleShare)}, ${summary.readWalks} read walks`,
   );
+  if (Object.keys(summary.memoryGate).length > 0) console.log(`memory gate: ${counts(summary.memoryGate)}`);
+  if (summary.system1) {
+    const s1 = summary.system1;
+    console.log(
+      `system 1: ${s1.runs} runs (${counts(s1.modes)}), ${s1.decisions} decisions, applied ${s1.applied}, changed ${s1.changed}, fallbacks ${s1.fallbacks}`,
+    );
+  }
   const rates = capacityRates((await readUsage(home)).records);
   for (const rate of rates) {
     console.log(

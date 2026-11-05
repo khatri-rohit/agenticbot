@@ -1,4 +1,11 @@
-import type { ThreadLastRun } from '@agent/agent-models';
+import type { ThinkingValue, ThreadLastRun } from '@agent/agent-models';
+
+/**
+ * How waiting for a run ended. `cancelled`: `run.settled` with `cancelled`.
+ * `gone`: the API no longer holds the run, or the stream closed without a
+ * settle; the ledger is the truth either way.
+ */
+export type RunEnd = 'settled' | 'cancelled' | 'gone' | 'timeout';
 
 /**
  * The few API calls a trial needs (base `http://localhost:<port>/api/agent`).
@@ -32,12 +39,15 @@ export class ApiClient {
     content: string;
     model: string;
     posture: 'agent' | 'ask';
+    /** Omitted: the model default. `'auto'`: System 1 picks per iteration (enforce mode only). */
+    thinking?: ThinkingValue;
   }): Promise<{ runId: string }> {
     return this.json('POST', '/run', {
       threadId: input.threadId,
       message: { content: input.content },
       model: input.model,
       posture: input.posture,
+      ...(input.thinking !== undefined ? { thinking: input.thinking } : {}),
       webSearch: true,
       contextWindowMode: 'default',
     });
@@ -62,11 +72,12 @@ export class ApiClient {
   }
 
   /**
-   * Wait for a run to finish: read its SSE stream until `run.settled`,
-   * `run.error`, or `event: done` (the run had already finished). Times out
-   * after `timeoutMs`.
+   * Wait for a run to settle: read its SSE stream until `run.settled` or
+   * `event: done` (the run had already settled). Every run ends with
+   * `run.settled`, so its workspace and ledger are final after it; `run.error`
+   * is only the cancel notice before it. Times out after `timeoutMs`.
    */
-  async waitForRun(runId: string, timeoutMs: number): Promise<'settled' | 'error' | 'gone' | 'timeout'> {
+  async waitForRun(runId: string, timeoutMs: number): Promise<RunEnd> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -84,12 +95,11 @@ export class ApiClient {
           if (/^event: done$/m.test(frame)) return 'settled';
           const data = frame.match(/^data: (.*)$/m)?.[1];
           if (!data) continue;
-          const type = (JSON.parse(data) as { type?: string }).type;
-          if (type === 'run.settled') return 'settled';
-          if (type === 'run.error') return 'error';
+          const event = JSON.parse(data) as { type?: string; cancelled?: boolean };
+          if (event.type === 'run.settled') return event.cancelled ? 'cancelled' : 'settled';
         }
       }
-      return 'settled';
+      return 'gone';
     } catch (error) {
       if (controller.signal.aborted) return 'timeout';
       throw error;

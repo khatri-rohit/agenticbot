@@ -1,4 +1,4 @@
-import { listRuns, readCatalog, type RunSummary } from '@agent/agent-eval';
+import { listRuns, readCatalog, stopLabel, type RunSummary } from '@agent/agent-eval';
 
 import { agentHome } from '../lib/home';
 import { tokens, when } from '../lib/format';
@@ -49,7 +49,7 @@ export default async function ThreadsPage() {
                   <td>{thread.model}</td>
                   <td>{threadRuns.length}</td>
                   <td className={last ? `status-${last.status}` : 'muted'}>
-                    {last ? `${last.status}${last.limitReason ? ` · ${last.limitReason.split(':')[0]}` : ''}` : '–'}
+                    {last ? `${last.status}${last.limitReason ? ` · ${stopLabel(last.limitReason)}` : ''}` : '–'}
                   </td>
                   <td>{tokens(prompt)}</td>
                   <td>{when(thread.updatedAt)}</td>

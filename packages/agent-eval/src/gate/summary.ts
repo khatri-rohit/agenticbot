@@ -29,6 +29,8 @@ export type SuiteStats = {
   seedHash: string;
   harnessSha: string;
   harnessDirty: string | null;
+  /** `TrialResult.system1Setup` shared by every trial; `unrecorded` for results written before it existed. */
+  system1Setup: string;
   tasks: Record<string, TaskStats>;
   /** Passing trials ÷ trials that ran, over the whole suite. */
   passRate: number;
@@ -61,6 +63,9 @@ export function summarizeSuite(results: TrialResult[]): SuiteStats {
       if (result[key] !== first[key]) throw new Error(`Results mix ${key} values (${first[key]} vs ${result[key]}).`);
     }
   }
+  // Trials that errored before any run have no setup; the others must agree.
+  const setups = new Set(ran.flatMap((result) => (result.system1Setup ? [result.system1Setup] : [])));
+  if (setups.size > 1) throw new Error(`Results mix System 1 setups (${[...setups].join(', ')}).`);
   const byTask = new Map<string, TrialResult[]>();
   for (const result of ran) byTask.set(result.taskId, [...(byTask.get(result.taskId) ?? []), result]);
 
@@ -96,6 +101,7 @@ export function summarizeSuite(results: TrialResult[]): SuiteStats {
     seedHash: first.seedHash,
     harnessSha: first.harnessSha,
     harnessDirty: first.harnessDirty,
+    system1Setup: [...setups][0] ?? 'unrecorded',
     tasks,
     passRate: ran.filter((result) => result.status === 'passed').length / ran.length,
   };

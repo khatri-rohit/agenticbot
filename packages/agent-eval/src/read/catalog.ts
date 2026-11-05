@@ -12,7 +12,7 @@ function openReadOnly(file: string): DatabaseSync {
 
 /**
  * Thread row from `catalog.db`. A read contract over the columns the API's
- * ThreadStore writes (apps/api/src/lib/thread-store.ts), not its type.
+ * ThreadStore writes (apps/api/src/threads/thread-store.ts), not its type.
  */
 export type ThreadRecord = {
   id: string;

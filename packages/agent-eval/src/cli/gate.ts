@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import { readBaseline, recordBaseline } from '../gate/baseline.js';
-import { compareToBaseline, type GateResult } from '../gate/gate.js';
+import { compareToBaseline, type GateCompare, type GateResult } from '../gate/gate.js';
 import { readResults, summarizeSuite, type SuiteStats } from '../gate/summary.js';
 import { flag, type Args } from './args.js';
 import { table, tokens } from './format.js';
@@ -12,8 +12,16 @@ const RUN_OPTIONS = `[--results <dir> | run options: --repeat 3 --model … --ap
 export const BASELINE_HELP = `baseline --suite regression ${RUN_OPTIONS} [--accept "<reason>"] [--baselines evals/baselines]
   Record the suite's baseline. Refuses to replace one unless the candidate passes the gate or --accept is given.`;
 
-export const GATE_HELP = `gate --suite regression ${RUN_OPTIONS} [--baselines evals/baselines]
-  Compare a suite run with the baseline. Exit 0 pass, 1 fail, 2 refused (model, seed or tasks differ).`;
+export const GATE_HELP = `gate --suite regression ${RUN_OPTIONS} [--baselines evals/baselines] [--compare system1]
+  Compare a suite run with the baseline. Exit 0 pass, 1 fail, 2 refused (model, seed, tasks or System 1 setup differ).
+  --compare system1: the setups must differ; passes on the same pass rate with lower median prompt tokens.`;
+
+function compareFlag(args: Args): GateCompare {
+  const value = flag(args, 'compare');
+  if (value === undefined) return 'harness';
+  if (value !== 'system1') throw new Error('--compare must be system1');
+  return value;
+}
 
 /** Stats from an existing results folder, or from a fresh suite run (spends capacity). */
 async function candidate(args: Args, suite: string): Promise<SuiteStats> {
@@ -85,7 +93,10 @@ export async function gateCommand(args: Args): Promise<number> {
     console.log(`REFUSED (no verdict):\n- no baseline for suite "${suite}" in ${baselinesDir}. Record one with: baseline --suite ${suite}`);
     return 2;
   }
-  const result = compareToBaseline(baseline, await candidate(args, suite));
+  const compare = compareFlag(args);
+  const stats = await candidate(args, suite);
+  console.log(`System 1 setup: baseline ${baseline.system1Setup ?? 'unrecorded'} → candidate ${stats.system1Setup}`);
+  const result = compareToBaseline(baseline, stats, compare);
   printVerdict(result);
   if (result.kind === 'refuse') return 2;
   return result.passed ? 0 : 1;

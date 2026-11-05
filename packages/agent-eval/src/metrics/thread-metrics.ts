@@ -1,9 +1,11 @@
+import { stopLabel } from '../read/runs.js';
 import type { UsageRecord } from '../read/usage.js';
 import type { RunMetrics } from './run-metrics.js';
 
 export type MetricsSummary = {
   runs: number;
   byStatus: Record<string, number>;
+  /** Stop reasons by `stopLabel`. */
   limits: Record<string, number>;
   promptTokens: number;
   completionTokens: number;
@@ -14,6 +16,16 @@ export type MetricsSummary = {
   readWalks: number;
   stallNudges: number;
   researchGates: number;
+  memoryGate: Record<string, number>;
+  /** Over runs with System 1 lines; null when none had any. */
+  system1: {
+    runs: number;
+    modes: Record<string, number>;
+    decisions: number;
+    applied: number;
+    changed: number;
+    fallbacks: number;
+  } | null;
 };
 
 function median(values: number[]): number | null {
@@ -27,11 +39,20 @@ function median(values: number[]): number | null {
 export function summarizeMetrics(list: RunMetrics[]): MetricsSummary {
   const byStatus: Record<string, number> = {};
   const limits: Record<string, number> = {};
+  const memoryGate: Record<string, number> = {};
   for (const metrics of list) {
     byStatus[metrics.status] = (byStatus[metrics.status] ?? 0) + 1;
-    const code = metrics.limitReason?.split(':')[0];
-    if (code) limits[code] = (limits[code] ?? 0) + 1;
+    const label = stopLabel(metrics.limitReason);
+    if (label) limits[label] = (limits[label] ?? 0) + 1;
+    for (const [verdict, n] of Object.entries(metrics.memoryGate)) {
+      memoryGate[verdict] = (memoryGate[verdict] ?? 0) + n;
+    }
   }
+  const withSystem1 = list.flatMap((m) => (m.system1 ? [m.system1] : []));
+  const modes: Record<string, number> = {};
+  for (const s1 of withSystem1) modes[s1.mode] = (modes[s1.mode] ?? 0) + 1;
+  const sum = (pick: (s1: (typeof withSystem1)[number]) => number) =>
+    withSystem1.reduce((total, s1) => total + pick(s1), 0);
   return {
     runs: list.length,
     byStatus,
@@ -46,6 +67,18 @@ export function summarizeMetrics(list: RunMetrics[]): MetricsSummary {
     readWalks: list.reduce((sum, m) => sum + m.readWalks.length, 0),
     stallNudges: list.reduce((sum, m) => sum + m.steering.stallNudges, 0),
     researchGates: list.reduce((sum, m) => sum + m.steering.researchGates, 0),
+    memoryGate,
+    system1:
+      withSystem1.length === 0
+        ? null
+        : {
+            runs: withSystem1.length,
+            modes,
+            decisions: sum((s1) => s1.decisions),
+            applied: sum((s1) => s1.applied),
+            changed: sum((s1) => s1.changed),
+            fallbacks: sum((s1) => Object.values(s1.fallbacks).reduce((a, b) => a + b, 0)),
+          },
   };
 }
 
