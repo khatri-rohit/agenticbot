@@ -1,21 +1,9 @@
 import type { LedgerEnvelope } from '@agent/agent-models';
 
+import { iterationShape, iterationsOf, PLAN_TOOLS } from '../read/iterations.js';
 import type { RunSummary } from '../read/runs.js';
 import { linesOf, type TraceLine } from '../read/trace.js';
 import type { UsageRecord } from '../read/usage.js';
-
-/**
- * A copy of each built-in tool's `stage` (agent-core `Tool.stage`), because
- * `tool_start` does not carry it yet (gap E9). Unknown tools count as mutate.
- */
-export function toolStage(name: string): string {
-  if (name === 'load_skill') return 'skill';
-  if (['glob', 'grep', 'read_file', 'recall', 'diff'].includes(name)) return 'read';
-  if (name === 'web_search' || name === 'web_fetch') return 'network';
-  if (name === 'delegate') return 'subagent';
-  if (name === 'run_terminal') return 'exec';
-  return 'mutate';
-}
 
 /** A read walk needs at least this many narrow reads of one file in a row. */
 export const READ_WALK_MIN_CALLS = 5;
@@ -91,6 +79,25 @@ export type RunMetrics = {
   reasoningEffort: Record<string, number>;
   /** Null when the run has no System 1 lines (System 1 off). */
   system1: System1Metrics | null;
+  /** Prompt tokens by phase of the work, per model call; null when nothing was edited. */
+  phases: { beforeFirstEdit: number; editing: number; afterLastEdit: number } | null;
+  /** Model calls by how many tools they asked for. `planOnly`: a single plan/todo call (a ritual iteration). */
+  callShape: { answer: number; single: number; multi: number; planOnly: number };
+  /** Last call's prompt ÷ first call's, over tool-using calls; null under two calls. */
+  promptGrowth: number | null;
+  /** The first call's prompt by context layer (`run_start.layers`), in tokens. */
+  firstCallLayers: Record<string, number>;
+  /** Tools of one parallel batch overlap, so tool-seconds can exceed the wall clock. */
+  time: { modelMs: number; toolSeconds: number };
+  /** Per tool: calls, calls that failed (classifier `error` or threw), and non-zero command exits. */
+  toolOutcomes: Record<string, { calls: number; errors: number; nonZeroExit: number }>;
+  /** An edit run ran a command after its last edit; null when nothing was edited. */
+  verifiedAfterEdit: boolean | null;
+  /**
+   * Own prompt tokens no traced call accounts for. Older traces do not trace
+   * tools-off final calls (limit handoffs), so their per-call numbers miss them.
+   */
+  untracedPromptTokens: number;
   /** Balance change across the run, from usage.jsonl (legacy session/weekly plans). */
   capacity: { weeklyPercent: number | null; sessionPercent: number | null } | null;
 };
@@ -113,11 +120,6 @@ function argPath(args: unknown): string | undefined {
 function argLimit(args: unknown): number | undefined {
   const value = (args as { limit?: unknown } | null)?.limit;
   return typeof value === 'number' ? value : undefined;
-}
-
-/** Same rule as the loop's isEditSuccess. */
-function isEditSuccess(preview: string): boolean {
-  return preview.startsWith('Created') || preview.startsWith('Patched');
 }
 
 function readWalks(lines: TraceLine[]): ReadWalk[] {
@@ -252,17 +254,57 @@ export function computeRunMetrics(input: {
   const totalPrompt = ownPrompt + childPrompt;
   const totalCompletion = ownCompletion + childCompletion;
 
+  const entries = iterationsOf(lines);
   const toolsByName: Record<string, number> = {};
   const toolsByStage: Record<string, number> = {};
-  for (const start of linesOf(lines, 'tool_start')) {
-    count(toolsByName, start.toolName);
-    count(toolsByStage, toolStage(start.toolName));
+  const toolOutcomes: RunMetrics['toolOutcomes'] = {};
+  const callShape = { answer: 0, single: 0, multi: 0, planOnly: 0 };
+  let modelMs = 0;
+  let toolMs = 0;
+  let firstEditAt = -1;
+  let lastEditAt = -1;
+  let lastExecAt = -1;
+  let edits = 0;
+  entries.forEach((entry, position) => {
+    if (entry.request && !entry.final) {
+      const shape = iterationShape(entry);
+      callShape[shape] += 1;
+      if (shape === 'single' && PLAN_TOOLS.has(entry.tools[0]!.name)) callShape.planOnly += 1;
+    }
+    modelMs += entry.response?.durationMs ?? 0;
+    for (const tool of entry.tools) {
+      count(toolsByName, tool.name);
+      count(toolsByStage, tool.stage);
+      toolMs += tool.durationMs ?? 0;
+      const outcome = (toolOutcomes[tool.name] ??= { calls: 0, errors: 0, nonZeroExit: 0 });
+      outcome.calls += 1;
+      if (tool.outcome === 'error' || tool.outcome === 'threw') outcome.errors += 1;
+      if (tool.exitCode !== undefined && tool.exitCode !== 0) outcome.nonZeroExit += 1;
+      if (tool.name === 'edit_file' && tool.outcome === 'ok') {
+        edits += 1;
+        if (firstEditAt < 0) firstEditAt = position;
+        lastEditAt = position;
+      }
+      if (tool.stage === 'exec') lastExecAt = position;
+    }
+  });
+  const firstEditIteration = firstEditAt >= 0 ? entries[firstEditAt]!.iteration : undefined;
+  let phases: RunMetrics['phases'] = null;
+  if (firstEditAt >= 0) {
+    phases = { beforeFirstEdit: 0, editing: 0, afterLastEdit: 0 };
+    entries.forEach((entry, position) => {
+      const prompt = entry.response?.usage?.promptTokens ?? 0;
+      if (position <= firstEditAt) phases!.beforeFirstEdit += prompt;
+      else if (position <= lastEditAt) phases!.editing += prompt;
+      else phases!.afterLastEdit += prompt;
+    });
   }
-
-  const editCompletes = linesOf(lines, 'tool_complete').filter(
-    (line) => line.toolName === 'edit_file' && isEditSuccess(line.resultPreview),
-  );
-  const firstEditIteration = editCompletes[0]?.iteration;
+  const toolCallPrompts = entries
+    .filter((entry) => !entry.final && entry.tools.length > 0)
+    .map((entry) => entry.response?.usage?.promptTokens)
+    .filter((value): value is number => typeof value === 'number' && value > 0);
+  const firstCallLayers: Record<string, number> = {};
+  for (const layer of linesOf(lines, 'run_start')[0]?.layers ?? []) firstCallLayers[layer.id] = layer.tokens;
   const promptBefore =
     firstEditIteration === undefined
       ? null
@@ -309,7 +351,7 @@ export function computeRunMetrics(input: {
     ...(run.durationMs !== undefined ? { wallClockMs: run.durationMs } : {}),
     ...(answer?.runDurationMs !== undefined ? { runDurationMs: answer.runDurationMs } : {}),
     ...(answer?.durationMs !== undefined ? { answerWriteMs: answer.durationMs } : {}),
-    edits: editCompletes.length,
+    edits,
     firstEdit:
       firstEditIteration === undefined
         ? null
@@ -338,6 +380,14 @@ export function computeRunMetrics(input: {
     memoryGate,
     reasoningEffort: effort,
     system1: system1Metrics(lines),
+    phases,
+    callShape,
+    promptGrowth: toolCallPrompts.length >= 2 ? toolCallPrompts.at(-1)! / toolCallPrompts[0]! : null,
+    firstCallLayers,
+    time: { modelMs, toolSeconds: Math.round(toolMs / 100) / 10 },
+    toolOutcomes,
+    verifiedAfterEdit: lastEditAt < 0 ? null : lastExecAt >= lastEditAt,
+    untracedPromptTokens: Math.max(0, ownPrompt - perCall.reduce((sum, value) => sum + value, 0)),
     capacity: usageDelta(input.usage?.find((record) => record.runId === run.runId)),
   };
 }

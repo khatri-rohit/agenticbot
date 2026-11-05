@@ -181,3 +181,315 @@ td.wrap {
   background: var(--accent);
   border-radius: 2px;
 }
+
+/* Run explorer: iteration tree (left) and call/tool inspector (right). */
+:root {
+  --k-system: #64748b;
+  --k-tools: #6366f1;
+  --k-user: #0ea5e9;
+  --k-assistant: #38bdf8;
+  --k-tool: #14b8a6;
+  --k-injected: #f59e0b;
+  --b-explore: #0ea5e9;
+  --b-change: #8b5cf6;
+  --b-verify: #14b8a6;
+}
+
+.crumbs {
+  margin: 0 0 4px;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.notice {
+  background: var(--mark);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.chip.err,
+.chip.sig-bad {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.chip.exit,
+.chip.sig-warn,
+.chip.marker {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.chip.effort {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.chip.new {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.runlayout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr);
+  gap: 16px;
+  margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .runlayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tree .band {
+  border-left: 3px solid transparent;
+  padding-left: 6px;
+}
+
+.tree .band-explore {
+  border-left-color: var(--b-explore);
+}
+
+.tree .band-change {
+  border-left-color: var(--b-change);
+}
+
+.tree .band-verify {
+  border-left-color: var(--b-verify);
+}
+
+.band-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 6px 0 2px;
+}
+
+.node summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: 4px;
+  list-style: none;
+}
+
+.node summary:hover,
+.node.selected > summary {
+  background: var(--mark);
+}
+
+.node .it {
+  width: 40px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pbar {
+  display: inline-block;
+  width: 80px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.pbar span {
+  display: block;
+  height: 6px;
+  background: var(--k-user);
+}
+
+.pnum {
+  width: 40px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-body {
+  padding: 2px 0 6px 46px;
+}
+
+.row-link {
+  display: block;
+  padding: 1px 0;
+}
+
+.row-link.child {
+  padding-left: 16px;
+}
+
+.inspector {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  position: sticky;
+  top: 8px;
+}
+
+.inspector h2 {
+  margin-top: 0;
+}
+
+.inspector h3 {
+  font-size: 13px;
+  margin: 14px 0 6px;
+}
+
+.inspector pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.stack {
+  display: flex;
+  height: 12px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.kind-system {
+  background: var(--k-system);
+}
+
+.kind-tools {
+  background: var(--k-tools);
+}
+
+.kind-user {
+  background: var(--k-user);
+}
+
+.kind-assistant {
+  background: var(--k-assistant);
+}
+
+.kind-tool {
+  background: var(--k-tool);
+}
+
+.kind-injected {
+  background: var(--k-injected);
+}
+
+.msg {
+  border-top: 1px solid var(--line);
+  padding: 4px 0;
+}
+
+.msg.added {
+  border-left: 2px solid var(--ok);
+  padding-left: 6px;
+}
+
+.msg summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.kind {
+  display: inline-block;
+  min-width: 72px;
+  text-align: center;
+  font-size: 11px;
+  color: #fff;
+  border-radius: 4px;
+  padding: 0 6px;
+  margin-right: 6px;
+}
+
+.raw {
+  margin-top: 20px;
+}
+
+.raw summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.timeline .row {
+  grid-template-columns: 56px 160px 1fr;
+}
+
+.dots {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.dot.ok {
+  background: var(--ok);
+}
+
+.dot.bad {
+  background: var(--bad);
+}
+
+.trial-passed {
+  color: var(--ok);
+}
+
+.trial-failed,
+.trial-error {
+  color: var(--bad);
+}
+
+.trial-skipped {
+  color: var(--muted);
+}

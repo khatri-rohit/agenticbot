@@ -1,119 +1,305 @@
 import {
-  findRun,
-  listRuns,
+  iterationsOf,
   loadRunMetrics,
+  readCall,
+  readRun,
   readRunTrace,
+  readToolResult,
+  signalsOf,
   stopLabel,
+  type CallDetail,
+  type Iteration,
+  type IterationTool,
+  type MessageKind,
   type RunMetrics,
+  type RunSummary,
   type TraceLine,
 } from '@agent/agent-eval';
 
-import { agentHome } from '../../../lib/home';
+import { homeFor } from '../../../lib/home';
 import { clip, duration, percent, tokens } from '../../../lib/format';
 
 export const dynamic = 'force-dynamic';
 
-/** Event types drawn as markers: the harness acting on the run. */
-const MARKERS = new Set([
-  'context_evicted',
-  'context_compacted_inrun',
-  'context_prefix_heavy',
-  'limit',
-  'stall_nudge',
-  'research_gate',
-  'budget_warning',
-  'tool_note',
-  'skill_loaded',
-  'skill_evicted',
-  'memory_gate',
-  'context_compacted',
-  'system1_report',
-]);
+type Search = Promise<{ call?: string; tool?: string; home?: string }>;
+type Band = 'explore' | 'change' | 'verify' | 'none';
 
-function describe(line: TraceLine): string {
+const KIND_LABEL: Record<MessageKind | 'tools', string> = {
+  system: 'system',
+  tools: 'tools',
+  user: 'user',
+  assistant: 'assistant',
+  tool: 'tool result',
+  injected: 'injected',
+};
+
+/** Explore = up to the first applied edit, change = through the last one, verify = after it. */
+function bandsOf(entries: Iteration[]): Band[] {
+  const applied = entries.map((entry) => entry.tools.some((tool) => tool.name === 'edit_file' && tool.outcome === 'ok'));
+  const first = applied.indexOf(true);
+  const last = applied.lastIndexOf(true);
+  return entries.map((_, i) => (first < 0 ? 'none' : i <= first ? 'explore' : i <= last ? 'change' : 'verify'));
+}
+
+function marker(line: TraceLine): string {
   switch (line.type) {
-    case 'run_start':
-      return `run start · ${line.model} · ${line.mode ?? ''} ${line.posture ?? ''} · depth ${line.depth ?? 0}${line.windowTokens ? ` · window ${tokens(line.windowTokens)}` : ''}${line.occupiedTokens ? ` · first prompt ${tokens(line.occupiedTokens)}` : ''}`;
-    case 'llm_request':
-      return `model call${line.estimatedPromptTokens ? ` · est ${tokens(line.estimatedPromptTokens)}` : ''}${line.reasoningEffort ? ` · effort ${line.reasoningEffort}` : ''}`;
-    case 'llm_response':
-      return `response · ${line.usage ? `${tokens(line.usage.promptTokens)} in / ${tokens(line.usage.completionTokens)} out` : 'no usage'} · ${duration(line.durationMs)} · ${line.finishReason ?? ''}${line.contentPreview ? ` — ${clip(line.contentPreview, 140)}` : ''}`;
-    case 'tool_start':
-      return `▶ ${line.toolName} ${clip(JSON.stringify(line.args ?? {}), 160)}`;
-    case 'tool_complete':
-      return `✓ ${line.toolName} · ${duration(line.durationMs)}${line.resultChars !== undefined ? ` · ${line.resultChars} chars` : ''} — ${clip(line.resultPreview, 120)}`;
-    case 'tool_error':
-      return `✗ ${line.toolName} — ${clip(line.error, 160)}`;
     case 'context_evicted':
-      return `context evicted · ${line.evicted} results · ${tokens(line.beforeTokens)} → ${tokens(line.afterTokens)}`;
+      return `evicted ${line.evicted} · ${tokens(line.beforeTokens)} → ${tokens(line.afterTokens)}`;
     case 'context_compacted_inrun':
-      return `in-run compaction · ${tokens(line.beforeTokens)} → ${tokens(line.afterTokens)}`;
+      return `compacted · ${tokens(line.beforeTokens)} → ${tokens(line.afterTokens)}`;
     case 'context_prefix_heavy':
       return `prefix heavy · ${tokens(line.promptTokens)}`;
     case 'limit':
-      return `limit · ${line.reason}`;
+      return `limit · ${stopLabel(line.reason)}`;
     case 'stall_nudge':
-      return `stall nudge · ${tokens(line.idleTokens)} with no edit`;
+      return `stall nudge · ${tokens(line.idleTokens)} idle`;
     case 'research_gate':
-      return `research gate · ${line.toolName} refused`;
+      return `research gate · ${line.toolName}`;
     case 'budget_warning':
-      return `budget warning · ${tokens(line.promptTokens)} of ${tokens(line.limitPromptTokens)}`;
+      return `budget warning`;
     case 'tool_note':
-      return `note · ${line.note} on ${line.toolName} (×${line.count})`;
+      return `note · ${line.note}`;
     case 'skill_loaded':
-      return `skill loaded · ${line.name} (${line.source}, ~${tokens(line.tokens)})`;
+      return `skill · ${line.name}`;
     case 'skill_evicted':
       return `skill retired · ${line.name}`;
     case 'memory_gate':
-      return `memory gate · ${line.verdict} ${line.target} — ${clip(line.why, 120)}`;
-    case 'context_compacted':
-      return `thread compacted through #${line.throughSeq} — ${clip(line.briefPreview, 120)}`;
-    case 'system1_decision': {
-      const d = line.decision;
-      return `system 1 · ${d.mode} · ${d.baseline ?? 'default'} → ${d.chosen ?? d.baseline ?? 'default'}${d.applied ? ' (applied)' : ''} · ${d.reason}${d.latencyMs !== undefined ? ` · ${d.latencyMs}ms` : ''}`;
-    }
-    case 'system1_report': {
-      const r = line.report;
-      const fallbacks = r.fallbacks.map((f) => `${f.kind} ×${f.count}`).join(', ');
-      return `system 1 report · ${r.mode} · ${r.calls} calls, ${r.applied} applied${r.latencyMs ? ` · p50 ${r.latencyMs.p50}ms / p95 ${r.latencyMs.p95}ms` : ''}${fallbacks ? ` · fallbacks ${fallbacks}` : ''}`;
-    }
-    case 'run_finish':
-      return `run finish · ${line.status ?? ''}${line.limitReason ? ` · ${line.limitReason}` : ''} · ${duration(line.durationMs)}`;
-    default: {
-      // Every known type is handled; newer traces can still carry types this viewer predates.
-      const unknown = line as { type: string };
-      return `${unknown.type} ${clip(JSON.stringify(unknown), 160)}`;
-    }
+      return `memory ${line.verdict}`;
+    default:
+      return line.type;
   }
 }
 
-function iterationOf(line: TraceLine): number | undefined {
-  const value = (line as { iteration?: unknown }).iteration;
-  return typeof value === 'number' ? value : undefined;
+function toolClass(tool: IterationTool): string {
+  if (tool.outcome === 'error' || tool.outcome === 'threw') return 'chip err';
+  if (tool.exitCode !== undefined && tool.exitCode !== 0) return 'chip exit';
+  return 'chip';
 }
 
-function MetricsPanel({ m }: { m: RunMetrics }) {
+function toolLabel(tool: IterationTool): string {
+  const target = (tool.args as { path?: unknown; pattern?: unknown; command?: unknown } | null) ?? {};
+  const what = typeof target.path === 'string' ? target.path : typeof target.pattern === 'string' ? target.pattern : '';
+  const exit = tool.exitCode !== undefined ? ` · exit ${tool.exitCode}` : '';
+  const failed = tool.outcome === 'error' ? ' ✗' : tool.outcome === 'threw' ? ' ✗ threw' : '';
+  return `${tool.name}${what ? ` ${clip(what, 28)}` : ''}${exit}${failed}`;
+}
+
+function Tree(props: { run: RunSummary; entries: Iteration[]; query: string; selectedCall?: number; selectedTool?: string }) {
+  const { run, entries, query, selectedCall, selectedTool } = props;
+  const bands = bandsOf(entries);
+  const maxPrompt = Math.max(1, ...entries.map((entry) => entry.response?.usage?.promptTokens ?? 0));
+  const children = [...run.children].sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? ''));
+  let delegates = 0;
+  let callIndex = 0;
+  const sep = query ? '&' : '?';
+  return (
+    <div className="tree">
+      {entries.map((entry, position) => {
+        const index = entry.request ? ++callIndex : undefined;
+        const prompt = entry.response?.usage?.promptTokens;
+        const open = index === selectedCall || entry.tools.some((tool) => tool.toolCallId === selectedTool);
+        const band = bands[position]!;
+        const showBand = band !== 'none' && (position === 0 || bands[position - 1] !== band);
+        return (
+          <div key={`${position}`} className={`band band-${band}`}>
+            {showBand ? <div className="band-label">{band === 'verify' ? 'verify + answer' : band}</div> : null}
+            <details open={open} className={open ? 'node selected' : 'node'}>
+              <summary>
+                <span className="it">{entry.final ? 'final' : `it ${entry.iteration}`}</span>
+                <span className="chip effort">{entry.request?.reasoningEffort ?? 'default'}</span>
+                <span className="pbar" title={`${prompt ?? '?'} prompt tokens`}>
+                  <span style={{ width: `${Math.round(((prompt ?? 0) / maxPrompt) * 100)}%` }} />
+                </span>
+                <span className="pnum">{tokens(prompt)}</span>
+                {entry.tools.map((tool, i) => (
+                  <span key={i} className={toolClass(tool)}>
+                    {tool.name}
+                  </span>
+                ))}
+                {entry.markers.length > 0 ? <span className="chip marker">{entry.markers.length} harness</span> : null}
+              </summary>
+              <div className="node-body">
+                {index !== undefined ? (
+                  <a className="row-link" href={`/runs/${run.runId}${query}${sep}call=${index}`}>
+                    ▸ model call {index}
+                    {entry.final ? ' (tools off)' : ''} · {tokens(prompt)} in / {tokens(entry.response?.usage?.completionTokens)} out ·{' '}
+                    {duration(entry.response?.durationMs)}
+                  </a>
+                ) : null}
+                {entry.system1 ? (
+                  <div className="muted small">
+                    System 1 {entry.system1.mode}: {entry.system1.baseline ?? 'default'} → {entry.system1.chosen ?? entry.system1.baseline ?? 'default'}
+                    {entry.system1.applied ? ' (applied)' : ''} · {entry.system1.reason}
+                  </div>
+                ) : null}
+                {entry.tools.map((tool, i) => {
+                  const child = tool.name === 'delegate' ? children[delegates++] : undefined;
+                  return (
+                    <div key={i}>
+                      {tool.toolCallId ? (
+                        <a className="row-link" href={`/runs/${run.runId}${query}${sep}tool=${tool.toolCallId}`}>
+                          ▸ <span className={toolClass(tool)}>{toolLabel(tool)}</span> {duration(tool.durationMs)}
+                        </a>
+                      ) : (
+                        <span className="row-link">▸ {toolLabel(tool)}</span>
+                      )}
+                      {child ? (
+                        <a className="row-link child" href={`/runs/${child.runId}${query}`}>
+                          ↳ sub-agent run {child.runId.slice(0, 8)} · {child.status} · {tokens(child.usage?.own.promptTokens)}
+                        </a>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                {entry.markers.map((line, i) => (
+                  <div key={i} className="muted small">
+                    ⚑ {marker(line)}
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StackBar({ detail }: { detail: CallDetail }) {
+  const order: (MessageKind | 'tools')[] = ['system', 'tools', 'user', 'assistant', 'tool', 'injected'];
+  const total = Math.max(1, order.reduce((sum, kind) => sum + detail.tokensByKind[kind], 0));
+  return (
+    <>
+      <div className="stack">
+        {order.map((kind) =>
+          detail.tokensByKind[kind] > 0 ? (
+            <span key={kind} className={`kind-${kind}`} style={{ width: `${(detail.tokensByKind[kind] / total) * 100}%` }} />
+          ) : null,
+        )}
+      </div>
+      <div className="legend">
+        {order.map((kind) =>
+          detail.tokensByKind[kind] > 0 ? (
+            <span key={kind}>
+              <i className={`kind-${kind}`} /> {KIND_LABEL[kind]} {tokens(detail.tokensByKind[kind])}
+            </span>
+          ) : null,
+        )}
+      </div>
+    </>
+  );
+}
+
+async function CallInspector({ home, run, index }: { home: string; run: RunSummary; index: number }) {
+  const detail = await readCall(home, run, index);
+  if (!detail) return <p className="muted">This run has no model call {index}.</p>;
+  const { call } = detail;
+  const added = detail.input.filter((message) => message.added).length;
+  const stubbed = detail.input.filter((message) => message.stub).length;
+  return (
+    <div className="inspector">
+      <h2>
+        Model call {call.index}
+        {call.final ? ' · tools off' : ''}
+      </h2>
+      <p className="muted">
+        iteration {call.iteration} · {tokens(call.promptTokens)} in / {tokens(call.completionTokens)} out · {duration(call.durationMs)} · effort{' '}
+        {call.effort ?? 'default'}
+      </p>
+      {!call.recorded ? (
+        <p className="notice">Input not recorded for this run (it predates call recording, or recording was off).</p>
+      ) : (
+        <>
+          <h3>Input</h3>
+          <StackBar detail={detail} />
+          <p className="muted small">
+            vs previous call: +{added} new · {detail.removed} no longer sent · {stubbed} shortened tool results
+            {detail.ledger === 'rewound' ? ' · run was rewound out of the ledger' : ''}
+          </p>
+          {detail.tools ? (
+            <details className="msg">
+              <summary>
+                <span className="kind kind-tools">tools</span> {detail.tools.names.length} definitions · {tokens(detail.tools.tokens)}
+              </summary>
+              <pre>{detail.tools.names.join(', ')}</pre>
+            </details>
+          ) : (
+            <p className="muted small">No tools offered on this call.</p>
+          )}
+          {detail.input.map((message) => (
+            <details key={message.index} className={message.added ? 'msg added' : 'msg'}>
+              <summary>
+                <span className={`kind kind-${message.kind}`}>{KIND_LABEL[message.kind]}</span>
+                {message.stub ? <span className="chip">shortened</span> : null}
+                {message.added ? <span className="chip new">new</span> : null}
+                <span className="muted"> {tokens(message.tokens)} · </span>
+                {message.toolCalls?.length
+                  ? `calls ${message.toolCalls.map((tc) => tc.name).join(', ')}`
+                  : clip(message.text ?? '(blob missing)', 110)}
+              </summary>
+              {message.toolCalls?.length ? (
+                <pre>{message.toolCalls.map((tc) => `${tc.name} ${tc.args}`).join('\n')}</pre>
+              ) : null}
+              <pre>{message.text ?? '(blob missing)'}</pre>
+            </details>
+          ))}
+        </>
+      )}
+      <h3>Output</h3>
+      {detail.output ? (
+        <>
+          {detail.output.text ? <pre>{detail.output.text}</pre> : null}
+          {detail.output.toolCalls.length > 0 ? (
+            <pre>{detail.output.toolCalls.map((tc) => `→ ${tc.name} ${tc.args}`).join('\n')}</pre>
+          ) : null}
+        </>
+      ) : (
+        <p className="muted">Output not recorded; the trace keeps a preview in the raw timeline below.</p>
+      )}
+    </div>
+  );
+}
+
+async function ToolInspector({ home, run, tool }: { home: string; run: RunSummary; tool: IterationTool }) {
+  const full = tool.toolCallId ? await readToolResult(home, run.threadId, tool.toolCallId) : null;
+  return (
+    <div className="inspector">
+      <h2>{tool.name}</h2>
+      <p className="muted">
+        stage {tool.stage} · {duration(tool.durationMs)} · outcome {tool.outcome ?? 'unknown'}
+        {tool.exitCode !== undefined ? ` · exit ${tool.exitCode}` : ''}
+      </p>
+      <h3>Arguments</h3>
+      <pre>{JSON.stringify(tool.args, null, 2)}</pre>
+      <h3>Result{full === null ? ' (preview)' : ''}</h3>
+      <pre>{full ?? tool.resultPreview ?? '(no result)'}</pre>
+    </div>
+  );
+}
+
+function Cards({ m }: { m: RunMetrics }) {
   const cards: [string, string][] = [
     ['Status', `${m.status}${m.limitReason ? ` · ${stopLabel(m.limitReason)}` : ''}`],
-    ['Iterations / tools', `${m.iterations} / ${m.toolCalls}`],
     ['Prompt total', `${tokens(m.promptTokens.total)} (sub-agents ${percent(m.childShare)})`],
     ['Per call median / p90', m.promptPerCall ? `${tokens(m.promptPerCall.median)} / ${tokens(m.promptPerCall.p90)}` : '–'],
-    ['Wall clock', duration(m.wallClockMs)],
-    ['Edits', `${m.edits}${m.firstEdit ? ` · first at it ${m.firstEdit.iteration}` : ''}`],
-    ['Idle share', percent(m.idleShare)],
-    ['Network calls', String(m.networkCalls)],
-    ['Read walks', m.readWalks.map((w) => `${w.path.split('/').at(-1)} ×${w.calls}`).join(', ') || 'none'],
-    ['Re-reads after eviction', m.reReadsAfterEviction === null ? 'n/a (old trace)' : String(m.reReadsAfterEviction)],
-    ['Steering', `stall ${m.steering.stallNudges} · gate ${m.steering.researchGates} · notes ${m.steering.toolNotes}`],
-    ['Capacity', m.capacity ? `weekly ${m.capacity.weeklyPercent}%` : '–'],
     [
-      'System 1',
-      m.system1
-        ? `${m.system1.mode} · ${m.system1.decisions} decisions · ${m.system1.mode === 'shadow' ? 'would change' : 'applied'} ${m.system1.mode === 'shadow' ? m.system1.changed : m.system1.applied}${m.system1.latencyMs ? ` · p95 ${m.system1.latencyMs.p95}ms` : ''}`
-        : 'off',
+      'Phases',
+      m.phases
+        ? `explore ${tokens(m.phases.beforeFirstEdit)} · change ${tokens(m.phases.editing)} · after ${tokens(m.phases.afterLastEdit)}`
+        : 'no edits',
     ],
-    ['Memory gate', Object.entries(m.memoryGate).map(([verdict, n]) => `${verdict} ${n}`).join(' · ') || 'none'],
-    ['Skills', `loaded ${m.skills.loaded} (~${tokens(m.skills.loadedTokens)}) · retired ${m.skills.evicted}`],
+    ['Calls', `${m.callShape.single} one-tool · ${m.callShape.multi} multi · ${m.callShape.planOnly} plan-only`],
+    ['Prompt growth', m.promptGrowth ? `${m.promptGrowth.toFixed(1)}×` : '–'],
+    ['Time', `model ${duration(m.time.modelMs)} · tools ${m.time.toolSeconds}s`],
+    [
+      'Tool failures',
+      Object.entries(m.toolOutcomes)
+        .filter(([, o]) => o.errors > 0)
+        .map(([name, o]) => `${name} ${o.errors}/${o.calls}`)
+        .join(' · ') || 'none recorded',
+    ],
+    ['System 1', m.system1 ? `${m.system1.mode} · ${m.system1.decisions} decisions · ${m.system1.applied} applied` : 'off'],
+    ['Wall clock', duration(m.wallClockMs)],
   ];
   return (
     <div className="grid">
@@ -127,10 +313,11 @@ function MetricsPanel({ m }: { m: RunMetrics }) {
   );
 }
 
-export default async function RunPage({ params }: { params: Promise<{ runId: string }> }) {
+export default async function RunPage({ params, searchParams }: { params: Promise<{ runId: string }>; searchParams: Search }) {
   const { runId } = await params;
-  const home = agentHome();
-  const run = findRun(await listRuns(home), runId);
+  const search = await searchParams;
+  const { home, query } = homeFor(search.home);
+  const run = await readRun(home, runId);
   if (!run) {
     return (
       <>
@@ -139,64 +326,65 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
       </>
     );
   }
-  const [{ lines }, [metrics]] = await Promise.all([
-    readRunTrace(run.tracePath),
-    loadRunMetrics(home, [run]),
-  ]);
-  // Anchors use the sink's seq; traces written before seq existed use the
-  // 1-based line number instead.
-  const anchor = (line: TraceLine, index: number) => line.seq ?? index + 1;
-  let lastIteration: number | undefined;
+  const [{ lines }, [metrics]] = await Promise.all([readRunTrace(run.tracePath), loadRunMetrics(home, [run])]);
+  const entries = iterationsOf(lines);
+  const callIndex = search.call ? Number(search.call) : undefined;
+  const selectedTool = search.tool ? entries.flatMap((entry) => entry.tools).find((tool) => tool.toolCallId === search.tool) : undefined;
+  const signals = metrics ? signalsOf(metrics) : [];
 
   return (
     <>
-      <h1>Run {run.runId}</h1>
-      <p className="muted">
+      <p className="muted crumbs">
         <a href={`/threads/${run.threadId}`}>thread {run.threadId.slice(0, 8)}</a>
         {run.parentRunId ? (
           <>
-            {' · sub-agent of '}
-            <a href={`/runs/${run.parentRunId}`}>{run.parentRunId.slice(0, 8)}</a>
+            {' / sub-agent of '}
+            <a href={`/runs/${run.parentRunId}${query}`}>{run.parentRunId.slice(0, 8)}</a>
           </>
         ) : null}
-        {' · '}
-        {run.model ?? ''}
+        {' / '}run {run.runId.slice(0, 8)} · {run.model ?? ''}
+        {query ? ' · eval home' : ''}
       </p>
-      {metrics ? <MetricsPanel m={metrics} /> : null}
-      {run.children.length > 0 ? (
-        <>
-          <h2>Sub-agent runs</h2>
-          <ul>
-            {run.children.map((child) => (
-              <li key={child.runId}>
-                <a href={`/runs/${child.runId}`}>{child.runId.slice(0, 8)}</a> · {child.status} ·{' '}
-                {child.iterations} iterations · {tokens(child.usage?.own.promptTokens)} prompt
-              </li>
-            ))}
-          </ul>
-        </>
+      <h1>
+        Run {run.runId.slice(0, 8)} <span className={`status-${run.status}`}>{run.status}</span>
+      </h1>
+      {signals.length > 0 ? (
+        <div className="signals">
+          {signals.map((signal, i) => (
+            <span key={i} className={`chip sig-${signal.severity}`}>
+              {signal.area} · {signal.signal}
+            </span>
+          ))}
+        </div>
       ) : null}
-      <h2>Timeline</h2>
-      <div className="timeline">
-        {lines.map((line, index) => {
-          const iteration = iterationOf(line);
-          const newIteration = iteration !== undefined && iteration !== lastIteration;
-          if (iteration !== undefined) lastIteration = iteration;
-          const id = anchor(line, index);
-          const classes = ['row', MARKERS.has(line.type) ? 'marker' : '', newIteration ? 'iteration' : '']
-            .filter(Boolean)
-            .join(' ');
-          return (
-            <div className={classes} id={`seq-${id}`} key={id}>
-              <a className="seq" href={`#seq-${id}`}>
-                #{id}
-              </a>
-              <span className="it">{iteration !== undefined ? `it ${iteration}` : ''}</span>
-              <span>{describe(line)}</span>
-            </div>
-          );
-        })}
+      {metrics ? <Cards m={metrics} /> : null}
+      <div className="runlayout">
+        <section>
+          <h2>Iterations</h2>
+          <Tree run={run} entries={entries} query={query} {...(callIndex ? { selectedCall: callIndex } : {})} {...(search.tool ? { selectedTool: search.tool } : {})} />
+        </section>
+        <section>
+          {callIndex ? (
+            <CallInspector home={home} run={run} index={callIndex} />
+          ) : selectedTool ? (
+            <ToolInspector home={home} run={run} tool={selectedTool} />
+          ) : (
+            <p className="muted inspector">Open an iteration and pick a model call or a tool call to inspect it.</p>
+          )}
+        </section>
       </div>
+      <details className="raw">
+        <summary>Raw trace ({lines.length} lines)</summary>
+        <div className="timeline">
+          {lines.map((line, index) => (
+            <div className="row" key={line.seq ?? index}>
+              <span className="seq">#{line.seq ?? index + 1}</span>
+              <span>{line.type}</span>
+              <code>{clip(JSON.stringify(line), 220)}</code>
+            </div>
+          ))}
+        </div>
+      </details>
     </>
   );
 }

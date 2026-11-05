@@ -9,5 +9,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}'],
+    // No web tests yet; an empty suite must not fail `nx run-many -t test`.
+    passWithNoTests: true,
   },
 });

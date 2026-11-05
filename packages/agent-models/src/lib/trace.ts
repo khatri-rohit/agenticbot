@@ -1,6 +1,29 @@
 import type { ContextReportLayer, ContextWindowSource } from './context.js';
 import type { RunUsage, TokenUsage } from './run.js';
 import type { System1EffortTrace, System1RunReport } from './system1.js';
+import type { ToolStage } from './tool-context.js';
+
+/**
+ * One message as sent to the model: its sha256 is the key of a blob holding
+ * `JSON.stringify(message)` in the thread's blob store.
+ */
+export type TraceMessageRef = {
+  role: string;
+  sha: string;
+  /** Length of the message's text content. */
+  chars: number;
+  /** Tool messages: the call they answer. */
+  toolCallId?: string;
+  /** Assistant messages: the calls they made. */
+  toolCallIds?: string[];
+};
+
+/** Exactly what one model call was sent (recorded when the host turns recording on). */
+export type TraceCallInput = {
+  messages: TraceMessageRef[];
+  /** Tool definitions offered; null when tools were off. */
+  tools: { sha: string; names: string[] } | null;
+};
 
 /**
  * Bumped when a TraceEvent field changes meaning or is removed. Adding an
@@ -43,6 +66,9 @@ export type TraceEvent =
       estimatedPromptTokens?: number;
       /** reasoning_effort sent on this call, when set. */
       reasoningEffort?: string;
+      /** A tools-off final call (limit handoff, deferred choice), not a new iteration. */
+      final?: true;
+      input?: TraceCallInput;
     }
   | {
       type: 'llm_response';
@@ -57,6 +83,9 @@ export type TraceEvent =
       durationMs?: number;
       /** Provider sent no usage; the run charged the local estimate. */
       usageEstimated?: boolean;
+      final?: true;
+      /** The assistant message returned, as a blob ref (recorded runs only). */
+      output?: { sha: string };
     }
   | {
       type: 'tool_start';
@@ -65,6 +94,8 @@ export type TraceEvent =
       toolName: string;
       /** The model's tool_call id: links start, complete/error, ledger row and evictions. */
       toolCallId?: string;
+      /** The tool's scheduling class, as the loop ran it. */
+      stage?: ToolStage;
       args: unknown;
     }
   | {
@@ -77,6 +108,9 @@ export type TraceEvent =
       resultPreview: string;
       /** Full result length before any preview clipping. */
       resultChars?: number;
+      /** From the tool's own classifier, when it has one (`Tool.classify`). */
+      outcome?: 'ok' | 'error';
+      exitCode?: number;
     }
   | {
       type: 'tool_error';
@@ -101,6 +135,8 @@ export type TraceEvent =
       limitReason?: string;
       usage?: RunUsage;
       durationMs?: number;
+      /** The run was cancelled (its abort signal fired). */
+      cancelled?: true;
     }
   | {
       type: 'memory_gate';

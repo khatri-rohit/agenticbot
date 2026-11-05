@@ -1,4 +1,5 @@
 import { findRun, flattenRuns, loadRunMetrics } from '../metrics/load.js';
+import { signalsOf } from '../metrics/areas.js';
 import type { RunMetrics } from '../metrics/run-metrics.js';
 import { capacityRates, summarizeMetrics } from '../metrics/thread-metrics.js';
 import { listRuns, stopLabel } from '../read/runs.js';
@@ -41,6 +42,12 @@ function describe(m: RunMetrics): string {
     `steering: stall ${m.steering.stallNudges}, research gate ${m.steering.researchGates}, notes ${m.steering.toolNotes}, budget warnings ${m.steering.budgetWarnings}, evictions ${m.steering.evictions}, in-run compactions ${m.steering.inRunCompactions}, prefix heavy ${m.steering.prefixHeavy}, thread compactions ${m.steering.threadCompactions}`,
     `limits: ${m.steering.limits.join(' | ') || 'none'}`,
     `tools: ${Object.entries(m.toolsByName).sort((a, b) => b[1] - a[1]).map(([name, n]) => `${name} ${n}`).join(', ')}`,
+    `phases: ${m.phases ? `before first edit ${tokens(m.phases.beforeFirstEdit)}, editing ${tokens(m.phases.editing)}, after last edit ${tokens(m.phases.afterLastEdit)}; checked by a command after the last edit: ${m.verifiedAfterEdit ? 'yes' : 'no'}` : 'no edits'}`,
+    `calls: ${m.callShape.answer} answers, ${m.callShape.single} one-tool (${m.callShape.planOnly} plan-only), ${m.callShape.multi} multi-tool; prompt growth ${m.promptGrowth?.toFixed(1) ?? '-'}×${m.untracedPromptTokens > 0 ? ` (${tokens(m.untracedPromptTokens)} of prompt in calls this trace does not show: an older trace without its final call)` : ''}`,
+    `first call by layer: ${counts(Object.fromEntries(Object.entries(m.firstCallLayers).filter(([, n]) => n > 0).map(([k, n]) => [k, n])))}`,
+    `time: model ${duration(m.time.modelMs)}, tools ${m.time.toolSeconds}s (parallel tools overlap)`,
+    `tool outcomes: ${Object.entries(m.toolOutcomes).filter(([, o]) => o.errors > 0 || o.nonZeroExit > 0).map(([name, o]) => `${name} ${o.errors}/${o.calls} failed${o.nonZeroExit ? `, ${o.nonZeroExit} non-zero exits` : ''}`).join('; ') || 'no failures recorded'}`,
+    `signals: ${signalsOf(m).map((s) => `${s.severity} ${s.area}: ${s.signal}`).join('; ') || 'none'}`,
     `skills: loaded ${m.skills.loaded} (~${tokens(m.skills.loadedTokens)}), retired ${m.skills.evicted}`,
     `memory gate: ${counts(m.memoryGate)}`,
     `reasoning effort: ${counts(m.reasoningEffort)}`,

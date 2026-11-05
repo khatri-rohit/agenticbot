@@ -1,3 +1,4 @@
+import { ANALYZE_HELP, analyzeCommand } from './analyze.js';
 import { parseArgs, type Args } from './args.js';
 import { BASELINE_HELP, GATE_HELP, baselineCommand, gateCommand } from './gate.js';
 import { METRICS_HELP, metricsCommand } from './metrics.js';
@@ -9,6 +10,7 @@ type Command = { help: string; run: (args: Args) => Promise<void | number> };
 const COMMANDS: Record<string, Command> = {
   runs: { help: RUNS_HELP, run: runsCommand },
   metrics: { help: METRICS_HELP, run: metricsCommand },
+  analyze: { help: ANALYZE_HELP, run: analyzeCommand },
   seed: { help: SEED_HELP, run: seedCommand },
   run: { help: RUN_HELP, run: runCommand },
   baseline: { help: BASELINE_HELP, run: baselineCommand },

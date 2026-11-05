@@ -1,3 +1,4 @@
+import type { TaskSuite } from '../runner/task.js';
 import type { SuiteStats, TaskStats } from './summary.js';
 
 /** A task fails when it loses this many passing trials (scaled to its trial count). */
@@ -8,7 +9,7 @@ export const MAX_SUITE_DROP_POINTS = 10;
 export const MAX_TOKEN_RISE = 0.1;
 
 export type Baseline = SuiteStats & {
-  suite: string;
+  suite: TaskSuite;
   recordedAt: string;
   /** Set when written with --accept: why an expected regression was accepted. */
   acceptReason?: string;
@@ -43,6 +44,9 @@ export function compareToBaseline(
   compare: GateCompare = 'harness',
 ): GateResult {
   const refuse: string[] = [];
+  if (baseline.suite && candidate.suite && baseline.suite !== candidate.suite) {
+    refuse.push(`suite differs: baseline ${baseline.suite}, candidate ${candidate.suite}`);
+  }
   if (baseline.model !== candidate.model) refuse.push(`model differs: baseline ${baseline.model}, candidate ${candidate.model}`);
   if (baseline.seedHash !== candidate.seedHash) refuse.push('seedHash differs: the eval home was re-seeded with different skills, agents or memory');
   // Baselines recorded before setups were tracked have none.

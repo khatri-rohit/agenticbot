@@ -59,10 +59,20 @@ export async function baselineCommand(args: Args): Promise<number> {
     console.error(BASELINE_HELP);
     return 1;
   }
-  const stats = await candidate(args, suite);
   const accept = flag(args, 'accept');
+  const baselinesDir = path.resolve(flag(args, 'baselines') ?? 'evals/baselines');
+  // Refuse a hand-edited baseline before running the suite: never spend on a refusal.
+  if (!accept) {
+    try {
+      await readBaseline(baselinesDir, suite);
+    } catch (error) {
+      console.error(`Baseline not written: ${error instanceof Error ? error.message : error}`);
+      return 2;
+    }
+  }
+  const stats = await candidate(args, suite);
   const outcome = await recordBaseline({
-    baselinesDir: path.resolve(flag(args, 'baselines') ?? 'evals/baselines'),
+    baselinesDir,
     suite,
     stats,
     ...(accept ? { acceptReason: accept } : {}),

@@ -12,6 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="top">
           <strong>Agent eval</strong>
           <a href="/">Threads</a>
+          <a href="/results">Results</a>
           <a href="/usage">Usage</a>
         </header>
         <main>{children}</main>

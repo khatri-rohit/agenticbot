@@ -10,7 +10,6 @@ import {
   rewriteCitationFences,
 } from './normalize-assistant-markdown';
 
-const codePlugins = { code };
 const fullPlugins = { code, mermaid };
 
 /** Streamdown / Shiki defaults — dark theme via `html.dark`. */
@@ -120,6 +119,9 @@ export function AgentMarkdown({
 
   if (!markdown) return null;
 
+  // Both branches share the full plugin set — the streaming branch previously
+  // dropped mermaid, so streamed diagram fences stayed unrendered until the
+  // stream completed and the component re-rendered in static mode.
   const shared = {
     shikiTheme: SHIKI_THEMES,
     lineNumbers: true,
@@ -127,6 +129,8 @@ export function AgentMarkdown({
     controls,
     className: 'agent-markdown',
     linkSafety,
+    tableMaxHeight: 320,
+    isAnimating: !!streaming && !reducedMotion,
   };
 
   if (streaming) {
@@ -137,9 +141,8 @@ export function AgentMarkdown({
           mode="streaming"
           animated={reducedMotion ? false : STREAM_ANIMATION}
           caret={reducedMotion ? undefined : 'circle'}
-          isAnimating={!reducedMotion}
           parseIncompleteMarkdown
-          plugins={codePlugins}
+          plugins={fullPlugins}
         >
           {markdown}
         </Streamdown>
@@ -147,11 +150,11 @@ export function AgentMarkdown({
       </div>
     );
   }
-
   return (
     <div className="min-w-0">
       <Streamdown
         {...shared}
+        isAnimating={false}
         mode="static"
         plugins={fullPlugins}
         mermaid={{ config: { theme: mermaidTheme() } }}

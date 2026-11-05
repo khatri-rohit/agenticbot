@@ -40,7 +40,11 @@ async function removeWorkdir(sourceRoot: string | null, dir: string): Promise<vo
   await rm(dir, { recursive: true, force: true });
 }
 
-/** Delete earlier workdirs of this task (`<taskId>-<n>`). */
+/** Delete earlier workdirs of this task (`<taskId>-<n>` exactly: task `readme` must not touch `readme-glossary-1`). */
+export function isTrialDir(name: string, taskId: string): boolean {
+  return name.startsWith(`${taskId}-`) && /^\d+$/.test(name.slice(taskId.length + 1));
+}
+
 export async function pruneWorkdirs(workdirsRoot: string, taskId: string, source: string): Promise<void> {
   let names: string[];
   try {
@@ -50,7 +54,7 @@ export async function pruneWorkdirs(workdirsRoot: string, taskId: string, source
   }
   const sourceRoot = isUrl(source) ? null : path.resolve(source);
   for (const name of names) {
-    if (!name.startsWith(`${taskId}-`)) continue;
+    if (!isTrialDir(name, taskId)) continue;
     await removeWorkdir(sourceRoot, path.join(workdirsRoot, name));
   }
   if (sourceRoot) await git(sourceRoot, ['worktree', 'prune']);

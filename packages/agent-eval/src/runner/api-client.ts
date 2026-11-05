@@ -1,18 +1,17 @@
-import type { ThinkingValue, ThreadLastRun } from '@agent/agent-models';
+import type { LedgerResponse, StartRunRequest, ThinkingValue, ThreadLastRun } from '@agent/agent-models';
 
-/**
- * How waiting for a run ended. `cancelled`: `run.settled` with `cancelled`.
- * `gone`: the API no longer holds the run, or the stream closed without a
- * settle; the ledger is the truth either way.
- */
-export type RunEnd = 'settled' | 'cancelled' | 'gone' | 'timeout';
+/** How often a trial reads the ledger while it waits for its run. */
+const POLL_MS = 2_000;
 
 /**
  * The few API calls a trial needs (base `http://localhost:<port>/api/agent`).
  * Trials go through the real entry point (G2); nothing here calls the loop.
  */
 export class ApiClient {
-  constructor(private readonly base: string) {}
+  constructor(
+    private readonly base: string,
+    private readonly pollMs = POLL_MS,
+  ) {}
 
   private async json<T>(method: string, route: string, body?: unknown): Promise<T> {
     const response = await fetch(`${this.base}${route}`, {
@@ -42,7 +41,7 @@ export class ApiClient {
     /** Omitted: the model default. `'auto'`: System 1 picks per iteration (enforce mode only). */
     thinking?: ThinkingValue;
   }): Promise<{ runId: string }> {
-    return this.json('POST', '/run', {
+    const body: StartRunRequest = {
       threadId: input.threadId,
       message: { content: input.content },
       model: input.model,
@@ -50,14 +49,16 @@ export class ApiClient {
       ...(input.thinking !== undefined ? { thinking: input.thinking } : {}),
       webSearch: true,
       contextWindowMode: 'default',
-    });
+    };
+    return this.json('POST', '/run', body);
   }
 
-  cancelRun(runId: string): Promise<unknown> {
-    return this.json('POST', `/run/${runId}/cancel`);
+  /** A run that already settled answers 404: that is fine, there is nothing left to stop. */
+  async cancelRun(runId: string): Promise<void> {
+    await this.json('POST', `/run/${runId}/cancel`).catch(() => undefined);
   }
 
-  ledger(threadId: string): Promise<{ lastRun?: ThreadLastRun; activeRunId?: string }> {
+  ledger(threadId: string): Promise<LedgerResponse> {
     return this.json('GET', `/threads/${threadId}/ledger`);
   }
 
@@ -72,40 +73,28 @@ export class ApiClient {
   }
 
   /**
-   * Wait for a run to settle: read its SSE stream until `run.settled` or
-   * `event: done` (the run had already settled). Every run ends with
-   * `run.settled`, so its workspace and ledger are final after it; `run.error`
-   * is only the cancel notice before it. Times out after `timeoutMs`.
+   * Wait until `runId` has settled and return its last-run, or null after
+   * `timeoutMs`. The API shows a run's last-run only once the run has fully
+   * settled (workspace and ledger final), so "the thread's last-run is this
+   * run" is the whole signal: no stream to drop, no race with post-run work.
+   * Nobody answers a choice in a trial, so a run paused on one is skipped
+   * (the run then ends with a summary of the options).
    */
-  async waitForRun(runId: string, timeoutMs: number): Promise<RunEnd> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(`${this.base}/run/${runId}/events`, { signal: controller.signal });
-      if (response.status === 404) return 'gone';
-      if (!response.ok || !response.body) throw new Error(`events ${runId} → ${response.status}`);
-      const decoder = new TextDecoder();
-      let buffer = '';
-      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-        buffer += decoder.decode(chunk, { stream: true });
-        let split: number;
-        while ((split = buffer.indexOf('\n\n')) >= 0) {
-          const frame = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
-          if (/^event: done$/m.test(frame)) return 'settled';
-          const data = frame.match(/^data: (.*)$/m)?.[1];
-          if (!data) continue;
-          const event = JSON.parse(data) as { type?: string; cancelled?: boolean };
-          if (event.type === 'run.settled') return event.cancelled ? 'cancelled' : 'settled';
+  async settledLastRun(threadId: string, runId: string, timeoutMs: number): Promise<ThreadLastRun | null> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const ledger = await this.ledger(threadId);
+      if (ledger.lastRun?.runId === runId) return ledger.lastRun;
+      if (ledger.activeRun?.runId === runId) {
+        for (const choice of ledger.activeRun.pendingChoices) {
+          // 404: answered or gone meanwhile.
+          await this.json('POST', `/run/${runId}/choice`, { choiceId: choice.choiceId, skipped: true }).catch(
+            () => undefined,
+          );
         }
       }
-      return 'gone';
-    } catch (error) {
-      if (controller.signal.aborted) return 'timeout';
-      throw error;
-    } finally {
-      clearTimeout(timer);
-      controller.abort();
+      if (Date.now() >= deadline) return null;
+      await new Promise((resolve) => setTimeout(resolve, this.pollMs));
     }
   }
 }

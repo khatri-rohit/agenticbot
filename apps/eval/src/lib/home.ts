@@ -18,3 +18,15 @@ export function agentHome(): string {
   if (configured) return path.resolve(repoRoot(), configured);
   return path.join(repoRoot(), '.local', 'personal-assistant');
 }
+
+/** The eval home (trials, suite results): `EVAL_HOME`, else this repo's `.local/eval-home`. */
+export function evalHome(): string {
+  const configured = process.env.EVAL_HOME;
+  if (configured) return path.resolve(repoRoot(), configured);
+  return path.join(repoRoot(), '.local', 'eval-home');
+}
+
+/** Run pages serve both homes; `?home=eval` selects the eval home (trial runs). */
+export function homeFor(param: string | string[] | undefined): { home: string; query: string } {
+  return param === 'eval' ? { home: evalHome(), query: '?home=eval' } : { home: agentHome(), query: '' };
+}

@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { compareToBaseline, type Baseline } from './gate.js';
+import type { TaskSuite } from '../runner/task.js';
 import type { SuiteStats } from './summary.js';
 
 export function baselinePath(baselinesDir: string, suite: string): string {
@@ -43,7 +44,7 @@ export async function readBaseline(baselinesDir: string, suite: string): Promise
  */
 export async function recordBaseline(input: {
   baselinesDir: string;
-  suite: string;
+  suite: TaskSuite;
   stats: SuiteStats;
   acceptReason?: string;
 }): Promise<{ written: true; path: string } | { written: false; why: string }> {

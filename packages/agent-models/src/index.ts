@@ -149,6 +149,7 @@ export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
 
 export type {
   ToolRisk,
+  ToolStage,
   ToolOrigin,
   ToolContext,
 } from './lib/tool-context.js';
@@ -178,7 +179,7 @@ export {
   ChoiceSkipped,
 } from './lib/choice.js';
 
-export type { TraceEvent } from './lib/trace.js';
+export type { TraceCallInput, TraceEvent, TraceMessageRef } from './lib/trace.js';
 export { TRACE_SCHEMA_VERSION } from './lib/trace.js';
 
 export type {

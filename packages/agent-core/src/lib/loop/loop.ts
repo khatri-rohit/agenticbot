@@ -16,6 +16,7 @@ import {
   type RunUsage,
   type TokenUsage,
   type ToolContext,
+  type ToolStage,
   type TraceEvent,
   type WebTrust,
 } from '@agent/agent-models';
@@ -36,10 +37,9 @@ import { createEffortRouter, type EffortSignals } from '../system1/effort';
 import { buildEffortState } from '../system1/state';
 import { getSkill } from '../tools/skills';
 import { resolveLimits } from './limits';
-import type { ModelTurn } from '../model/types';
-import type { Tool, ToolRegistry, ToolStage } from '../tools/types';
+import type { Tool, ToolRegistry } from '../tools/types';
+import { isEditSuccess } from '../tools/workspace/tools';
 import {
-  isEditSuccess,
   outcomeKey,
   pathFromToolArgs,
   toolCallKey,
@@ -51,13 +51,22 @@ import { throwIfAborted, withTimeout } from './timeout';
 import { preview, ToolCallRecord } from './tool-call-record';
 import { toLedgerRecord } from './to-ledger-record';
 import { WebSourceStore } from './web-sources';
+import { createCallRecorder } from './call-record';
 import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 
 const OPEN_PLAN_WORK_NUDGE =
   'Open todos remain on the Final plan. Update todo status or finish those items before ending the turn. Do not claim the work is done.';
 
 const USER_SKIPPED_CHOICE =
-  'User skipped this choice. Stop. Do not assume a path or keep editing.';
+  'User skipped this choice to decide later. Do not pick an option or continue work that depends on it.';
+
+/** Tools-off final call after a limit; doubles as the handoff the next run continues from. */
+const LIMIT_HANDOFF_INSTRUCTION =
+  'This run stopped at a limit; tools are off. If the request can be answered from the information above, answer it now and say what is uncertain. Otherwise write a short handoff for the next run: what is done (files changed, what was verified), what is left, and the exact next step.';
+
+/** Tools-off final call after the user skipped an offer_choice: a summary they can decide from. */
+const DEFERRED_CHOICE_INSTRUCTION =
+  'The user skipped your question to decide later; tools are off. Do not pick an option or continue the work. Write the reply they will decide from: 1) one or two lines on what was done so far and where it stopped; 2) the open question; 3) each option by its label: what it would do, its trade-offs (effort, risk, what it changes) and when it is the right pick; 4) your recommendation and why; 5) how to answer next time (for example "Go with <label>", several options, or other direction). Keep it scannable.';
 
 /** A tool without a declared stage (e.g. a future MCP tool) is scheduled as mutate, the strictest class. */
 function toolStage(tool: Tool): ToolStage {
@@ -142,6 +151,7 @@ export async function runLoop(
     ...(result.limitReason ? { limitReason: result.limitReason } : {}),
     usage,
     durationMs: Date.now() - startedAt,
+    ...(config.signal?.aborted ? { cancelled: true as const } : {}),
   });
   return {
     ...result,
@@ -244,6 +254,8 @@ async function runLoopCore(
     ...(config.putBlob ? { putBlob: config.putBlob } : {}),
     ...(config.readBlob ? { readBlob: config.readBlob } : {}),
   });
+  const recorder =
+    config.recordCalls && config.putBlob ? createCallRecorder(config.putBlob) : null;
 
   let iterations = 0;
   let totalToolCalls = 0;
@@ -589,6 +601,7 @@ async function runLoopCore(
                 webTrust: () => webSources.snapshot(),
                 ...(config.emit ? { emit: config.emit } : {}),
                 ...(config.pinnedSkills ? { pinnedSkills: config.pinnedSkills } : {}),
+                ...(config.recordCalls ? { recordCalls: true } : {}),
                 ...(config.capacity ? { capacity: config.capacity } : {}),
                 chargeUsage: (child) => budget.chargeChild(child),
               }),
@@ -797,21 +810,26 @@ async function runLoopCore(
     return '';
   }
 
-  function finishChoiceSkipped(): CoreResult {
-    emitTurnCompleted(iterations);
+  /**
+   * The user skipped an offer_choice: they will decide later, so the run
+   * ends with a tools-off summary of the open choice, not as incomplete.
+   */
+  async function completeAfterDeferredChoice(): Promise<CoreResult> {
+    stubLiveToolResults(messages, contextBudget, runStart);
+    const final = await finalizeAnswer(DEFERRED_CHOICE_INSTRUCTION);
+    emitTurnCompleted(iterations, final.usage);
     emit?.({
       type: 'run.completed',
       runId,
       iterations,
       toolCalls: totalToolCalls,
-      incomplete: true,
     });
     return {
       runId,
-      content: lastAssistantContent(),
+      content: final.content,
       iterations,
       toolCalls: totalToolCalls,
-      status: 'incomplete',
+      status: 'completed',
     };
   }
 
@@ -822,6 +840,7 @@ async function runLoopCore(
       iteration: iterations,
       toolName: call.toolName,
       toolCallId: call.toolCall.id,
+      stage: toolStage(call.tool),
       args: call.args,
     });
     record.start(
@@ -849,6 +868,7 @@ async function runLoopCore(
     durationMs: number,
   ): Promise<'ok' | 'halted'> {
     const { toolCall, toolName, tool, args } = call;
+    const classified = tool.classify?.(result);
     trace({
       type: 'tool_complete',
       runId,
@@ -858,6 +878,8 @@ async function runLoopCore(
       durationMs,
       resultPreview: preview(result),
       resultChars,
+      ...(classified ? { outcome: classified.outcome } : {}),
+      ...(classified?.exitCode !== undefined ? { exitCode: classified.exitCode } : {}),
     });
     // Append before outcome halt so I1 always holds for the triggering call.
     const webTrust = trustByCall.get(toolCall.id);
@@ -1015,8 +1037,8 @@ async function runLoopCore(
     return outcomeHalted ? 'halted' : 'ok';
   }
 
-  /** Fresh message lifecycle for limit finalization (never reuse the tool-turn id). */
-  async function finalizeAnswer(): Promise<{
+  /** Tools-off final answer with a fresh message lifecycle (never reuse the tool-turn id). */
+  async function finalizeAnswer(instruction: string): Promise<{
     content: string;
     usage?: TokenUsage;
   }> {
@@ -1032,19 +1054,40 @@ async function runLoopCore(
 
     emit?.({ type: 'assistant.started', runId, messageId: finalMessageId });
 
+    // The instruction joins the live `messages` only: it is loop control
+    // flow, not a durable turn, so it must never hit onMessage.
+    messages.push({ role: 'user', content: instruction });
+    const noTools: ToolRegistry = { definitions: [], byName: new Map() };
+    // The tool-less finalize prompt is everything in `messages` right now.
+    const estimatedPrompt = estimatePromptTokens(messages);
+    trace({
+      type: 'llm_request',
+      runId,
+      iteration: iterations,
+      estimatedPromptTokens: estimatedPrompt,
+      final: true,
+      ...(recorder ? { input: recorder.input(messages, noTools) } : {}),
+    });
+
     // duration = model-call + stream time; excludes tool execution (on ToolCompleted).
     const startedAt = Date.now();
-    const turn = await finalizeWithoutTools(
-      modelCall,
-      config.model,
-      messages,
-      onTextDelta,
-      signal,
-    );
+    const turn = await modelCall(config.model, messages, noTools, onTextDelta, signal);
     const content = turn.content ?? '';
     const durationMs = Date.now() - startedAt;
-    // The tool-less finalize prompt is everything in `messages` right now.
-    budget.chargeOwn(turn.usage, estimatePromptTokens(messages), turn.content);
+    const usageEstimated = budget.chargeOwn(turn.usage, estimatedPrompt, turn.content);
+    trace({
+      type: 'llm_response',
+      runId,
+      iteration: iterations,
+      finishReason: turn.finishReason,
+      hasToolCalls: false,
+      contentPreview: content ? preview(content) : undefined,
+      ...(turn.usage ? { usage: turn.usage } : {}),
+      durationMs,
+      ...(usageEstimated ? { usageEstimated } : {}),
+      final: true,
+      ...(recorder ? { output: recorder.output(turn) } : {}),
+    });
 
     await appendDurable(
       {
@@ -1093,7 +1136,7 @@ async function runLoopCore(
 
   async function completeAfterLimit(): Promise<CoreResult> {
     stubLiveToolResults(messages, contextBudget, runStart);
-    const final = await finalizeAnswer();
+    const final = await finalizeAnswer(LIMIT_HANDOFF_INSTRUCTION);
     emitTurnCompleted(iterations, final.usage);
     emit?.({
       type: 'run.completed',
@@ -1225,6 +1268,7 @@ async function runLoopCore(
         iteration: iterations,
         estimatedPromptTokens: estimatedPrompt,
         ...(effort.wire !== undefined ? { reasoningEffort: effort.wire } : {}),
+        ...(recorder ? { input: recorder.input(messages, tools) } : {}),
       });
       emit?.({ type: 'turn.started', runId, iteration: iterations });
 
@@ -1264,6 +1308,7 @@ async function runLoopCore(
         ...(turn.usage ? { usage: turn.usage } : {}),
         durationMs,
         ...(usageEstimated ? { usageEstimated } : {}),
+        ...(recorder ? { output: recorder.output(turn) } : {}),
       });
 
       if (turn.toolCalls.length > 0) {
@@ -1375,7 +1420,10 @@ async function runLoopCore(
           batchOutcome = await executeReadyBatch(staged.subagent, []);
         }
         if (batchOutcome === 'deferred') {
-          return finishChoiceSkipped();
+          // Calls in later stages (e.g. a delegate after offer_choice) never ran:
+          // answer them before the summary call, so no tool_call goes unanswered.
+          await record.skip(turn.toolCalls, 'Skipped: user deferred this choice.');
+          return await completeAfterDeferredChoice();
         }
         if (batchOutcome === 'halted') {
           const skipDetail = lastLimitReason?.startsWith('limit.outcome:')
@@ -1545,34 +1593,3 @@ async function runLoopCore(
   }
 }
 
-/**
- * Finalize the answer after a limit without offering tools.
- * The steering prompt joins the live `messages` array only — it is loop
- * control flow, not a durable turn, so it must never hit onMessage.
- */
-async function finalizeWithoutTools(
-  modelCall: ModelCallFn,
-  model: string,
-  messages: ChatCompletionMessageParam[],
-  onTextDelta: ((delta: string) => void) | undefined,
-  signal: AbortSignal | undefined,
-): Promise<ModelTurn> {
-  // Doubles as the handoff the next run continues from (it is the last
-  // assistant row in the ledger, and the Last run layer points at it).
-  messages.push({
-    role: 'user',
-    content:
-      'This run stopped at a limit; tools are off. If the request can be answered from the information above, answer it now and say what is uncertain. Otherwise write a short handoff for the next run: what is done (files changed, what was verified), what is left, and the exact next step.',
-  });
-
-  return modelCall(
-    model,
-    messages,
-    {
-      definitions: [],
-      byName: new Map(),
-    },
-    onTextDelta,
-    signal,
-  );
-}

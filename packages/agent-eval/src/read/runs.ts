@@ -184,6 +184,31 @@ async function threadIds(home: string, threadId?: string): Promise<string[]> {
 }
 
 /**
+ * One run by id, reading only its own thread (and that thread's sub-agent
+ * threads): the thread is found from the directory listing, not by parsing
+ * every trace in the home. Null when no thread has `<runId>.jsonl`.
+ */
+export async function readRun(home: string, runId: string): Promise<RunSummary | null> {
+  let threads: string[];
+  try {
+    threads = await readdir(path.join(home, 'sessions'));
+  } catch {
+    return null;
+  }
+  const threadId = threads.find((id) => existsSync(path.join(home, 'sessions', id, 'traces', `${runId}.jsonl`)));
+  if (!threadId) return null;
+  const find = (runs: RunSummary[]): RunSummary | null => {
+    for (const run of runs) {
+      if (run.runId === runId) return run;
+      const child = find(run.children);
+      if (child) return child;
+    }
+    return null;
+  };
+  return find(await listRuns(home, { threadId }));
+}
+
+/**
  * Runs under an agent home, newest first, with sub-agent runs nested under
  * the run that started them. `threadId` limits to one thread (and its
  * sub-agent threads); `since` (ISO) keeps runs started at or after it.

@@ -423,6 +423,7 @@ export function createSubagentRunner(deps: {
             ? { workspaceRoot: parent.workspaceRoot }
             : {}),
           putBlob: (text) => host.putBlob(threadId, text),
+          ...(parent.recordCalls ? { recordCalls: true } : {}),
           readBlob: (sha, offset, length) =>
             host.readBlob(threadId, sha, offset, length),
           onMessage: async (record, meta) => {

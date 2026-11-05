@@ -1,0 +1,19 @@
+{
+  "id": "limit-codes-lookup",
+  "suite": "regression",
+  "repo": {
+    "source": ".",
+    "commit": "9065479"
+  },
+  "prompt": "Where is the table of run limit codes defined, and which codes count as resumable? Answer with the file path and the list of resumable codes. Do not change any files.",
+  "posture": "ask",
+  "checks": [],
+  "files": [],
+  "scope": {
+    "allow": []
+  },
+  "budget": {
+    "maxPromptTokens": 150000,
+    "maxMinutes": 4
+  }
+}

@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { isPauseStop, isResumableStop, type ThinkingValue } from '@agent/agent-models';
+import { isPauseStop, isResumableStop, RUN_CANCELLED_REASON, type ThinkingValue } from '@agent/agent-models';
 
 import { readCatalog } from '../read/catalog.js';
 import { listRuns } from '../read/runs.js';
@@ -24,6 +24,20 @@ const CAPACITY_SKIP = 'capacity';
 
 export type TrialStatus = 'passed' | 'failed' | 'skipped' | 'error';
 
+/**
+ * Why a trial's last run ended, so a report can tell "the agent failed" from
+ * "the setup failed": settled (normally), timeout (past the trial deadline,
+ * cancelled by the runner), cancelled (by someone else), capacity (the
+ * account ran out), error (the trial itself failed: API down, checkout,
+ * a run that never settled).
+ */
+export type TrialEnd = 'settled' | 'timeout' | 'cancelled' | 'capacity' | 'error';
+
+/** What a trial needs from the API; `ApiClient` in production, a fake in tests. */
+export type TrialClient = Pick<ApiClient, 'createThread' | 'startRun' | 'cancelRun' | 'settledLastRun'>;
+
+export type TrialOptions = Pick<RunnerOptions, 'evalHome' | 'harnessRoot' | 'model' | 'thinking' | 'continues'>;
+
 export type TrialResult = {
   taskId: string;
   suite: TaskSuite;
@@ -42,6 +56,7 @@ export type TrialResult = {
    */
   system1Setup?: string;
   status: TrialStatus;
+  ended?: TrialEnd;
   /** Why it was skipped or errored. */
   reason?: string;
   checksPassed?: boolean;
@@ -81,6 +96,26 @@ export type RunnerOptions = {
 };
 
 export type SuiteRun = { resultsDir: string; results: TrialResult[] };
+
+/** `summary.json` in a suite run's results folder; the trial files are the only copy of the results. */
+export const SUITE_META_FILE = 'summary.json';
+
+export type SuiteRunMeta = {
+  label: string;
+  suite: TaskSuite | 'mixed';
+  harnessSha: string;
+  harnessDirty: string | null;
+  seedHash: string;
+  model: string;
+  thinking?: ThinkingValue;
+  tasks: string[];
+  repeat: number;
+  startBalance: { session: number | null; weekly: number | null };
+  startedAt: string;
+  finishedAt?: string;
+  /** Why the suite stopped early (ceiling, capacity). */
+  stopped?: string;
+};
 
 type Balance = { session: number | null; weekly: number | null };
 
@@ -145,9 +180,14 @@ async function assertApiOnEvalHome(
   }
 }
 
-async function runTrial(
-  api: ApiClient,
-  opts: RunnerOptions,
+/**
+ * One trial: a fresh checkout, a thread, the task prompt plus up to
+ * `continues` Continue messages on resumable stops, then a grade of the
+ * settled workspace. Never throws: failures are an `error` trial.
+ */
+export async function runTrial(
+  api: TrialClient,
+  opts: TrialOptions,
   loaded: LoadedTask,
   trial: number,
   base: Omit<TrialResult, 'taskId' | 'suite' | 'trial' | 'taskHash' | 'status' | 'continues' | 'runIds' | 'startedAt' | 'finishedAt'>,
@@ -198,17 +238,19 @@ async function runTrial(
         ...(thinking !== undefined ? { thinking } : {}),
       });
       result.runIds.push(runId);
-      const end = await api.waitForRun(runId, Math.max(60_000, deadline - Date.now()));
-      if (end === 'timeout') {
-        await api.cancelRun(runId).catch(() => undefined);
+      const lastRun = await api.settledLastRun(thread.id, runId, Math.max(60_000, deadline - Date.now()));
+      if (!lastRun) {
+        await api.cancelRun(runId);
         // Grade only a settled workspace: a cancelled run can still be finishing a write.
-        if ((await api.waitForRun(runId, CANCEL_SETTLE_MS)) === 'timeout') {
+        if (!(await api.settledLastRun(thread.id, runId, CANCEL_SETTLE_MS))) {
           throw new Error(`run ${runId} did not settle within ${CANCEL_SETTLE_MS / 1000}s of its cancel; workspace not graded`);
         }
+        result.ended = 'timeout';
         limitReason = 'eval.timeout: trial passed its hard deadline';
         break;
       }
-      limitReason = (await api.ledger(thread.id)).lastRun?.limitReason;
+      limitReason = lastRun.limitReason;
+      result.ended = limitReason === RUN_CANCELLED_REASON ? 'cancelled' : 'settled';
       // A pause (account ran out) is resumable for a person, not for a trial.
       if (!limitReason || !isResumableStop(limitReason) || isPauseStop(limitReason)) break;
       if (result.continues >= opts.continues) break;
@@ -226,6 +268,7 @@ async function runTrial(
 
     // The account ran out, not the agent: the trial gets no grade (plan D-3).
     if (limitReason && isPauseStop(limitReason)) {
+      result.ended = 'capacity';
       result.status = 'skipped';
       result.reason = `${CAPACITY_SKIP}: ${limitReason}`;
       result.finishedAt = new Date().toISOString();
@@ -251,6 +294,7 @@ async function runTrial(
     result.status = grade.passed ? 'passed' : 'failed';
   } catch (error) {
     result.status = 'error';
+    result.ended = 'error';
     result.reason = error instanceof Error ? error.message : String(error);
   }
   result.finishedAt = new Date().toISOString();
@@ -286,6 +330,20 @@ export async function runSuite(opts: RunnerOptions): Promise<SuiteRun> {
     seedHash: seed.seedHash,
     model: opts.model,
   };
+  const suites = new Set(opts.tasks.map((loaded) => loaded.task.suite));
+  const meta: SuiteRunMeta = {
+    label: opts.label,
+    suite: suites.size === 1 ? [...suites][0]! : 'mixed',
+    ...base,
+    ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
+    tasks: opts.tasks.map((loaded) => loaded.task.id),
+    repeat: opts.repeat,
+    startBalance: start,
+    startedAt: new Date().toISOString(),
+  };
+  // Written now and again at the end, so an interrupted suite run still says what it was.
+  const writeMeta = () => writeFile(path.join(resultsDir, SUITE_META_FILE), `${JSON.stringify(meta, null, 2)}\n`);
+  await writeMeta();
   let stopped: string | undefined;
 
   for (const loaded of opts.tasks) {
@@ -328,9 +386,8 @@ export async function runSuite(opts: RunnerOptions): Promise<SuiteRun> {
     }
   }
 
-  await writeFile(
-    path.join(resultsDir, 'summary.json'),
-    `${JSON.stringify({ label: opts.label, ...base, startBalance: start, results: results.map(({ grade: _grade, metrics: _metrics, ...rest }) => rest) }, null, 2)}\n`,
-  );
+  meta.finishedAt = new Date().toISOString();
+  if (stopped) meta.stopped = stopped;
+  await writeMeta();
   return { resultsDir, results };
 }

@@ -29,6 +29,10 @@
         "executor": "nx:run-commands",
         "options": { "command": "node packages/agent-eval/scripts/cli.mjs metrics", "cwd": "{workspaceRoot}" }
       },
+      "analyze": {
+        "executor": "nx:run-commands",
+        "options": { "command": "node packages/agent-eval/scripts/cli.mjs analyze", "cwd": "{workspaceRoot}" }
+      },
       "seed": {
         "executor": "nx:run-commands",
         "options": { "command": "node packages/agent-eval/scripts/cli.mjs seed", "cwd": "{workspaceRoot}" }

@@ -1,7 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { TrialResult } from '../runner/runner.js';
+import { SUITE_META_FILE, type SuiteRunMeta, type TrialResult } from '../runner/runner.js';
+import type { TaskSuite } from '../runner/task.js';
 
 /** Spread (max ÷ min prompt tokens) above this marks a task unstable: no token verdict. */
 export const UNSTABLE_SPREAD = 2;
@@ -25,6 +26,8 @@ export type TaskStats = {
 };
 
 export type SuiteStats = {
+  /** Absent on baselines recorded before it was tracked. */
+  suite?: TaskSuite;
   model: string;
   seedHash: string;
   harnessSha: string;
@@ -43,9 +46,9 @@ function median(values: number[]): number | null {
   return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
-/** Trial results of one suite run (`<results>/<task>-<n>.json`; summary.json excluded). */
+/** Trial results of one suite run (`<results>/<task>-<n>.json`; the meta file excluded). */
 export async function readResults(dir: string): Promise<TrialResult[]> {
-  const files = (await readdir(dir)).filter((file) => file.endsWith('.json') && file !== 'summary.json');
+  const files = (await readdir(dir)).filter((file) => file.endsWith('.json') && file !== SUITE_META_FILE);
   const results: TrialResult[] = [];
   for (const file of files.sort()) {
     results.push(JSON.parse(await readFile(path.join(dir, file), 'utf8')) as TrialResult);
@@ -53,13 +56,39 @@ export async function readResults(dir: string): Promise<TrialResult[]> {
   return results;
 }
 
-/** Per-task stats of one suite run. Throws if trials disagree on model, seed or harness. */
+/**
+ * A suite run's meta and trials. `meta` is null for folders written before
+ * the meta file existed (or an unreadable one); the trials are still read.
+ */
+export async function readSuiteRun(dir: string): Promise<{ id: string; meta: SuiteRunMeta | null; results: TrialResult[] }> {
+  let meta: SuiteRunMeta | null = null;
+  try {
+    const raw = JSON.parse(await readFile(path.join(dir, SUITE_META_FILE), 'utf8')) as Partial<SuiteRunMeta>;
+    // Older summary.json files have no `tasks`; they are not a meta file.
+    if (typeof raw.label === 'string' && Array.isArray(raw.tasks)) meta = raw as SuiteRunMeta;
+  } catch {
+    meta = null;
+  }
+  return { id: path.basename(dir), meta, results: await readResults(dir) };
+}
+
+/** Suite runs under `<evalHome>/results`, newest first (folder names start with an ISO stamp). */
+export async function listSuiteRuns(resultsRoot: string): Promise<string[]> {
+  try {
+    const entries = await readdir(resultsRoot, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().reverse();
+  } catch {
+    return [];
+  }
+}
+
+/** Per-task stats of one suite run. Throws if trials disagree on suite, model, seed or harness. */
 export function summarizeSuite(results: TrialResult[]): SuiteStats {
   const ran = results.filter((result) => result.status !== 'skipped');
   if (ran.length === 0) throw new Error('No trials ran in these results (all skipped).');
   const first = ran[0]!;
   for (const result of ran) {
-    for (const key of ['model', 'seedHash', 'harnessSha', 'harnessDirty'] as const) {
+    for (const key of ['suite', 'model', 'seedHash', 'harnessSha', 'harnessDirty'] as const) {
       if (result[key] !== first[key]) throw new Error(`Results mix ${key} values (${first[key]} vs ${result[key]}).`);
     }
   }
@@ -97,6 +126,7 @@ export function summarizeSuite(results: TrialResult[]): SuiteStats {
     };
   }
   return {
+    suite: first.suite,
     model: first.model,
     seedHash: first.seedHash,
     harnessSha: first.harnessSha,
