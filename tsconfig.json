@@ -17,6 +17,12 @@
     },
     {
       "path": "./packages/agent-core"
+    },
+    {
+      "path": "./packages/agent-eval"
+    },
+    {
+      "path": "./apps/eval"
     }
   ]
 }

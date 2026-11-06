@@ -1,0 +1,192 @@
+{
+  "result": {
+    "runId": "replay-run",
+    "content": "Agent error: This operation was aborted",
+    "iterations": 1,
+    "toolCalls": 2,
+    "status": "error",
+    "usage": {
+      "own": {
+        "promptTokens": 1000,
+        "completionTokens": 20,
+        "calls": 1,
+        "estimatedCalls": 0
+      },
+      "children": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "calls": 0,
+        "estimatedCalls": 0
+      }
+    }
+  },
+  "trace": [
+    {
+      "type": "run_start",
+      "runId": "replay-run",
+      "model": "replay",
+      "threadId": "unknown",
+      "depth": 0,
+      "mode": "workspace",
+      "posture": "agent",
+      "windowTokens": 200000
+    },
+    {
+      "type": "llm_request",
+      "runId": "replay-run",
+      "iteration": 1,
+      "estimatedPromptTokens": 43
+    },
+    {
+      "type": "llm_response",
+      "runId": "replay-run",
+      "iteration": 1,
+      "finishReason": "tool_calls",
+      "hasToolCalls": true,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "durationMs": 0
+    },
+    {
+      "type": "tool_start",
+      "runId": "replay-run",
+      "iteration": 1,
+      "toolName": "edit_file",
+      "toolCallId": "e1",
+      "stage": "mutate",
+      "args": {
+        "path": "a.ts"
+      }
+    },
+    {
+      "type": "tool_error",
+      "runId": "replay-run",
+      "iteration": 1,
+      "toolName": "agent",
+      "error": "This operation was aborted"
+    },
+    {
+      "type": "run_finish",
+      "runId": "replay-run",
+      "iterations": 1,
+      "toolCalls": 2,
+      "status": "error",
+      "usage": {
+        "own": {
+          "promptTokens": 1000,
+          "completionTokens": 20,
+          "calls": 1,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      },
+      "durationMs": 0,
+      "cancelled": true
+    }
+  ],
+  "events": [
+    {
+      "type": "run.started",
+      "runId": "replay-run",
+      "threadId": "unknown",
+      "mode": "workspace",
+      "posture": "agent",
+      "model": "replay"
+    },
+    {
+      "type": "turn.started",
+      "runId": "replay-run",
+      "iteration": 1
+    },
+    {
+      "type": "assistant.started",
+      "runId": "replay-run",
+      "messageId": "<id>"
+    },
+    {
+      "type": "assistant.completed",
+      "runId": "replay-run",
+      "messageId": "<id>",
+      "content": "",
+      "durationMs": 0
+    },
+    {
+      "type": "tool.started",
+      "runId": "replay-run",
+      "toolCallId": "e1",
+      "toolName": "edit_file",
+      "argsPreview": "{\"path\":\"a.ts\"}"
+    },
+    {
+      "type": "tool.completed",
+      "runId": "replay-run",
+      "toolCallId": "e1",
+      "toolName": "edit_file",
+      "durationMs": 0,
+      "resultPreview": "Skipped: run cancelled.",
+      "outcome": "skipped"
+    },
+    {
+      "type": "tool.started",
+      "runId": "replay-run",
+      "toolCallId": "e2",
+      "toolName": "edit_file",
+      "argsPreview": "{\"path\":\"b.ts\"}"
+    },
+    {
+      "type": "tool.completed",
+      "runId": "replay-run",
+      "toolCallId": "e2",
+      "toolName": "edit_file",
+      "durationMs": 0,
+      "resultPreview": "Skipped: run cancelled.",
+      "outcome": "skipped"
+    },
+    {
+      "type": "run.error",
+      "runId": "replay-run",
+      "error": "This operation was aborted"
+    }
+  ],
+  "ledger": [
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "e1",
+          "type": "function",
+          "function": {
+            "name": "edit_file",
+            "arguments": "{\"path\":\"a.ts\"}"
+          }
+        },
+        {
+          "id": "e2",
+          "type": "function",
+          "function": {
+            "name": "edit_file",
+            "arguments": "{\"path\":\"b.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "e1",
+      "content": "Skipped: run cancelled."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "e2",
+      "content": "Skipped: run cancelled."
+    }
+  ]
+}

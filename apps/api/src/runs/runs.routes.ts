@@ -152,7 +152,7 @@ function parseChoiceOptionIds(value: unknown): string[] | null {
 
 /**
  * POST /api/agent/run/:runId/choice
- * Continue with selected options + extra text, or skip (run ends incomplete).
+ * Continue with selected options + extra text, or skip (the run ends with a summary of the options).
  */
 router.post('/run/:runId/choice', (req: Request, res: Response) => {
   const { runId } = req.params;

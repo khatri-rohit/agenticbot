@@ -1,0 +1,152 @@
+{
+  "result": {
+    "runId": "replay-run",
+    "content": "All done.",
+    "iterations": 1,
+    "toolCalls": 0,
+    "status": "completed",
+    "usage": {
+      "own": {
+        "promptTokens": 1000,
+        "completionTokens": 20,
+        "calls": 1,
+        "estimatedCalls": 0
+      },
+      "children": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "calls": 0,
+        "estimatedCalls": 0
+      }
+    }
+  },
+  "trace": [
+    {
+      "type": "run_start",
+      "runId": "replay-run",
+      "model": "replay",
+      "threadId": "unknown",
+      "depth": 0,
+      "mode": "workspace",
+      "posture": "agent",
+      "windowTokens": 200000
+    },
+    {
+      "type": "llm_request",
+      "runId": "replay-run",
+      "iteration": 1,
+      "estimatedPromptTokens": 7
+    },
+    {
+      "type": "llm_response",
+      "runId": "replay-run",
+      "iteration": 1,
+      "finishReason": "stop",
+      "hasToolCalls": false,
+      "contentPreview": "All done.",
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "durationMs": 0
+    },
+    {
+      "type": "run_finish",
+      "runId": "replay-run",
+      "iterations": 1,
+      "toolCalls": 0,
+      "status": "completed",
+      "usage": {
+        "own": {
+          "promptTokens": 1000,
+          "completionTokens": 20,
+          "calls": 1,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      },
+      "durationMs": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "run.started",
+      "runId": "replay-run",
+      "threadId": "unknown",
+      "mode": "workspace",
+      "posture": "agent",
+      "model": "replay"
+    },
+    {
+      "type": "turn.started",
+      "runId": "replay-run",
+      "iteration": 1
+    },
+    {
+      "type": "assistant.started",
+      "runId": "replay-run",
+      "messageId": "<id>"
+    },
+    {
+      "type": "assistant.completed",
+      "runId": "replay-run",
+      "messageId": "<id>",
+      "content": "All done.",
+      "durationMs": 0
+    },
+    {
+      "type": "turn.completed",
+      "runId": "replay-run",
+      "iteration": 1,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "runUsage": {
+        "own": {
+          "promptTokens": 1000,
+          "completionTokens": 20,
+          "calls": 1,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      }
+    },
+    {
+      "type": "run.completed",
+      "runId": "replay-run",
+      "iterations": 1,
+      "toolCalls": 0,
+      "usage": {
+        "own": {
+          "promptTokens": 1000,
+          "completionTokens": 20,
+          "calls": 1,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      }
+    }
+  ],
+  "ledger": [
+    {
+      "role": "assistant",
+      "content": "All done."
+    }
+  ]
+}

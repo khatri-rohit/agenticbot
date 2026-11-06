@@ -7,6 +7,13 @@ import type { TraceEvent } from './trace.js';
  */
 export type ToolRisk = 'read' | 'write' | 'exec' | 'network' | 'external';
 
+/**
+ * Loop scheduling class. skill/read/subagent batches run in parallel;
+ * network/exec/mutate run one at a time. A tool without a stage (e.g. a
+ * future MCP tool) is scheduled as `mutate`, the strictest class.
+ */
+export type ToolStage = 'skill' | 'read' | 'network' | 'subagent' | 'exec' | 'mutate';
+
 /** Where the run originated — chat today; cron/channels later. */
 export type ToolOrigin = 'chat' | 'cron' | 'channel' | 'eval';
 

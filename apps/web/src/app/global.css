@@ -430,6 +430,19 @@ body {
   font-family: var(--font-mono);
 }
 
+/* Skim survives: the report's trust sections (Verified / Not verified /
+   Still pending) are bold H3s the model emits; give them a hard left
+   border so they read as banners, not inline emphasis in body text. */
+.agent-markdown :is(h2, h3, h4).report-banner {
+  margin-top: 1.5rem;
+  padding: 0.35rem 0 0.35rem 0.6rem;
+  border-left: 3px solid var(--primary);
+}
+
+.agent-markdown [data-streamdown='hr'] {
+  margin: 1.25rem 0;
+}
+
 /* Block chrome: theme tokens + Streamdown my-* often miss the Tailwind scan. */
 .agent-markdown [data-streamdown='code-block'],
 .agent-markdown [data-streamdown='table-wrapper'],

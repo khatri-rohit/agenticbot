@@ -518,7 +518,7 @@ function TurnStatusLine({
         aria-hidden
       />
       {label}
-      <span className="text-muted-foreground/50">
+      <span className="text-muted-foreground/70">
         {elapsed}s{total != null ? ` · ${formatDuration(total)} total` : ''}
       </span>
     </p>
@@ -541,7 +541,7 @@ function MessageTimestamp({
     <time
       dateTime={iso}
       title={title}
-      className="type-caption text-muted-foreground/55 tabular-nums"
+      className="type-caption text-muted-foreground/70 tabular-nums"
     >
       {text}
       {durationMs != null && ` · ${formatDuration(durationMs)}`}

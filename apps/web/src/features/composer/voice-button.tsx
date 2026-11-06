@@ -3,6 +3,7 @@
 import { Loader2, Mic } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { VoiceInputController } from './use-voice-input';
 
@@ -31,34 +32,38 @@ function MicWaveform({ level }: { level: number }) {
 /** Mic toggle: idle mic, live waveform while listening, spinner while transcribing. */
 export function VoiceButton({ voice }: { voice: VoiceInputController }) {
   return (
-    <Button
-      type="button"
-      size="icon-sm"
-      variant={voice.active || voice.transcribing ? 'secondary' : 'ghost'}
-      onClick={() => voice.toggle()}
-      aria-label={
-        voice.transcribing
-          ? 'Transcribing voice'
-          : voice.active
-            ? 'Stop voice mode'
-            : 'Start voice mode'
-      }
-      aria-pressed={voice.active}
-      aria-busy={voice.transcribing}
-      title={voice.transcribing ? 'Transcribing…' : 'Voice mode'}
-      className={cn(
-        'shrink-0 rounded-full',
-        (voice.active || voice.transcribing) && 'text-foreground',
-        voice.active && 'w-auto px-2',
-      )}
-    >
-      {voice.active ? (
-        <MicWaveform level={voice.level} />
-      ) : voice.transcribing ? (
-        <Loader2 className="size-4 animate-spin" strokeWidth={2.25} />
-      ) : (
-        <Mic className="size-4" strokeWidth={2.25} />
-      )}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant={voice.active || voice.transcribing ? 'secondary' : 'ghost'}
+          onClick={() => voice.toggle()}
+          aria-label={
+            voice.transcribing
+              ? 'Transcribing voice'
+              : voice.active
+                ? 'Stop voice mode'
+                : 'Start voice mode'
+          }
+          aria-pressed={voice.active}
+          aria-busy={voice.transcribing}
+          className={cn(
+            'shrink-0 rounded-full',
+            (voice.active || voice.transcribing) && 'text-foreground',
+            voice.active && 'w-auto px-2',
+          )}
+        >
+          {voice.active ? (
+            <MicWaveform level={voice.level} />
+          ) : voice.transcribing ? (
+            <Loader2 className="size-4 animate-spin" strokeWidth={2.25} />
+          ) : (
+            <Mic className="size-4" strokeWidth={2.25} />
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{voice.transcribing ? 'Transcribing…' : 'Voice mode'}</TooltipContent>
+    </Tooltip>
   );
 }

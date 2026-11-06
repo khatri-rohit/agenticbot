@@ -1,0 +1,269 @@
+{
+  "result": {
+    "runId": "replay-run",
+    "content": "Open question: A or B. I recommend A.",
+    "iterations": 1,
+    "toolCalls": 2,
+    "status": "completed",
+    "usage": {
+      "own": {
+        "promptTokens": 2000,
+        "completionTokens": 40,
+        "calls": 2,
+        "estimatedCalls": 0
+      },
+      "children": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "calls": 0,
+        "estimatedCalls": 0
+      }
+    }
+  },
+  "trace": [
+    {
+      "type": "run_start",
+      "runId": "replay-run",
+      "model": "replay",
+      "threadId": "unknown",
+      "depth": 0,
+      "mode": "workspace",
+      "posture": "agent",
+      "windowTokens": 200000
+    },
+    {
+      "type": "llm_request",
+      "runId": "replay-run",
+      "iteration": 1,
+      "estimatedPromptTokens": 250
+    },
+    {
+      "type": "llm_response",
+      "runId": "replay-run",
+      "iteration": 1,
+      "finishReason": "tool_calls",
+      "hasToolCalls": true,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "durationMs": 0
+    },
+    {
+      "type": "tool_start",
+      "runId": "replay-run",
+      "iteration": 1,
+      "toolName": "offer_choice",
+      "toolCallId": "c1",
+      "stage": "mutate",
+      "args": {
+        "question": "Which approach?",
+        "options": [
+          {
+            "id": "a",
+            "label": "Approach A"
+          },
+          {
+            "id": "b",
+            "label": "Approach B"
+          }
+        ]
+      }
+    },
+    {
+      "type": "llm_request",
+      "runId": "replay-run",
+      "iteration": 1,
+      "estimatedPromptTokens": 257,
+      "final": true
+    },
+    {
+      "type": "llm_response",
+      "runId": "replay-run",
+      "iteration": 1,
+      "finishReason": "stop",
+      "hasToolCalls": false,
+      "contentPreview": "Open question: A or B. I recommend A.",
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "durationMs": 0,
+      "final": true
+    },
+    {
+      "type": "run_finish",
+      "runId": "replay-run",
+      "iterations": 1,
+      "toolCalls": 2,
+      "status": "completed",
+      "usage": {
+        "own": {
+          "promptTokens": 2000,
+          "completionTokens": 40,
+          "calls": 2,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      },
+      "durationMs": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "run.started",
+      "runId": "replay-run",
+      "threadId": "unknown",
+      "mode": "workspace",
+      "posture": "agent",
+      "model": "replay"
+    },
+    {
+      "type": "turn.started",
+      "runId": "replay-run",
+      "iteration": 1
+    },
+    {
+      "type": "assistant.started",
+      "runId": "replay-run",
+      "messageId": "<id>"
+    },
+    {
+      "type": "assistant.completed",
+      "runId": "replay-run",
+      "messageId": "<id>",
+      "content": "",
+      "durationMs": 0
+    },
+    {
+      "type": "tool.started",
+      "runId": "replay-run",
+      "toolCallId": "c1",
+      "toolName": "offer_choice",
+      "argsPreview": "{\"question\":\"Which approach?\"}"
+    },
+    {
+      "type": "tool.completed",
+      "runId": "replay-run",
+      "toolCallId": "c1",
+      "toolName": "offer_choice",
+      "durationMs": 0,
+      "resultPreview": "User skipped this choice to decide later. Do not pick an option or continue work that depends on it.",
+      "outcome": "skipped"
+    },
+    {
+      "type": "tool.started",
+      "runId": "replay-run",
+      "toolCallId": "s1",
+      "toolName": "later",
+      "argsPreview": "{}"
+    },
+    {
+      "type": "tool.completed",
+      "runId": "replay-run",
+      "toolCallId": "s1",
+      "toolName": "later",
+      "durationMs": 0,
+      "resultPreview": "Skipped: user deferred this choice.",
+      "outcome": "skipped"
+    },
+    {
+      "type": "assistant.started",
+      "runId": "replay-run",
+      "messageId": "<id>"
+    },
+    {
+      "type": "assistant.completed",
+      "runId": "replay-run",
+      "messageId": "<id>",
+      "content": "Open question: A or B. I recommend A.",
+      "durationMs": 0
+    },
+    {
+      "type": "turn.completed",
+      "runId": "replay-run",
+      "iteration": 1,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "runUsage": {
+        "own": {
+          "promptTokens": 2000,
+          "completionTokens": 40,
+          "calls": 2,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      }
+    },
+    {
+      "type": "run.completed",
+      "runId": "replay-run",
+      "iterations": 1,
+      "toolCalls": 2,
+      "usage": {
+        "own": {
+          "promptTokens": 2000,
+          "completionTokens": 40,
+          "calls": 2,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      }
+    }
+  ],
+  "ledger": [
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "c1",
+          "type": "function",
+          "function": {
+            "name": "offer_choice",
+            "arguments": "{\"question\":\"Which approach?\",\"options\":[{\"id\":\"a\",\"label\":\"Approach A\"},{\"id\":\"b\",\"label\":\"Approach B\"}]}"
+          }
+        },
+        {
+          "id": "s1",
+          "type": "function",
+          "function": {
+            "name": "later",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "c1",
+      "content": "User skipped this choice to decide later. Do not pick an option or continue work that depends on it."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "s1",
+      "content": "Skipped: user deferred this choice."
+    },
+    {
+      "role": "assistant",
+      "content": "Open question: A or B. I recommend A."
+    }
+  ]
+}

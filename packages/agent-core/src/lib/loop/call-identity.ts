@@ -96,7 +96,3 @@ export function outcomeKey(toolName: string, args: unknown, result: string): str
   return `${toolCallKey(toolName, args)}#${sha256Text(result.slice(0, 2000))}`;
 }
 
-/** edit_file results start with "Created" or "Patched" on success. */
-export function isEditSuccess(result: string): boolean {
-  return result.startsWith('Created') || result.startsWith('Patched');
-}

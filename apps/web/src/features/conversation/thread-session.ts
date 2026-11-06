@@ -18,7 +18,7 @@ import {
 import { fetchLedger, seqFromMessageId } from '@/api/thread-client';
 import { resolveOllamaModel } from '@/features/composer/ollama-models';
 import { skillTokensInText } from '@/features/composer/skill-slash-picker';
-import { refreshThreads } from '@/features/threads/thread-cache';
+import { getThreadsSnapshot, refreshThreads } from '@/features/threads/thread-cache';
 import { toastError } from '@/hooks/use-toast';
 import {
   applyChatEvent,
@@ -245,6 +245,9 @@ export function createThreadSession(
             subscribedRunId: runId,
             subscribedThreadId: threadId,
             liveThreadId: threadId,
+            // Read per event: the title is generated after the first run.
+            threadTitle:
+              getThreadsSnapshot().find((thread) => thread.id === threadId)?.title ?? null,
           });
           if (event.type === 'context.compacted') void refreshMessages();
           if (event.type === 'run.settled') {
