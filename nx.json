@@ -12,7 +12,7 @@
       "!{projectRoot}/vitest.config.[jt]s",
       "!{projectRoot}/test-setup.[jt]s"
     ],
-    "sharedGlobals": []
+    "sharedGlobals": ["{workspaceRoot}/.github/workflows/nx-ci.yml"]
   },
   "plugins": [
     {
