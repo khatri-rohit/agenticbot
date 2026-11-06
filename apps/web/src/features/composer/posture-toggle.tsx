@@ -55,7 +55,7 @@ export function PostureToggle({
         <span className="flex items-center gap-1.5">
           Posture — Ask / Agent
           <Kbd>Ctrl</Kbd>
-          <Kbd>.</Kbd>
+          <Kbd>,</Kbd>
         </span>
       </TooltipContent>
     </Tooltip>

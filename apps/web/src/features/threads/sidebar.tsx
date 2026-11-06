@@ -142,6 +142,38 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
     });
   }, [threads, workspaceOrder]);
 
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const query = search.trim().toLowerCase();
+
+  const visibleHomeThreads = useMemo(
+    () =>
+      query
+        ? homeThreads.filter((thread) =>
+            thread.title.toLowerCase().includes(query),
+          )
+        : homeThreads,
+    [homeThreads, query],
+  );
+
+  // A folder-name match surfaces every thread inside that folder.
+  const visibleWorkspaceGroups = useMemo(
+    () =>
+      query
+        ? workspaceGroups
+            .map((group) => ({
+              ...group,
+              threads: group.name.toLowerCase().includes(query)
+                ? group.threads
+                : group.threads.filter((thread) =>
+                    thread.title.toLowerCase().includes(query),
+                  ),
+            }))
+            .filter((group) => group.threads.length > 0)
+        : workspaceGroups,
+    [workspaceGroups, query],
+  );
+
   // Drop empties from persisted order; append newly discovered projects at the end.
   // Skip until threads have loaded — otherwise we'd wipe the stored drag order
   // before any workspace roots are known.
@@ -288,19 +320,41 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    disabled
-                    aria-disabled="true"
-                    aria-label="Search coming soon"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/70"
+                    aria-label="Search conversations"
+                    aria-expanded={searchOpen}
+                    className={cn(
+                      'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/55 hover:text-foreground',
+                      searchOpen && 'text-foreground',
+                    )}
+                    onClick={() => {
+                      setSearchOpen((open) => !open);
+                      setSearch('');
+                    }}
                   >
                     <Search className="size-4" strokeWidth={1.75} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  Search coming soon
+                  Search conversations
                 </TooltipContent>
               </Tooltip>
             </div>
+            {searchOpen ? (
+              <input
+                autoFocus
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setSearchOpen(false);
+                    setSearch('');
+                  }
+                }}
+                placeholder="Search conversations…"
+                aria-label="Search conversations"
+                className="mb-2 w-full rounded-md border border-border/45 bg-background/40 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring/60"
+              />
+            ) : null}
           </div>
 
           <ScrollArea className="min-h-0 flex-1 px-2">
@@ -319,15 +373,16 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                     <Plus className="size-3.5" strokeWidth={2} />
                   </button>
                 </div>
-                {homeThreads.length === 0 ? (
+                {visibleHomeThreads.length === 0 ? (
                   <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
-                    No conversations yet
+                    {query ? 'No matches' : 'No conversations yet'}
                   </p>
                 ) : (
                   <PagedThreadList
-                    threads={homeThreads}
+                    threads={visibleHomeThreads}
                     pathname={pathname}
                     listKey="home"
+                    paginated={!query}
                   />
                 )}
               </section>
@@ -348,9 +403,11 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                     <Plus className="size-3.5" strokeWidth={2} />
                   </button>
                 </div>
-                {workspaceGroups.length === 0 ? (
+                {visibleWorkspaceGroups.length === 0 ? (
                   <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
-                    Open a folder to start project chats
+                    {query
+                      ? 'No matches'
+                      : 'Open a folder to start project chats'}
                   </p>
                 ) : (
                   <div
@@ -358,7 +415,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                     role="list"
                     aria-label="Workspace projects"
                   >
-                    {workspaceGroups.map((group) => {
+                    {visibleWorkspaceGroups.map((group) => {
                       const collapsedFolder = collapsedFolders.some((item) =>
                         sameWorkspaceRoot(item, group.root),
                       );
@@ -515,6 +572,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                           {!collapsedFolder ? (
                             <PagedThreadList
                               threads={group.threads}
+                              paginated={!query}
                               pathname={pathname}
                               listKey={group.root}
                               dense
@@ -546,20 +604,23 @@ function PagedThreadList({
   listKey,
   dense = false,
   className,
+  paginated = true,
 }: {
   threads: Thread[];
   pathname: string;
   listKey: string;
   dense?: boolean;
   className?: string;
+  /** Page through long lists; a search filter shows every match at once. */
+  paginated?: boolean;
 }) {
   const [pages, setPages] = useState(1);
 
   useEffect(() => {
     setPages(1);
-  }, [listKey]);
+  }, [listKey, paginated]);
 
-  const limit = pages * SIDEBAR_THREAD_PAGE;
+  const limit = paginated ? pages * SIDEBAR_THREAD_PAGE : threads.length;
   const visible = threads.slice(0, limit);
   const remaining = threads.length - visible.length;
 
@@ -760,7 +821,7 @@ function ThreadItem({
         </Link>
         <span
           className={cn(
-            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/60 transition-opacity',
+            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/70 transition-opacity',
             'group-focus-within:opacity-100',
             active && 'opacity-100',
             'group-has-[[data-state=open]]:opacity-0',

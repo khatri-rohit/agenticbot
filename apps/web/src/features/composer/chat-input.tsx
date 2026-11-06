@@ -57,6 +57,7 @@ import { ModelPicker } from '@/features/composer/model-picker';
 import { WorkspacePicker } from '@/features/threads/workspace-picker';
 import { ContextWindowPicker } from '@/features/composer/context-window-picker';
 import { ThinkingPicker } from '@/features/composer/thinking-picker';
+
 import { ContextUsage } from '@/features/usage/context-usage';
 import { UsageMeter } from '@/features/usage/usage-meter';
 import { SkillsPanel } from '@/features/composer/skills-panel';
@@ -185,6 +186,7 @@ export function ChatInput({
   );
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [thinkingPickerOpen, setThinkingPickerOpen] = useState(false);
   const [skillSlashOpen, setSkillSlashOpen] = useState(false);
   const [skillSlashQuery, setSkillSlashQuery] = useState('');
   const [skillSlashActive, setSkillSlashActive] = useState(0);
@@ -777,15 +779,18 @@ export function ChatInput({
     });
   }, [modelConfig]);
 
-  // Ctrl+. (Cmd+. on macOS) toggles Ask ↔ Agent posture.
+  // Ctrl+, (Cmd+, on macOS) toggles Ask ↔ Agent posture.
+  // Ctrl+. (Cmd+. on macOS) opens the thinking/effort picker.
   // Ctrl+/ (Cmd+/ on macOS) opens the model picker dropdown.
   const showPostureChipsRef = useRef(showPostureChips);
   showPostureChipsRef.current = showPostureChips;
+  const thinkingSupportedRef = useRef(false);
+  thinkingSupportedRef.current = modelConfig?.thinking.supported === true;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
-      if (e.key === '.') {
+      if (e.key === ',') {
         if (!showPostureChipsRef.current) return;
         e.preventDefault();
         const current = composerOptionsRef.current.posture ?? 'agent';
@@ -793,6 +798,10 @@ export function ChatInput({
           ...composerOptionsRef.current,
           posture: current === 'agent' ? 'ask' : 'agent',
         });
+      } else if (e.key === '.') {
+        if (!thinkingSupportedRef.current) return;
+        e.preventDefault();
+        setThinkingPickerOpen(true);
       } else if (e.key === '/') {
         e.preventDefault();
         setModelPickerOpen(true);
@@ -951,6 +960,8 @@ export function ChatInput({
           }
           disabled={isRunning}
           autoAvailable={modelConfig.system1Auto === true}
+          open={thinkingPickerOpen}
+          onOpenChange={setThinkingPickerOpen}
         />
       ) : null}
       <ContextWindowPicker
@@ -1075,7 +1086,7 @@ export function ChatInput({
         })}
         rows={1}
         className={cn(
-          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0',
+          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0',
           isHero && 'min-h-10',
           voiceLocked && 'caret-transparent',
         )}

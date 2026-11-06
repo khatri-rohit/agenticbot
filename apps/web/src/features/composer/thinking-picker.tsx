@@ -16,6 +16,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Kbd } from '@/components/ui/kbd';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 function thinkingKey(value: ThinkingValue): string {
   if (value === false) return 'off';
@@ -44,6 +46,8 @@ export function ThinkingPicker({
   onChange,
   disabled,
   autoAvailable = false,
+  open: openExternal,
+  onOpenChange,
 }: {
   thinking: OllamaThinkingConfig;
   value: ThinkingValue | undefined;
@@ -51,6 +55,9 @@ export function ThinkingPicker({
   disabled?: boolean;
   /** System 1 can pick a level per step from this model's own levels. */
   autoAvailable?: boolean;
+  /** Externally controlled open state (e.g. keyboard shortcut). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   if (!thinking.supported || thinking.values.length === 0) return null;
 
@@ -59,21 +66,35 @@ export function ThinkingPicker({
   const isBoolean = thinking.mode === 'boolean';
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          className="h-7 max-w-34 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
-          aria-label={`Thinking: ${thinkingLabel(selected)}`}
-        >
-          <Brain className="size-3.5 shrink-0 opacity-80" aria-hidden />
-          <span className="truncate">{thinkingLabel(selected)}</span>
-          <ChevronDown className="size-3.5 shrink-0 opacity-70" />
-        </Button>
-      </DropdownMenuTrigger>
+    <DropdownMenu
+      open={openExternal}
+      onOpenChange={onOpenChange}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={disabled}
+              className="h-7 max-w-34 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+              aria-label={`Thinking: ${thinkingLabel(selected)}`}
+            >
+              <Brain className="size-3.5 shrink-0 opacity-80" aria-hidden />
+              <span className="truncate">{thinkingLabel(selected)}</span>
+              <ChevronDown className="size-3.5 shrink-0 opacity-70" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>
+          <span className="flex items-center gap-1.5">
+            {isBoolean ? 'Thinking' : 'Effort'} — pick a level
+            <Kbd>Ctrl</Kbd>
+            <Kbd>.</Kbd>
+          </span>
+        </TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" className="w-40">
         <DropdownMenuLabel className="text-xs text-muted-foreground">
           {isBoolean ? 'Thinking' : 'Effort'}
