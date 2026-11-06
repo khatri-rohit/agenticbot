@@ -382,6 +382,7 @@ export function createThreadSession(
   async function answerChoice(choiceId: string, answer: ChoiceAnswer): Promise<void> {
     const choice = view.chat.pendingChoices.find((c) => c.choiceId === choiceId);
     if (!choice) return;
+    // The toast here is the single error surface; callers only reset busy state.
     try {
       await transport.resolveChoice(
         choice.runId,
@@ -389,7 +390,6 @@ export function createThreadSession(
       );
     } catch (error) {
       toastError(errorMessage(error, 'Could not send choice'), 'Choice failed');
-      throw error;
     }
   }
 

@@ -81,12 +81,13 @@ export const WORKSPACE_MODE: ModeConfig = {
     'delegate',
   ],
   limits: {
-    maxIterations: 200,
-    maxToolCalls: 450,
+    maxIterations: 500,
+    maxToolCalls: 1_200,
     maxRepeatedToolCalls: 8,
     toolTimeoutMs: 120_000,
-    maxPromptTokens: 2_500_000,
-    maxWallMs: 30 * 60_000,
+    maxPromptTokens: 10_000_000,
+    // Real runs take about 5 minutes of model time per 1M prompt tokens, plus tools.
+    maxWallMs: 2 * 60 * 60_000,
   },
 };
 

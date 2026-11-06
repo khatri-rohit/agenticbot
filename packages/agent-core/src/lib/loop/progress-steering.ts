@@ -7,6 +7,14 @@ const RESEARCH_GATE_RATIO = 0.5;
 /** Tighter marks while the host says account capacity is behind pace. */
 const STALL_NUDGE_RATIO_CONSERVE = 0.2;
 const RESEARCH_GATE_RATIO_CONSERVE = 0.35;
+/**
+ * Idle spend is waste at any run size, so a bigger cap does not buy a longer
+ * stall: the marks stop growing here (the ratios of a 2.5M cap).
+ */
+const STALL_NUDGE_MAX_TOKENS = 750_000;
+const RESEARCH_GATE_MAX_TOKENS = 1_250_000;
+const STALL_NUDGE_MAX_TOKENS_CONSERVE = 500_000;
+const RESEARCH_GATE_MAX_TOKENS_CONSERVE = 875_000;
 /** Turns in a row whose every call hit the research gate before the run ends with a handoff. */
 const MAX_GATED_TURNS = 2;
 
@@ -46,8 +54,10 @@ export class ProgressSteering {
 
   /** The parent's own web tools are closed until the next progress. */
   researchGated(): boolean {
-    const ratio = this.conserving() ? RESEARCH_GATE_RATIO_CONSERVE : RESEARCH_GATE_RATIO;
-    return this.enabled && this.idleTokens() >= this.budget.maxPromptTokens! * ratio;
+    const conserving = this.conserving();
+    const ratio = conserving ? RESEARCH_GATE_RATIO_CONSERVE : RESEARCH_GATE_RATIO;
+    const ceiling = conserving ? RESEARCH_GATE_MAX_TOKENS_CONSERVE : RESEARCH_GATE_MAX_TOKENS;
+    return this.enabled && this.idleTokens() >= Math.min(this.budget.maxPromptTokens! * ratio, ceiling);
   }
 
   /** Count one refused web call; true for the first refusal since progress. */
@@ -79,8 +89,10 @@ export class ProgressSteering {
     if (this.stallNudged || !this.enabled) return undefined;
     const max = this.budget.maxPromptTokens!;
     const idle = this.idleTokens();
-    const ratio = this.conserving() ? STALL_NUDGE_RATIO_CONSERVE : STALL_NUDGE_RATIO;
-    if (idle < max * ratio) return undefined;
+    const conserving = this.conserving();
+    const ratio = conserving ? STALL_NUDGE_RATIO_CONSERVE : STALL_NUDGE_RATIO;
+    const ceiling = conserving ? STALL_NUDGE_MAX_TOKENS_CONSERVE : STALL_NUDGE_MAX_TOKENS;
+    if (idle < Math.min(max * ratio, ceiling)) return undefined;
     this.stallNudged = true;
     return { idle, max };
   }

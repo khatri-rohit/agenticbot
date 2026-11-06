@@ -20,6 +20,8 @@ import type { ToolCallRow } from './turn-timeline';
 import { SubagentCard } from './subagent-card';
 import type { SubagentActivity } from './chat-store';
 import { Button } from '@/components/ui/button';
+import { toastError } from '@/hooks/use-toast';
+import { copyText } from '@/lib/copy-text';
 import { cn } from '@/lib/utils';
 
 /** The digest markers are for the parent model; the card shows the body. */
@@ -437,13 +439,16 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard denied */
+    const ok = await copyText(text);
+    if (!ok) {
+      toastError(
+        "Couldn't copy — your browser blocked clipboard access",
+        'Copy failed',
+      );
+      return;
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
   };
   return (
     <Button

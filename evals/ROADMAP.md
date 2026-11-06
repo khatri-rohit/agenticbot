@@ -371,3 +371,24 @@ Each candidate is judged on three questions: is the problem real (evidence), doe
 ## Implementation record (2026-11-05)
 
 See `docs/plans/evals-implementation-report.md` for what was built, how it was verified, deviations and what is not done.
+
+## Plan from here (2026-11-06)
+
+This replaces the order of phases 7–9 above. Rule for every step from S3 on: one change per gate run, kept only if the pass rate holds and tokens drop.
+
+| Step | What | Files or commands | Done when | Cost |
+|---|---|---|---|---|
+| S1 | Land what is built: one typecheck and test pass (the limit changes were never compiled), restart the API, in-app skip check, the manual checks from the refactor | `npx nx run-many -t typecheck,test,build` | All pass; a skip gives a summary; "go with B" continues | Free |
+| S2 | First baseline (phase 7): seed, API on the eval home, suite × 3, record the baseline and `analyze` rows | `agent-eval seed`, `run --suite regression --repeat 3`, `baseline` | `evals/baselines/regression.json` exists; trials report `deps: linked` | Up to about 3% of the week |
+| S3 | Batching guidance: batch independent reads and searches; update todos alongside real work | `prompts/system-prompt.ts` | Gate passes; one-tool share and plan-only count drop | Up to about 3% |
+| S4 | Plan-only note: a `tool_note` when a turn only updates the plan (the gate behind S3's prompt) | `loop.ts`, `trace.ts` (`note: 'plan_only'`) | Gate passes; plan-only count near 0 | Up to about 3% |
+| S5 | Checkpoint: a week of normal use with recording on | `analyze`, viewer | Top 3 wastes written here; disk growth from `blobs/` measured | Free |
+| S6 | Long-run context: compaction and eviction timing, from what recorded runs show | `context/` | Gate passes; p90 prompt growth drops | Up to about 3% |
+| S7 | Edit discipline: re-read before editing, check after the last edit | `prompts/`, maybe a tool note | Gate passes; failed edits and unchecked edit runs drop | Up to about 3% |
+| S8 | System 1 health: why the breaker opens, timeout above measured p95 | `system1/`, `SYSTEMONE_*` | Fallbacks under 10% over a day of normal use | Free |
+| S9 | System 1 shadow week, threshold tuning, then A/B with `gate --compare system1` | `SYSTEMONE_MODE`, `system1/effort.ts` | A recorded promote or no-promote decision | About 6% or more |
+| S10 | Ongoing loop: `analyze`, top area, one change, gate; add a task when a waste class deserves one | Owning module | Scoreboard targets met | Per change |
+
+**Picked up only when needed:** `parentToolCallId` on child `run_start` (exact sub-agent nesting), cached-token counts (before S9's prompt-cache question), one loop finisher (next change to how runs end), `/compare` page (if S9 needs it), retiring the old CLI eval, more regression tasks.
+
+**Proposed targets for the new measures** (to confirm against the S2 baseline): one-tool iterations under 50%, plan-only near 0, failed edits under 3%, System 1 fallbacks under 10%.

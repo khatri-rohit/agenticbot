@@ -139,7 +139,7 @@ export async function analyzeCommand(args: Args): Promise<number> {
     table(
       ['run', 'status', 'prompt', 'signals'],
       topRuns.map((run) => [
-        run.runId.slice(0, 8),
+        run.runId,
         run.status,
         tokens(run.promptTokens),
         run.signals.map((s) => `${s.severity === 'bad' ? '!' : ''}${s.signal}`).join('; ') || '-',

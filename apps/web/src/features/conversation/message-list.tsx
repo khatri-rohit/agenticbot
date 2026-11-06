@@ -10,7 +10,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import {
-  isPauseStop,
   isResumableStop,
   type Message,
   type System1FallbackKind,
@@ -35,6 +34,8 @@ import { SubagentCard } from './subagent-card';
 import { ToolStepList } from './tool-call-panel';
 import { PlanChip } from './thread-plan-card';
 import { UserMessage } from './user-message';
+import { isUserCancelled, stopReasonLabel } from './stop-reason';
+import { toastError } from '@/hooks/use-toast';
 import { cn } from 'cn';
 
 export function MessageList({
@@ -61,6 +62,20 @@ export function MessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const anchorRefs = useRef(new Map<string, HTMLDivElement>());
+  // Transcript Retry/Continue fire async actions; hold the button until the
+  // request settles so a double-click cannot fire two.
+  const [transcriptBusy, setTranscriptBusy] = useState(false);
+  const runTranscriptAction = async (action: () => void | Promise<void>) => {
+    if (transcriptBusy) return;
+    setTranscriptBusy(true);
+    try {
+      await action();
+    } catch {
+      toastError('The request failed — nothing was changed', 'Action failed');
+    } finally {
+      setTranscriptBusy(false);
+    }
+  };
 
   const streaming = chatState.activeRun?.streamingMessage;
   const toolActivity =
@@ -290,11 +305,18 @@ export function MessageList({
                   {/* The run never replied (start failed, or stopped first). */}
                   {isLastTurn && !isRunning && !showSteps ? (
                     <div className="flex items-center gap-3 px-1" role="status">
-                      <p className="type-caption text-muted-foreground">No reply.</p>
+                      <p className="type-caption text-muted-foreground">
+                        {isUserCancelled(chatState.limitNotice?.reason ?? '')
+                          ? 'You stopped this run before it replied.'
+                          : 'The run failed to start.'}
+                      </p>
                       <button
                         type="button"
-                        onClick={() => void onRetryLastResponse()}
-                        className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted"
+                        disabled={transcriptBusy}
+                        onClick={() =>
+                          void runTranscriptAction(() => onRetryLastResponse())
+                        }
+                        className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted disabled:opacity-50"
                       >
                         Retry
                       </button>
@@ -391,19 +413,20 @@ export function MessageList({
               className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1"
               role="status"
             >
-              <p className="type-caption text-muted-foreground">
-                {isPauseStop(chatState.limitNotice.reason)
-                  ? 'Paused'
-                  : 'Run stopped early'}
-                : {chatState.limitNotice.reason}
+              <p
+                className="type-caption text-muted-foreground"
+                title={chatState.limitNotice.reason}
+              >
+                {stopReasonLabel(chatState.limitNotice.reason)}
               </p>
               {onContinue &&
               !isRunning &&
               isResumableStop(chatState.limitNotice.reason) ? (
                 <button
                   type="button"
-                  onClick={() => void onContinue()}
-                  className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted"
+                  disabled={transcriptBusy}
+                  onClick={() => void runTranscriptAction(() => onContinue())}
+                  className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted disabled:opacity-50"
                 >
                   Continue
                 </button>
