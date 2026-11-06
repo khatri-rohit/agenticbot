@@ -96,6 +96,17 @@ function textOf(content: unknown): string {
   return '';
 }
 
+/** A message's own words, for matching against the ledger (images aside, trimmed as the host sends them). */
+function wordsOf(content: unknown): string {
+  if (Array.isArray(content)) {
+    return content
+      .map((part: { type?: string; text?: string }) => (part.type === 'text' && !part.text?.startsWith('[image ') ? (part.text ?? '') : ''))
+      .join('')
+      .trim();
+  }
+  return typeof content === 'string' ? content.trim() : '';
+}
+
 type BlobReader = (sha: string) => Promise<string | null>;
 
 function blobReader(home: string, threadId: string): BlobReader {
@@ -127,7 +138,7 @@ async function ledgerIndex(envelopes: LedgerEnvelope[], blob: BlobReader) {
       const full = envelope.contentBlob ? await blob(envelope.contentBlob) : null;
       toolText.set(record.tool_call_id, full ?? record.content);
     } else if (record.role === 'user') {
-      userTexts.add(textOf(record.content));
+      userTexts.add(wordsOf(record.content));
     }
   }
   return { toolText, userTexts };
@@ -172,7 +183,7 @@ export async function readCall(home: string, run: RunSummary, index: number): Pr
     const text = sent ? textOf(sent.content) : null;
     let kind: MessageKind =
       ref.role === 'system' || ref.role === 'tool' || ref.role === 'assistant' ? ref.role : 'user';
-    if (kind === 'user' && text !== null && ledgerState === 'matched' && !userTexts.has(text)) kind = 'injected';
+    if (kind === 'user' && sent && ledgerState === 'matched' && !userTexts.has(wordsOf(sent.content))) kind = 'injected';
     const full = ref.toolCallId ? toolText.get(ref.toolCallId) : undefined;
     messages.push({
       index: i,

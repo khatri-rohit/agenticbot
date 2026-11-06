@@ -7,7 +7,7 @@
   "checks": [{ "run": "git diff --check", "expectExit": 0, "timeoutSec": 30 }],
   "files": [
     { "path": "README.md", "mustMatch": "^## Glossary\\s*$" },
-    { "path": "README.md", "mustMatch": "## Glossary[\\s\\S]*\\bsub-agent\\b[\\s\\S]*## Repository layout" }
+    { "path": "README.md", "mustMatch": "## Glossary[\\s\\S]*\\b[Ss]ub-agent\\b[\\s\\S]*## Repository layout" }
   ],
   "scope": { "allow": ["README.md"] },
   "budget": { "maxPromptTokens": 300000, "maxMinutes": 6 }

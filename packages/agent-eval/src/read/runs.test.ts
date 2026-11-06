@@ -41,6 +41,13 @@ describe('summarizeRun status', () => {
     expect(run.limitReason).toBe(RUN_CANCELLED_REASON);
   });
 
+  it('reads the cancel marker from the trace, on any run of a thread', () => {
+    const cancelled = { ...finish('error'), cancelled: true } as TraceLine;
+    const run = summary([start, cancelled], lastRun('completed', 'a-later-run'));
+    expect(run.status).toBe('cancelled');
+    expect(run.limitReason).toBe(RUN_CANCELLED_REASON);
+  });
+
   it('marks a run with no run_finish and the start marker interrupted', () => {
     const run = summary([start], lastRun('interrupted'));
     expect(run.status).toBe('interrupted');

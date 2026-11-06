@@ -46,7 +46,8 @@ export async function runCommandFor(
 
   // Cost estimate from the personal usage log, before spending anything.
   const rate = capacityRates((await readUsage(agentHome(args))).records).find((r) => r.model === model);
-  const budget = tasks.reduce((sum, loaded) => sum + loaded.task.budget.maxPromptTokens, 0) * repeat;
+  // A trial is cancelled at twice its budget (runner.ts), so that is the worst case.
+  const budget = tasks.reduce((sum, loaded) => sum + loaded.task.budget.maxPromptTokens, 0) * repeat * 2;
   console.log(
     `${tasks.length} task(s) × ${repeat} trial(s) on ${model}; worst case ${(budget / 1_000_000).toFixed(1)}M prompt tokens` +
       (rate ? ` ≈ ${((budget / 1_000_000) * rate.weeklyPercentPer1M).toFixed(1)}% of the week` : ' (no capacity rate for this model yet)'),

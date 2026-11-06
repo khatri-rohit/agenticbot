@@ -31,12 +31,12 @@ export type RunSummary = {
   parentRunId?: string;
   /**
    * `run_finish.status`, except:
-   * - `cancelled`: the thread's last-run says the user (or the eval runner) cancelled it.
+   * - `cancelled`: `run_finish.cancelled`, or the thread's last-run says so (older traces have no marker).
    * - `interrupted`: no `run_finish` and the last-run still holds the marker written
    *   at run start: the server stopped mid-run, or the run is still going. An offline
    *   reader cannot tell those apart; the API's ledger `activeRun` can.
    * - `unknown`: no `run_finish` and no last-run for this run (older run on the thread, old trace).
-   * last-run.json only describes a thread's latest run, so older cancelled runs read as their `run_finish.status`.
+   * last-run.json only describes a thread's latest run, so cancels in older traces read as their `run_finish.status`.
    */
   status: 'completed' | 'incomplete' | 'cancelled' | 'interrupted' | 'error' | 'unknown';
   limitReason?: string;
@@ -61,8 +61,11 @@ function finishStatus(value: unknown): RunSummary['status'] {
     : 'unknown';
 }
 
-function statusOf(finishLine: { status?: string } | undefined, lastRun: ThreadLastRun | null): RunSummary['status'] {
-  if (lastRun?.limitReason === RUN_CANCELLED_REASON) return 'cancelled';
+function statusOf(
+  finishLine: { status?: string; cancelled?: true } | undefined,
+  lastRun: ThreadLastRun | null,
+): RunSummary['status'] {
+  if (finishLine?.cancelled || lastRun?.limitReason === RUN_CANCELLED_REASON) return 'cancelled';
   if (finishLine) return finishStatus(finishLine.status);
   if (lastRun?.limitReason === RUN_INTERRUPTED_REASON) return 'interrupted';
   return lastRun ? lastRun.status : 'unknown';
@@ -100,9 +103,11 @@ export function summarizeRun(input: {
   // A cancel or crash is the reason the run stopped, whatever the loop wrote last.
   const finishedAt = finish?.ts ?? (status === 'interrupted' ? undefined : lastRun?.finishedAt);
   const limitReason =
-    status === 'cancelled' || status === 'interrupted'
-      ? lastRun?.limitReason
-      : (finish?.limitReason ?? limit?.reason ?? lastRun?.limitReason);
+    status === 'cancelled'
+      ? RUN_CANCELLED_REASON
+      : status === 'interrupted'
+        ? lastRun?.limitReason
+        : (finish?.limitReason ?? limit?.reason ?? lastRun?.limitReason);
   const durationMs =
     finish?.durationMs ??
     (startedAt && finishedAt ? Date.parse(finishedAt) - Date.parse(startedAt) : undefined);

@@ -335,7 +335,7 @@ export default async function RunPage({ params, searchParams }: { params: Promis
   return (
     <>
       <p className="muted crumbs">
-        <a href={`/threads/${run.threadId}`}>thread {run.threadId.slice(0, 8)}</a>
+        {query ? `thread ${run.threadId.slice(0, 8)}` : <a href={`/threads/${run.threadId}`}>thread {run.threadId.slice(0, 8)}</a>}
         {run.parentRunId ? (
           <>
             {' / sub-agent of '}

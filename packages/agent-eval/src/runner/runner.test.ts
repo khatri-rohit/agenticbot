@@ -52,8 +52,9 @@ class FakeAgent implements TrialClient {
     };
     const lines = [
       { seq: 1, ts: new Date().toISOString(), type: 'run_start', runId, model: 'm' },
+      { seq: 2, type: 'llm_response', runId, iteration: 1, finishReason: 'stop', hasToolCalls: false, usage: { promptTokens: step.promptTokens ?? 1000, completionTokens: 10 } },
       {
-        seq: 2,
+        seq: 3,
         ts: new Date().toISOString(),
         type: 'run_finish',
         runId,
@@ -147,6 +148,8 @@ async function trial(script: ScriptedRun[], loaded = task()): Promise<{ result: 
 }
 
 const glossary = { file: 'README.md', text: '# Demo\n\n## Glossary\n' };
+/** A deadline already behind us (budget minutes × 2 + 10 minutes < 0). */
+const pastDeadline = () => task({ budget: { maxPromptTokens: 100_000, maxMinutes: -5.1 } });
 
 describe('runTrial', () => {
   it('grades a run that completes the first time', async () => {
@@ -170,17 +173,29 @@ describe('runTrial', () => {
   }, 60_000);
 
   it('cancels a run past its deadline and grades it once it settled', async () => {
-    const { result, agent } = await trial([{ edit: glossary, liveFor: 1 }]);
+    const { result, agent } = await trial([{ edit: glossary, liveFor: 1 }], pastDeadline());
     expect(agent.cancelled).toEqual(['run-1']);
     expect(result).toMatchObject({ status: 'failed', ended: 'timeout', limitReason: 'eval.timeout: trial passed its hard deadline' });
     expect(result.grade?.filesPassed).toBe(true);
   }, 60_000);
 
   it('does not grade a run that never settles after its cancel', async () => {
-    const { result } = await trial([{ edit: glossary, liveFor: 2 }]);
+    const { result } = await trial([{ edit: glossary, liveFor: 2 }], pastDeadline());
     expect(result).toMatchObject({ status: 'error', ended: 'error' });
     expect(result.reason).toMatch(/did not settle/);
     expect(result.grade).toBeUndefined();
+  }, 60_000);
+
+  it('cancels a run past twice its token budget', async () => {
+    const { result, agent } = await trial([{ edit: glossary, liveFor: 1, promptTokens: 250_000 }]);
+    expect(agent.cancelled).toEqual(['run-1']);
+    expect(result).toMatchObject({ status: 'failed', ended: 'over-budget' });
+    expect(result.limitReason).toMatch(/^eval\.budget:/);
+  }, 60_000);
+
+  it('marks a run the server lost as an error, not a normal end', async () => {
+    const { result } = await trial([{ edit: glossary, outcome: 'interrupted' }]);
+    expect(result.ended).toBe('error');
   }, 60_000);
 
   it('fails a trial that edits outside its scope', async () => {

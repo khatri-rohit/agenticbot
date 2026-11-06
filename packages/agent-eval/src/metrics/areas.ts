@@ -101,7 +101,7 @@ export type AreaRow = {
   owner: string;
   /** Runs that tripped at least one rule of the area. */
   runs: number;
-  /** Prompt tokens (own + sub-agents) of those runs: where the area's cost sits. */
+  /** Each run's own prompt tokens: sub-agent runs are their own rows, so nothing counts twice. */
   tokens: number;
   worst: Signal | null;
 };
@@ -117,7 +117,7 @@ export function areaRows(list: RunMetrics[]): AreaRow[] {
     for (const area of new Set(signals.map((s) => s.area))) {
       const row = rows.get(area)!;
       row.runs += 1;
-      row.tokens += m.promptTokens.total;
+      row.tokens += m.promptTokens.own;
       for (const s of signals.filter((x) => x.area === area)) {
         const worse = !row.worst || (s.severity === 'bad' && row.worst.severity === 'warn') ||
           (s.severity === row.worst.severity && s.value / s.threshold > row.worst.value / row.worst.threshold);

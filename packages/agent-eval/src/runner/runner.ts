@@ -3,10 +3,11 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { isPauseStop, isResumableStop, RUN_CANCELLED_REASON, type ThinkingValue } from '@agent/agent-models';
+import { isPauseStop, isResumableStop, RUN_CANCELLED_REASON, type ThinkingValue, type ThreadLastRun } from '@agent/agent-models';
 
 import { readCatalog } from '../read/catalog.js';
 import { listRuns } from '../read/runs.js';
+import { linesOf, readRunTrace } from '../read/trace.js';
 import { flattenRuns, loadRunMetrics } from '../metrics/load.js';
 import type { RunMetrics } from '../metrics/run-metrics.js';
 import { ApiClient } from './api-client.js';
@@ -19,6 +20,13 @@ import type { LoadedTask, TaskSuite } from './task.js';
 const CONTINUE_MESSAGE = 'Continue from where the last run stopped.';
 /** After cancelling a run past its deadline, how long to wait for it to settle before giving up on the trial. */
 const CANCEL_SETTLE_MS = 120_000;
+/**
+ * A task's token budget is graded, not enforced: the run keeps the production
+ * cap so the trial measures the real harness. Past this many times the budget
+ * the trial cannot pass anyway, so it is cancelled instead of spending on.
+ */
+const OVER_BUDGET_FACTOR = 2;
+const BUDGET_CHECK_MS = 30_000;
 /** Reason prefix of trials skipped because the account ran out; the rest of the suite is skipped too. */
 const CAPACITY_SKIP = 'capacity';
 
@@ -27,11 +35,11 @@ export type TrialStatus = 'passed' | 'failed' | 'skipped' | 'error';
 /**
  * Why a trial's last run ended, so a report can tell "the agent failed" from
  * "the setup failed": settled (normally), timeout (past the trial deadline,
- * cancelled by the runner), cancelled (by someone else), capacity (the
- * account ran out), error (the trial itself failed: API down, checkout,
- * a run that never settled).
+ * cancelled by the runner), over-budget (past OVER_BUDGET_FACTOR, cancelled by
+ * the runner), cancelled (by someone else), capacity (the account ran out),
+ * error (API down, checkout, a run that errored, crashed or never settled).
  */
-export type TrialEnd = 'settled' | 'timeout' | 'cancelled' | 'capacity' | 'error';
+export type TrialEnd = 'settled' | 'timeout' | 'over-budget' | 'cancelled' | 'capacity' | 'error';
 
 /** What a trial needs from the API; `ApiClient` in production, a fake in tests. */
 export type TrialClient = Pick<ApiClient, 'createThread' | 'startRun' | 'cancelRun' | 'settledLastRun'>;
@@ -180,6 +188,16 @@ async function assertApiOnEvalHome(
   }
 }
 
+/** Prompt tokens of every run on the trial's thread so far, sub-agents included. */
+async function trialPromptTokens(home: string, threadId: string): Promise<number> {
+  let total = 0;
+  for (const run of flattenRuns(await listRuns(home, { threadId }))) {
+    const { lines } = await readRunTrace(run.tracePath);
+    for (const line of linesOf(lines, 'llm_response')) total += line.usage?.promptTokens ?? 0;
+  }
+  return total;
+}
+
 /**
  * One trial: a fresh checkout, a thread, the task prompt plus up to
  * `continues` Continue messages on resumable stops, then a grade of the
@@ -238,19 +256,31 @@ export async function runTrial(
         ...(thinking !== undefined ? { thinking } : {}),
       });
       result.runIds.push(runId);
-      const lastRun = await api.settledLastRun(thread.id, runId, Math.max(60_000, deadline - Date.now()));
+      const budgetStop = task.budget.maxPromptTokens * OVER_BUDGET_FACTOR;
+      let lastRun: ThreadLastRun | null = null;
+      let stopped: { ended: TrialEnd; reason: string } | undefined;
+      while (!lastRun && !stopped) {
+        lastRun = await api.settledLastRun(thread.id, runId, Math.max(0, Math.min(BUDGET_CHECK_MS, deadline - Date.now())));
+        if (lastRun) break;
+        if (Date.now() >= deadline) {
+          stopped = { ended: 'timeout', reason: 'eval.timeout: trial passed its hard deadline' };
+        } else if ((await trialPromptTokens(opts.evalHome, thread.id)) > budgetStop) {
+          stopped = { ended: 'over-budget', reason: `eval.budget: trial passed ${budgetStop} prompt tokens` };
+        }
+      }
       if (!lastRun) {
         await api.cancelRun(runId);
         // Grade only a settled workspace: a cancelled run can still be finishing a write.
         if (!(await api.settledLastRun(thread.id, runId, CANCEL_SETTLE_MS))) {
           throw new Error(`run ${runId} did not settle within ${CANCEL_SETTLE_MS / 1000}s of its cancel; workspace not graded`);
         }
-        result.ended = 'timeout';
-        limitReason = 'eval.timeout: trial passed its hard deadline';
+        result.ended = stopped!.ended;
+        limitReason = stopped!.reason;
         break;
       }
       limitReason = lastRun.limitReason;
-      result.ended = limitReason === RUN_CANCELLED_REASON ? 'cancelled' : 'settled';
+      // lastRun.status 'error' also covers a server that stopped mid-run (the interrupted marker).
+      result.ended = limitReason === RUN_CANCELLED_REASON ? 'cancelled' : lastRun.status === 'error' ? 'error' : 'settled';
       // A pause (account ran out) is resumable for a person, not for a trial.
       if (!limitReason || !isResumableStop(limitReason) || isPauseStop(limitReason)) break;
       if (result.continues >= opts.continues) break;
@@ -366,6 +396,7 @@ export async function runSuite(opts: RunnerOptions): Promise<SuiteRun> {
             trial,
             taskHash: loaded.taskHash,
             status: 'skipped',
+            ...(stopped ? {} : { ended: 'capacity' as const }),
             reason: skip,
             continues: 0,
             runIds: [],

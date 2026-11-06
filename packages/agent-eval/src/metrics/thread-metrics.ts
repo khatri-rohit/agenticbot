@@ -57,8 +57,9 @@ export function summarizeMetrics(list: RunMetrics[]): MetricsSummary {
     runs: list.length,
     byStatus,
     limits,
-    promptTokens: list.reduce((sum, m) => sum + m.promptTokens.total, 0),
-    completionTokens: list.reduce((sum, m) => sum + m.completionTokens.total, 0),
+    // Own only: sub-agent runs are in the list too, and a parent's total already holds their spend.
+    promptTokens: list.reduce((sum, m) => sum + m.promptTokens.own, 0),
+    completionTokens: list.reduce((sum, m) => sum + m.completionTokens.own, 0),
     edits: list.reduce((sum, m) => sum + m.edits, 0),
     medianPromptPerRun: median(list.map((m) => m.promptTokens.total)),
     medianIdleShare: median(

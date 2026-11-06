@@ -12,6 +12,17 @@ export type CallRecorder = {
   output(turn: ModelTurn): { sha: string };
 };
 
+/** Image data is already in the ledger's attachments; a recording keeps only its size. */
+function withoutImageData(message: ChatCompletionMessageParam): unknown {
+  if (!Array.isArray(message.content)) return message;
+  return {
+    ...message,
+    content: message.content.map((part) =>
+      part.type === 'image_url' ? { type: 'text', text: `[image ${part.image_url.url.length} chars]` } : part,
+    ),
+  };
+}
+
 function textOf(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -23,7 +34,7 @@ function textOf(content: unknown): string {
 /**
  * Records every model call's input and output as content-addressed blobs
  * (`JSON.stringify(message)` keyed by its sha256, the same key the host
- * blob store uses), so a viewer can rebuild exactly what was sent. Each
+ * blob store uses), so a viewer can rebuild what was sent, image data aside. Each
  * text is written once per run; a failed write never affects the run.
  */
 export function createCallRecorder(putBlob: (text: string) => Promise<string>): CallRecorder {
@@ -43,7 +54,7 @@ export function createCallRecorder(putBlob: (text: string) => Promise<string>): 
       const refs: TraceMessageRef[] = messages.map((message) => {
         const ref: TraceMessageRef = {
           role: message.role,
-          sha: store(JSON.stringify(message)),
+          sha: store(JSON.stringify(withoutImageData(message))),
           chars: textOf(message.content).length,
         };
         if (message.role === 'tool') ref.toolCallId = message.tool_call_id;

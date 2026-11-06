@@ -34,7 +34,7 @@ function GradeDots({ trial }: { trial: TrialResult }) {
 export default async function SuiteRunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const home = evalHome();
-  const suiteRun = await readSuiteRun(path.join(home, 'results', decodeURIComponent(id)));
+  const suiteRun = await readSuiteRun(path.join(home, 'results', path.basename(decodeURIComponent(id))));
   const { meta, results } = suiteRun;
   const tasks = [...new Set(results.map((trial) => trial.taskId))];
   const maxTrial = Math.max(0, ...results.map((trial) => trial.trial));

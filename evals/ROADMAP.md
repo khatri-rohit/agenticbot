@@ -392,3 +392,14 @@ This replaces the order of phases 7–9 above. Rule for every step from S3 on: o
 **Picked up only when needed:** `parentToolCallId` on child `run_start` (exact sub-agent nesting), cached-token counts (before S9's prompt-cache question), one loop finisher (next change to how runs end), `/compare` page (if S9 needs it), retiring the old CLI eval, more regression tasks.
 
 **Proposed targets for the new measures** (to confirm against the S2 baseline): one-tool iterations under 50%, plan-only near 0, failed edits under 3%, System 1 fallbacks under 10%.
+
+## Review record (2026-11-06)
+
+Changes after reviewing the implementation against this plan:
+- **Budget stop:** a trial is cancelled at twice its token budget (`ended: 'over-budget'`). Task budgets were only graded afterwards, so the 10M run cap would have let a runaway trial spend far more. Worst case for one suite run × 3 is 5.1M tokens, about 6% of the week on glm-5.3, and the 10% suite ceiling still applies between trials. The "up to about 3%" costs above are the budgeted spend, not this worst case.
+- **Sub-agent effort hints** raised (quick ~10, medium ~40, thorough ~150 tool calls); the old "~25" undercut the raised limits.
+- **Limits decided 2026-11-05:** main run 10M tokens, 500 iterations, 1,200 tool calls, 2 hours. Explore, review and user agents 200 iterations, 450 tool calls, 30 minutes, 2.5M tokens (and at most 25% of the parent's remaining budget). Stall and research-gate marks stay at 750k and 1.25M.
+- **Reader:** `run_finish.cancelled` now sets `cancelled`; trials whose run errored report `ended: 'error'`; `analyze` and summaries count each run's own tokens, so sub-agent spend is not counted twice.
+- **Recording:** image data is no longer stored; messages with images are no longer labelled injected.
+
+Known gaps, not blocking: deferred choices are not counted as a metric; sub-agents nest under `delegate` by start order; older cancels still read as `error`.
