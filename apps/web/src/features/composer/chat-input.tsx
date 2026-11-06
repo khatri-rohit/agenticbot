@@ -786,6 +786,11 @@ export function ChatInput({
   showPostureChipsRef.current = showPostureChips;
   const thinkingSupportedRef = useRef(false);
   thinkingSupportedRef.current = modelConfig?.thinking.supported === true;
+  // The thinking chip unmounts when the model lacks thinking support; drop the
+  // stale open state so the menu doesn't pop open on the next remount.
+  useEffect(() => {
+    if (!thinkingSupportedRef.current) setThinkingPickerOpen(false);
+  }, [modelConfig]);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
