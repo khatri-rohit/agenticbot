@@ -96,7 +96,7 @@ export function subagentProfileWarnings(): string[] {
 }
 
 function frontmatter(raw: string): { fields: Map<string, string>; body: string } {
-  const text = raw.replace(/^﻿/, '').replace(/\r/g, '');
+  const text = raw.replace(/^\uFEFF/, '').replace(/\r/g, '');
   const fields = new Map<string, string>();
   if (!text.startsWith('---')) return { fields, body: text.trim() };
   const end = text.indexOf('\n---', 3);
