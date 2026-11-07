@@ -5,9 +5,9 @@
   "scripts": {
     "dev:api": "npx nx run @agent/api:serve",
     "dev:web": "npx nx run @agent/web:dev --port=4200",
+    "dev:eval": "npx nx run @agent/eval:dev",
     "prod:api": "npx nx serve @agent/api --configuration=production --watch=false",
     "prod:web": "npx nx run @agent/web:start --port=4200",
-    "dev:eval": "npx nx run @agent/eval:dev",
     "prod:eval": "npx nx run @agent/eval:start --port=3210",
     "typecheck": "npx nx run-many -t typecheck",
     "build": "npx nx run-many -t build"

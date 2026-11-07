@@ -2,6 +2,8 @@ import { listRuns, readCatalog, stopLabel, type RunSummary } from '@agent/agent-
 
 import { agentHome } from '../lib/home';
 import { tokens, when } from '../lib/format';
+import { reviewHref } from '../review/href';
+import { readReview } from '../review/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +15,11 @@ export default async function ThreadsPage() {
   for (const run of runs) {
     byThread.set(run.threadId, [...(byThread.get(run.threadId) ?? []), run]);
   }
+  const reviewByThread = new Map(
+    await Promise.all(
+      threads.map(async (thread) => [thread.id, await readReview(home, thread.id)] as const),
+    ),
+  );
 
   return (
     <>
@@ -29,6 +36,7 @@ export default async function ThreadsPage() {
               <th>Last run</th>
               <th>Prompt tokens</th>
               <th>Updated</th>
+              <th>Review</th>
             </tr>
           </thead>
           <tbody>
@@ -40,6 +48,7 @@ export default async function ThreadsPage() {
                   sum + (run.usage?.own.promptTokens ?? 0) + (run.usage?.children.promptTokens ?? 0),
                 0,
               );
+              const reviewed = reviewByThread.get(thread.id);
               return (
                 <tr key={thread.id}>
                   <td className="wrap">
@@ -53,6 +62,9 @@ export default async function ThreadsPage() {
                   </td>
                   <td>{tokens(prompt)}</td>
                   <td>{when(thread.updatedAt)}</td>
+                  <td>
+                    <a href={reviewHref(thread.id)}>{reviewed ? 'Open review' : 'Review'}</a>
+                  </td>
                 </tr>
               );
             })}

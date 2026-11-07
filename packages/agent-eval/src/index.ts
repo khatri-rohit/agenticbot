@@ -38,6 +38,15 @@ export {
 } from './metrics/thread-metrics.js';
 export { findRun, flattenRuns, loadRunMetrics } from './metrics/load.js';
 export { AREA_OWNERS, areaRows, RULES, signalsOf, type Area, type AreaRow, type Signal } from './metrics/areas.js';
+export {
+  analyzeThread,
+  buildReviewInput,
+  reviewFingerprint,
+  reviewOwnerThread,
+  type ReviewExcerpt,
+  type ReviewModelInput,
+  type ThreadReviewAnalysis,
+} from './analyze/review.js';
 
 export { loadTask, loadTasks, parseTask, type EvalTask, type LoadedTask, type TaskSuite } from './runner/task.js';
 export { readSeed, seedEvalHome, type SeedInfo } from './runner/seed.js';

@@ -18,6 +18,7 @@ import {
 
 import { homeFor } from '../../../lib/home';
 import { clip, duration, percent, tokens } from '../../../lib/format';
+import { ReviewCta } from '../../../review/cta';
 
 export const dynamic = 'force-dynamic';
 
@@ -332,10 +333,12 @@ export default async function RunPage({ params, searchParams }: { params: Promis
   const selectedTool = search.tool ? entries.flatMap((entry) => entry.tools).find((tool) => tool.toolCallId === search.tool) : undefined;
   const signals = metrics ? signalsOf(metrics) : [];
 
+  const homeFlag = search.home === 'eval' ? 'eval' : '';
+
   return (
     <>
       <p className="muted crumbs">
-        {query ? `thread ${run.threadId.slice(0, 8)}` : <a href={`/threads/${run.threadId}`}>thread {run.threadId.slice(0, 8)}</a>}
+        <a href={`/threads/${run.threadId}${query}`}>thread {run.threadId.slice(0, 8)}</a>
         {run.parentRunId ? (
           <>
             {' / sub-agent of '}
@@ -345,9 +348,14 @@ export default async function RunPage({ params, searchParams }: { params: Promis
         {' / '}run {run.runId.slice(0, 8)} · {run.model ?? ''}
         {query ? ' · eval home' : ''}
       </p>
-      <h1>
-        Run {run.runId.slice(0, 8)} <span className={`status-${run.status}`}>{run.status}</span>
-      </h1>
+      <div className="page-head">
+        <h1>
+          Run {run.runId.slice(0, 8)} <span className={`status-${run.status}`}>{run.status}</span>
+        </h1>
+        <div className="page-head-actions">
+          <ReviewCta home={home} threadId={run.threadId} runId={run.runId} homeFlag={homeFlag} />
+        </div>
+      </div>
       {signals.length > 0 ? (
         <div className="signals">
           {signals.map((signal, i) => (

@@ -391,6 +391,15 @@ This replaces the order of phases 7–9 above. Rule for every step from S3 on: o
 
 **Picked up only when needed:** `parentToolCallId` on child `run_start` (exact sub-agent nesting), cached-token counts (before S9's prompt-cache question), one loop finisher (next change to how runs end), `/compare` page (if S9 needs it), retiring the old CLI eval, more regression tasks.
 
+## Run review (2026-11-06)
+
+Manual **Review** on the eval viewer (`apps/eval` thread page `/threads/[id]` and run page `/runs/[id]`), not the Personal Assistant harness sidebar.
+
+- Stored artifact `$AGENT_HOME/reviews/<threadId>.json`, keyed by `reviewFingerprint()` (thread id, ledger length, last record sha, run ids/statuses). Unchanged → serve stored, no recompute/spend; changed → stale banner until the button is clicked again.
+- Two tiers: deterministic digest in `packages/agent-eval` (`analyzeThread` / `buildReviewInput`) + one bounded narrative that explains the digest (digest + ≤5 excerpts, never the raw trace). System 1 is not used. Narrative follows the title-generation pattern (`REVIEW_MODEL`, timeout, digest-only fallback) in the eval app host.
+- Finding kinds: over-work, unnecessary-calls, misread-intent, waste, good. Alignment vs the user plan.
+- Auto-review on leftover budget stays deferred. No Review button in `apps/web`.
+
 **Proposed targets for the new measures** (to confirm against the S2 baseline): one-tool iterations under 50%, plan-only near 0, failed edits under 3%, System 1 fallbacks under 10%.
 
 ## Review record (2026-11-06)

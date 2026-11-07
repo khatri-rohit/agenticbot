@@ -261,3 +261,23 @@ export {
   parseSnapshot,
   resolveContextWindow,
 } from './lib/context.js';
+
+export { REVIEW_FINDING_KINDS } from './lib/review.js';
+export type {
+  ReviewAlignment,
+  ReviewAlignmentVerdict,
+  ReviewDigest,
+  ReviewFinding,
+  ReviewFindingKind,
+  ReviewFingerprint,
+  ReviewNarrative,
+  ReviewNumbers,
+  ReviewRunGlance,
+  ThreadReview,
+} from './lib/review.js';
+export {
+  parseReviewNarrative,
+  parseThreadReview,
+  reviewFingerprintKey,
+  sameReviewFingerprint,
+} from './lib/review.js';
