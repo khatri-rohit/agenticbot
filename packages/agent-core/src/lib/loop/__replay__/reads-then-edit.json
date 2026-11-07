@@ -1,0 +1,430 @@
+{
+  "result": {
+    "runId": "replay-run",
+    "content": "Edited a.ts.",
+    "iterations": 3,
+    "toolCalls": 3,
+    "status": "completed",
+    "usage": {
+      "own": {
+        "promptTokens": 3000,
+        "completionTokens": 60,
+        "calls": 3,
+        "estimatedCalls": 0
+      },
+      "children": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "calls": 0,
+        "estimatedCalls": 0
+      }
+    }
+  },
+  "trace": [
+    {
+      "type": "run_start",
+      "runId": "replay-run",
+      "model": "replay",
+      "threadId": "unknown",
+      "depth": 0,
+      "mode": "workspace",
+      "posture": "agent",
+      "windowTokens": 200000
+    },
+    {
+      "type": "llm_request",
+      "runId": "replay-run",
+      "iteration": 1,
+      "estimatedPromptTokens": 74
+    },
+    {
+      "type": "llm_response",
+      "runId": "replay-run",
+      "iteration": 1,
+      "finishReason": "tool_calls",
+      "hasToolCalls": true,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "durationMs": 0
+    },
+    {
+      "type": "tool_start",
+      "runId": "replay-run",
+      "iteration": 1,
+      "toolName": "read_file",
+      "toolCallId": "r1",
+      "stage": "read",
+      "args": {
+        "path": "a.ts"
+      }
+    },
+    {
+      "type": "tool_start",
+      "runId": "replay-run",
+      "iteration": 1,
+      "toolName": "read_file",
+      "toolCallId": "r2",
+      "stage": "read",
+      "args": {
+        "path": "b.ts"
+      }
+    },
+    {
+      "type": "tool_complete",
+      "runId": "replay-run",
+      "iteration": 1,
+      "toolName": "read_file",
+      "toolCallId": "r1",
+      "durationMs": 0,
+      "resultPreview": "contents of a.ts",
+      "resultChars": 16
+    },
+    {
+      "type": "tool_complete",
+      "runId": "replay-run",
+      "iteration": 1,
+      "toolName": "read_file",
+      "toolCallId": "r2",
+      "durationMs": 0,
+      "resultPreview": "contents of b.ts",
+      "resultChars": 16
+    },
+    {
+      "type": "llm_request",
+      "runId": "replay-run",
+      "iteration": 2,
+      "estimatedPromptTokens": 145
+    },
+    {
+      "type": "llm_response",
+      "runId": "replay-run",
+      "iteration": 2,
+      "finishReason": "tool_calls",
+      "hasToolCalls": true,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "durationMs": 0
+    },
+    {
+      "type": "tool_start",
+      "runId": "replay-run",
+      "iteration": 2,
+      "toolName": "edit_file",
+      "toolCallId": "e1",
+      "stage": "mutate",
+      "args": {
+        "path": "a.ts"
+      }
+    },
+    {
+      "type": "tool_complete",
+      "runId": "replay-run",
+      "iteration": 2,
+      "toolName": "edit_file",
+      "toolCallId": "e1",
+      "durationMs": 0,
+      "resultPreview": "Patched a.ts",
+      "resultChars": 12
+    },
+    {
+      "type": "llm_request",
+      "runId": "replay-run",
+      "iteration": 3,
+      "estimatedPromptTokens": 182
+    },
+    {
+      "type": "llm_response",
+      "runId": "replay-run",
+      "iteration": 3,
+      "finishReason": "stop",
+      "hasToolCalls": false,
+      "contentPreview": "Edited a.ts.",
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "durationMs": 0
+    },
+    {
+      "type": "run_finish",
+      "runId": "replay-run",
+      "iterations": 3,
+      "toolCalls": 3,
+      "status": "completed",
+      "usage": {
+        "own": {
+          "promptTokens": 3000,
+          "completionTokens": 60,
+          "calls": 3,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      },
+      "durationMs": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "run.started",
+      "runId": "replay-run",
+      "threadId": "unknown",
+      "mode": "workspace",
+      "posture": "agent",
+      "model": "replay"
+    },
+    {
+      "type": "turn.started",
+      "runId": "replay-run",
+      "iteration": 1
+    },
+    {
+      "type": "assistant.started",
+      "runId": "replay-run",
+      "messageId": "<id>"
+    },
+    {
+      "type": "assistant.completed",
+      "runId": "replay-run",
+      "messageId": "<id>",
+      "content": "",
+      "durationMs": 0
+    },
+    {
+      "type": "tool.started",
+      "runId": "replay-run",
+      "toolCallId": "r1",
+      "toolName": "read_file",
+      "argsPreview": "{\"path\":\"a.ts\"}"
+    },
+    {
+      "type": "tool.started",
+      "runId": "replay-run",
+      "toolCallId": "r2",
+      "toolName": "read_file",
+      "argsPreview": "{\"path\":\"b.ts\"}"
+    },
+    {
+      "type": "tool.completed",
+      "runId": "replay-run",
+      "toolCallId": "r1",
+      "toolName": "read_file",
+      "durationMs": 0,
+      "resultPreview": "contents of a.ts",
+      "outcome": "ok"
+    },
+    {
+      "type": "tool.completed",
+      "runId": "replay-run",
+      "toolCallId": "r2",
+      "toolName": "read_file",
+      "durationMs": 0,
+      "resultPreview": "contents of b.ts",
+      "outcome": "ok"
+    },
+    {
+      "type": "turn.completed",
+      "runId": "replay-run",
+      "iteration": 1,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "runUsage": {
+        "own": {
+          "promptTokens": 1000,
+          "completionTokens": 20,
+          "calls": 1,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      }
+    },
+    {
+      "type": "turn.started",
+      "runId": "replay-run",
+      "iteration": 2
+    },
+    {
+      "type": "assistant.started",
+      "runId": "replay-run",
+      "messageId": "<id>"
+    },
+    {
+      "type": "assistant.completed",
+      "runId": "replay-run",
+      "messageId": "<id>",
+      "content": "",
+      "durationMs": 0
+    },
+    {
+      "type": "tool.started",
+      "runId": "replay-run",
+      "toolCallId": "e1",
+      "toolName": "edit_file",
+      "argsPreview": "{\"path\":\"a.ts\"}"
+    },
+    {
+      "type": "tool.completed",
+      "runId": "replay-run",
+      "toolCallId": "e1",
+      "toolName": "edit_file",
+      "durationMs": 0,
+      "resultPreview": "Patched a.ts",
+      "outcome": "ok"
+    },
+    {
+      "type": "turn.completed",
+      "runId": "replay-run",
+      "iteration": 2,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "runUsage": {
+        "own": {
+          "promptTokens": 2000,
+          "completionTokens": 40,
+          "calls": 2,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      }
+    },
+    {
+      "type": "turn.started",
+      "runId": "replay-run",
+      "iteration": 3
+    },
+    {
+      "type": "assistant.started",
+      "runId": "replay-run",
+      "messageId": "<id>"
+    },
+    {
+      "type": "assistant.completed",
+      "runId": "replay-run",
+      "messageId": "<id>",
+      "content": "Edited a.ts.",
+      "durationMs": 0
+    },
+    {
+      "type": "turn.completed",
+      "runId": "replay-run",
+      "iteration": 3,
+      "usage": {
+        "promptTokens": 1000,
+        "completionTokens": 20
+      },
+      "runUsage": {
+        "own": {
+          "promptTokens": 3000,
+          "completionTokens": 60,
+          "calls": 3,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      }
+    },
+    {
+      "type": "run.completed",
+      "runId": "replay-run",
+      "iterations": 3,
+      "toolCalls": 3,
+      "usage": {
+        "own": {
+          "promptTokens": 3000,
+          "completionTokens": 60,
+          "calls": 3,
+          "estimatedCalls": 0
+        },
+        "children": {
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "calls": 0,
+          "estimatedCalls": 0
+        }
+      }
+    }
+  ],
+  "ledger": [
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "r1",
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"path\":\"a.ts\"}"
+          }
+        },
+        {
+          "id": "r2",
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"path\":\"b.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "r1",
+      "content": "contents of a.ts"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "r2",
+      "content": "contents of b.ts"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "e1",
+          "type": "function",
+          "function": {
+            "name": "edit_file",
+            "arguments": "{\"path\":\"a.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "e1",
+      "content": "Patched a.ts"
+    },
+    {
+      "role": "assistant",
+      "content": "Edited a.ts."
+    }
+  ]
+}

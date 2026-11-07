@@ -18,7 +18,7 @@ import {
 import { fetchLedger, seqFromMessageId } from '@/api/thread-client';
 import { resolveOllamaModel } from '@/features/composer/ollama-models';
 import { skillTokensInText } from '@/features/composer/skill-slash-picker';
-import { refreshThreads } from '@/features/threads/thread-cache';
+import { getThreadsSnapshot, refreshThreads } from '@/features/threads/thread-cache';
 import { toastError } from '@/hooks/use-toast';
 import {
   applyChatEvent,
@@ -245,6 +245,9 @@ export function createThreadSession(
             subscribedRunId: runId,
             subscribedThreadId: threadId,
             liveThreadId: threadId,
+            // Read per event: the title is generated after the first run.
+            threadTitle:
+              getThreadsSnapshot().find((thread) => thread.id === threadId)?.title ?? null,
           });
           if (event.type === 'context.compacted') void refreshMessages();
           if (event.type === 'run.settled') {
@@ -379,6 +382,7 @@ export function createThreadSession(
   async function answerChoice(choiceId: string, answer: ChoiceAnswer): Promise<void> {
     const choice = view.chat.pendingChoices.find((c) => c.choiceId === choiceId);
     if (!choice) return;
+    // The toast here is the single error surface; callers only reset busy state.
     try {
       await transport.resolveChoice(
         choice.runId,
@@ -386,7 +390,6 @@ export function createThreadSession(
       );
     } catch (error) {
       toastError(errorMessage(error, 'Could not send choice'), 'Choice failed');
-      throw error;
     }
   }
 

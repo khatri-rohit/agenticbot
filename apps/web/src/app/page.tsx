@@ -105,7 +105,7 @@ export default function HomePage() {
                     <span className="min-w-0 flex-1 truncate">
                       {clampChatTitle(thread.title)}
                     </span>
-                    <span className="type-caption shrink-0 tabular-nums text-muted-foreground/60">
+                    <span className="type-caption shrink-0 tabular-nums text-muted-foreground/70">
                       {formatRelativeTime(thread.updatedAt)}
                     </span>
                   </Link>

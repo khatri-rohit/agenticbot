@@ -1,0 +1,37 @@
+{
+  "id": "eval-timeout-label",
+  "suite": "regression",
+  "repo": {
+    "source": ".",
+    "commit": "9065479"
+  },
+  "prompt": "In packages/agent-eval/src/read/runs.ts, `stopLabel` labels the eval runner's own stop reason `eval.timeout: …` as 'other'. Make it return 'timeout' for reasons that start with `eval.timeout:`, and update the stopLabel test in packages/agent-eval/src/read/runs.test.ts so it covers that case. Run that test file. Change nothing else.",
+  "posture": "agent",
+  "checks": [
+    {
+      "run": "npx vitest run --root packages/agent-eval src/read/runs.test.ts",
+      "expectExit": 0,
+      "timeoutSec": 120
+    }
+  ],
+  "files": [
+    {
+      "path": "packages/agent-eval/src/read/runs.ts",
+      "mustMatch": "eval\\.timeout"
+    },
+    {
+      "path": "packages/agent-eval/src/read/runs.test.ts",
+      "mustMatch": "eval\\.timeout[\\s\\S]*'timeout'"
+    }
+  ],
+  "scope": {
+    "allow": [
+      "packages/agent-eval/src/read/runs.ts",
+      "packages/agent-eval/src/read/runs.test.ts"
+    ]
+  },
+  "budget": {
+    "maxPromptTokens": 400000,
+    "maxMinutes": 8
+  }
+}

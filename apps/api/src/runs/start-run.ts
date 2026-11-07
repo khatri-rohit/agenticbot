@@ -292,6 +292,8 @@ async function startClaimedRun(
     contextBudget: prepared.report.budget,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     putBlob: (text) => store.putBlob(threadId, text),
+    // Every model call's exact input/output, for the eval viewer. Off: AGENT_RECORD_MODEL_CALLS=0.
+    recordCalls: process.env.AGENT_RECORD_MODEL_CALLS !== '0',
     readBlob: (sha256, offset, length) =>
       store.readBlobText(threadId, sha256, offset, length),
     onMessage: async (record, meta) => {

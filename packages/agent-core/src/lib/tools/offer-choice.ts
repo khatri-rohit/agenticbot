@@ -43,7 +43,8 @@ function formatContinue(optionIds: string[], options: ChoiceOption[], text?: str
 
 /**
  * Mid-turn direction: any subset of options plus optional extra text.
- * Skip stops the run; it does not pick a default path.
+ * Skip defers: the run ends with a tools-off summary of the options for the
+ * user to decide from; it never picks a default path.
  */
 export const offer_choice: Tool = {
   definition: {
@@ -101,7 +102,7 @@ export const offer_choice: Tool = {
     usage: [
       'Pass a short question and at least two options with stable ids.',
       'The human may check several options and/or type extra direction. Follow all of that.',
-      'If they skip, stop. Do not invent a path.',
+      'If they skip, the run ends with a summary of the options for them to decide from. Never pick one yourself.',
     ],
   },
   execute: async (args, ctx) => {

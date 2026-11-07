@@ -500,6 +500,11 @@ export function formatFileRead(
   return `${header}\n${kept.join('\n')}${footer}`;
 }
 
+/** edit_file results start with "Created" or "Patched" on success (see the change report above). */
+export function isEditSuccess(result: string): boolean {
+  return result.startsWith('Created') || result.startsWith('Patched');
+}
+
 export const editFileTool: Tool = {
   definition: {
     type: 'function',
@@ -547,6 +552,7 @@ export const editFileTool: Tool = {
     path: typeof args.path === 'string' ? args.path : '',
     intent: typeof args.oldText === 'string' && args.oldText.length > 0 ? 'patch' : 'create',
   }),
+  classify: (result) => ({ outcome: isEditSuccess(result) ? 'ok' : 'error' }),
   execute: async (args, ctx) => {
     const resolved = await resolveWorkspacePath(
       ctx.workspaceRoot,
@@ -677,6 +683,11 @@ export const runTerminalTool: Tool = {
   stage: 'exec',
   // Kills the whole process tree on its own timeout.
   ownsTimeout: true,
+  // The second line is `exit <n>`, `exit timeout` or `signal <name>`; blocked and unbound runs return one line.
+  classify: (result) => {
+    const exit = /^exit (\d+)$/.exec(result.split('\n', 2)[1] ?? '');
+    return exit ? { outcome: 'ok', exitCode: Number(exit[1]) } : { outcome: 'error' };
+  },
   execute: async (args, ctx) => {
     const root = ctx.workspaceRoot;
     if (!root) return 'No workspace is bound to this run';

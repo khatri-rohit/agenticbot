@@ -149,6 +149,7 @@ export { envelopeToChatMessage, envelopeToUiMessage } from './lib/ledger.js';
 
 export type {
   ToolRisk,
+  ToolStage,
   ToolOrigin,
   ToolContext,
 } from './lib/tool-context.js';
@@ -178,7 +179,7 @@ export {
   ChoiceSkipped,
 } from './lib/choice.js';
 
-export type { TraceEvent } from './lib/trace.js';
+export type { TraceCallInput, TraceEvent, TraceMessageRef } from './lib/trace.js';
 export { TRACE_SCHEMA_VERSION } from './lib/trace.js';
 
 export type {
@@ -260,3 +261,23 @@ export {
   parseSnapshot,
   resolveContextWindow,
 } from './lib/context.js';
+
+export { REVIEW_FINDING_KINDS } from './lib/review.js';
+export type {
+  ReviewAlignment,
+  ReviewAlignmentVerdict,
+  ReviewDigest,
+  ReviewFinding,
+  ReviewFindingKind,
+  ReviewFingerprint,
+  ReviewNarrative,
+  ReviewNumbers,
+  ReviewRunGlance,
+  ThreadReview,
+} from './lib/review.js';
+export {
+  parseReviewNarrative,
+  parseThreadReview,
+  reviewFingerprintKey,
+  sameReviewFingerprint,
+} from './lib/review.js';

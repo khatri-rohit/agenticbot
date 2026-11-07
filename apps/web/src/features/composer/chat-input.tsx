@@ -57,6 +57,7 @@ import { ModelPicker } from '@/features/composer/model-picker';
 import { WorkspacePicker } from '@/features/threads/workspace-picker';
 import { ContextWindowPicker } from '@/features/composer/context-window-picker';
 import { ThinkingPicker } from '@/features/composer/thinking-picker';
+
 import { ContextUsage } from '@/features/usage/context-usage';
 import { UsageMeter } from '@/features/usage/usage-meter';
 import { SkillsPanel } from '@/features/composer/skills-panel';
@@ -74,6 +75,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Kbd } from '@/components/ui/kbd';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -183,6 +185,8 @@ export function ChatInput({
     null,
   );
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [thinkingPickerOpen, setThinkingPickerOpen] = useState(false);
   const [skillSlashOpen, setSkillSlashOpen] = useState(false);
   const [skillSlashQuery, setSkillSlashQuery] = useState('');
   const [skillSlashActive, setSkillSlashActive] = useState(0);
@@ -775,6 +779,43 @@ export function ChatInput({
     });
   }, [modelConfig]);
 
+  // Ctrl+, (Cmd+, on macOS) toggles Ask ↔ Agent posture.
+  // Ctrl+. (Cmd+. on macOS) opens the thinking/effort picker.
+  // Ctrl+/ (Cmd+/ on macOS) opens the model picker dropdown.
+  const showPostureChipsRef = useRef(showPostureChips);
+  showPostureChipsRef.current = showPostureChips;
+  const thinkingSupportedRef = useRef(false);
+  thinkingSupportedRef.current = modelConfig?.thinking.supported === true;
+  // The thinking chip unmounts when the model lacks thinking support; drop the
+  // stale open state so the menu doesn't pop open on the next remount.
+  useEffect(() => {
+    if (!thinkingSupportedRef.current) setThinkingPickerOpen(false);
+  }, [modelConfig]);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      if (e.key === ',') {
+        if (!showPostureChipsRef.current) return;
+        e.preventDefault();
+        const current = composerOptionsRef.current.posture ?? 'agent';
+        onComposerOptionsChangeRef.current({
+          ...composerOptionsRef.current,
+          posture: current === 'agent' ? 'ask' : 'agent',
+        });
+      } else if (e.key === '.') {
+        if (!thinkingSupportedRef.current) return;
+        e.preventDefault();
+        setThinkingPickerOpen(true);
+      } else if (e.key === '/') {
+        e.preventDefault();
+        setModelPickerOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const isHero = variant === 'hero';
   const hasText = Boolean(input.trim());
   const canSend = (hasText || pendingAttachments.length > 0) && localModelReady;
@@ -792,17 +833,22 @@ export function ChatInput({
   const attachMenu = (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-            aria-label="Composer options"
-          >
-            <Plus className="size-4" strokeWidth={2.25} />
-          </Button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                aria-label="Composer options"
+              >
+                <Plus className="size-4" strokeWidth={2.25} />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Attach &amp; options</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent align="center" className="w-52 bg-card shadow-lg">
           <DropdownMenuLabel>Composer</DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -907,6 +953,8 @@ export function ChatInput({
               'No models on the API host. Run `ollama pull <model>` where apps/api runs, then toggle Local again.')
             : undefined
         }
+        open={modelPickerOpen}
+        onOpenChange={setModelPickerOpen}
       />
       {modelConfig?.thinking.supported ? (
         <ThinkingPicker
@@ -917,6 +965,8 @@ export function ChatInput({
           }
           disabled={isRunning}
           autoAvailable={modelConfig.system1Auto === true}
+          open={thinkingPickerOpen}
+          onOpenChange={setThinkingPickerOpen}
         />
       ) : null}
       <ContextWindowPicker
@@ -957,21 +1007,31 @@ export function ChatInput({
         loading={ollamaBalance.loading}
       />
       {voice.enabled ? <VoiceButton voice={voice} /> : null}
-      <Button
-        type="button"
-        size="icon-sm"
-        variant={showStopButton ? 'secondary' : 'default'}
-        onClick={handlePrimaryAction}
-        disabled={!showStopButton && !canSend}
-        className="shrink-0 rounded-full"
-        aria-label={showStopButton ? 'Stop generating' : 'Send message'}
-      >
-        {showStopButton ? (
-          <Square className="size-3.5 fill-current" strokeWidth={0} />
-        ) : (
-          <ArrowUp className="size-4" strokeWidth={2.25} />
-        )}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant={showStopButton ? 'secondary' : 'default'}
+            onClick={handlePrimaryAction}
+            disabled={!showStopButton && !canSend}
+            className="shrink-0 rounded-full"
+            aria-label={showStopButton ? 'Stop generating' : 'Send message'}
+          >
+            {showStopButton ? (
+              <Square className="size-3.5 fill-current" strokeWidth={0} />
+            ) : (
+              <ArrowUp className="size-4" strokeWidth={2.25} />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <span className="flex items-center gap-1.5">
+            {showStopButton ? 'Stop' : 'Send'}
+            <Kbd>⏎</Kbd>
+          </span>
+        </TooltipContent>
+      </Tooltip>
     </>
   );
 
@@ -1031,7 +1091,7 @@ export function ChatInput({
         })}
         rows={1}
         className={cn(
-          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/50 focus-visible:ring-0',
+          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0',
           isHero && 'min-h-10',
           voiceLocked && 'caret-transparent',
         )}

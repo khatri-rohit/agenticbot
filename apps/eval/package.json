@@ -1,0 +1,20 @@
+{
+  "name": "@agent/eval",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "projectType": "application",
+    "sourceRoot": "apps/eval/src",
+    "tags": [
+      "scope:eval",
+      "type:app"
+    ]
+  },
+  "dependencies": {
+    "@agent/agent-eval": "*",
+    "@agent/agent-models": "*",
+    "next": "~16.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

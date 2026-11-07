@@ -55,7 +55,9 @@ export function ChoiceCard({
     setBusy(kind);
     try {
       await onResolve(choice.choiceId, body);
-    } catch {
+    } finally {
+      // answerChoice owns the error toast; this only releases the busy state,
+      // on success and failure alike.
       setBusy(null);
     }
   };

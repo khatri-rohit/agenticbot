@@ -8,6 +8,18 @@ import { getSkill } from '../tools/skills';
 import type { SubagentContext, SubagentLimits, SubagentProfile } from './types';
 
 /**
+ * Room for real research and review. A child's prompt tokens are also capped
+ * at CHILD_BUDGET_SHARE of what the parent has left, so children cannot
+ * outspend the parent however high this is.
+ */
+const RESEARCH_LIMITS: SubagentLimits = {
+  maxIterations: 200,
+  maxToolCalls: 450,
+  maxWallMs: 30 * 60_000,
+  maxPromptTokens: 2_500_000,
+};
+
+/**
  * Built-in specialists. Writes stay with the parent (one writer, many
  * readers): no profile edits files or runs commands, and planning stays in
  * the parent, which is the only agent that holds the conversation.
@@ -21,7 +33,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     // Search and report: routine steps, no design calls.
     thinking: 'off',
     tools: ['glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
-    limits: { maxIterations: 20, maxToolCalls: 60, maxWallMs: 5 * 60_000, maxPromptTokens: 300_000 },
+    limits: RESEARCH_LIMITS,
     context: 'none',
     rules: false,
     report: true,
@@ -40,8 +52,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     modelRole: 'strong',
     // Finding real defects is the hard part; give it the model's full depth.
     thinking: 'max',
-    tools: ['diff', 'glob', 'grep', 'read_file', 'recall'],
-    limits: { maxIterations: 15, maxToolCalls: 50, maxWallMs: 5 * 60_000, maxPromptTokens: 300_000 },
+    tools: ['diff', 'glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
+    limits: RESEARCH_LIMITS,
     context: 'diff',
     rules: true,
     report: true,
@@ -49,7 +61,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     inheritPickedSkills: true,
     source: 'builtin',
     prompt: `You are a code reviewer with no stake in the change.
-- Start with the diff tool, then read surrounding code where a change touches shared types, callers, or error paths.
+- Start with the diff tool, then read surrounding code where a change touches shared types, callers, or error paths. Read as much as the review needs.
+- Use web tools only to check a library or API fact the change relies on.
 - Report real defects: wrong behavior, broken contracts, missed edge cases, rule violations. Skip style nits the project rules do not require.
 - Mark anything outside the user's request as out of scope instead of asking for it.
 - Each issue: location (path:line), problem, fix, severity.`,
@@ -96,7 +109,7 @@ export function subagentProfileWarnings(): string[] {
 }
 
 function frontmatter(raw: string): { fields: Map<string, string>; body: string } {
-  const text = raw.replace(/^﻿/, '').replace(/\r/g, '');
+  const text = raw.replace(/^\uFEFF/, '').replace(/\r/g, '');
   const fields = new Map<string, string>();
   if (!text.startsWith('---')) return { fields, body: text.trim() };
   const end = text.indexOf('\n---', 3);
@@ -135,12 +148,13 @@ function parseUserProfile(file: string, raw: string): SubagentProfile | string {
     .split(',')
     .map((skill) => skill.trim())
     .filter(Boolean);
-  const turns = Number(fields.get('maxturns') ?? 15);
+  const turns = Number(fields.get('maxturns') ?? RESEARCH_LIMITS.maxIterations);
   const limits: SubagentLimits = {
-    maxIterations: Number.isFinite(turns) && turns > 0 ? Math.min(Math.floor(turns), 40) : 15,
-    maxToolCalls: 60,
-    maxWallMs: 5 * 60_000,
-    maxPromptTokens: 300_000,
+    ...RESEARCH_LIMITS,
+    maxIterations:
+      Number.isFinite(turns) && turns > 0
+        ? Math.min(Math.floor(turns), RESEARCH_LIMITS.maxIterations)
+        : RESEARCH_LIMITS.maxIterations,
   };
   return {
     name,

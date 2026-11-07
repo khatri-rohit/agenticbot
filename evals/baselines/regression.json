@@ -1,0 +1,52 @@
+{
+  "suite": "regression",
+  "recordedAt": "2026-11-06T17:14:14.257Z",
+  "model": "glm-5.3:cloud",
+  "seedHash": "ee2592f79f7f5b5e51e227dbc67568cf8577bb0ae84168eca8f94a99c2913512",
+  "harnessSha": "cddf6a8131aac4d017b9cad9d2f379216d14347f",
+  "harnessDirty": "3eb02aace81e34d8",
+  "system1Setup": "off/thinking=default",
+  "tasks": {
+    "eval-timeout-label": {
+      "taskId": "eval-timeout-label",
+      "taskHash": "30a5970eb699ca957aaa2b0aab724f79fd531419e9a87ba77a717a1f8f0ea796",
+      "trials": 3,
+      "passes": 2,
+      "errors": 0,
+      "passRate": 0.6666666666666666,
+      "medianPromptTokens": 189278,
+      "medianMinutes": 1.3,
+      "spread": 4.476880439000055,
+      "stable": false,
+      "scopeViolations": 0
+    },
+    "limit-codes-lookup": {
+      "taskId": "limit-codes-lookup",
+      "taskHash": "2bc739d3cf793e98276fefb8f2a72dd47b864ded71672f91c877bfca820815c5",
+      "trials": 3,
+      "passes": 3,
+      "errors": 0,
+      "passRate": 1,
+      "medianPromptTokens": 22693,
+      "medianMinutes": 0.2,
+      "spread": 1.0301293160911877,
+      "stable": true,
+      "scopeViolations": 0
+    },
+    "readme-glossary": {
+      "taskId": "readme-glossary",
+      "taskHash": "564f3cea337984757b4682a00188f3f3cf13a637b68e45153e4eb46c9f95b8a7",
+      "trials": 3,
+      "passes": 1,
+      "errors": 0,
+      "passRate": 0.3333333333333333,
+      "medianPromptTokens": 97606,
+      "medianMinutes": 0.4,
+      "spread": 1.7031530824128844,
+      "stable": true,
+      "scopeViolations": 0
+    }
+  },
+  "passRate": 0.6666666666666666,
+  "integrity": "6bfbbc074745eb95543406c9bfc83337d73ef341d00a259ba3e41816d55146a4"
+}

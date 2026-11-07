@@ -14,6 +14,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/utils';
 
 function matchesQuery(m: OllamaModel, q: string): boolean {
@@ -35,6 +41,8 @@ export function ModelPicker({
   local = false,
   loading = false,
   emptyMessage,
+  open: openExternal,
+  onOpenChange,
 }: {
   value: string;
   onChange: (modelId: string) => void;
@@ -44,8 +52,13 @@ export function ModelPicker({
   local?: boolean;
   loading?: boolean;
   emptyMessage?: string;
+  /** Externally controlled open state (e.g. keyboard shortcut). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  const open = openExternal ?? openInternal;
+  const setOpen = onOpenChange ?? setOpenInternal;
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -98,19 +111,30 @@ export function ModelPicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          className="h-7 max-w-48 gap-1 rounded-full bg-muted/45 px-2.5 text-xs font-normal text-muted-foreground ring-1 ring-border/35 hover:bg-muted/70 hover:text-foreground"
-          aria-label={`Model: ${label}`}
-        >
-          <span className="truncate">{label}</span>
-          <ChevronDown className="size-3.5 shrink-0 opacity-70" />
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={disabled}
+              className="h-7 max-w-48 gap-1 rounded-full bg-muted/45 px-2.5 text-xs font-normal text-muted-foreground ring-1 ring-border/35 hover:bg-muted/70 hover:text-foreground"
+              aria-label={`Model: ${label}`}
+            >
+              <span className="truncate">{label}</span>
+              <ChevronDown className="size-3.5 shrink-0 opacity-70" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>
+          <span className="flex items-center gap-1.5">
+            Switch model
+            <Kbd>Ctrl</Kbd>
+            <Kbd>/</Kbd>
+          </span>
+        </TooltipContent>
+      </Tooltip>
       <PopoverContent
         align="start"
         side="top"
@@ -125,6 +149,7 @@ export function ModelPicker({
           <input
             type="text"
             value={query}
+            autoFocus
             onChange={(e) => {
               setQuery(e.target.value);
               setActiveIndex(0);

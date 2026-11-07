@@ -52,7 +52,7 @@ export function createDelegateTool(profiles: SubagentProfile[]): Tool {
             thoroughness: {
               type: 'string',
               enum: [...THOROUGHNESS],
-              description: 'Optional for explore: quick (~5 tool calls), medium (~12), thorough (~25).',
+              description: 'Optional for explore: quick (~10 tool calls), medium (~40), thorough (~150).',
             },
             resume: {
               type: 'string',

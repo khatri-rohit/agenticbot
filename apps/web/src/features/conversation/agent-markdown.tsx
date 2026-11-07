@@ -1,16 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
 import { mermaid } from '@streamdown/mermaid';
 import {
   extractFileCitations,
+  isReportBanner,
   normalizeAssistantMarkdown,
   rewriteCitationFences,
 } from './normalize-assistant-markdown';
 
-const codePlugins = { code };
+/**
+ * One plugin set for both modes: swapping plugins when streaming finishes
+ * re-runs Shiki on every settled block (finish-line flash).
+ */
 const fullPlugins = { code, mermaid };
 
 /** Streamdown / Shiki defaults — dark theme via `html.dark`. */
@@ -52,6 +56,21 @@ const STREAM_ANIMATION = {
  * @see https://streamdown.ai/docs — `linkSafety`
  */
 const linkSafety = { enabled: false };
+
+/**
+ * Assistant output is untrusted web content: prompt-injected images and links
+ * are the documented Streamdown threat. Keep rehype-harden's default protocol
+ * allow-list; restrict rendered images to local/HTTPS origins and drop data
+ * URIs (a data:image payload can smuggle content past CSP img-src).
+ * @see https://streamdown.ai/docs/features/security
+ */
+const hardenImages = {
+  image: {
+    enabled: true,
+    origins: ['self', 'https:'],
+    allowDataImages: false,
+  },
+};
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
@@ -117,6 +136,20 @@ export function AgentMarkdown({
     () => normalizeAssistantMarkdown(rewriteCitationFences(content)),
     [content],
   );
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Streamdown sanitizes HTML, so banner headings cannot be marked in the
+  // markdown; mark them after each render. Styled in global.css.
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    for (const heading of root.querySelectorAll('h2, h3, h4')) {
+      heading.classList.toggle(
+        'report-banner',
+        isReportBanner(heading.textContent ?? ''),
+      );
+    }
+  });
 
   if (!markdown) return null;
 
@@ -127,19 +160,20 @@ export function AgentMarkdown({
     controls,
     className: 'agent-markdown',
     linkSafety,
+    harden: hardenImages,
+    mermaid: { config: { theme: mermaidTheme() } },
   };
 
   if (streaming) {
     return (
-      <div className="min-w-0">
+      <div className="min-w-0" ref={containerRef}>
         <Streamdown
           {...shared}
           mode="streaming"
           animated={reducedMotion ? false : STREAM_ANIMATION}
           caret={reducedMotion ? undefined : 'circle'}
-          isAnimating={!reducedMotion}
           parseIncompleteMarkdown
-          plugins={codePlugins}
+          plugins={fullPlugins}
         >
           {markdown}
         </Streamdown>
@@ -149,12 +183,11 @@ export function AgentMarkdown({
   }
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" ref={containerRef}>
       <Streamdown
         {...shared}
         mode="static"
         plugins={fullPlugins}
-        mermaid={{ config: { theme: mermaidTheme() } }}
       >
         {markdown}
       </Streamdown>

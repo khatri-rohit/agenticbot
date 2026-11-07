@@ -113,6 +113,28 @@ function promoteStandaloneBoldLines(markdown: string): string {
     .join('\n');
 }
 
+/** Report section banners the skim pass must not miss. */
+export const REPORT_BANNER_TITLES = [
+  'what changed',
+  'verified',
+  'not verified',
+  'still pending',
+  'notes for next time',
+  'noticed, not changed',
+  'assumptions',
+  'open questions',
+];
+
+export function isReportBanner(title: string): boolean {
+  const normalized = title.toLowerCase().trim();
+  return REPORT_BANNER_TITLES.some(
+    (banner) =>
+      normalized === banner ||
+      normalized.startsWith(`${banner}:`) ||
+      normalized.startsWith(`${banner} `),
+  );
+}
+
 /** e.g. `flowchart A --> B` → `flowchart TD` + `A --> B` */
 function normalizeMermaidBody(chart: string): string {
   if (!chart) return chart;

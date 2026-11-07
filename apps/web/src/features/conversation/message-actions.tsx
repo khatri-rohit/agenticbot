@@ -8,6 +8,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { toastError } from '@/hooks/use-toast';
+import { copyText } from '@/lib/copy-text';
 import { cn } from '@/lib/utils';
 
 export function MessageActions({
@@ -35,13 +37,16 @@ export function MessageActions({
 
   const handleCopy = useCallback(async () => {
     if (!content) return;
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard denied */
+    const ok = await copyText(content);
+    if (!ok) {
+      toastError(
+        "Couldn't copy — your browser blocked clipboard access",
+        'Copy failed',
+      );
+      return;
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
   }, [content]);
 
   const handleConfirmRetry = useCallback(async () => {
@@ -50,6 +55,8 @@ export function MessageActions({
     try {
       await onRetry();
       setConfirmRetry(false);
+    } catch {
+      toastError('The retry request failed — nothing was changed', 'Retry failed');
     } finally {
       setRetrying(false);
     }

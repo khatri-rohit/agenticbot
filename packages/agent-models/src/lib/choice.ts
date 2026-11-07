@@ -1,6 +1,7 @@
 /**
  * Mid-turn direction picker. Separate from exec approval:
- * checkboxes + optional extra text, then Continue — or Skip to stop the run.
+ * checkboxes + optional extra text, then Continue — or Skip to decide later
+ * (the run ends with a summary of the options).
  */
 
 export const MAX_CHOICE_OPTIONS = 8;
@@ -22,7 +23,7 @@ export type ChoiceResult = {
   text?: string;
 };
 
-/** User skipped: the loop must stop, not invent a path. */
+/** User skipped to decide later: the run ends with a summary, never a picked path. */
 export class ChoiceSkipped extends Error {
   override readonly name = 'ChoiceSkipped';
   constructor(message = 'User skipped this choice') {

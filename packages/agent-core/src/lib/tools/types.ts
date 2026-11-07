@@ -3,7 +3,7 @@ import type {
   ChatCompletionFunctionTool,
 } from 'openai/resources/chat/completions';
 
-import type { ToolContext, ToolRisk } from '@agent/agent-models';
+import type { ToolContext, ToolRisk, ToolStage } from '@agent/agent-models';
 
 /**
  * Guidance text injected into the system prompt per tool.
@@ -15,12 +15,13 @@ export type ToolGuidance = {
   usage: string[];
 };
 
-/**
- * Loop scheduling class. skill/read/subagent batches run in parallel;
- * network/exec/mutate run one at a time. A tool without a stage (e.g. a
- * future MCP tool) is scheduled as `mutate`, the strictest class.
- */
-export type ToolStage = 'skill' | 'read' | 'network' | 'subagent' | 'exec' | 'mutate';
+/** What a tool's own result says happened, for the trace (see `Tool.classify`). */
+export type ToolResultClass = {
+  /** `error`: the tool ran but did not do what was asked (edit not applied, command blocked or killed). */
+  outcome: 'ok' | 'error';
+  /** run_terminal: the command's exit code. Non-zero is still `ok`: a failing test is often the point. */
+  exitCode?: number;
+};
 
 export type Tool = {
   definition: ChatCompletionFunctionTool;
@@ -40,6 +41,11 @@ export type Tool = {
    * maxToolCalls.
    */
   admit?: (args: Record<string, unknown>, ctx: ToolContext) => string | null;
+  /**
+   * Reads the tool's own (shaped) result: did it do what was asked? Only
+   * tools whose results carry a failure the trace cannot see otherwise.
+   */
+  classify?: (result: string) => ToolResultClass;
   /** What the UI shows of the arguments, when the raw arguments are too long or noisy. */
   previewArgs?: (args: Record<string, unknown>) => unknown;
   execute: (

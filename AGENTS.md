@@ -22,71 +22,120 @@
 
 <!-- nx configuration end-->
 
-# Personal Assistant — guide for contributors and coding agents
+# Personal Assistant
 
-This is the one guide for working in this repo. `CLAUDE.md` and `.cursor/rules/` point here. [README.md](./README.md) covers setup, the API surface and design notes.
+Nx monorepo for a personal agent harness. One runtime (`agent-core`), two bindings: **Home** (chat, optional web) and **Workspace** (folder-bound coding tools). Setup, env, and the HTTP surface are in [README.md](./README.md).
 
-The goal of every change: **the next change gets cheaper to understand and make.** Complexity is whatever makes the system hard to understand or modify. It grows one reasonable-looking change at a time, so each change has to leave the structure at least as clear as it found it.
+`apps/web` is the chat product. `apps/eval` is the measurement viewer. They are not the same UI.
 
-## Ownership
+## Modules
 
-| Layer        | Project                                  | Owns                                                                                     |
-| ------------ | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Contract     | `packages/agent-models` (`type:data`)    | Shared shapes: events, ledger, trace, threads, plans, modes. Imports nothing.            |
-| Runtime      | `packages/agent-core` (`type:logic`)     | Loop, tools, context, model calls, sub-agents, System 1. No HTTP, DOM or database.       |
-| HTTP host    | `apps/api` (`type:app`)                  | Express routes, stores on disk, env wiring.                                              |
-| UI           | `apps/web` (`type:app`, `scope:web`)     | Next.js chat UI. Imports only `agent-models`, never `agent-core`.                        |
-| CLI / eval   | `apps/cli` (`type:app`)                  | Runs the core directly from a terminal; eval scenarios.                                  |
+| Project | Role | Use |
+| ------- | ---- | --- |
+| `packages/agent-models` | Shared shapes. Imports nothing. | Events, ledger, trace, threads, plans, modes (`HOME_MODE` / `WORKSPACE_MODE`), review artifact. One file per family under `src/lib/` (`event.ts`, `ledger.ts`, `trace.ts`, `run.ts`, `thread.ts`, `mode.ts`, `review.ts`, …). |
+| `packages/agent-core` | Host-agnostic runtime. No HTTP, DOM, or database. | Loop, tools, context, model calls, sub-agents, System 1. Public surface is `src/index.ts`; the rest stays internal. |
+| `apps/api` | Express host on disk. | `/api/agent/*`: threads, runs, memory, skills, models. Optional `/api/voice`. Wires env, stores, System 1, traces. |
+| `apps/web` | Next.js chat. Imports `agent-models` only, never `agent-core`. | Composer, thread view, sidebar, usage meters. Rebuilds from the ledger; SSE is the live path. |
+| `apps/cli` | Terminal host. | Runs core directly (no HTTP). Leftover `src/eval/` is not the eval product. |
+| `packages/agent-eval` | Read-only measurement. Imports `agent-models` only, never `agent-core`. | Readers, metrics, trial runner, gate. Trials talk to the HTTP API; they do not run a second loop. |
+| `apps/eval` | Next.js viewer over `agent-eval`. Does not import `agent-core`. | Suite results, run traces, usage, thread/run **Review**. Not the chat UI. |
+| `evals/` | Task corpus (not an Nx project). | `evals/tasks`, `evals/baselines`, plan of record in `evals/ROADMAP.md`. |
 
-Lint enforces these arrows (`@nx/enforce-module-boundaries` in `eslint.config.mjs`). Loop correctness, tool execution, limits and event order belong in core; status codes, CORS and UX belong in the hosts.
+Lint (`@nx/enforce-module-boundaries` in `eslint.config.mjs`) matches this: `type:data` → `type:logic` → `type:app`. `scope:web` cannot import logic packages. `apps/eval` is `scope:eval` and still does not import `agent-core`.
 
-## Where code goes
+## Chat flow
 
-Organise by **what the code is about**, not by what kind of file it is. Look for the folder that owns the topic before creating a new one.
+```
+apps/web composer (features/composer)
+  → POST /api/agent/run          apps/api/src/runs/runs.routes.ts → start-run.ts
+  → assemble run context         runs/run-context.ts (ledger, memory, skills, workspace, compaction)
+  → RunManager.start             packages/agent-core/src/lib/run/run-manager.ts
+  → runLoop                      packages/agent-core/src/lib/loop/loop.ts
+  → GET /api/agent/run/:id/events  SSE AgentEvent
+  → chat-store / use-agent-run   apps/web/src/features/conversation/
+```
 
-**`apps/api/src/`**: one folder per topic, with its route file next to the code it uses:
-`threads/` (thread CRUD, ledger, workspace pick, `thread-store`), `runs/` (start a run, run context, compaction, cancel/choice/events, sub-agent host, System 1 wiring, titles), `memory/`, `skills/`, `models/` (model list/config, account balance and capacity), `voice/`, and `platform/` (process-wide instances, agent home, logger, trace sink). Routes only parse requests and shape responses; the work lives beside them (for example `runs/start-run.ts`).
+One active run per thread, in process memory. After `RUN_HANDLE_TTL_MS` (5 minutes) a late SSE subscribe is 404; the client rebuilds from `GET /api/agent/threads/:id/ledger`. Retry/edit **rewinds** (truncates) the ledger. Title generation (`runs/thread-title.ts`) is maintenance, not on the request path.
 
-**`apps/web/src/`**:
-- `app/`: Next.js routes only.
-- `features/conversation/`: the thread view (message list, cards, chat store, `thread-session` and its hook `use-agent-run`).
-- `features/composer/`: the input box and everything it controls (pickers, voice, skills, drafts).
-- `features/threads/`: sidebar, thread lists, spaces, workspace picker.
-- `features/usage/`: context and account usage meters.
-- `api/`: HTTP clients for the API, one per topic.
-- `components/ui/`: shadcn primitives (generated; keep as is). `components/shell/`: app frame and providers.
-- `hooks/`, `lib/`: generic helpers with no feature knowledge only.
+**Home vs Workspace** is `packages/agent-models/src/lib/mode.ts`: allowed tools, global tools, iteration/token/wall limits. Home is chat; Workspace adds folder-jailed coding tools (`edit_file`, `run_terminal`, `delegate`, `diff`).
 
-**`packages/agent-core/src/lib/`**: `loop/` (the run loop and its state: budget, steering, repetition guard, web sources), `context/`, `tools/` (`web/`, `workspace/`, one file per other tool family), `model/`, `subagent/`, `system1/`, `run/`, `events/`, `memory/`, `prompts/`. Add to `src/index.ts` only what a host needs. Everything else stays internal.
+## Disk layout (`AGENT_HOME`)
 
-**`packages/agent-models/src/lib/`**: one file per shape family. Types and pure helpers on those types only.
+Host-owned. Typical path: `.local/personal-assistant/`.
 
-## Naming
+| Path | What |
+| ---- | ---- |
+| `catalog.db` | Thread index (SQLite). |
+| `sessions/<threadId>/ledger.jsonl` | Active tape. Append-only until rewind. |
+| `sessions/<threadId>/traces/<runId>.jsonl` | Per-run facts core recorded (schema `TRACE_SCHEMA_VERSION`). |
+| `sessions/<threadId>/` blobs | Large bodies, recorded model-call payloads. |
+| `reviews/<threadId>.json` | Stored thread Review (eval app). |
 
-- Files are kebab-case. React hooks are `use-*.ts(x)`. Express routers are `<topic>.routes.ts` and export `<topic>Router`.
-- Name a file after what it is about inside its folder (`tools/web/providers.ts`, not `tools/web-search-providers.ts`).
-- Tests sit next to the code: `<name>.test.ts`.
-- Web imports use `@/…`. Core and API use relative imports inside a project and package names across projects.
+Eval reads these files. It does not re-derive what core already put in the trace.
 
-## Module design
+## Runtime (major files)
 
-- **Deep modules.** A module should hide more than it shows: a small interface over real work or state. `system1/port.ts` (`ask`, `report` over client, breaker, budget and recorder) and `loop/run-budget.ts` are the references.
-- **Split on interfaces, not line counts.** Split when a piece has its own state and a small interface; leave a large file whole when its parts must be read in order (the iteration loop in `loop.ts`) or must coordinate (`threads/thread-store.ts`).
-- **No pass-through layers.** No component or function that only forwards a dozen props or arguments, no index files that only re-export, no wrapper around a single call.
-- **One copy.** Before writing a helper, search for it. Share it once it has three identical callers; near-copies that behave differently keep their own names.
-- **Comments** say why or state a contract, on the non-obvious parts. They don't narrate the next line.
-- **No defensive theater.** Validate at trust boundaries (HTTP bodies, model output, files, env), not inside trusted code.
+**Loop** — `packages/agent-core/src/lib/loop/`
 
-## How the harness thinks
+- `loop.ts` — iteration: model turn → tools → budget/limits → finish. Replay snapshots in `__replay__/` pin event/trace order.
+- `limits.ts`, `run-budget.ts` — iteration, tool-call, token, and wall caps.
+- `repetition-guard.ts`, `progress-steering.ts` — stall / research-gate (absolute marks 750k / 1.25M).
+- `model-call.ts`, `call-record.ts` — streaming call; optional content-addressed recording of exactly what the model saw.
+- `to-ledger-record.ts` — loop output → ledger row.
 
-- **Events are the API between core and UI.** Changing an event shape means updating core, the API, the web store and the CLI together. The UI must rebuild from `GET /ledger`; SSE is only the fast path.
-- **Ledger over stream.** Any UI state that cannot be rebuilt from the ledger is a bug. Retry/edit rewinds (truncates) the ledger.
-- **Budget machine.** Looping is a limits problem (`loop/limits.ts`, `loop/repetition-guard.ts`, `loop/progress-steering.ts`), not a prompt problem.
-- **Context is a cache.** Stubbing and eviction are cache decisions (`context/`). New capabilities are judged by what they keep resident.
-- **Gate over prompt.** The model proposes, a gate disposes (memory, posture, path jail, web trust). Ship the gate with the capability.
-- **No LLM on the request path** (admission, assembly, compaction). Title generation is maintenance.
-- `RunManager` keeps one active run per thread in process memory. Late SSE after `RUN_HANDLE_TTL_MS` is a 404; the ledger is the truth.
+**Context** — `packages/agent-core/src/lib/context/`
 
-## Before you finish
+- `assemble-context.ts` — builds the prompt. Old tool results stub first, then attachments; large bodies spill to blobs; tape compact last.
+- `residency.ts` — in-run eviction (`(evicted)` cards) and extractive recap. Compaction is not an LLM call.
+- Host-side between-run compact: `apps/api/src/runs/compaction.ts`. Window size: `apps/api/src/models/model-runtime.ts` + `agent-models/src/lib/context.ts`.
 
-Run the targets for what you touched: `npx nx run-many -t typecheck,test,build -p <projects>` (the web app type-checks during `build`), and `npx eslint <paths>`. A change to `loop.ts` should keep every existing trace and event identical unless the behaviour change is the point.
+**Tools** — `packages/agent-core/src/lib/tools/`
+
+- `registry.ts` — per-run allow list (composer toggles ∪ mode `globalTools`).
+- `web/` — `web_search` (opt-in), `web_fetch` (always).
+- `workspace/` — path jail, `read_file` / `edit_file` / `run_terminal`.
+- `memory.ts`, `plan.ts`, `offer-choice.ts`, `recall.ts`, `skills.ts`.
+- Memory / posture / path jail are deterministic gates (`memory/gate.ts`), not prompt text.
+
+**Model and System 1**
+
+- `model/client.ts`, `model/stream.ts` — Ollama (cloud or local).
+- `system1/port.ts` — classifier: state + questions → scores (`ask` / `report`). Not a writer. Host wires it in `apps/api/src/runs/system1-runtime.ts`.
+
+**Sub-agents** — `packages/agent-core/src/lib/subagent/` (`delegate.ts`, `profiles.ts`, `runner.ts`). Host: `apps/api/src/runs/subagent-host.ts`. Profiles: explore, review, advisor, user agents under `$AGENT_HOME/agents/`. Children cannot nest; cancelled with the parent.
+
+**Events** — `packages/agent-models/src/lib/event.ts` is the live API shape. Core emits (`events/emitter.ts`, `events/trace.ts`); API streams; web reduces; eval reads the on-disk trace/ledger.
+
+## Hosts (major files)
+
+**API** — `apps/api/src/`
+
+- `main.ts` — mounts routers under `/api/agent`.
+- `threads/thread-store.ts` — catalog + ledger + plans on disk.
+- `threads/threads.routes.ts` — thread CRUD, ledger GET, workspace pick.
+- `runs/start-run.ts`, `runs.routes.ts` — start, cancel, choice, SSE, events.
+- `platform/agent-home.ts`, `platform/instances.ts`, `platform/trace-sink.ts`.
+- `memory/`, `skills/`, `models/`, `voice/` — each topic’s route next to its store.
+
+**Web** — `apps/web/src/`
+
+- `app/chat/[threadId]/page.tsx` — thread page.
+- `features/conversation/` — `use-agent-run`, `chat-store`, message list, cards (`thread-session` is the SSE/ledger client).
+- `features/composer/` — input, model/thinking/web/skills/voice.
+- `features/threads/` — sidebar, spaces, workspace picker.
+- `features/usage/` — context and account meters.
+- `api/` — HTTP clients, one per topic.
+
+**CLI** — `apps/cli/src/` — `local-run.ts` drives core in-process.
+
+## Eval flow
+
+Trials: `packages/agent-eval/src/runner/runner.ts` grades a task by calling the **same HTTP API** (`runner/api-client.ts`), then reading the thread’s ledger/traces. Budget stop cancels a trial at 2× its token budget. Gate/baseline: `gate/`. CLI entry: `cli/main.ts`.
+
+Viewer (`apps/eval`): server pages over those readers — `/results`, `/results/[id]`, `/runs/[id]`, `/threads/[id]`, `/usage`. Home path: `apps/eval/src/lib/home.ts`.
+
+**Review** (thread/run performance, not the `delegate(review)` sub-agent):
+
+- Digest: `packages/agent-eval/src/analyze/review.ts` (`analyzeThread`, `buildReviewInput`) — metrics + ≤5 `run_finish` excerpts, no whole-trace dump.
+- Types: `packages/agent-models/src/lib/review.ts` (`ReviewArtifact`, `reviewFingerprint`).
+- UI: `apps/eval/src/review/` (verdict, CTA, store, narrative). Destination is `/threads/[id]/review`. Thread and run pages link/run a review; they are not the review document. Unchanged fingerprint serves `reviews/<threadId>.json`; narrative is one bounded JSON call over the digest.

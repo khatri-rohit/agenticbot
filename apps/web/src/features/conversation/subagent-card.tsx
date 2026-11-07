@@ -29,6 +29,14 @@ function formatTokens(tokens: number): string {
  * thread's live view. Settled: expandable digest with status badge and
  * iteration/tool-call counts.
  */
+/** Settled statuses in words; unknown values fall back to the raw status. */
+const SETTLED_STATUS_LABELS: Record<string, string> = {
+  completed: 'Done',
+  incomplete: 'Stopped early',
+  error: 'Failed',
+  cancelled: 'Cancelled',
+};
+
 export function SubagentCard({ activity }: { activity: SubagentActivity }) {
   const [open, setOpen] = useState(false);
   const running = activity.status === 'running';
@@ -47,7 +55,7 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
         ? `${calls} tool${calls === 1 ? '' : 's'}${activity.lastTool ? ` · ${activity.lastTool}` : ''}`
         : 'starting…';
     }
-    return activity.status;
+    return SETTLED_STATUS_LABELS[activity.status] ?? activity.status;
   })();
 
   return (

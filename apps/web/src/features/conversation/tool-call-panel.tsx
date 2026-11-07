@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Ban,
   Check,
@@ -20,6 +20,8 @@ import type { ToolCallRow } from './turn-timeline';
 import { SubagentCard } from './subagent-card';
 import type { SubagentActivity } from './chat-store';
 import { Button } from '@/components/ui/button';
+import { toastError } from '@/hooks/use-toast';
+import { copyText } from '@/lib/copy-text';
 import { cn } from '@/lib/utils';
 
 /** The digest markers are for the parent model; the card shows the body. */
@@ -172,6 +174,70 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
   }
 }
 
+/** File rows with settled edit_file results, for the summary strip. */
+function changedFilesSummary(rows: ToolCallRow[]): ChangesSummaryProps | null {
+  const files: ToolCallRow[] = [];
+  let plus = 0;
+  let minus = 0;
+  let pending = false;
+
+  for (const row of rows) {
+    if (row.toolName !== 'edit_file') continue;
+    if (row.status === 'running') {
+      pending = true;
+      continue;
+    }
+    if (row.status === 'failed' || row.status === 'skipped') continue;
+    const summary = summarizeToolRow(row);
+    files.push(row);
+    plus += summary.plus ?? 0;
+    minus += summary.minus ?? 0;
+  }
+
+  if (files.length === 0 && !pending) return null;
+  return {
+    files: files.length,
+    plus,
+    minus,
+    pending,
+  };
+}
+
+type ChangesSummaryProps = {
+  files: number;
+  plus: number;
+  minus: number;
+  pending: boolean;
+};
+
+function ChangesSummary({ files, plus, minus, pending }: ChangesSummaryProps) {
+  return (
+    <div
+      className="flex items-center gap-2 overflow-hidden rounded-lg border border-border/50 bg-muted/30 px-3 py-2"
+      aria-label={
+        pending ? 'Writing files…' : `Changed ${files} files +${plus} −${minus}`
+      }
+    >
+      <FilePenLine className="size-3.5 shrink-0 text-muted-foreground" />
+      {pending ? (
+        <span className="type-caption text-muted-foreground">
+          Writing files…
+        </span>
+      ) : (
+        <>
+          <span className="type-caption font-medium text-muted-foreground/80">
+            Changed {files} {files === 1 ? 'file' : 'files'}
+          </span>
+          <span className="type-caption flex-1 font-mono tabular-nums">
+            <span className="text-[var(--status-ok)]">+{plus}</span>{' '}
+            <span className="text-[var(--status-failed)]">−{minus}</span>
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
 function KindIcon({
   kind,
   action,
@@ -206,14 +272,18 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
 }
 
 /**
- * Render each tool call as its own inline card in the stream. No group
- * accordion: every row is independently collapsible, so the user always sees
- * what the agent is doing without expanding a wrapper first.
+ * Each tool call renders as its own inline card in the stream. No group
+ * accordion: every row is independently collapsible, so the user always
+ * sees what the agent is doing without expanding a wrapper first.
+ * A settled-run summary strip ("Changed N files +a −b") sits above the
+ * cards when the step wrote files — the glanceable number before detail.
  */
 export function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
   if (rows.length === 0) return null;
+  const changes = changedFilesSummary(rows);
   return (
     <div className="flex flex-col gap-2">
+      {changes ? <ChangesSummary {...changes} /> : null}
       {rows.map((row) => {
         // Ledger rebuild path (UC3/UC6): delegate tool results carry a
         // machine-readable header. Parse it and render a SubagentCard
@@ -299,6 +369,12 @@ function ToolCard({ row }: { row: ToolCallRow }) {
           </span>
         ) : null}
         <StatusIcon status={row.status} />
+        <ChevronDown
+          className={cn(
+            'size-3 shrink-0 text-muted-foreground transition-transform',
+            open && 'rotate-180',
+          )}
+        />
       </button>
 
       {open ? (
@@ -313,24 +389,8 @@ function ToolCard({ row }: { row: ToolCallRow }) {
         </div>
       )}
 
-      {/* Bottom bar: always visible, holds the centered expand affordance so
-          the click target is identical in both states. */}
-      <div className="flex items-center justify-center border-t border-border/40 bg-muted/20 py-0.5">
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          aria-label={open ? 'Collapse' : 'Expand'}
-          className="type-caption flex items-center gap-1 rounded-md px-2 py-0.5 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-        >
-          <ChevronDown
-            className={cn(
-              'size-3 shrink-0 transition-transform',
-              open && 'rotate-180',
-            )}
-          />
-        </button>
-      </div>
+      {/* No bottom bar: the header is the one expand affordance, matching the
+          competitive norm (Cursor/ChatGPT tool cards) of one control per card. */}
     </article>
   );
 }
@@ -379,13 +439,16 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard denied */
+    const ok = await copyText(text);
+    if (!ok) {
+      toastError(
+        "Couldn't copy — your browser blocked clipboard access",
+        'Copy failed',
+      );
+      return;
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
   };
   return (
     <Button
@@ -427,7 +490,7 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
   const content = row.result ?? '';
   if (!content) {
     return (
-      <p className="type-caption px-3 py-2 italic text-muted-foreground/60">
+      <p className="type-caption px-3 py-2 italic text-muted-foreground/70">
         {row.status === 'running' ? 'Reading…' : 'No output captured.'}
       </p>
     );
@@ -466,7 +529,7 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
         ))}
       </pre>
       {note ? (
-        <p className="type-caption px-3 pb-2 italic text-muted-foreground/60">
+        <p className="type-caption px-3 pb-2 italic text-muted-foreground/70">
           {note[1]}
         </p>
       ) : null}
@@ -491,7 +554,7 @@ function EditFilePreview({
 
   if (row.status === 'running' && !oldText && !newText) {
     return (
-      <p className="type-caption px-3 py-2 italic text-muted-foreground/60">
+      <p className="type-caption px-3 py-2 italic text-muted-foreground/70">
         Editing {path}…
       </p>
     );
@@ -545,7 +608,7 @@ function EditFilePreview({
         </div>
       ) : null}
       {oldLines.length === 0 && newLines.length === 0 ? (
-        <p className="type-caption italic text-muted-foreground/60">
+        <p className="type-caption italic text-muted-foreground/70">
           {row.result || 'No diff available.'}
         </p>
       ) : null}
@@ -620,9 +683,9 @@ function SearchPreview({ row }: { row: ToolCallRow }) {
           {result}
         </pre>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/60">Searching…</p>
+        <p className="type-caption italic text-muted-foreground/70">Searching…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/60">
+        <p className="type-caption italic text-muted-foreground/70">
           No results.
         </p>
       )}
@@ -652,9 +715,9 @@ function WebFetchPreview({ row }: { row: ToolCallRow }) {
           {content}
         </pre>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/60">Fetching…</p>
+        <p className="type-caption italic text-muted-foreground/70">Fetching…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/60">
+        <p className="type-caption italic text-muted-foreground/70">
           No content.
         </p>
       )}
@@ -664,9 +727,119 @@ function WebFetchPreview({ row }: { row: ToolCallRow }) {
 
 /** plan / todo / offer_choice / default: raw args + result. These tools have
  *  dedicated settled-state cards elsewhere in the UI; this shows the raw call. */
+
+/* ---------- structured (JSON) result table ---------- */
+
+type JsonTable = { columns: string[]; rows: string[][] };
+
+/**
+ * Parse a tool result into rows/columns when the result is a JSON array of
+ * uniformly-keyed records — the shape list-style tools emit. Returns null
+ * for anything else (plain text keeps the <pre>). Caps protect the DOM from
+ * pathological results; non-scalar cells render empty rather than as
+ * "[object Object]".
+ */
+const JSON_TABLE_MAX_ROWS = 100;
+const JSON_TABLE_MAX_COLUMNS = 6;
+const JSON_TABLE_VALUE_MAX_CHARS = 200;
+
+function parseJsonTable(result: string): JsonTable | null {
+  const trimmed = result.trim();
+  if (trimmed.charCodeAt(0) !== 91 /* [ */) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+  if (!parsed.every(isPlainRecord)) return null;
+
+  // Column order = first-seen across records; reject over-wide results so a
+  // stray JSON object dump still gets the plain <pre>.
+  const columns: string[] = [];
+  for (const record of parsed) {
+    for (const key of Object.keys(record)) {
+      if (!columns.includes(key)) {
+        if (columns.length === JSON_TABLE_MAX_COLUMNS) return null;
+        columns.push(key);
+      }
+    }
+  }
+  const rows = parsed.slice(0, JSON_TABLE_MAX_ROWS).map((record) =>
+    columns.map((column) => {
+      const raw = record[column];
+      if (raw === null || raw === undefined) return '';
+      if (typeof raw === 'string') return shortenCell(raw);
+      if (typeof raw === 'number' || typeof raw === 'boolean') {
+        return String(raw);
+      }
+      return '';
+    }),
+  );
+  return { columns, rows };
+}
+
+function shortenCell(text: string): string {
+  return text.length > JSON_TABLE_VALUE_MAX_CHARS
+    ? `${text.slice(0, JSON_TABLE_VALUE_MAX_CHARS)}…`
+    : text;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+  );
+}
+
+function JsonTable({ table }: { table: JsonTable }) {
+  return (
+    <div className="min-w-0 px-1 py-1">
+      <table className="w-full border-collapse font-mono text-xs">
+        <thead>
+          <tr className="border-b border-border/60 text-left">
+            {table.columns.map((column) => (
+              <th
+                key={column}
+                className="whitespace-nowrap px-2 py-1 font-medium text-muted-foreground/80"
+              >
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((cells, i) => (
+            <tr key={i} className="border-b border-border/25">
+              {cells.map((cell, j) => (
+                <td
+                  key={j}
+                  className="max-w-[28ch] truncate px-2 py-1 text-foreground/90"
+                  title={cell}
+                >
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {table.rows.length === JSON_TABLE_MAX_ROWS ? (
+        <p className="type-caption mt-1 text-muted-foreground/70">
+          First {JSON_TABLE_MAX_ROWS} rows shown.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function GenericPreview({ row }: { row: ToolCallRow }) {
   const args = row.args ?? '';
   const result = row.result ?? '';
+  const table = useMemo(
+    () => (result ? parseJsonTable(result) : null),
+    [result],
+  );
 
   return (
     <div className="min-w-0 space-y-2 px-3 py-2">
@@ -689,19 +862,23 @@ function GenericPreview({ row }: { row: ToolCallRow }) {
             label="Output"
             onCopy={<CopyButton text={result} />}
           />
-          <pre
-            className={cn(
-              PREVIEW_SCROLL,
-              'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono type-caption leading-relaxed text-foreground/90',
-            )}
-          >
-            {result}
-          </pre>
+          {table && table.rows.length > 0 ? (
+            <JsonTable table={table} />
+          ) : (
+            <pre
+              className={cn(
+                PREVIEW_SCROLL,
+                'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono type-caption leading-relaxed text-foreground/90',
+              )}
+            >
+              {result}
+            </pre>
+          )}
         </div>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/60">Running…</p>
+        <p className="type-caption italic text-muted-foreground/70">Running…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/60">
+        <p className="type-caption italic text-muted-foreground/70">
           No output captured.
         </p>
       )}

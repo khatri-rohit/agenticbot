@@ -271,6 +271,6 @@ function TodoMark({
     );
   }
   return (
-    <Circle className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
+    <Circle className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
   );
 }

@@ -64,7 +64,6 @@ export type {
   Tool,
   ToolGuidance,
   ToolRegistry,
-  ToolStage,
 } from './lib/tools/types';
 export { createMemoryTool } from './lib/tools/memory';
 export type { MemoryToolStore } from './lib/tools/memory';

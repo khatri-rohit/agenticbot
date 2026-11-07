@@ -110,8 +110,12 @@ export function ContextUsage({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          role="meter"
           aria-label={`${showTilde ? 'About ' : ''}${percent}% context used, ${usedLabel} of ${limitLabel} tokens, ${source}${defaultWindow ? ', default window' : ''}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           <svg
             width={size}
@@ -153,6 +157,11 @@ export function ContextUsage({
         <p className="type-caption mb-2 font-medium text-muted-foreground">
           Context
         </p>
+        {ratio >= 0.92 ? (
+          <p className="type-caption mb-2 rounded-md bg-[var(--warning)]/10 px-2 py-1 text-[var(--warning)]">
+            Context nearly full — the next run may compact or trim history.
+          </p>
+        ) : null}
         <div
           className="mb-2 flex h-1.5 overflow-hidden rounded-full bg-muted"
           aria-hidden

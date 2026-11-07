@@ -82,7 +82,7 @@ function toolProtocol(registry: ToolRegistry, isWorkspace: boolean): string {
       ? '- plan and todo are a durable journal and checklist. Use them for multi-step work the user will want to track; skip them for small tasks. If a Final plan with open todos exists, work against it and keep todo status current.'
       : '',
     has('offer_choice')
-      ? '- offer_choice is for a real fork in the approach or product decision. Never for permission to edit or run, or for which tool or skill to use. If the user skips, stop.'
+      ? '- offer_choice is for a real fork in the approach or product decision. Never for permission to edit or run, or for which tool or skill to use. If the user skips, they will decide later: never pick an option yourself.'
       : '',
     '- Reads (glob, grep, read_file) may run together; web_search then web_fetch run in order; writes, shell, plan, todo, memory, and offer_choice run one at a time.',
   ];
@@ -200,7 +200,7 @@ This chat is not bound to a project folder. You cannot edit files or run a termi
 Think clearly. Answer as a peer.
 Use web_search and web_fetch when current facts matter.
 Cite source URLs inline when you used the web. Do not invent live facts.
-If two reasonable paths would change what you do next, offer_choice with labeled options. They may check several and add extra text. If they skip, stop.
+If two reasonable paths would change what you do next, offer_choice with labeled options. They may check several and add extra text. If they skip, they will decide later: never pick an option yourself.
 If the user wants you to change a repo, tell them to open a folder (start a workspace chat).
 `.trim();
 

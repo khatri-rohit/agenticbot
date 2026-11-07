@@ -11,7 +11,7 @@ import {
 
 const RULES_MAX_CHARS = 4_000;
 
-const THOROUGHNESS_CALLS = { quick: 5, medium: 12, thorough: 25 } as const;
+const THOROUGHNESS_CALLS = { quick: 10, medium: 40, thorough: 150 } as const;
 
 /**
  * Child system prompt. Deliberately small (~1k tokens + rules): role,

@@ -81,12 +81,17 @@ export type RunLoopConfig = {
   workspaceRoot?: string;
   /** Host blob store for full web pages (optional; loop keeps an in-run cache). */
   putBlob?: (text: string) => Promise<string>;
+  /**
+   * Record every model call's exact input and output as blobs through
+   * `putBlob`, referenced from `llm_request` / `llm_response`. Needs `putBlob`.
+   */
+  recordCalls?: boolean;
   readBlob?: (
     sha256: string,
     offset?: number,
     length?: number,
   ) => Promise<string>;
-  /** Mid-turn direction picker. Skip must stop the run, not invent a path. */
+  /** Mid-turn direction picker. A skip defers: the run ends with a summary of the options, never a picked path. */
   offerChoice?: (request: ChoiceRequest) => Promise<ChoiceResult>;
   /** Legacy trace callback (eval harness). Kept for backward compat. */
   trace?: (event: TraceEvent) => void;
@@ -161,6 +166,8 @@ export type SubagentParent = {
   chargeUsage: (usage: RunUsage) => void;
   /** The parent's capacity gate; a child pauses on the same account limits. */
   capacity?: CapacityGate;
+  /** The parent records its model calls; children record theirs too. */
+  recordCalls?: boolean;
 };
 
 export type SubagentSpawner = (
