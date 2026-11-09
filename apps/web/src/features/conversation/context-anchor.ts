@@ -72,7 +72,8 @@ export function getContextAnchor(threadId: string): ContextAnchor | null {
     const windowSource =
       parsed.windowSource === 'default' ||
       parsed.windowSource === 'model' ||
-      parsed.windowSource === 'fallback'
+      parsed.windowSource === 'fallback' ||
+      parsed.windowSource === 'served'
         ? parsed.windowSource
         : undefined;
     const layers = parseLayers(parsed.layers);

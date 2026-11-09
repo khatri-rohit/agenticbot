@@ -13,8 +13,10 @@ import {
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
+  parseHarnessFlags,
   threadMentions,
   type ContextWindowMode,
+  type HarnessFlags,
   type RunPosture,
 } from '@agent/agent-models';
 import {
@@ -150,7 +152,10 @@ export async function prepareRun(input: {
   report: ReturnType<typeof assembleContext>['report'];
   mode: ModeConfig;
   posture: RunPosture;
+  /** Resolved once here; the loop must run with the same switches the prompt was built with. */
+  flags: HarnessFlags;
 }> {
+  const flags = parseHarnessFlags(process.env.AGENT_FLAGS);
   const memory = getMemoryStore();
   const kind = normalizeThreadKind(input.thread?.kind);
   const mode = modeForKind(kind);
@@ -238,6 +243,7 @@ export async function prepareRun(input: {
       skillNames,
       ...(plan ? { plan } : {}),
       ...(lastRun ? { lastRun } : {}),
+      flags,
     },
     window.budget,
   );
@@ -248,6 +254,7 @@ export async function prepareRun(input: {
     report: { ...report, windowSource: window.source },
     mode,
     posture,
+    flags,
   };
 }/**
  * The thread's last settled run. While a run is live, its lastRun is only the

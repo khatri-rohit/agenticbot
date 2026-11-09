@@ -29,7 +29,14 @@
       "depth": 0,
       "mode": "workspace",
       "posture": "agent",
-      "windowTokens": 200000
+      "windowTokens": 200000,
+      "flags": {
+        "outcomeCards": true,
+        "promptTiers": true,
+        "harnessNotes": true,
+        "compactHomePrompt": false,
+        "situationCard": true
+      }
     },
     {
       "type": "llm_request",
@@ -148,5 +155,13 @@
       "role": "assistant",
       "content": "All done."
     }
+  ],
+  "prompts": [
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      }
+    ]
   ]
 }

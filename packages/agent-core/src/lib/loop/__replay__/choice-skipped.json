@@ -29,7 +29,14 @@
       "depth": 0,
       "mode": "workspace",
       "posture": "agent",
-      "windowTokens": 200000
+      "windowTokens": 200000,
+      "flags": {
+        "outcomeCards": true,
+        "promptTiers": true,
+        "harnessNotes": true,
+        "compactHomePrompt": false,
+        "situationCard": true
+      }
     },
     {
       "type": "llm_request",
@@ -74,7 +81,7 @@
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 1,
-      "estimatedPromptTokens": 257,
+      "estimatedPromptTokens": 265,
       "final": true
     },
     {
@@ -265,5 +272,55 @@
       "role": "assistant",
       "content": "Open question: A or B. I recommend A."
     }
+  ],
+  "prompts": [
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {
+              "name": "offer_choice",
+              "arguments": "{\"question\":\"Which approach?\",\"options\":[{\"id\":\"a\",\"label\":\"Approach A\"},{\"id\":\"b\",\"label\":\"Approach B\"}]}"
+            }
+          },
+          {
+            "id": "s1",
+            "type": "function",
+            "function": {
+              "name": "later",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "User skipped this choice to decide later. Do not pick an option or continue work that depends on it."
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "s1",
+        "content": "Skipped: user deferred this choice."
+      },
+      {
+        "role": "user",
+        "content": "[Harness note, not from the user] The user skipped your question to decide later; tools are off. Do not pick an option or continue the work. Write the reply they will decide from: 1) one or two lines on what was done so far and where it stopped; 2) the open question; 3) each option by its label: what it would do, its trade-offs (effort, risk, what it changes) and when it is the right pick; 4) your recommendation and why; 5) how to answer next time (for example \"Go with <label>\", several options, or other direction). Keep it scannable."
+      }
+    ]
   ]
 }

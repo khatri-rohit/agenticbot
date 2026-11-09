@@ -41,6 +41,8 @@ const BUCKETS: {
       'plan',
       'mentions',
       'brief',
+      'last_run',
+      'situation',
     ],
     barClass: 'bg-foreground/35',
   },
@@ -111,7 +113,7 @@ export function ContextUsage({
         <button
           type="button"
           role="meter"
-          aria-label={`${showTilde ? 'About ' : ''}${percent}% context used, ${usedLabel} of ${limitLabel} tokens, ${source}${defaultWindow ? ', default window' : ''}`}
+          aria-label={`${showTilde ? 'About ' : ''}${percent}% context used, ${usedLabel} of ${limitLabel} tokens, ${source}${defaultWindow ? ', default window' : ''}${windowSource === 'served' ? ', limited by local Ollama' : ''}`}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
@@ -253,6 +255,12 @@ export function ContextUsage({
         {defaultWindow ? (
           <p className="type-caption mt-2 text-muted-foreground">
             Using the 200K fallback window: the model's size is unavailable
+          </p>
+        ) : null}
+        {windowSource === 'served' ? (
+          <p className="type-caption mt-2 text-muted-foreground">
+            Limited to the context local Ollama loaded this model with. Raise
+            OLLAMA_CONTEXT_LENGTH on the daemon for more.
           </p>
         ) : null}
         <p className="type-caption mt-2 text-muted-foreground tabular-nums">

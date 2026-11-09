@@ -1,4 +1,5 @@
 import type { ContextReportLayer, ContextWindowSource } from './context.js';
+import type { HarnessFlags } from './flags.js';
 import type { RunUsage, TokenUsage } from './run.js';
 import type { System1EffortTrace, System1RunReport } from './system1.js';
 import type { ToolStage } from './tool-context.js';
@@ -57,6 +58,8 @@ export type TraceEvent =
       /** Prompt size of the first call, split by context layer. */
       occupiedTokens?: number;
       layers?: ContextReportLayer[];
+      /** Harness switches this run used (absent on traces from before flags). */
+      flags?: HarnessFlags;
     }
   | {
       type: 'llm_request';

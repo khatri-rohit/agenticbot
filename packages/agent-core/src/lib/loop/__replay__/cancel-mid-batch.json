@@ -29,7 +29,14 @@
       "depth": 0,
       "mode": "workspace",
       "posture": "agent",
-      "windowTokens": 200000
+      "windowTokens": 200000,
+      "flags": {
+        "outcomeCards": true,
+        "promptTiers": true,
+        "harnessNotes": true,
+        "compactHomePrompt": false,
+        "situationCard": true
+      }
     },
     {
       "type": "llm_request",
@@ -188,5 +195,13 @@
       "tool_call_id": "e2",
       "content": "Skipped: run cancelled."
     }
+  ],
+  "prompts": [
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      }
+    ]
   ]
 }

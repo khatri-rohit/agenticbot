@@ -159,6 +159,42 @@ export async function getOllamaModelConfig(
   return config;
 }
 
+function withTag(name: string): string {
+  return name.includes(':') ? name : `${name}:latest`;
+}
+
+type PsResponse = {
+  models?: Array<{ name?: string; model?: string; context_length?: number }>;
+};
+
+/**
+ * Context length the daemon has this model loaded with (GET /api/ps), or
+ * null when the model is not loaded or the daemon does not report it.
+ * Never cached: a reload can change it. Never throws.
+ */
+export async function getServedContextLength(
+  model: string,
+  endpoint: OllamaEndpoint = 'local',
+): Promise<number | null> {
+  try {
+    const res = await fetch(`${nativeOllamaBaseUrl(endpoint)}/api/ps`, {
+      headers: { ...authHeaders() },
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as PsResponse;
+    // The daemon lists an untagged pick as `name:latest`.
+    const wanted = withTag(model);
+    const loaded = data.models?.find(
+      (row) => withTag(row.name ?? '') === wanted || withTag(row.model ?? '') === wanted,
+    );
+    const served = loaded?.context_length;
+    return typeof served === 'number' && served > 0 ? served : null;
+  } catch {
+    return null;
+  }
+}
+
 /** List models installed on the Ollama daemon (GET /api/tags). */
 export async function listOllamaModels(
   endpoint: OllamaEndpoint = 'local',

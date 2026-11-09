@@ -123,7 +123,10 @@ describe('compact snapshot', () => {
     });
     const blob = JSON.stringify(messages);
     expect(blob).toContain('new question');
-    expect(blob).not.toContain('old answer');
+    // The compacted row is not sent as a message (the situation card may still quote its lead).
+    expect(
+      messages.some((m) => m.role === 'assistant' && m.content === 'old answer'),
+    ).toBe(false);
     expect(blob).toContain('Goal: old question');
   });
 
@@ -247,7 +250,8 @@ describe('compact snapshot', () => {
     const last = users[2];
     expect(last?.role).toBe('user');
     if (last?.role === 'user') {
-      expect(last.content).toBe('now?');
+      // Per-send harness context rides ahead of the user's own words.
+      expect(String(last.content).endsWith('now?')).toBe(true);
     }
   });
 

@@ -2,7 +2,7 @@ import type { ModeName, RunPosture } from '@agent/agent-models';
 
 import type { ToolRegistry } from '../tools/types';
 import { ANTI_SLOP_CODE_LAW } from './coding-law';
-import { loadAgentIdentity } from './load-agent-identity';
+import { HOME_COMPACT_IDENTITY, loadAgentIdentity } from './load-agent-identity';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -205,6 +205,31 @@ If the user wants you to change a repo, tell them to open a folder (start a work
 `.trim();
 
 /**
+ * Home with a short identity: how to read the turn and how to answer, with
+ * compact tool guidance. The long house style lives in the
+ * ai-writing-guidelines skill, loaded when finished prose matters.
+ */
+function compactHomePrompt(registry: ToolRegistry): string {
+  const styleSkill = registry.byName.has('load_skill')
+    ? '\nFor finished prose the user will keep (docs, posts, emails), load the ai-writing-guidelines skill first.'
+    : '';
+  return `
+${HOME_COMPACT_IDENTITY}${styleSkill}
+
+# Tools
+${toolProtocol(registry, false)}
+
+${buildToolGuardrails(registry, true)}
+
+${HOME_BEHAVIOR}
+
+Today's date is ${today()}.
+`
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Assembles the frozen system prompt. Workspace gets the engineer prompt;
  * Home keeps its writing identity. USER.md / MEMORY.md belong in the memory
  * layer (assembleContext), not here. Posture is a run policy, not a ModeName.
@@ -213,8 +238,10 @@ export function buildSystemPrompt(
   registry: ToolRegistry,
   mode?: ModeName,
   posture: RunPosture = 'agent',
+  options: { compactHome?: boolean } = {},
 ): string {
   if (mode === 'workspace') return workspacePrompt(registry, posture);
+  if (options.compactHome) return compactHomePrompt(registry);
 
   return `
 ${loadAgentIdentity(mode)}

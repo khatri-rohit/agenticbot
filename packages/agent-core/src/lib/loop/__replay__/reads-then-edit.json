@@ -29,7 +29,14 @@
       "depth": 0,
       "mode": "workspace",
       "posture": "agent",
-      "windowTokens": 200000
+      "windowTokens": 200000,
+      "flags": {
+        "outcomeCards": true,
+        "promptTiers": true,
+        "harnessNotes": true,
+        "compactHomePrompt": false,
+        "situationCard": true
+      }
     },
     {
       "type": "llm_request",
@@ -426,5 +433,108 @@
       "role": "assistant",
       "content": "Edited a.ts."
     }
+  ],
+  "prompts": [
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "r1",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"a.ts\"}"
+            }
+          },
+          {
+            "id": "r2",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"b.ts\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "r1",
+        "content": "contents of a.ts"
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "r2",
+        "content": "contents of b.ts"
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "r1",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"a.ts\"}"
+            }
+          },
+          {
+            "id": "r2",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"b.ts\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "r1",
+        "content": "contents of a.ts"
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "r2",
+        "content": "contents of b.ts"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "e1",
+            "type": "function",
+            "function": {
+              "name": "edit_file",
+              "arguments": "{\"path\":\"a.ts\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "e1",
+        "content": "Patched a.ts"
+      }
+    ]
   ]
 }

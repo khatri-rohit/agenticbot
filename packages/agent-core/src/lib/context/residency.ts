@@ -8,6 +8,7 @@ import { CHARS_PER_TOKEN, type ContextBudget } from '@agent/agent-models';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { skillCard } from '../tools/skills';
 import { sha256Text } from '../tools/web/source';
+import { argsPreview, toolCallIndex, type ToolCallInfo } from './outcome-card';
 
 /**
  * In-run context residency. assembleContext evicts by user turn when a run
@@ -31,33 +32,6 @@ const SKILL_CARD_PREFIX = '(skill card)';
 const UNCHANGED_PREFIX = '(unchanged';
 const RECAP_PREFIX = '(compacted progress)';
 const RECAP_MAX_CHARS = 8_000;
-const ARGS_PREVIEW_MAX = 160;
-
-type ToolCallInfo = { name: string; args: string };
-
-function toolCallIndex(
-  messages: ChatCompletionMessageParam[],
-): Map<string, ToolCallInfo> {
-  const byId = new Map<string, ToolCallInfo>();
-  for (const message of messages) {
-    if (message.role !== 'assistant' || !message.tool_calls) continue;
-    for (const call of message.tool_calls) {
-      if (call.type !== 'function') continue;
-      byId.set(call.id, {
-        name: call.function.name,
-        args: call.function.arguments,
-      });
-    }
-  }
-  return byId;
-}
-
-function argsPreview(raw: string): string {
-  const compact = raw.replace(/\s+/g, ' ').trim();
-  return compact.length > ARGS_PREVIEW_MAX
-    ? `${compact.slice(0, ARGS_PREVIEW_MAX)}…`
-    : compact;
-}
 
 function isResident(content: string): boolean {
   return (

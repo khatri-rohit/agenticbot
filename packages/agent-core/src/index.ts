@@ -21,6 +21,7 @@ export { streamModelTurn } from './lib/model/stream';
 export type { OnTextDelta, ModelCallOptions } from './lib/model/types';
 export {
   getOllamaModelConfig,
+  getServedContextLength,
   listOllamaModels,
   peekOllamaModelConfig,
   resolveReasoningEffort,

@@ -290,6 +290,7 @@ async function startClaimedRun(
     estimatedPromptTokens: prepared.report.occupiedTokens,
     contextReport: prepared.report,
     contextBudget: prepared.report.budget,
+    flags: prepared.flags,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     putBlob: (text) => store.putBlob(threadId, text),
     // Every model call's exact input/output, for the eval viewer. Off: AGENT_RECORD_MODEL_CALLS=0.

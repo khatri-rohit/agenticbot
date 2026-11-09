@@ -8,6 +8,7 @@ import {
 const BRIEF_MAX = 1_200;
 const SUMMARY_MAX = 8_000;
 const TURN_MAX = 400;
+const OMITTED_MARKER_MAX = 40;
 
 function clip(text: string, max: number): string {
   const trimmed = text.trim();
@@ -150,9 +151,33 @@ export function buildExtractiveSnapshot(input: {
     throughSeq: input.throughSeq,
     model: input.model,
     brief,
-    summary: clip(summaryLines.join('\n\n'), SUMMARY_MAX),
+    summary: keepFirstAndNewest(summaryLines, SUMMARY_MAX),
     createdAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Fit turn lines in `max` chars keeping the first line (the request that
+ * started the thread) and as many of the newest as fit. The turns right
+ * before the cut are the ones a follow-up depends on; a head clip dropped
+ * exactly those.
+ */
+function keepFirstAndNewest(lines: string[], max: number): string {
+  const all = lines.join('\n\n');
+  if (all.length <= max) return all;
+  const first = lines[0] ?? '';
+  const newest: string[] = [];
+  let used = first.length;
+  for (let i = lines.length - 1; i > 0; i--) {
+    const line = lines[i] ?? '';
+    // Each kept line costs its text plus a separator; reserve room for the marker.
+    if (used + line.length + 2 + OMITTED_MARKER_MAX > max) break;
+    newest.unshift(line);
+    used += line.length + 2;
+  }
+  const omitted = lines.length - 1 - newest.length;
+  const marker = omitted > 0 ? [`(${omitted} earlier turns omitted)`] : [];
+  return clip([first, ...marker, ...newest].join('\n\n'), max);
 }
 
 const MENTION_MAX_CHARS = 4_000;

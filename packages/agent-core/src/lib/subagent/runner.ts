@@ -419,6 +419,7 @@ export function createSubagentRunner(deps: {
             maxPromptTokens: carve,
           },
           contextBudget,
+          flags: parent.flags,
           ...(parent.workspaceRoot
             ? { workspaceRoot: parent.workspaceRoot }
             : {}),

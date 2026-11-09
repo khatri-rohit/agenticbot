@@ -5,6 +5,7 @@ import type {
 import type {
   ContextBudget,
   ContextReport,
+  HarnessFlags,
   LedgerEnvelope,
   MemoryFiles,
   ModeName,
@@ -16,6 +17,7 @@ import type {
 import {
   CHARS_PER_TOKEN,
   DEFAULT_CONTEXT_BUDGET,
+  DEFAULT_HARNESS_FLAGS,
   envelopeToChatMessage,
   formatThreadPlanForPrompt,
   imageAttachments,
@@ -34,6 +36,8 @@ import type { ToolRegistry } from '../tools/types';
 import { stubWebSourceCard } from '../tools/web/source';
 import { hostListedWebUrls } from '../tools/web/trust';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { outcomeCard, toolCallIndex, type ToolCallInfo } from './outcome-card';
+import { buildEvidenceLog, buildSituationCard } from './situation';
 
 export type MentionedThreadContext = {
   threadId: string;
@@ -66,6 +70,8 @@ export type AssembleContextInput = {
   skillNames?: string[];
   /** Prior run summary for resume; incomplete/cancelled inject a system note. */
   lastRun?: ThreadLastRun | null;
+  /** Harness switches for this run. Defaults to DEFAULT_HARNESS_FLAGS. */
+  flags?: HarnessFlags;
 };
 
 /** Prompt-only fill for ledger orphans (pre-I1 / crash). Does not rewrite disk. */
@@ -251,6 +257,7 @@ const PREFIX_LAYER_IDS = new Set([
   'mentions',
   'brief',
   'last_run',
+  'situation',
 ]);
 
 /**
@@ -293,7 +300,11 @@ function userSeqs(envelopes: LedgerEnvelope[]): number[] {
     .map((envelope) => envelope.seq);
 }
 
-function stubToolContent(envelope: LedgerEnvelope): string {
+function stubToolContent(
+  envelope: LedgerEnvelope,
+  info: ToolCallInfo | undefined,
+  outcomeCards: boolean,
+): string {
   if (envelope.record.role !== 'tool') return '';
   const card = stubWebSourceCard(
     envelope.record.content,
@@ -305,6 +316,15 @@ function stubToolContent(envelope: LedgerEnvelope): string {
     listed.length > 0
       ? `\n${listed.map((url) => `URL: ${url}`).join('\n')}`
       : '';
+  if (outcomeCards) {
+    return outcomeCard({
+      toolCallId: envelope.record.tool_call_id,
+      info,
+      content: envelope.record.content,
+      ...(envelope.contentBlob ? { blobSha: envelope.contentBlob } : {}),
+      tail: urlTail,
+    });
+  }
   if (envelope.contentBlob) {
     return `(stub) tool ${envelope.record.tool_call_id} full result in blob sha256:${envelope.contentBlob}${urlTail}`;
   }
@@ -374,8 +394,10 @@ export function stubLiveToolResults(
    * a sha). Omitted at assemble time, where every message is from the ledger.
    */
   liveFrom: number = messages.length,
+  flags: HarnessFlags = DEFAULT_HARNESS_FLAGS,
 ): number {
   const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
+  let callInfo: Map<string, ToolCallInfo> | null = null;
   const userIndexes: number[] = [];
   for (let i = 0; i < Math.min(liveFrom, messages.length); i++) {
     if (messages[i]?.role === 'user') userIndexes.push(i);
@@ -415,11 +437,20 @@ export function stubLiveToolResults(
     if (!old && !overCap) continue;
     if (old) {
       const card = stubWebSourceCard(content, message.tool_call_id);
+      let stub = card;
+      if (!stub && flags.outcomeCards) {
+        callInfo ??= toolCallIndex(messages);
+        stub = outcomeCard({
+          toolCallId: message.tool_call_id,
+          info: callInfo.get(message.tool_call_id),
+          content,
+        });
+      }
       messages[i] = {
         role: 'tool',
         tool_call_id: message.tool_call_id,
         content:
-          card ??
+          stub ??
           `(stub) tool ${message.tool_call_id} omitted (${content.length} chars)`,
       };
     } else {
@@ -436,14 +467,14 @@ export function stubLiveToolResults(
 
 function toParam(
   envelope: LedgerEnvelope,
-  stubTool: boolean,
+  stubContent: string | null,
   stubImages: boolean,
 ): ChatCompletionMessageParam | null {
-  if (stubTool && envelope.record.role === 'tool') {
+  if (stubContent !== null && envelope.record.role === 'tool') {
     return {
       role: 'tool',
       tool_call_id: envelope.record.tool_call_id,
-      content: stubToolContent(envelope),
+      content: stubContent,
     };
   }
   if (stubImages && envelope.record.role === 'user') {
@@ -475,6 +506,32 @@ function toParam(
   };
 }
 
+const HARNESS_CONTEXT_OPEN =
+  '[Context from the harness for this message. The user did not write it.]';
+const HARNESS_CONTEXT_CLOSE =
+  "[End of harness context. The user's message follows.]";
+
+/**
+ * Put per-send context at the top of the current user message. Assembly-time
+ * only: the ledger keeps the user's words as sent, so an edit, retry or a
+ * later turn never carries an old card. Null when the turn does not start
+ * with a user message (the caller keeps system-message placement).
+ */
+function withHarnessContext(
+  turn: ChatCompletionMessageParam[],
+  blocks: string[],
+): ChatCompletionMessageParam[] | null {
+  if (blocks.length === 0) return turn;
+  const first = turn[0];
+  if (!first || first.role !== 'user') return null;
+  const header = [HARNESS_CONTEXT_OPEN, ...blocks, HARNESS_CONTEXT_CLOSE].join('\n\n');
+  const content: ChatCompletionMessageParam['content'] =
+    typeof first.content === 'string'
+      ? `${header}\n\n${first.content}`
+      : [{ type: 'text', text: header }, ...first.content];
+  return [{ role: 'user', content } as ChatCompletionMessageParam, ...turn.slice(1)];
+}
+
 function layerTokens(
   messages: ChatCompletionMessageParam[],
   tools: ToolRegistry['definitions'] = [],
@@ -501,10 +558,12 @@ export function assembleContext(
   input: AssembleContextInput,
   budget: ContextBudget = DEFAULT_CONTEXT_BUDGET,
 ): AssembleContextResult {
+  const flags = input.flags ?? DEFAULT_HARNESS_FLAGS;
   const systemText = buildSystemPrompt(
     input.tools,
     input.mode,
     input.posture ?? 'agent',
+    { compactHome: flags.compactHomePrompt },
   );
   const systemMessage: ChatCompletionMessageParam = {
     role: 'system',
@@ -603,6 +662,15 @@ export function assembleContext(
 
   const lastUserSeq = users.at(-1);
   const maxToolChars = budget.toolResultMaxTokens * CHARS_PER_TOKEN;
+  const outcomeCards = flags.outcomeCards;
+  const situationText = flags.situationCard
+    ? [
+        buildSituationCard({ envelopes: input.envelopes, lastUserSeq }),
+        buildEvidenceLog(input.envelopes),
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    : '';
 
   let stubbedToolResults = 0;
   const tailMessages: ChatCompletionMessageParam[] = [];
@@ -610,10 +678,17 @@ export function assembleContext(
 
   // Old load_skill rows become skill cards (core rules), not bare stubs.
   const skillCallNames = new Map<string, string>();
+  // Name + args per call, for the outcome cards of old tool rows.
+  const callInfo = new Map<string, ToolCallInfo>();
   for (const envelope of live) {
     if (envelope.record.role !== 'assistant') continue;
     for (const call of envelope.record.tool_calls ?? []) {
-      if (call.type !== 'function' || call.function.name !== 'load_skill') continue;
+      if (call.type !== 'function') continue;
+      callInfo.set(call.id, {
+        name: call.function.name,
+        args: call.function.arguments,
+      });
+      if (call.function.name !== 'load_skill') continue;
       try {
         const args = JSON.parse(call.function.arguments) as { skill_name?: unknown };
         if (typeof args.skill_name === 'string') skillCallNames.set(call.id, args.skill_name);
@@ -647,7 +722,17 @@ export function assembleContext(
             tool_call_id: envelope.record.tool_call_id,
             content: skillCard(skillName),
           }
-        : toParam(envelope, stubTool, stubImages);
+        : toParam(
+            envelope,
+            stubTool && envelope.record.role === 'tool'
+              ? stubToolContent(
+                  envelope,
+                  callInfo.get(envelope.record.tool_call_id),
+                  outcomeCards,
+                )
+              : null,
+            stubImages,
+          );
     if (
       message?.role === 'tool' &&
       overCap &&
@@ -668,19 +753,51 @@ export function assembleContext(
   // Stable layers first, then history, then layers that change between sends
   // (skill picks, plan edits, mentions, last-run note). A plan edit then
   // invalidates only the tail of the prompt, not the whole history prefix.
-  const messages: ChatCompletionMessageParam[] = fillOrphanToolResults([
-    systemMessage,
-    ...(skillsMessage ? [skillsMessage] : []),
-    memoryMessage,
-    ...(rulesMessage ? [rulesMessage] : []),
-    ...(briefMessage ? [briefMessage] : []),
-    ...tailMessages,
-    ...(bodiesMessage ? [bodiesMessage] : []),
-    ...(planMessage ? [planMessage] : []),
-    ...(mentionsMessage ? [mentionsMessage] : []),
-    ...(lastRunMessage ? [lastRunMessage] : []),
-    ...turnMessages,
-  ]);
+  const perSendTexts = [
+    bodiesText,
+    planText,
+    mentionsMessage ? String(mentionsMessage.content) : '',
+    lastRunText ?? '',
+    situationText,
+  ].filter((text) => text.length > 0);
+  const tieredTurn = flags.promptTiers
+    ? withHarnessContext(turnMessages, perSendTexts)
+    : null;
+  const messages: ChatCompletionMessageParam[] = fillOrphanToolResults(
+    tieredTurn
+      ? [
+          // One leading system message: identity, tools, skills index,
+          // memory, rules, brief. Per-send context rides in the user turn.
+          {
+            role: 'system',
+            content: [
+              systemText,
+              skillsText,
+              memoryText,
+              rulesText,
+              briefMessage ? String(briefMessage.content) : '',
+            ]
+              .filter((text) => text.length > 0)
+              .join('\n\n'),
+          },
+          ...tailMessages,
+          ...tieredTurn,
+        ]
+      : [
+          systemMessage,
+          ...(skillsMessage ? [skillsMessage] : []),
+          memoryMessage,
+          ...(rulesMessage ? [rulesMessage] : []),
+          ...(briefMessage ? [briefMessage] : []),
+          ...tailMessages,
+          ...(bodiesMessage ? [bodiesMessage] : []),
+          ...(planMessage ? [planMessage] : []),
+          ...(mentionsMessage ? [mentionsMessage] : []),
+          ...(lastRunMessage ? [lastRunMessage] : []),
+          ...(situationText ? [{ role: 'system' as const, content: situationText }] : []),
+          ...turnMessages,
+        ],
+  );
 
   // Use the assembled messages, not raw ledger content: the prompt may hold
   // stubbed or capped versions of load_skill results, and conversationTokens
@@ -743,6 +860,11 @@ export function assembleContext(
       tokens: briefMessage
         ? charsToTokens(String(briefMessage.content).length) + 4
         : 0,
+    },
+    {
+      id: 'situation',
+      label: 'Situation and evidence',
+      tokens: situationText ? charsToTokens(situationText.length) + 4 : 0,
     },
     {
       id: 'last_run',

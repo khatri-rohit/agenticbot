@@ -40,8 +40,12 @@ export type ContextBudget = {
  */
 export type ContextWindowMode = 'default' | 'model';
 
-/** Provenance of ContextReport.budget.windowTokens (host sets after assemble). */
-export type ContextWindowSource = 'default' | 'model' | 'fallback';
+/**
+ * Provenance of ContextReport.budget.windowTokens (host sets after assemble).
+ * `served`: a local daemon runs the model with a smaller context than the
+ * chosen window, so the window was clamped to what is actually served.
+ */
+export type ContextWindowSource = 'default' | 'model' | 'fallback' | 'served';
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 
@@ -68,20 +72,35 @@ export function parseContextWindowMode(value: unknown): ContextWindowMode | unde
 
 /**
  * The window a run budgets against. `modelMax` is the provider-reported
- * context length (null when /api/show failed → 200k fallback).
+ * context length (null when /api/show failed → 200k fallback). `servedMax`
+ * is the context a local daemon actually loaded the model with: the
+ * OpenAI-compatible endpoint cannot ask for a size, and a prompt past the
+ * served size is cut from the front without an error, so it caps the window.
  */
 export function resolveContextWindow(input: {
   mode?: ContextWindowMode;
   modelMax: number | null;
+  servedMax?: number | null;
 }): { windowTokens: number; source: ContextWindowSource } {
-  if (!input.modelMax || input.modelMax <= 0) {
+  const chosen = chooseContextWindow(input.mode, input.modelMax);
+  const served = input.servedMax ?? 0;
+  return served > 0 && served < chosen.windowTokens
+    ? { windowTokens: served, source: 'served' }
+    : chosen;
+}
+
+function chooseContextWindow(
+  mode: ContextWindowMode | undefined,
+  modelMax: number | null,
+): { windowTokens: number; source: ContextWindowSource } {
+  if (!modelMax || modelMax <= 0) {
     return { windowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS, source: 'fallback' };
   }
-  if (input.mode === 'model') {
-    return { windowTokens: input.modelMax, source: 'model' };
+  if (mode === 'model') {
+    return { windowTokens: modelMax, source: 'model' };
   }
   return {
-    windowTokens: Math.min(DEFAULT_CONTEXT_WINDOW_TOKENS, input.modelMax),
+    windowTokens: Math.min(DEFAULT_CONTEXT_WINDOW_TOKENS, modelMax),
     source: 'default',
   };
 }

@@ -68,8 +68,13 @@ async function replay(
   const trace: TraceEvent[] = [];
   const events: AgentEventWithoutSeq[] = [];
   const ledger: LedgerRecord[] = [];
+  // Exactly what each model call saw, so a change to prompt order or nudge text fails too.
+  const prompts: unknown[] = [];
   let calls = 0;
-  const modelCall: ModelCallFn = async () => script(++calls);
+  const modelCall: ModelCallFn = async (_model, messages) => {
+    prompts.push(structuredClone(messages));
+    return script(++calls);
+  };
   let result: unknown;
   try {
     result = await runLoop(modelCall, [{ role: 'user', content: 'do the task' }], createToolRegistry(tools), {
@@ -87,7 +92,7 @@ async function replay(
   } catch (error) {
     result = { threw: error instanceof Error ? error.message : String(error) };
   }
-  return normalise({ result, trace, events, ledger });
+  return normalise({ result, trace, events, ledger, prompts });
 }
 
 describe('loop replay', () => {

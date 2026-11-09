@@ -6,6 +6,7 @@ import type {
   ChoiceResult,
   ContextBudget,
   ContextReport,
+  HarnessFlags,
   LedgerAppendMeta,
   LedgerRecord,
   RunPosture,
@@ -109,6 +110,8 @@ export type RunLoopConfig = {
   hasOpenPlanWork?: () => boolean | Promise<boolean>;
   /** Budget for mid-turn tool-result stubbing. Defaults to DEFAULT_CONTEXT_BUDGET. */
   contextBudget?: ContextBudget;
+  /** Harness switches resolved by the host at run start. Defaults to DEFAULT_HARNESS_FLAGS. */
+  flags?: HarnessFlags;
   /**
    * Sub-agent runner. The loop binds it to this run (signal, budget,
    * capabilities) when the registry has `delegate`.
@@ -152,6 +155,8 @@ export type SubagentParent = {
   /** Parent registry names; a child's tools are a subset. */
   toolNames: string[];
   contextBudget: ContextBudget;
+  /** Children run with the parent's switches. */
+  flags: HarnessFlags;
   /** Parent's unspent prompt-token budget, when capped. */
   remainingPromptTokens?: number;
   /** Parent conversation for an advisor fork. */
