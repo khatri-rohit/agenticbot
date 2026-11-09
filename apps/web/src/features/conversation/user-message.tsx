@@ -244,7 +244,7 @@ export function UserMessage({
             {sentAt ? (
               <time
                 dateTime={message.createdAt}
-                className="type-caption text-muted-foreground/70 tabular-nums"
+                className="type-caption text-subtle-foreground tabular-nums"
               >
                 {sentAt}
               </time>

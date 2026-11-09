@@ -1,101 +1,88 @@
 export const THEME_STORAGE_KEY = 'desk-ui-theme';
 
-export type ThemeId = 'studio' | 'midnight' | 'ember' | 'paper';
+/** What the user picks in settings. */
+export type ThemePreference = 'light' | 'dark' | 'system';
 
-export type ThemeScheme = 'dark' | 'light';
+/** What actually renders — resolved from the preference. */
+export type ThemeScheme = 'light' | 'dark';
 
-export type ThemePreset = {
-  id: ThemeId;
-  label: string;
-  description: string;
-  scheme: ThemeScheme;
-  /** Preview chips for the theme picker */
-  swatch: { bg: string; accent: string };
-};
+export const DEFAULT_THEME_PREFERENCE: ThemePreference = 'system';
 
-/** Legacy ids from earlier reading-theme set → current presets. */
-const LEGACY_THEME_MAP: Record<string, ThemeId> = {
-  ink: 'studio',
-  signal: 'studio',
-  glacier: 'midnight',
-  moss: 'midnight',
-  lamp: 'ember',
-};
-
-export const THEME_PRESETS: ThemePreset[] = [
-  {
-    id: 'studio',
-    label: 'Studio',
-    description: 'Warm charcoal — high contrast',
-    scheme: 'dark',
-    swatch: { bg: '#1f1e1d', accent: '#d97757' },
-  },
-  {
-    id: 'midnight',
-    label: 'Midnight',
-    description: 'Cool blue-slate dark',
-    scheme: 'dark',
-    swatch: { bg: 'oklch(0.14 0.018 250)', accent: 'oklch(0.68 0.13 250)' },
-  },
-  {
-    id: 'ember',
-    label: 'Ember',
-    description: 'Warm charcoal for evening work',
-    scheme: 'dark',
-    swatch: { bg: 'oklch(0.14 0.018 55)', accent: 'oklch(0.74 0.12 55)' },
-  },
-  {
-    id: 'paper',
-    label: 'Paper',
-    description: 'Clean light workbench',
-    scheme: 'light',
-    swatch: { bg: 'oklch(0.985 0.004 250)', accent: 'oklch(0.45 0.12 230)' },
-  },
+export const THEME_PREFERENCES: ThemePreference[] = [
+  'light',
+  'dark',
+  'system',
 ];
 
-export const DEFAULT_THEME_ID: ThemeId = 'studio';
-
-export const THEME_IDS: ThemeId[] = THEME_PRESETS.map((p) => p.id);
-
-export function isThemeId(value: string): value is ThemeId {
-  return THEME_PRESETS.some((p) => p.id === value);
+export function isThemePreference(value: string): value is ThemePreference {
+  return THEME_PREFERENCES.some((preference) => preference === value);
 }
 
-export function resolveThemeId(value: string | null | undefined): ThemeId {
-  if (!value) return DEFAULT_THEME_ID;
-  if (isThemeId(value)) return value;
-  return LEGACY_THEME_MAP[value] ?? DEFAULT_THEME_ID;
+/**
+ * Legacy ids from the preset era (and earlier reading themes) → mode.
+ * Dark presets (studio/midnight/ember) keep dark; paper was the light one.
+ */
+const LEGACY_THEME_MAP: Record<string, ThemeScheme> = {
+  studio: 'dark',
+  midnight: 'dark',
+  ember: 'dark',
+  paper: 'light',
+  ink: 'dark',
+  signal: 'dark',
+  glacier: 'dark',
+  moss: 'dark',
+  lamp: 'dark',
+};
+
+export function resolveStoredPreference(
+  raw: string | null | undefined,
+): ThemePreference {
+  if (!raw) return DEFAULT_THEME_PREFERENCE;
+  if (isThemePreference(raw)) return raw;
+  const scheme = LEGACY_THEME_MAP[raw];
+  return scheme ?? DEFAULT_THEME_PREFERENCE;
 }
 
-export function themeScheme(themeId: ThemeId): ThemeScheme {
-  return THEME_PRESETS.find((p) => p.id === themeId)?.scheme ?? 'dark';
+export function schemeForPreference(
+  preference: ThemePreference,
+  systemPrefersDark: boolean,
+): ThemeScheme {
+  if (preference === 'system') {
+    return systemPrefersDark ? 'dark' : 'light';
+  }
+  return preference;
 }
 
-export function applyThemeToDocument(themeId: ThemeId): void {
+export function applyThemeToDocument(scheme: ThemeScheme): void {
   const root = document.documentElement;
-  root.setAttribute('data-theme', themeId);
-  const scheme = themeScheme(themeId);
   root.classList.toggle('dark', scheme === 'dark');
   root.classList.toggle('light', scheme === 'light');
   root.style.colorScheme = scheme;
 }
 
-export function readStoredThemeId(): ThemeId {
-  if (typeof window === 'undefined') return DEFAULT_THEME_ID;
+export function readStoredPreference(): ThemePreference {
+  if (typeof window === 'undefined') return DEFAULT_THEME_PREFERENCE;
   try {
     const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    const resolved = resolveThemeId(raw);
-    if (raw && raw !== resolved) persistThemeId(resolved);
+    const resolved = resolveStoredPreference(raw);
+    if (raw && raw !== resolved) persistThemePreference(resolved);
     return resolved;
   } catch {
-    return DEFAULT_THEME_ID;
+    return DEFAULT_THEME_PREFERENCE;
   }
 }
 
-export function persistThemeId(themeId: ThemeId): void {
+export function persistThemePreference(preference: ThemePreference): void {
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, themeId);
+    localStorage.setItem(THEME_STORAGE_KEY, preference);
   } catch {
     /* storage blocked */
   }
 }
+
+/**
+ * FOUC guard, run before paint. Must stay an inline string — an imported
+ * module would execute after first paint. Built from the same constants the
+ * provider uses, so the two cannot drift.
+ */
+export const THEME_INIT_SCRIPT = `(function(){try{var k=${JSON.stringify(THEME_STORAGE_KEY)};var d=${JSON.stringify(DEFAULT_THEME_PREFERENCE)};var legacy=${JSON.stringify(LEGACY_THEME_MAP)};var prefs=${JSON.stringify(THEME_PREFERENCES)};var t=localStorage.getItem(k)||d;if(legacy[t])t=legacy[t];if(prefs.indexOf(t)<0)t=d;var sys=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;var dark=t==='dark'||(t==='system'&&sys);document.documentElement.classList.toggle('dark',dark);document.documentElement.classList.toggle('light',!dark);document.documentElement.style.colorScheme=dark?'dark':'light';}catch(e){document.documentElement.classList.add('dark');document.documentElement.style.colorScheme='dark';}})();`;

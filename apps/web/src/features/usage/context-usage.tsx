@@ -115,7 +115,7 @@ export function ContextUsage({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="inline-flex h-7 items-center justify-center gap-1 rounded-md px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           <svg
             width={size}
@@ -151,6 +151,10 @@ export function ContextUsage({
               strokeLinecap="round"
             />
           </svg>
+          {/* A bare ring reads as a spinner; the number says what it is. */}
+          <span className="type-caption tabular-nums" aria-hidden>
+            {percent}%
+          </span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" side="top" className="w-64 p-2.5">
@@ -206,7 +210,7 @@ export function ContextUsage({
                 {kids.length > 1
                   ? kids.map((layer) => (
                       <div key={layer.id} className="contents">
-                        <dt className="pl-2 text-muted-foreground/80">
+                        <dt className="pl-2 text-muted-foreground">
                           {layer.label}
                         </dt>
                         <dd className="text-right tabular-nums text-muted-foreground">

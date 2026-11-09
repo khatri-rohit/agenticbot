@@ -43,9 +43,9 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
 
   const statusIcon = (() => {
     if (running) return <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />;
-    if (activity.status === 'completed') return <Check className="size-3.5 shrink-0 text-muted-foreground/70" />;
-    if (activity.status === 'cancelled') return <XCircle className="size-3.5 shrink-0 text-muted-foreground/70" />;
-    return <AlertCircle className="size-3.5 shrink-0 text-muted-foreground/70" />;
+    if (activity.status === 'completed') return <Check className="size-3.5 shrink-0 text-subtle-foreground" />;
+    if (activity.status === 'cancelled') return <XCircle className="size-3.5 shrink-0 text-subtle-foreground" />;
+    return <AlertCircle className="size-3.5 shrink-0 text-subtle-foreground" />;
   })();
 
   const statusLabel = (() => {

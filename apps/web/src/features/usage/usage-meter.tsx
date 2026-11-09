@@ -77,6 +77,10 @@ export function UsageMeter({
 
   const ratio = usedRatio(balance);
   if (ratio == null) return null;
+  // Below half used, an almost-empty ring next to the mic read as a stalled
+  // spinner. Account usage is still in Settings; the composer shows it once
+  // it starts to matter.
+  if (ratio < 0.5) return null;
 
   const clamped = Math.min(1, Math.max(0, ratio));
   const offset = circumference * (1 - clamped);
@@ -94,6 +98,7 @@ export function UsageMeter({
           type="button"
           className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
           aria-label={ariaLabel}
+          title={ariaLabel}
         >
           <svg
             width={size}

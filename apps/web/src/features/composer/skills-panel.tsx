@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Search, Trash2 } from 'lucide-react';
 import {
   deleteUserSkill,
@@ -30,9 +25,10 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { SkillCreateForm } from './skill-create-form';
 import { cn } from '@/lib/utils';
 
-type Tab = 'catalog' | 'import';
+type Tab = 'catalog' | 'import' | 'create';
 
 function matchesQuery(
   skill: { name: string; description: string },
@@ -149,7 +145,7 @@ function ImportRow({
         <p className="type-ui mt-0.5 line-clamp-2 leading-5 text-muted-foreground">
           {skill.description}
         </p>
-        <p className="mt-1 truncate font-mono text-xs text-muted-foreground/80">
+        <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
           {skill.pathInRepo}
           {skill.folderName !== skill.pathInRepo
             ? ` → ${skill.folderName}`
@@ -338,17 +334,21 @@ export function SkillsPanel({
       }}
     >
       <DialogContent
-        className="grid max-h-[min(90dvh,40rem)] w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-xl"
+        className={cn(
+          'grid max-h-[min(90dvh,44rem)] w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0',
+          // The editor needs room for code; catalog and import stay compact.
+          tab === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-xl',
+        )}
         showCloseButton
       >
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/60 px-4 py-3.5 pr-12">
           <DialogTitle>Skills</DialogTitle>
           <DialogDescription>
-            Catalog of procedure packs. Import from GitHub into your home skills
-            folder. Type / in the composer to attach a pack to this send. The
-            agent always sees this catalog and loads a body with{' '}
-            <span className="font-mono text-xs">load_skill</span> when intent
-            fits.
+            Catalog of procedure packs. Import from GitHub or write your own
+            into your home skills folder. Type / in the composer to attach a
+            pack to this send. The agent always sees this catalog and loads a
+            body with <span className="font-mono text-xs">load_skill</span> when
+            intent fits.
           </DialogDescription>
         </DialogHeader>
 
@@ -394,6 +394,22 @@ export function SkillsPanel({
               )}
             >
               Import
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="skills-tab-create"
+              aria-controls="skills-panel-create"
+              aria-selected={tab === 'create'}
+              onClick={() => setTab('create')}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1.5 font-medium transition-colors',
+                tab === 'create'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Create your own
             </button>
           </div>
 
@@ -463,18 +479,18 @@ export function SkillsPanel({
                               </h3>
                               <ul className="space-y-0.5">
                                 {filteredGlobal.map((skill) => (
-                                    <CatalogRow
-                                      key={`global:${skill.folder}`}
-                                      skill={skill}
-                                      overrides={false}
-                                      expanded={expanded.has(
-                                        `global:${skill.folder}`,
-                                      )}
-                                      onToggleExpand={() =>
-                                        toggleExpand(`global:${skill.folder}`)
-                                      }
-                                    />
-                                  ))}
+                                  <CatalogRow
+                                    key={`global:${skill.folder}`}
+                                    skill={skill}
+                                    overrides={false}
+                                    expanded={expanded.has(
+                                      `global:${skill.folder}`,
+                                    )}
+                                    onToggleExpand={() =>
+                                      toggleExpand(`global:${skill.folder}`)
+                                    }
+                                  />
+                                ))}
                               </ul>
                             </section>
                           ) : null}
@@ -579,6 +595,21 @@ export function SkillsPanel({
                   </p>
                 </>
               )}
+            </div>
+          ) : tab === 'create' ? (
+            <div
+              id="skills-panel-create"
+              role="tabpanel"
+              aria-labelledby="skills-tab-create"
+              className="flex min-h-[min(60vh,28rem)] flex-1 flex-col"
+            >
+              <SkillCreateForm
+                onCreated={(next) => {
+                  setCatalogs(next);
+                  setTab('catalog');
+                }}
+                onCancel={() => setTab('catalog')}
+              />
             </div>
           ) : (
             <div

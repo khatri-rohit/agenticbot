@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
 import { mermaid } from '@streamdown/mermaid';
+import { useTheme } from '@/components/shell/theme-provider';
+import type { ThemeScheme } from '@/components/shell/theme-presets';
 import {
   extractFileCitations,
   isReportBanner,
@@ -33,22 +35,9 @@ const controls = {
   },
 } as const;
 
-function mermaidTheme(): 'dark' | 'default' {
-  if (typeof document === 'undefined') return 'dark';
-  return document.documentElement.classList.contains('light')
-    ? 'default'
-    : 'dark';
+function mermaidTheme(scheme: ThemeScheme): 'dark' | 'default' {
+  return scheme === 'light' ? 'default' : 'dark';
 }
-
-/** Faster word cadence so a fast SSE buffer does not feel like a carousel. */
-const STREAM_ANIMATION = {
-  animation: 'fadeIn' as const,
-  duration: 100,
-  easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-  sep: 'word' as const,
-  stagger: 12,
-  maxBacklogMs: 220,
-};
 
 /**
  * Streamdown enables link-safety by default (full-screen confirm modal).
@@ -131,6 +120,7 @@ export function AgentMarkdown({
   streaming?: boolean;
 }) {
   const reducedMotion = usePrefersReducedMotion();
+  const { scheme } = useTheme();
   const citations = useMemo(() => extractFileCitations(content), [content]);
   const markdown = useMemo(
     () => normalizeAssistantMarkdown(rewriteCitationFences(content)),
@@ -153,6 +143,11 @@ export function AgentMarkdown({
 
   if (!markdown) return null;
 
+  // Mermaid reads its theme once per render of a diagram; remount on a
+  // theme switch so diagrams follow. Only when a diagram is present, since a
+  // remount re-runs Shiki on every code block.
+  const themeKey = markdown.includes('```mermaid') ? scheme : undefined;
+
   const shared = {
     shikiTheme: SHIKI_THEMES,
     lineNumbers: true,
@@ -161,16 +156,19 @@ export function AgentMarkdown({
     className: 'agent-markdown',
     linkSafety,
     harden: hardenImages,
-    mermaid: { config: { theme: mermaidTheme() } },
+    mermaid: { config: { theme: mermaidTheme(scheme) } },
   };
 
   if (streaming) {
     return (
       <div className="min-w-0" ref={containerRef}>
         <Streamdown
+          key={themeKey}
           {...shared}
           mode="streaming"
-          animated={reducedMotion ? false : STREAM_ANIMATION}
+          // Text appears as it arrives. A per-word fade made replies ripple
+          // in; the caret alone says it is still streaming.
+          animated={false}
           caret={reducedMotion ? undefined : 'circle'}
           parseIncompleteMarkdown
           plugins={fullPlugins}
@@ -185,6 +183,7 @@ export function AgentMarkdown({
   return (
     <div className="min-w-0" ref={containerRef}>
       <Streamdown
+        key={themeKey}
         {...shared}
         mode="static"
         plugins={fullPlugins}

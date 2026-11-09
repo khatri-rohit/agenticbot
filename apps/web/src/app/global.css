@@ -3,6 +3,9 @@
 @import 'streamdown/styles.css';
 @import 'tw-animate-css';
 
+/* `dark:` follows the chosen theme (html.dark), not the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Streamdown ships Tailwind classes inside minified JS — scan full dist dirs + safelist layout utils. */
 @source "../../../node_modules/streamdown/dist";
 @source "../../../node_modules/@streamdown/code/dist";
@@ -18,6 +21,7 @@
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -42,14 +46,9 @@
   --font-mono: var(--font-code), ui-monospace, monospace;
 }
 
-/* Scrollbar geometry (thumb colors come from each theme in themes.css). */
+/* Scrollbar geometry only — track/thumb colors come from themes.css. */
 :root {
   --scrollbar-size: 8px;
-  /* Fallback until themes.css loads; each theme overrides track + thumb */
-  --scrollbar-track: oklch(0.16 0.01 264 / 0.4);
-  --scrollbar-thumb: oklch(0.48 0.02 264 / 0.95);
-  --scrollbar-thumb-hover: oklch(0.56 0.024 264);
-  --scrollbar-thumb-active: oklch(0.64 0.028 264);
 
   /* Typography — next/font injects --font-ui / --font-code on <html> */
   --font-ui: ui-sans-serif, system-ui, sans-serif;
@@ -62,17 +61,19 @@
   --text-hero-sub: clamp(0.9375rem, 1.2vw, 1.0625rem);
   --text-hero-sub-leading: 1.55;
 
-  --text-md-h1: 1.25rem;
-  --text-md-h1-leading: 1.3;
-  --text-md-h2: 1.125rem;
-  --text-md-h2-leading: 1.35;
-  --text-md-h3: 1rem;
-  --text-md-h3-leading: 1.4;
+  /* Headings scale off the reading size so they stay above body text at
+     every breakpoint (fixed rem sizes left H3 smaller than body on xl). */
+  --text-md-h1: calc(var(--text-body-reading) * 1.4);
+  --text-md-h1-leading: 1.28;
+  --text-md-h2: calc(var(--text-body-reading) * 1.2);
+  --text-md-h2-leading: 1.32;
+  --text-md-h3: calc(var(--text-body-reading) * 1.06);
+  --text-md-h3-leading: 1.38;
 
   --text-body: 0.9375rem;
-  --text-body-leading: 1.65;
+  --text-body-leading: 1.6;
   --text-body-reading: 0.9375rem;
-  --text-body-reading-leading: 1.65;
+  --text-body-reading-leading: 1.62;
   --text-user: 0.875rem;
   --text-user-leading: 1.55;
   --text-composer: 0.9375rem;
@@ -86,10 +87,10 @@
 /* Extra-large screens: scale up the reading measure so text isn't cramped. */
 @media (min-width: 1536px) {
   :root {
-    --text-body: 1.0625rem;
+    --text-body: 1rem;
     --text-body-leading: 1.6;
-    --text-body-reading: 1.0625rem;
-    --text-body-reading-leading: 1.6;
+    --text-body-reading: 1rem;
+    --text-body-reading-leading: 1.62;
     --text-user: 1rem;
     --text-user-leading: 1.55;
   }
@@ -167,8 +168,7 @@ body {
   width: 100%;
   min-width: 0;
   overflow-x: hidden;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 /* Reply, not a paper: real heading ladder + full-contrast reading body. */
@@ -176,8 +176,7 @@ body {
   max-width: 100%;
   min-width: 0;
   overflow-x: hidden;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
   font-size: var(--text-body-reading);
   line-height: var(--text-body-reading-leading);
   color: var(--foreground);
@@ -211,10 +210,10 @@ body {
 .agent-markdown [data-streamdown='heading-5'],
 .agent-markdown [data-streamdown='heading-6'] {
   color: var(--foreground);
-  letter-spacing: -0.02em;
-  margin: 1.55em 0 0.45em;
+  letter-spacing: -0.011em;
+  margin: 1.5em 0 0.5em;
   line-height: 1.3;
-  text-wrap: pretty;
+  text-wrap: balance;
 }
 
 .agent-markdown h1,
@@ -246,12 +245,12 @@ body {
 .agent-markdown [data-streamdown='heading-6'] {
   font-size: var(--text-body-reading);
   font-weight: 600;
-  letter-spacing: -0.012em;
+  letter-spacing: -0.005em;
 }
 
 .agent-markdown [data-streamdown='paragraph'],
 .agent-markdown p {
-  margin: 0 0 0.85em;
+  margin: 0 0 0.9em;
 }
 
 .agent-markdown
@@ -273,7 +272,32 @@ body {
 .agent-markdown ul,
 .agent-markdown ol {
   margin: 0 0 1em;
-  padding-left: 1.25rem;
+  padding-left: 1.35rem;
+}
+
+.agent-markdown ul {
+  list-style: disc;
+}
+
+.agent-markdown ol {
+  list-style: decimal;
+}
+
+.agent-markdown :is(ul, ol) ul {
+  list-style: circle;
+  margin: 0.25em 0 0.35em;
+}
+
+.agent-markdown :is(ul, ol) ol {
+  margin: 0.25em 0 0.35em;
+}
+
+.agent-markdown li::marker {
+  color: var(--subtle-foreground);
+}
+
+.agent-markdown ol > li::marker {
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-markdown [data-streamdown='list-item'],
@@ -299,6 +323,16 @@ body {
   width: 100%;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+}
+
+.agent-markdown :is(th, td) {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.agent-markdown thead th {
+  white-space: nowrap;
 }
 
 .agent-markdown thead th,
@@ -455,8 +489,11 @@ body {
   background: var(--md-block-bg, var(--card));
 }
 
-.agent-markdown [data-streamdown='table-wrapper'] {
+.agent-markdown [data-streamdown='table-wrapper'],
+.agent-markdown [data-streamdown='table-wrapper'] > div {
+  max-height: none;
   overflow-x: auto;
+  overflow-y: visible;
 }
 
 /* Fenced code: calmer chrome, copy only (download hidden via controls). */

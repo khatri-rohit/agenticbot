@@ -157,12 +157,15 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
         action: action === 'set_goal' ? 'Goal' : 'Plan',
       };
     }
-    case 'todo':
+    case 'todo': {
+      const todos = todoItems(args);
+      const done = todos.filter((t) => t.status === 'completed').length;
       return {
         kind: 'other',
-        title: 'checklist',
+        title: todos.length ? `${done} of ${todos.length} done` : 'checklist',
         action: 'Todos',
       };
+    }
     case 'offer_choice':
       return {
         kind: 'other',
@@ -225,7 +228,7 @@ function ChangesSummary({ files, plus, minus, pending }: ChangesSummaryProps) {
         </span>
       ) : (
         <>
-          <span className="type-caption font-medium text-muted-foreground/80">
+          <span className="type-caption font-medium text-muted-foreground">
             Changed {files} {files === 1 ? 'file' : 'files'}
           </span>
           <span className="type-caption flex-1 font-mono tabular-nums">
@@ -266,9 +269,9 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
     return <X className="size-3.5 shrink-0 text-destructive" />;
   }
   if (status === 'skipped') {
-    return <Ban className="size-3.5 shrink-0 text-muted-foreground/70" />;
+    return <Ban className="size-3.5 shrink-0 text-subtle-foreground" />;
   }
-  return <Check className="size-3.5 shrink-0 text-muted-foreground/70" />;
+  return <Check className="size-3.5 shrink-0 text-subtle-foreground" />;
 }
 
 /**
@@ -299,7 +302,9 @@ export function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
               status: header.status,
               iterations: header.iterations,
               toolCalls: header.toolCalls,
-              summary: stripUntrustedMarkers(subagentDigestBody(row.result)) || undefined,
+              summary:
+                stripUntrustedMarkers(subagentDigestBody(row.result)) ||
+                undefined,
               seq: 0,
             };
             return (
@@ -333,7 +338,7 @@ function ToolCard({ row }: { row: ToolCallRow }) {
 
   return (
     <article
-      className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/50 bg-muted/30"
+      className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card"
       aria-label={`${summary.action}: ${summary.title}`}
     >
       <button
@@ -347,10 +352,16 @@ function ToolCard({ row }: { row: ToolCallRow }) {
           action={summary.action}
           className="text-muted-foreground"
         />
-        <span className="type-caption shrink-0 font-medium text-muted-foreground/80">
+        <span className="type-caption shrink-0 font-medium text-muted-foreground">
           {summary.action}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+        <span
+          className={cn(
+            'min-w-0 flex-1 font-mono text-xs text-foreground',
+            open ? 'whitespace-pre-wrap break-all' : 'truncate',
+          )}
+          title={open ? undefined : summary.title}
+        >
           {summary.title}
         </span>
         {summary.minus !== undefined ? (
@@ -364,7 +375,7 @@ function ToolCard({ row }: { row: ToolCallRow }) {
           </span>
         ) : null}
         {row.durationMs !== undefined && row.status !== 'running' ? (
-          <span className="type-caption shrink-0 tabular-nums text-muted-foreground/70">
+          <span className="type-caption shrink-0 tabular-nums text-subtle-foreground">
             {row.durationMs}ms
           </span>
         ) : null}
@@ -378,14 +389,26 @@ function ToolCard({ row }: { row: ToolCallRow }) {
       </button>
 
       {open ? (
-        <div className="min-w-0 max-h-[60vh] overflow-y-auto overflow-x-auto border-t border-border/40 bg-background/40">
+        <div className="min-w-0 max-h-[60vh] overflow-y-auto overflow-x-auto border-t border-border/40 bg-card">
           <ToolPreview row={row} summary={summary} />
         </div>
       ) : (
-        <div className="relative min-w-0 max-h-24 overflow-hidden border-t border-border/40 bg-background/40">
+        <div
+          className="relative min-w-0 max-h-24 cursor-pointer overflow-hidden border-t border-border/40 bg-card"
+          style={
+            {
+              '--teaser-surface':
+                summary.kind === 'terminal'
+                  ? 'var(--terminal-bg)'
+                  : 'var(--card)',
+            } as React.CSSProperties
+          }
+          onClick={toggle}
+        >
           <ToolPreview row={teaserRow(row)} summary={summary} />
-          {/* Fade-to-edge so the clipped teaser reads as "more below — expand". */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-background/90 to-transparent" />
+          {/* Fade in the card's own colour: a mismatched fade left a hard
+              cut through the last line instead of "more below". */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-[var(--teaser-surface)] to-transparent" />
         </div>
       )}
 
@@ -426,6 +449,8 @@ function ToolPreview({
       return <SearchPreview row={row} />;
     case 'web_fetch':
       return <WebFetchPreview row={row} />;
+    case 'todo':
+      return <TodoPreview row={row} />;
     default:
       return <GenericPreview row={row} />;
   }
@@ -435,7 +460,13 @@ function ToolPreview({
 
 const PREVIEW_SCROLL = 'overflow-x-auto';
 
-function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+function CopyButton({
+  text,
+  label = 'Copy',
+}: {
+  text: string;
+  label?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     if (!text) return;
@@ -477,9 +508,7 @@ function PreviewHeader({
 }) {
   return (
     <div className="flex items-center justify-between gap-2 px-3 pt-2">
-      <p className="type-caption font-medium text-muted-foreground/70">
-        {label}
-      </p>
+      <p className="type-caption font-medium text-subtle-foreground">{label}</p>
       {onCopy}
     </div>
   );
@@ -490,7 +519,7 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
   const content = row.result ?? '';
   if (!content) {
     return (
-      <p className="type-caption px-3 py-2 italic text-muted-foreground/70">
+      <p className="type-caption px-3 py-2 italic text-subtle-foreground">
         {row.status === 'running' ? 'Reading…' : 'No output captured.'}
       </p>
     );
@@ -501,7 +530,9 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
   const firstLine = header ? Number(header[1]) : 1;
   let body = header ? content.slice(header[0].length) : content;
   // "(read_file truncated … continue with offset=…)" is a note, not a file line.
-  const note = body.match(/\n\n(\((?:read_file truncated|continue with)[^\n]*\))$/);
+  const note = body.match(
+    /\n\n(\((?:read_file truncated|continue with)[^\n]*\))$/,
+  );
   if (note) body = body.slice(0, note.index);
   const lines = body.split('\n');
   const label = header
@@ -509,10 +540,7 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
     : `File · ${lines.length} lines`;
   return (
     <div className="min-w-0">
-      <PreviewHeader
-        label={label}
-        onCopy={<CopyButton text={content} />}
-      />
+      <PreviewHeader label={label} onCopy={<CopyButton text={content} />} />
       <pre
         className={cn(
           PREVIEW_SCROLL,
@@ -529,7 +557,7 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
         ))}
       </pre>
       {note ? (
-        <p className="type-caption px-3 pb-2 italic text-muted-foreground/70">
+        <p className="type-caption px-3 pb-2 italic text-subtle-foreground">
           {note[1]}
         </p>
       ) : null}
@@ -554,7 +582,7 @@ function EditFilePreview({
 
   if (row.status === 'running' && !oldText && !newText) {
     return (
-      <p className="type-caption px-3 py-2 italic text-muted-foreground/70">
+      <p className="type-caption px-3 py-2 italic text-subtle-foreground">
         Editing {path}…
       </p>
     );
@@ -579,7 +607,9 @@ function EditFilePreview({
           >
             {oldLines.map((line, i) => (
               <span key={i} className="block">
-                <span className="mr-2 select-none text-[var(--diff-removed-fg)]/70">−</span>
+                <span className="mr-2 select-none text-[var(--diff-removed-fg)]/70">
+                  −
+                </span>
                 {line}
               </span>
             ))}
@@ -600,7 +630,9 @@ function EditFilePreview({
           >
             {newLines.map((line, i) => (
               <span key={i} className="block">
-                <span className="mr-2 select-none text-[var(--diff-added-fg)]/70">+</span>
+                <span className="mr-2 select-none text-[var(--diff-added-fg)]/70">
+                  +
+                </span>
                 {line}
               </span>
             ))}
@@ -608,7 +640,7 @@ function EditFilePreview({
         </div>
       ) : null}
       {oldLines.length === 0 && newLines.length === 0 ? (
-        <p className="type-caption italic text-muted-foreground/70">
+        <p className="type-caption italic text-subtle-foreground">
           {row.result || 'No diff available.'}
         </p>
       ) : null}
@@ -616,43 +648,34 @@ function EditFilePreview({
   );
 }
 
-/** run_terminal: dark block with `$ command` then output. While running,
- *  shows the command and a "Running…" line; output fills on completion. */
+/** run_terminal: the output as one flat terminal well. The command lives in
+ *  the card header (it wraps there when the card is open), so it is never
+ *  repeated here. */
 function TerminalPreview({ row }: { row: ToolCallRow }) {
-  const args = parseArgs(row.args);
-  const command = asString(args.command) || (row.result?.split('\n')[0] ?? '');
-  const output =
-    row.result && row.status !== 'running'
-      ? row.result
-      : row.status === 'running'
-        ? ''
-        : row.result ?? '';
+  const output = row.status === 'running' ? '' : (row.result ?? '');
 
   return (
-    <div className="min-w-0 px-3 py-2">
-      <PreviewHeader
-        label="Terminal"
-        onCopy={output ? <CopyButton text={output} /> : undefined}
-      />
+    <div className="relative min-w-0 bg-[var(--terminal-bg)]">
+      {output ? (
+        <div className="absolute top-1 right-1.5 z-10">
+          <CopyButton text={output} />
+        </div>
+      ) : null}
       <pre
         className={cn(
           PREVIEW_SCROLL,
-          'm-0 min-w-0 whitespace-pre-wrap break-words rounded-lg bg-[var(--terminal-bg)] px-2.5 py-2 font-mono type-caption leading-relaxed text-[var(--terminal-fg)] ring-1 ring-[var(--terminal-ring)]',
+          'm-0 min-w-0 whitespace-pre-wrap break-words px-3 py-2 pr-16 font-mono type-caption leading-relaxed text-[var(--terminal-fg)]',
         )}
       >
-        <span className="block text-[var(--terminal-prompt)]">
-          <span className="mr-1 select-none text-[var(--terminal-muted)]">$</span>
-          {command}
-        </span>
         {row.status === 'running' ? (
-          <span className="mt-1 flex items-center gap-1.5 text-[var(--terminal-muted)]">
+          <span className="flex items-center gap-1.5 text-[var(--terminal-muted)]">
             <Loader2 className="size-3 animate-spin" />
             Running…
           </span>
         ) : output ? (
-          <span className="mt-1 block text-[var(--terminal-fg)]/85">{output}</span>
+          output
         ) : (
-          <span className="mt-1 block text-[var(--terminal-muted)]">No output.</span>
+          <span className="text-[var(--terminal-muted)]">No output.</span>
         )}
       </pre>
     </div>
@@ -683,9 +706,9 @@ function SearchPreview({ row }: { row: ToolCallRow }) {
           {result}
         </pre>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/70">Searching…</p>
+        <p className="type-caption italic text-subtle-foreground">Searching…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/70">
+        <p className="type-caption italic text-subtle-foreground">
           No results.
         </p>
       )}
@@ -715,9 +738,9 @@ function WebFetchPreview({ row }: { row: ToolCallRow }) {
           {content}
         </pre>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/70">Fetching…</p>
+        <p className="type-caption italic text-subtle-foreground">Fetching…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/70">
+        <p className="type-caption italic text-subtle-foreground">
           No content.
         </p>
       )}
@@ -787,9 +810,7 @@ function shortenCell(text: string): string {
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-  );
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function JsonTable({ table }: { table: JsonTable }) {
@@ -801,7 +822,7 @@ function JsonTable({ table }: { table: JsonTable }) {
             {table.columns.map((column) => (
               <th
                 key={column}
-                className="whitespace-nowrap px-2 py-1 font-medium text-muted-foreground/80"
+                className="whitespace-nowrap px-2 py-1 font-medium text-muted-foreground"
               >
                 {column}
               </th>
@@ -825,7 +846,7 @@ function JsonTable({ table }: { table: JsonTable }) {
         </tbody>
       </table>
       {table.rows.length === JSON_TABLE_MAX_ROWS ? (
-        <p className="type-caption mt-1 text-muted-foreground/70">
+        <p className="type-caption mt-1 text-subtle-foreground">
           First {JSON_TABLE_MAX_ROWS} rows shown.
         </p>
       ) : null}
@@ -833,8 +854,78 @@ function JsonTable({ table }: { table: JsonTable }) {
   );
 }
 
+type TodoItem = { content: string; status: string };
+
+/** todo args → items; tolerant of partial/streaming args. */
+function todoItems(args: Record<string, unknown>): TodoItem[] {
+  if (!Array.isArray(args.todos)) return [];
+  return args.todos.flatMap((t) => {
+    if (!t || typeof t !== 'object') return [];
+    const item = t as Record<string, unknown>;
+    const content = asString(item.content);
+    return content
+      ? [{ content, status: asString(item.status) || 'pending' }]
+      : [];
+  });
+}
+
+const TODO_MARK: Record<string, string> = {
+  completed: '✓',
+  in_progress: '◐',
+  pending: '○',
+};
+
+/** todo: the checklist itself, not its JSON. */
+function TodoPreview({ row }: { row: ToolCallRow }) {
+  const todos = todoItems(parseArgs(row.args));
+  if (todos.length === 0) return <GenericPreview row={row} />;
+  return (
+    <ul className="min-w-0 space-y-1 px-3 py-2 type-ui">
+      {todos.map((todo, i) => (
+        <li key={i} className="flex min-w-0 items-start gap-2">
+          <span
+            aria-hidden
+            className={cn(
+              'w-3.5 shrink-0 text-center tabular-nums',
+              todo.status === 'completed'
+                ? 'text-[var(--status-ok)]'
+                : 'text-subtle-foreground',
+            )}
+          >
+            {TODO_MARK[todo.status] ?? '○'}
+          </span>
+          <span
+            className={cn(
+              'min-w-0',
+              todo.status === 'completed'
+                ? 'text-muted-foreground line-through decoration-subtle-foreground/60'
+                : 'text-foreground',
+            )}
+          >
+            <span className="sr-only">{todo.status.replace('_', ' ')}: </span>
+            {todo.content}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Top-level args as label/value pairs; nested values are summarised. */
+function readableArgs(raw: string): Array<[string, string]> | null {
+  const args = parseArgs(raw);
+  const entries = Object.entries(args);
+  if (entries.length === 0) return null;
+  return entries.map(([key, value]) => {
+    if (Array.isArray(value)) return [key, `${value.length} items`];
+    if (value && typeof value === 'object') return [key, '{…}'];
+    return [key, String(value)];
+  });
+}
+
 function GenericPreview({ row }: { row: ToolCallRow }) {
   const args = row.args ?? '';
+  const pairs = useMemo(() => readableArgs(args), [args]);
   const result = row.result ?? '';
   const table = useMemo(
     () => (result ? parseJsonTable(result) : null),
@@ -845,23 +936,42 @@ function GenericPreview({ row }: { row: ToolCallRow }) {
     <div className="min-w-0 space-y-2 px-3 py-2">
       {args ? (
         <div className="min-w-0">
-          <PreviewHeader label="Args" onCopy={<CopyButton text={args} />} />
-          <pre
-            className={cn(
-              PREVIEW_SCROLL,
-              'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono type-caption leading-relaxed text-foreground/90',
-            )}
-          >
-            {args}
-          </pre>
+          <PreviewHeader label="Input" onCopy={<CopyButton text={args} />} />
+          {pairs ? (
+            <dl className="grid min-w-0 grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 px-1 py-1 type-caption">
+              {pairs.map(([key, value]) => (
+                <div key={key} className="contents">
+                  <dt className="text-subtle-foreground">{key}</dt>
+                  <dd
+                    className="m-0 min-w-0 truncate text-foreground"
+                    title={value}
+                  >
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {/* Raw JSON stays one click away for debugging, out of the
+              reading path. */}
+          <details className="px-1">
+            <summary className="type-caption cursor-pointer text-subtle-foreground hover:text-foreground">
+              Raw JSON
+            </summary>
+            <pre
+              className={cn(
+                PREVIEW_SCROLL,
+                'm-0 mt-1 min-w-0 whitespace-pre-wrap break-words font-mono type-caption leading-relaxed text-foreground/90',
+              )}
+            >
+              {args}
+            </pre>
+          </details>
         </div>
       ) : null}
       {result ? (
         <div className="min-w-0">
-          <PreviewHeader
-            label="Output"
-            onCopy={<CopyButton text={result} />}
-          />
+          <PreviewHeader label="Output" onCopy={<CopyButton text={result} />} />
           {table && table.rows.length > 0 ? (
             <JsonTable table={table} />
           ) : (
@@ -876,9 +986,9 @@ function GenericPreview({ row }: { row: ToolCallRow }) {
           )}
         </div>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/70">Running…</p>
+        <p className="type-caption italic text-subtle-foreground">Running…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/70">
+        <p className="type-caption italic text-subtle-foreground">
           No output captured.
         </p>
       )}

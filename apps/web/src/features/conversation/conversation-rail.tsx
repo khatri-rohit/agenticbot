@@ -88,7 +88,9 @@ export function ConversationRail({
 
   return (
     <div
-      className="pointer-events-none absolute inset-y-0 left-5 z-20 hidden w-20 sm:block cursor-pointer"
+      // Hug the reading column (max-w-4xl = 56rem) instead of the window
+      // edge, so the ticks read as part of the conversation.
+      className="pointer-events-none absolute inset-y-0 left-[max(1.25rem,calc(50%-30.5rem))] z-20 hidden w-20 sm:block cursor-pointer"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -105,8 +107,7 @@ export function ConversationRail({
         <div
           className={cn(
             'relative rounded-md border border-transparent transition-colors',
-            hovered &&
-              'border-border/50 px-2 py-2 bg-card',
+            hovered && 'border-border/50 px-2 py-2 bg-card',
           )}
         >
           {hovered ? (
@@ -131,7 +132,7 @@ export function ConversationRail({
                     <span className="line-clamp-1">
                       {truncateLabel(anchor.label)}
                       {anchor.toolCount && anchor.toolCount > 0 ? (
-                        <span className="text-muted-foreground/70">
+                        <span className="text-subtle-foreground">
                           {' · '}
                           {anchor.toolCount}{' '}
                           {anchor.toolCount === 1 ? 'tool' : 'tools'}

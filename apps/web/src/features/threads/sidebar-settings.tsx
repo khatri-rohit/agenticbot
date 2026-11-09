@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Bell,
+  Check,
+  Monitor,
+  Moon,
   Palette,
   RefreshCw,
   RotateCcw,
   Settings,
+  Sun,
   Trash2,
   UserRound,
   Volume2,
@@ -52,7 +56,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { ThemeId } from '@/components/shell/theme-presets';
+import type { ThemePreference } from '@/components/shell/theme-presets';
 import { cn } from '@/lib/utils';
 import {
   enableBrowserNotifications,
@@ -73,7 +77,7 @@ export function SidebarSettings({
 }: {
   collapsed?: boolean;
 }) {
-  const { themeId, setThemeId, presets } = useTheme();
+  const { preference, setPreference } = useTheme();
   const [profileOpen, setProfileOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [notifyOn, setNotifyOn] = useState(false);
@@ -154,37 +158,45 @@ export function SidebarSettings({
                 Appearance
               </DropdownMenuLabel>
               <DropdownMenuRadioGroup
-                value={themeId}
-                onValueChange={(value) => setThemeId(value as ThemeId)}
+                value={preference}
+                onValueChange={(value) =>
+                  setPreference(value as ThemePreference)
+                }
               >
-                {presets.map((preset) => (
+                {(
+                  [
+                    {
+                      value: 'light',
+                      label: 'Light',
+                      icon: Sun,
+                      hint: 'Warm paper, ink text',
+                    },
+                    {
+                      value: 'dark',
+                      label: 'Dark',
+                      icon: Moon,
+                      hint: 'Warm charcoal, clay accent',
+                    },
+                    {
+                      value: 'system',
+                      label: 'System',
+                      icon: Monitor,
+                      hint: 'Follow your device setting',
+                    },
+                  ] as const
+                ).map((option) => (
                   <DropdownMenuRadioItem
-                    key={preset.id}
-                    value={preset.id}
+                    key={option.value}
+                    value={option.value}
                     className="items-start gap-2.5 py-2"
                   >
-                    <span
-                      className="mt-0.5 flex size-4 shrink-0 overflow-hidden rounded-[3px] ring-1 ring-border/70"
-                      aria-hidden
-                    >
-                      <span
-                        className="h-full w-1/2"
-                        style={{ background: preset.swatch.bg }}
-                      />
-                      <span
-                        className="h-full w-1/2"
-                        style={{ background: preset.swatch.accent }}
-                      />
-                    </span>
+                    <option.icon className="mt-0.5 size-4 shrink-0 opacity-80" />
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="flex items-center gap-1.5 leading-none">
-                        {preset.label}
-                        <span className="type-caption rounded px-1 py-px font-medium text-muted-foreground ring-1 ring-border/50">
-                          {preset.scheme}
-                        </span>
+                        {option.label}
                       </span>
                       <span className="type-caption leading-snug text-muted-foreground">
-                        {preset.description}
+                        {option.hint}
                       </span>
                     </span>
                   </DropdownMenuRadioItem>
@@ -344,7 +356,7 @@ function ProfileDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>User profile</DialogTitle>
           <DialogDescription>
@@ -445,19 +457,29 @@ function ProfileDialog({
                 <Trash2 className="size-3.5" />
                 Clear
               </Button>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {/* A disabled primary "Saved" button read as broken; state
+                    is a quiet label, the action appears only when needed. */}
+                {!isDirty && !saving ? (
+                  <span className="type-caption flex items-center gap-1 text-subtle-foreground">
+                    <Check className="size-3.5" aria-hidden />
+                    Saved
+                  </span>
+                ) : null}
                 <DialogClose asChild>
-                  <Button type="button" variant="outline" disabled={saving}>
+                  <Button type="button" variant="ghost" disabled={saving}>
                     Close
                   </Button>
                 </DialogClose>
-                <Button
-                  type="button"
-                  disabled={!canSave}
-                  onClick={() => void handleSave()}
-                >
-                  {saving ? 'Saving…' : isDirty ? 'Save profile' : 'Saved'}
-                </Button>
+                {isDirty || saving ? (
+                  <Button
+                    type="button"
+                    disabled={!canSave}
+                    onClick={() => void handleSave()}
+                  >
+                    {saving ? 'Saving…' : 'Save profile'}
+                  </Button>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -497,7 +519,10 @@ function ProfileTab({
         </p>
       ) : null}
 
-      <Label htmlFor="about-user" className="type-caption text-muted-foreground">
+      <Label
+        htmlFor="about-user"
+        className="type-caption text-muted-foreground"
+      >
         About you
       </Label>
       <Textarea
@@ -508,39 +533,53 @@ function ProfileTab({
           'Name: Alex\nRole: staff engineer\nTimezone: IST (UTC+5:30)\nPrefs: concise BLUF answers, show trade-offs\nStack: TypeScript, Nx, Next.js'
         }
         onChange={(event) => onDraft(event.target.value)}
-        className="min-h-40 resize-y"
+        // It is a file (USER.md), so it reads like one: mono, calmer size,
+        // bounded height so the dialog never outgrows the screen.
+        className="max-h-[50vh] min-h-64 resize-y font-mono text-[0.8125rem] leading-[1.6]"
       />
 
-      <CharBudgetBar used={draft.length} cap={cap} />
-
-      {overCap ? (
-        <p className="type-caption text-destructive">
-          Over cap by {overBy} chars — consolidate first.
-        </p>
-      ) : isDirty ? (
-        <p className="type-caption text-muted-foreground">
-          Unsaved changes — Save to persist to{' '}
-          <code className="type-caption">USER.md</code>.
-        </p>
-      ) : null}
+      <div className="flex items-start justify-between gap-3">
+        {overCap ? (
+          <p className="type-caption text-destructive">
+            Over cap by {overBy} chars — consolidate first.
+          </p>
+        ) : isDirty ? (
+          <p className="type-caption text-muted-foreground">
+            Unsaved changes — Save to persist to{' '}
+            <code className="type-caption">USER.md</code>.
+          </p>
+        ) : (
+          <span />
+        )}
+        <CharBudgetBar used={draft.length} cap={cap} />
+      </div>
     </div>
   );
 }
 
 function CharBudgetBar({ used, cap }: { used: number; cap: number }) {
   const ratio = Math.min(used / Math.max(cap, 1), 1);
+  // Neutral until it matters: a full-width accent bar read as a loading or
+  // error state at 39%.
   const barColor =
-    used > cap ? 'bg-destructive' : ratio > 0.8 ? 'bg-[var(--warning)]' : 'bg-primary';
+    used > cap
+      ? 'bg-destructive'
+      : ratio > 0.8
+        ? 'bg-[var(--warning)]'
+        : 'bg-subtle-foreground/60';
   return (
-    <div className="flex flex-col gap-1">
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+    <div className="flex shrink-0 items-center gap-2">
+      <div className="h-1 w-20 overflow-hidden rounded-full bg-muted">
         <div
           className={cn('h-full transition-all', barColor)}
           style={{ width: `${ratio * 100}%` }}
           aria-hidden
         />
       </div>
-      <p className="type-caption text-muted-foreground" aria-live="polite">
+      <p
+        className="type-caption whitespace-nowrap text-subtle-foreground tabular-nums"
+        aria-live="polite"
+      >
         {used}/{cap} chars · ~{Math.ceil(used / 4)} tokens
       </p>
     </div>

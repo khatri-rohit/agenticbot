@@ -1,4 +1,12 @@
-import { mkdir, writeFile, rename, cp, readdir, rm, stat } from 'node:fs/promises';
+import {
+  mkdir,
+  writeFile,
+  rename,
+  cp,
+  readdir,
+  rm,
+  stat,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -400,4 +408,56 @@ export async function deleteUserSkill(
     force: true,
   });
   invalidateSkillCatalog();
+}
+
+/** Hand-written skills stay small: they are prompt text, not archives. */
+const MAX_SKILL_BYTES = 64 * 1024;
+
+/**
+ * Write a hand-authored skill to `$AGENT_HOME/skills/<name>/SKILL.md`.
+ * Refuses to overwrite: an existing folder may be an installed pack.
+ */
+export async function createUserSkill(input: {
+  agentHome: string;
+  name: string;
+  content: string;
+}): Promise<{ folder: string }> {
+  const name = input.name.trim();
+  if (!FOLDER_NAME.test(name)) {
+    throw new SkillImportError(
+      'Name must start with a letter or digit and use only letters, digits, ".", "_" or "-".',
+      400,
+    );
+  }
+  const content = input.content.replace(/\r\n/g, '\n');
+  if (Buffer.byteLength(content, 'utf8') > MAX_SKILL_BYTES) {
+    throw new SkillImportError('Skill is larger than 64 KB.', 413);
+  }
+  // Same parser the catalog uses. Without name and description the skill
+  // would load but the model would never know when to reach for it.
+  const parsed = parseSkillMarkdown(content, '');
+  if (!parsed.name || !parsed.description) {
+    throw new SkillImportError(
+      'Start the skill with a --- frontmatter block that has name: and description:.',
+      400,
+    );
+  }
+  const dir = path.join(input.agentHome, 'skills', name);
+  const exists = await stat(dir).then(
+    () => true,
+    () => false,
+  );
+  if (exists) {
+    throw new SkillImportError(`A skill named "${name}" already exists.`, 409);
+  }
+  await mkdir(dir, { recursive: true });
+  const tmp = path.join(dir, `.SKILL.md.${process.pid}.tmp`);
+  await writeFile(
+    tmp,
+    content.endsWith('\n') ? content : `${content}\n`,
+    'utf8',
+  );
+  await rename(tmp, path.join(dir, 'SKILL.md'));
+  invalidateSkillCatalog();
+  return { folder: name };
 }

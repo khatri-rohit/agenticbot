@@ -15,14 +15,13 @@ import {
   type System1FallbackKind,
   type System1RunReport,
 } from '@agent/agent-models';
-import type {
-  ChatState,
-  CompactionNotice,
-  ToolActivity,
-} from './chat-store';
+import type { ChatState, CompactionNotice, ToolActivity } from './chat-store';
 import { groupMessageTurns } from './group-message-turns';
-import { buildTurnTimeline } from './turn-timeline';
-import { formatDuration, formatMessageTime } from '../../lib/format-relative-time';
+import { buildTurnTimeline, summarizeTurnWork } from './turn-timeline';
+import {
+  formatDuration,
+  formatMessageTime,
+} from '../../lib/format-relative-time';
 import { AgentMarkdown } from './agent-markdown';
 import {
   ConversationRail,
@@ -134,12 +133,7 @@ export function MessageList({
     // streaming/assistantSnippets produce snippet/stream steps that do not
     // affect the anchor, so they are excluded to avoid rebuilding every
     // anchor on every assistant.delta during streaming.
-  }, [
-    turns,
-    toolActivity,
-    compactionNotice,
-    activeRunId,
-  ]);
+  }, [turns, toolActivity, compactionNotice, activeRunId]);
 
   const showRail = shouldShowConversationRail(turnAnchors.length);
 
@@ -240,7 +234,7 @@ export function MessageList({
       >
         <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-5 sm:px-6">
           {!hasMessages && !isRunning && !streaming?.content && (
-            <p className="type-ui text-center text-muted-foreground/70">
+            <p className="type-ui text-center text-muted-foreground">
               Conversation will appear here.
             </p>
           )}
@@ -267,6 +261,17 @@ export function MessageList({
                 compaction: turnCompaction,
                 subagentActivity: chatState.activeRun?.subagentActivity,
               });
+              // The turn footer (time · work summary · Copy/Retry) belongs at
+              // the end of the turn. When tool calls follow the last reply
+              // (e.g. an interrupted run), lift it below them.
+              const latestReplyStep = steps.find(
+                (step): step is Extract<typeof step, { type: 'assistant' }> =>
+                  step.type === 'assistant' &&
+                  step.message.id === latestAssistantMessageId,
+              );
+              const footerAfterSteps =
+                latestReplyStep !== undefined &&
+                steps.at(-1) !== latestReplyStep;
               const showSteps =
                 turn.replies.length > 0 ||
                 liveActivity.length > 0 ||
@@ -339,7 +344,12 @@ export function MessageList({
                             <AssistantMessage
                               key={step.message.id}
                               message={step.message}
-                              showMeta={isLatestAssistant}
+                              showMeta={isLatestAssistant && !footerAfterSteps}
+                              workSummary={
+                                isLatestAssistant
+                                  ? summarizeTurnWork(steps)
+                                  : undefined
+                              }
                               turnStartedAt={turn.userMessage.createdAt}
                               showRetry={!isRunning && isLatestAssistant}
                               onRetry={onRetryLastResponse}
@@ -391,6 +401,17 @@ export function MessageList({
                     </div>
                   ) : null}
 
+                  {footerAfterSteps && latestReplyStep ? (
+                    <TurnFooter
+                      message={latestReplyStep.message}
+                      workSummary={summarizeTurnWork(steps)}
+                      turnStartedAt={turn.userMessage.createdAt}
+                      showRetry={!isRunning}
+                      onRetry={onRetryLastResponse}
+                      retryDisabled={isRunning}
+                    />
+                  ) : null}
+
                   {isLastTurn &&
                   (isRunning || compactionNotice?.status === 'running') ? (
                     <TurnStatusLine
@@ -410,11 +431,22 @@ export function MessageList({
 
           {chatState.limitNotice ? (
             <div
-              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1"
+              className={cn(
+                'flex flex-wrap items-center gap-x-3 gap-y-1',
+                // A stop the user didn't ask for (interrupt, limit) is the most
+                // important line on screen: banner, not caption.
+                isUserCancelled(chatState.limitNotice.reason)
+                  ? 'px-1'
+                  : 'rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2',
+              )}
               role="status"
             >
               <p
-                className="type-caption text-muted-foreground"
+                className={cn(
+                  isUserCancelled(chatState.limitNotice.reason)
+                    ? 'type-caption text-muted-foreground'
+                    : 'type-ui font-medium text-[var(--warning-fg)]',
+                )}
                 title={chatState.limitNotice.reason}
               >
                 {stopReasonLabel(chatState.limitNotice.reason)}
@@ -435,7 +467,10 @@ export function MessageList({
           ) : null}
 
           {chatState.system1Notice ? (
-            <p className="type-caption px-1 text-muted-foreground" role="status">
+            <p
+              className="type-caption px-1 text-muted-foreground"
+              role="status"
+            >
               {system1NoticeText(chatState.system1Notice.report)}
             </p>
           ) : null}
@@ -461,7 +496,10 @@ const SYSTEM1_KIND_LABEL: Record<System1FallbackKind, string> = {
 
 /** One line: how many decisions fell back, why, and from which step. */
 function system1NoticeText(report: System1RunReport): string {
-  const total = report.fallbacks.reduce((sum, fallback) => sum + fallback.count, 0);
+  const total = report.fallbacks.reduce(
+    (sum, fallback) => sum + fallback.count,
+    0,
+  );
   const parts = report.fallbacks.map(
     (fallback) =>
       `${SYSTEM1_KIND_LABEL[fallback.kind]} ×${fallback.count} from step ${fallback.firstIteration}`,
@@ -529,11 +567,13 @@ function TurnStatusLine({
   if (!label) return null;
   // Re-rendered every second by the phase clock above.
   const started = runStartedAt ? Date.parse(runStartedAt) : NaN;
-  const total = Number.isFinite(started) ? Math.max(0, Date.now() - started) : null;
+  const total = Number.isFinite(started)
+    ? Math.max(0, Date.now() - started)
+    : null;
 
   return (
     <p
-      className="type-caption flex items-center gap-1.5 pl-0.5 text-left text-muted-foreground/70 tabular-nums"
+      className="type-caption flex items-center gap-1.5 pl-0.5 text-left text-muted-foreground tabular-nums"
       aria-live="polite"
     >
       <span
@@ -541,7 +581,7 @@ function TurnStatusLine({
         aria-hidden
       />
       {label}
-      <span className="text-muted-foreground/70">
+      <span className="text-muted-foreground">
         {elapsed}s{total != null ? ` · ${formatDuration(total)} total` : ''}
       </span>
     </p>
@@ -564,7 +604,7 @@ function MessageTimestamp({
     <time
       dateTime={iso}
       title={title}
-      className="type-caption text-muted-foreground/70 tabular-nums"
+      className="type-caption text-muted-foreground tabular-nums"
     >
       {text}
       {durationMs != null && ` · ${formatDuration(durationMs)}`}
@@ -592,7 +632,9 @@ function answerTiming(
     return { iso: message.createdAt, durationMs: message.durationMs };
   }
   const writing =
-    message.durationMs != null ? ` · writing the answer ${formatDuration(message.durationMs)}` : '';
+    message.durationMs != null
+      ? ` · writing the answer ${formatDuration(message.durationMs)}`
+      : '';
   return {
     iso: new Date(finished - total).toISOString(),
     durationMs: total,
@@ -608,16 +650,30 @@ function MessageMetaRow({
   iso,
   durationMs,
   title,
+  workSummary,
   children,
 }: {
   iso?: string;
   durationMs?: number;
   title?: string;
+  /** What the turn did, e.g. "Edited 3 files · 12 tool calls". */
+  workSummary?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
-      <MessageTimestamp iso={iso ?? ''} durationMs={durationMs} title={title} />
+      <div className="flex min-w-0 items-center gap-1.5">
+        <MessageTimestamp
+          iso={iso ?? ''}
+          durationMs={durationMs}
+          title={title}
+        />
+        {workSummary ? (
+          <span className="type-caption truncate text-subtle-foreground">
+            · {workSummary}
+          </span>
+        ) : null}
+      </div>
       <div className="flex min-w-0 items-center">{children}</div>
     </div>
   );
@@ -626,6 +682,7 @@ function MessageMetaRow({
 function AssistantMessage({
   message,
   showMeta = true,
+  workSummary,
   showRetry,
   onRetry,
   retryDisabled,
@@ -634,6 +691,7 @@ function AssistantMessage({
   message: Message;
   /** Meta footer (start time · run duration · Copy) only on the turn's final response. */
   showMeta?: boolean;
+  workSummary?: string;
   /** The turn's user message time; fallback start for old rows. */
   turnStartedAt?: string;
   showRetry?: boolean;
@@ -641,7 +699,6 @@ function AssistantMessage({
   retryDisabled?: boolean;
 }) {
   if (!message.content.trim()) return null;
-  const timing = answerTiming(message, turnStartedAt);
 
   return (
     <div className="min-w-0 max-w-full">
@@ -649,20 +706,50 @@ function AssistantMessage({
         <AgentMarkdown content={message.content} />
       </article>
       {showMeta ? (
-        <MessageMetaRow
-          iso={timing.iso}
-          durationMs={timing.durationMs}
-          {...(timing.title ? { title: timing.title } : {})}
-        >
-          <MessageActions
-            content={message.content}
-            align="start"
-            showRetry={showRetry}
-            onRetry={onRetry}
-            disabled={retryDisabled}
-          />
-        </MessageMetaRow>
+        <TurnFooter
+          message={message}
+          workSummary={workSummary}
+          turnStartedAt={turnStartedAt}
+          showRetry={showRetry}
+          onRetry={onRetry}
+          retryDisabled={retryDisabled}
+        />
       ) : null}
     </div>
+  );
+}
+
+/** Time · work summary on the left, Copy/Retry for the final reply on the right. */
+function TurnFooter({
+  message,
+  workSummary,
+  turnStartedAt,
+  showRetry,
+  onRetry,
+  retryDisabled,
+}: {
+  message: Message;
+  workSummary?: string;
+  turnStartedAt?: string;
+  showRetry?: boolean;
+  onRetry: () => void | Promise<void>;
+  retryDisabled?: boolean;
+}) {
+  const timing = answerTiming(message, turnStartedAt);
+  return (
+    <MessageMetaRow
+      iso={timing.iso}
+      durationMs={timing.durationMs}
+      workSummary={workSummary}
+      {...(timing.title ? { title: timing.title } : {})}
+    >
+      <MessageActions
+        content={message.content}
+        align="start"
+        showRetry={showRetry}
+        onRetry={onRetry}
+        disabled={retryDisabled}
+      />
+    </MessageMetaRow>
   );
 }

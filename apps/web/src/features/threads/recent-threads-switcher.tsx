@@ -266,7 +266,7 @@ export function RecentThreadsSwitcher() {
                       {formatRelativeTime(entry.updatedAt)}
                     </span>
                   ) : null}
-                  <span className="type-caption shrink-0 text-muted-foreground/70">
+                  <span className="type-caption shrink-0 text-subtle-foreground">
                     Agent
                   </span>
                 </button>
