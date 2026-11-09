@@ -67,7 +67,11 @@ import {
   loadComposerDraft,
   saveComposerDraft,
 } from '@/features/composer/composer-draft';
-import { PostureToggle } from '@/features/composer/posture-toggle';
+import {
+  POSTURE_LABEL,
+  PostureToggle,
+  nextPosture,
+} from '@/features/composer/posture-toggle';
 import { VoiceButton } from '@/features/composer/voice-button';
 import { Button } from '@/components/ui/button';
 import {
@@ -803,7 +807,7 @@ export function ChatInput({
         const current = composerOptionsRef.current.posture ?? 'agent';
         onComposerOptionsChangeRef.current({
           ...composerOptionsRef.current,
-          posture: current === 'agent' ? 'ask' : 'agent',
+          posture: nextPosture(current),
         });
       } else if (e.key === '.') {
         if (!thinkingSupportedRef.current) return;
@@ -1126,7 +1130,7 @@ export function ChatInput({
           >
             <CardHeader className="border-b border-border/40 pb-2">
               <Badge variant="secondary" className="font-normal">
-                1 queued as {posture === 'ask' ? 'Ask' : 'Agent'}
+                1 queued as {POSTURE_LABEL[posture ?? 'agent']}
               </Badge>
               <CardAction className="flex gap-1">
                 <Button

@@ -53,7 +53,16 @@ export function getAgentHome(): string {
 
 export function getThreadStore(): Promise<ThreadStore> {
   if (!storePromise) {
-    storePromise = openThreadStore(getAgentHome());
+    storePromise = openThreadStore(getAgentHome()).then((store) => {
+      // Threads from before the search index: indexed once, off the request path.
+      store.backfillSearchIndex().catch((error: unknown) => {
+        console.warn(
+          '[search] backfill failed:',
+          error instanceof Error ? error.message : error,
+        );
+      });
+      return store;
+    });
   }
   return storePromise;
 }

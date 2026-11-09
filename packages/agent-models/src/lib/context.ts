@@ -49,6 +49,13 @@ export type ContextWindowSource = 'default' | 'model' | 'fallback' | 'served';
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 
+/**
+ * Smallest window a run starts on. Below it the system prompt, tool schemas
+ * and one real file read leave too little room for the conversation, so the
+ * host refuses the send with a clear message instead of running degraded.
+ */
+export const MIN_CONTEXT_WINDOW_TOKENS = 32_000;
+
 export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   windowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
   outputReserveTokens: 20_000,

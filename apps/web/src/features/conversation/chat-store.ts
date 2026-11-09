@@ -1,4 +1,5 @@
 import {
+  normalizeRunPosture,
   occupiedFromUsage,
   type AgentEvent,
   type ChoiceOption,
@@ -196,7 +197,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           runId: event.runId,
           status: 'running',
           model: event.model,
-          posture: event.posture === 'ask' ? 'ask' : 'agent',
+          posture: normalizeRunPosture(event.posture),
           streamingMessage: null,
           toolActivity: [],
           subagentActivity: [],

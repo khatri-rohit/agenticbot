@@ -7,6 +7,7 @@ import {
   CHARS_PER_TOKEN,
   ChoiceSkipped,
   isAskStrippedTool,
+  isReadOnlyPosture,
   limitMessage,
   type ModelTurn,
   type ToolContext,
@@ -285,10 +286,12 @@ async function admitToolCall(
 
   guard.knownTool();
 
-  if (s.posture === 'ask' && isAskStrippedTool(toolName)) {
+  if (isReadOnlyPosture(s.posture) && isAskStrippedTool(toolName)) {
     await record.refuse(
       toolCall,
-      'Blocked: this run is Ask (read-only). Switch the composer to Agent to edit files or run commands.',
+      s.posture === 'plan'
+        ? 'Blocked: this run is Plan (read-only). Finish the plan; the user switches to Agent to carry it out.'
+        : 'Blocked: this run is Ask (read-only). Switch the composer to Agent to edit files or run commands.',
     );
     return { kind: 'filled' };
   }
@@ -488,6 +491,9 @@ async function settleReturned(
   if (toolName === 'edit_file' && isEditSuccess(result)) {
     s.guard.editSucceeded();
     s.steering.markProgress();
+    s.unverifiedEdit = true;
+  } else if (toolName === 'run_terminal') {
+    s.unverifiedEdit = false;
   }
   return 'ok';
 }

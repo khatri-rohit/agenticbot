@@ -70,7 +70,16 @@ export { createMemoryTool } from './lib/tools/memory';
 export type { MemoryToolStore } from './lib/tools/memory';
 export { createInMemoryPlanStore, createPlanTools } from './lib/tools/plan';
 export type { PlanStore } from './lib/tools/plan';
-export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
+export { gateMemoryOps, applyMemoryText, looksLikeSecret } from './lib/memory/gate';
+export {
+  buildReviewMessages,
+  newUserTurns,
+  parseReviewProposals,
+} from './lib/memory/review';
+export {
+  createSessionSearchTool,
+  type SessionSearchHit,
+} from './lib/tools/session-search';
 
 // Context
 export { assembleContext } from './lib/context/assemble-context';
@@ -86,6 +95,10 @@ export {
   buildExtractiveSnapshot,
   packMentionedThread,
 } from './lib/context/compact-snapshot';
+export {
+  acceptSectionedSummary,
+  buildSummaryMessages,
+} from './lib/context/sectioned-summary';
 
 // Sub-agents
 export {

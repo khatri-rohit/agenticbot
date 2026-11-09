@@ -12,7 +12,7 @@ export type EvalTask = {
   suite: TaskSuite;
   repo: { source: string; commit: string };
   prompt: string;
-  posture: 'agent' | 'ask';
+  posture: 'agent' | 'ask' | 'plan';
   /** Sent as `thinking` on every run; absent = the model default. The CLI's --thinking overrides it. */
   thinking?: ThinkingValue;
   checks: { run: string; expectExit: number; timeoutSec?: number }[];
@@ -50,7 +50,7 @@ export function parseTask(file: string, raw: unknown): EvalTask {
   if (!Array.isArray(t.files)) fail(file, '"files" must be an array');
   if (!Array.isArray(scope.allow)) fail(file, '"scope.allow" must be an array');
   const posture = t.posture ?? 'agent';
-  if (posture !== 'agent' && posture !== 'ask') fail(file, '"posture" must be agent or ask');
+  if (posture !== 'agent' && posture !== 'ask' && posture !== 'plan') fail(file, '"posture" must be agent, ask or plan');
   const thinking = t.thinking;
   if (thinking !== undefined && typeof thinking !== 'boolean' && typeof thinking !== 'string') {
     fail(file, '"thinking" must be a boolean or a string');

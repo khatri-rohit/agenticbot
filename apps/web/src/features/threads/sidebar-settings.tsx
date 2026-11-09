@@ -19,6 +19,8 @@ import { DEFAULT_MEMORY_CAPS, type MemoryOp } from '@agent/agent-models';
 import { useTheme } from '@/components/shell/theme-provider';
 import {
   fetchMemory,
+  fetchPendingMemory,
+  resolvePendingMemory,
   revertMemoryOp,
   saveUserMemory,
 } from '@/api/agent-client';
@@ -253,7 +255,7 @@ export function SidebarSettings({
   );
 }
 
-type Tab = 'profile' | 'notes' | 'history';
+type Tab = 'profile' | 'notes' | 'history' | 'suggestions';
 
 function ProfileDialog({
   open,
@@ -268,6 +270,8 @@ function ProfileDialog({
   const [loadedUser, setLoadedUser] = useState('');
   const [notes, setNotes] = useState('');
   const [ops, setOps] = useState<MemoryOp[]>([]);
+  const [pending, setPending] = useState<MemoryOp[]>([]);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmRevertId, setConfirmRevertId] = useState<string | null>(null);
@@ -278,7 +282,11 @@ function ProfileDialog({
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const memory = await fetchMemory();
+      const [memory, suggestions] = await Promise.all([
+        fetchMemory(),
+        fetchPendingMemory(),
+      ]);
+      setPending(suggestions);
       setDraft(memory.files.user);
       setLoadedUser(memory.files.user);
       setNotes(memory.files.notes);
@@ -335,6 +343,19 @@ function ProfileDialog({
     }
   };
 
+  const handleResolve = async (opId: string, decision: 'approve' | 'reject') => {
+    setResolvingId(opId);
+    try {
+      await resolvePendingMemory(opId, decision);
+      toastSuccess(decision === 'approve' ? 'Saved to memory. It applies on the next run.' : 'Suggestion dismissed.');
+      await loadAll(true);
+    } catch (error) {
+      toastError(describeError(error), 'Could not update the suggestion');
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
   const handleRevert = async (opId: string) => {
     setRevertingId(opId);
     try {
@@ -352,6 +373,10 @@ function ProfileDialog({
     { id: 'profile', label: 'Profile' },
     { id: 'notes', label: 'Agent notes' },
     { id: 'history', label: 'History' },
+    {
+      id: 'suggestions',
+      label: pending.length > 0 ? `Suggestions (${pending.length})` : 'Suggestions',
+    },
   ];
 
   return (
@@ -404,6 +429,12 @@ function ProfileDialog({
           />
         ) : tab === 'notes' ? (
           <NotesTab notes={notes} />
+        ) : tab === 'suggestions' ? (
+          <SuggestionsTab
+            pending={pending}
+            resolvingId={resolvingId}
+            onResolve={(opId, decision) => void handleResolve(opId, decision)}
+          />
         ) : (
           <HistoryTab
             ops={ops}
@@ -743,5 +774,72 @@ function ProfileSkeleton() {
       <div className="h-1.5 w-full animate-pulse rounded-full bg-muted" />
       <div className="h-3 w-48 animate-pulse rounded bg-muted" />
     </div>
+  );
+}
+
+/** Memory the learning loop proposed; nothing is written until approved here. */
+function SuggestionsTab({
+  pending,
+  resolvingId,
+  onResolve,
+}: {
+  pending: MemoryOp[];
+  resolvingId: string | null;
+  onResolve: (opId: string, decision: 'approve' | 'reject') => void;
+}) {
+  if (pending.length === 0) {
+    return (
+      <p className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
+        No suggestions. After a chat goes quiet, the agent may suggest facts to remember; they wait here for you.
+      </p>
+    );
+  }
+  return (
+    <ScrollArea className="h-64 rounded-md border border-border">
+      <ul role="list" className="flex flex-col divide-y divide-border">
+        {pending.map((op) => {
+          const target = op.target === 'user' ? 'Profile' : op.target === 'notes' ? 'Agent notes' : 'Other';
+          const busy = resolvingId === op.id;
+          return (
+            <li key={op.id} className="flex flex-col gap-1.5 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <span className="type-caption font-medium text-muted-foreground">{target}</span>
+                <span className="type-caption text-muted-foreground">
+                  {op.evidence === 'user-said' ? 'you said this' : 'inferred'}
+                </span>
+                <span className="type-caption ml-auto text-muted-foreground">
+                  {formatRelativeTime(op.ts)}
+                </span>
+              </div>
+              {op.content ? (
+                <p className="text-xs whitespace-pre-wrap text-foreground">{op.content}</p>
+              ) : null}
+              <p className="type-caption text-muted-foreground">{op.reason}</p>
+              <div className="flex justify-end gap-1.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="type-caption h-6 px-2"
+                  disabled={busy}
+                  onClick={() => onResolve(op.id, 'reject')}
+                >
+                  Dismiss
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="type-caption h-6 px-2"
+                  disabled={busy}
+                  onClick={() => onResolve(op.id, 'approve')}
+                >
+                  Save to memory
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </ScrollArea>
   );
 }

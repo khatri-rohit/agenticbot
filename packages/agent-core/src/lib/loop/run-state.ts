@@ -86,6 +86,12 @@ export type RunState = {
   prefixHeavy: boolean;
   /** Set when a tool (sub-agent `report`) asks to end the run with this answer. */
   stopContent: string | undefined;
+  /** Effort escalation fired: later calls use one rung above the baseline. */
+  escalated: boolean;
+  /** A successful edit with no run_terminal after it. */
+  unverifiedEdit: boolean;
+  /** The stop check already sent the run back once. */
+  stopChecked: boolean;
 };
 
 export function createRunState(
@@ -183,6 +189,9 @@ export function createRunState(
     advisorHinted: false,
     prefixHeavy: false,
     stopContent: undefined,
+    escalated: false,
+    unverifiedEdit: false,
+    stopChecked: false,
   };
   return state;
 }

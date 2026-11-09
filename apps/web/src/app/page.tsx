@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { MessageAttachment } from '@agent/agent-models';
+import { normalizeRunPosture, type MessageAttachment } from '@agent/agent-models';
 import { ChatInput } from '@/features/composer/chat-input';
 import { ChatShell } from '@/components/shell/chat-shell';
 import {
@@ -134,11 +134,7 @@ export default function HomePage() {
                 model: options.model,
                 local: options.local,
                 thinking: options.thinking,
-                posture: bound
-                  ? options.posture === 'ask'
-                    ? 'ask'
-                    : 'agent'
-                  : undefined,
+                posture: bound ? normalizeRunPosture(options.posture) : undefined,
                 attachments,
                 ...(options.skills ? { skills: options.skills } : {}),
                 ...(options.contextWindowMode

@@ -95,10 +95,18 @@ function toolProtocol(registry: ToolRegistry, isWorkspace: boolean): string {
  * reads in the parent). Stable text first; the date sits at the very end.
  */
 function workspacePrompt(registry: ToolRegistry, posture: RunPosture): string {
-  const isAsk = posture === 'ask';
+  // Plan shares Ask's read-only sections; its own text replaces how-you-work and the report.
+  const isAsk = posture !== 'agent';
+  const isPlan = posture === 'plan';
   const has = (name: string) => registry.byName.has(name);
 
-  const howYouWork = isAsk
+  const howYouWork = isPlan
+    ? `# How you work (Plan: read-only)
+- You can glob, grep, and read_file. You cannot edit files or run commands. The user approves the plan by switching the composer to Agent.
+- Explore first: read the code the change will touch, its callers, and its contracts. Do not invent paths, APIs, or flags.
+- Then write the plan${has('plan') ? ' with the plan tool (journal plus todos)' : ''}: the goal, the files and the change in each, the order, how each step is verified, and the risks. Name open questions instead of guessing.
+- Stop when the plan is written. Do not start the work.`
+    : isAsk
     ? `# How you work (Ask: read-only)
 - You can glob, grep, and read_file. You cannot edit files or run commands; if the user wants changes, tell them to switch the composer to Agent.
 - Understand before you answer: read the code in question, its callers, and its contracts. Do not invent paths, APIs, or flags.
@@ -135,7 +143,10 @@ Ask what this could break: callers of anything you changed, edge cases and error
           : ''
       }`;
 
-  const report = isAsk
+  const report = isPlan
+    ? `# Answer
+Summarise the plan in a few lines: the approach, the steps, and the open questions. Point to the plan for detail. No preamble.`
+    : isAsk
     ? `# Answer
 Lead with the answer, then the evidence (path:line). Short, no preamble.`
     : `# Report

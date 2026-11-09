@@ -4,6 +4,7 @@ import {
   imageAttachments,
   isWorkspaceKind,
   lastRunFrom,
+  MIN_CONTEXT_WINDOW_TOKENS,
   normalizeRunPosture,
   parseContextWindowMode,
   planHasOpenWork,
@@ -26,7 +27,7 @@ import {
   capacitySnapshot,
   createCapacityGate,
 } from '../models/capacity';
-import { resolveCallOptions } from '../models/model-runtime';
+import { resolveCallOptions, resolveContextBudget } from '../models/model-runtime';
 import {
   getAgentHome,
   getThreadStore,
@@ -34,6 +35,7 @@ import {
 } from '../platform/instances';
 import { threadTraceSink } from '../platform/trace-sink.js';
 import { compactThread, emitCompacted, maybeCompactThread } from './compaction';
+import { rewindLearningCursor, scheduleLearningReview } from '../memory/learning-loop';
 import {
   endpointFromLocal,
   lastUserEnvelope,
@@ -148,6 +150,7 @@ async function startClaimedRun(
 
   if (rewindThroughSeq !== undefined) {
     await store.rewind(threadId, rewindThroughSeq);
+    await rewindLearningCursor(threadId, rewindThroughSeq);
   }
 
   const ledgerBefore = await store.readLedger(threadId, 0);
@@ -177,6 +180,22 @@ async function startClaimedRun(
     } catch {
       // If /api/show is unavailable, let the model provider reject instead.
     }
+  }
+
+  // Also before the user row: a window this small cannot hold the prompt and
+  // a real conversation (local Ollama may serve less than the model's size).
+  const servedWindow = await resolveContextBudget(
+    useModel,
+    endpoint,
+    thread.contextWindowMode,
+  );
+  if (servedWindow.budget.windowTokens < MIN_CONTEXT_WINDOW_TOKENS) {
+    return reject(
+      'invalid',
+      servedWindow.source === 'served'
+        ? `Local Ollama is serving ${useModel} with a ${servedWindow.budget.windowTokens.toLocaleString()}-token context; the agent needs at least ${MIN_CONTEXT_WINDOW_TOKENS.toLocaleString()}. Raise OLLAMA_CONTEXT_LENGTH on the daemon and restart it.`
+        : `${useModel} has a ${servedWindow.budget.windowTokens.toLocaleString()}-token context; the agent needs at least ${MIN_CONTEXT_WINDOW_TOKENS.toLocaleString()}. Pick a model with a larger window.`,
+    );
   }
 
   if (message) {
@@ -223,6 +242,8 @@ async function startClaimedRun(
     store,
     threadId,
     model: useModel,
+    endpoint,
+    flags: prepared.flags,
     envelopes,
     report: prepared.report,
   });
@@ -355,6 +376,13 @@ async function startClaimedRun(
           error instanceof Error ? error.message : error,
         );
       }
+      // Restarts the idle timer; the review runs once the thread goes quiet.
+      scheduleLearningReview({
+        threadId,
+        model: useModel,
+        endpoint,
+        enabled: prepared.flags.learningLoop,
+      });
       // A cancelled run leaves compaction to the next run's pre-run pass, so
       // nothing it writes can race that run's rewind.
       if (outcome === 'cancelled' || !result.contextReport) return;
@@ -363,6 +391,8 @@ async function startClaimedRun(
         threadId,
         runId,
         model: useModel,
+        endpoint,
+        flags: prepared.flags,
         report: result.contextReport,
       });
     },

@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useEffect, useRef } from 'react';
+import { normalizeRunPosture } from '@agent/agent-models';
 import { ChatHeader } from '@/features/conversation/chat-header';
 import { MessageList } from '@/features/conversation/message-list';
 import { ChatInput } from '@/features/composer/chat-input';
@@ -48,7 +49,7 @@ export default function ChatThreadPage({
       local,
       model,
       thinking: pending.thinking,
-      posture: pending.posture === 'ask' ? 'ask' : 'agent',
+      posture: normalizeRunPosture(pending.posture),
       contextWindowMode: pending.contextWindowMode ?? 'default',
     });
     void sendMessage(
@@ -58,7 +59,7 @@ export default function ChatThreadPage({
         local,
         model,
         thinking: pending.thinking,
-        posture: pending.posture === 'ask' ? 'ask' : 'agent',
+        posture: normalizeRunPosture(pending.posture),
         ...(pending.skills ? { skills: pending.skills } : {}),
         contextWindowMode: pending.contextWindowMode ?? 'default',
       },

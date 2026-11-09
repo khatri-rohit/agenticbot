@@ -188,14 +188,54 @@ export class MemoryStore {
         evidence: original.evidence,
       };
 
-      return this.applyUnlocked(inverse, workspaceRoot, opId);
+      return this.applyUnlocked(inverse, workspaceRoot, { reverts: opId });
+    });
+  }
+
+  /** Staged ops nobody has approved or rejected yet, oldest first. */
+  async listPending(): Promise<MemoryOp[]> {
+    const ops = await this.listOps();
+    const resolved = new Set(ops.map((op) => op.resolves).filter(Boolean));
+    return ops.filter((op) => op.status === 'staged' && !resolved.has(op.id));
+  }
+
+  /**
+   * The user's decision on a staged op. Approve applies it as the user's own
+   * write (the gate still checks caps and secrets); reject records the
+   * decision. Either way the new op names the staged one in `resolves`.
+   */
+  resolveStaged(
+    opId: string,
+    decision: 'approve' | 'reject',
+    workspaceRoot?: string,
+  ): Promise<MemoryOp> {
+    return this.serialize(async () => {
+      const pending = await this.listPending();
+      const staged = pending.find((op) => op.id === opId);
+      if (!staged) throw new Error('Pending suggestion not found');
+      const proposed: ProposedMemoryOp = {
+        target: staged.target,
+        action: staged.action,
+        ...(staged.oldText !== undefined ? { oldText: staged.oldText } : {}),
+        ...(staged.content !== undefined ? { content: staged.content } : {}),
+        reason: staged.reason,
+        source: staged.source,
+        by: 'user',
+        evidence: staged.evidence,
+      };
+      if (decision === 'approve') {
+        return this.applyUnlocked(proposed, workspaceRoot, { resolves: opId });
+      }
+      const rejected = { ...this.toOp(proposed, 'rejected'), resolves: opId };
+      await this.appendOp(rejected);
+      return rejected;
     });
   }
 
   private async applyUnlocked(
     proposed: ProposedMemoryOp,
     workspaceRoot?: string,
-    reverts?: string,
+    links: { reverts?: string; resolves?: string } = {},
   ): Promise<MemoryOp> {
     const files = await this.read(
       proposed.target === 'notes' ? workspaceRoot : undefined,
@@ -220,7 +260,8 @@ export class MemoryStore {
     if (proposed.action === 'add') {
       op.oldText = (proposed.content ?? '').trim();
     }
-    if (reverts) op.reverts = reverts;
+    if (links.reverts) op.reverts = links.reverts;
+    if (links.resolves) op.resolves = links.resolves;
 
     if (proposed.target === 'user') {
       await writeFile(this.userPath(), next, 'utf8');

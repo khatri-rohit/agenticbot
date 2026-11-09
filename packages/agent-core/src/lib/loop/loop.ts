@@ -15,7 +15,11 @@ import {
 import { refreshContextReport } from '../context/assemble-context';
 import { consoleTrace } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
-import { createEffortRouter, type EffortSignals } from '../system1/effort';
+import {
+  createEffortRouter,
+  type EffortDecision,
+  type EffortSignals,
+} from '../system1/effort';
 import { buildEffortState } from '../system1/state';
 import { getSkill } from '../tools/skills';
 import type { ToolRegistry } from '../tools/types';
@@ -25,6 +29,7 @@ import {
   noteLimit,
   type CoreResult,
   type LoopConfig,
+  type RunState,
 } from './run-state';
 import { throwIfAborted } from './timeout';
 import { preview } from './tool-call-record';
@@ -122,6 +127,40 @@ async function reportSystem1(
   }
 }
 
+/**
+ * reasoning_effort to override for this call, or undefined to send the
+ * baseline. System 1's routed rung applies as before; with escalation on, a
+ * tool error or a steering note raises the rest of the run to one rung above
+ * the baseline (a routed rung higher than that still wins). Never lowers.
+ */
+function escalateEffort(
+  s: RunState,
+  effort: EffortDecision,
+  cause: { toolError: boolean; nudged: boolean },
+): string | undefined {
+  const routed = effort.applied && effort.wire !== undefined ? effort.wire : undefined;
+  const ladder = s.config.effortPolicy?.ladder;
+  const base = s.config.effortPolicy?.baselineIndex;
+  if (!s.flags.effortEscalation || !ladder || base === undefined || base < 0) return routed;
+  const from = ladder[base];
+  const up = ladder[base + 1];
+  if (!from || !up) return routed;
+  if (!s.escalated && (cause.toolError || cause.nudged)) {
+    s.escalated = true;
+    s.trace({
+      type: 'effort_escalated',
+      runId: s.runId,
+      iteration: s.iterations,
+      from: from.wire,
+      to: up.wire,
+      reason: cause.toolError ? 'tool_error' : 'steering',
+    });
+  }
+  if (!s.escalated) return routed;
+  const routedIndex = routed === undefined ? -1 : ladder.findIndex((rung) => rung.wire === routed);
+  return routedIndex > base + 1 ? routed : up.wire;
+}
+
 async function runLoopCore(
   modelCall: ModelCallFn,
   messages: ChatCompletionMessageParam[],
@@ -210,9 +249,10 @@ async function runLoopCore(
         return finishPaused(s, capacityPause);
       }
 
+      const nudged = turnSignals.nudged;
       const effortSignals: EffortSignals = {
         iteration: s.iterations,
-        steering: turnSignals.nudged || messages[messages.length - 1]?.role === 'user',
+        steering: nudged || messages[messages.length - 1]?.role === 'user',
         toolError: turnSignals.toolError,
         wrote: turnSignals.wrote,
       };
@@ -240,13 +280,18 @@ async function runLoopCore(
       if (effort.trace) {
         trace({ type: 'system1_decision', runId, iteration: s.iterations, decision: effort.trace });
       }
+      const effortOverride = escalateEffort(s, effort, {
+        toolError: effortSignals.toolError,
+        nudged,
+      });
+      const sentEffort = effortOverride ?? effort.wire;
 
       trace({
         type: 'llm_request',
         runId,
         iteration: s.iterations,
         estimatedPromptTokens: estimatedPrompt,
-        ...(effort.wire !== undefined ? { reasoningEffort: effort.wire } : {}),
+        ...(sentEffort !== undefined ? { reasoningEffort: sentEffort } : {}),
         ...(recorder ? { input: recorder.input(messages, tools) } : {}),
       });
       emit?.({ type: 'turn.started', runId, iteration: s.iterations });
@@ -271,7 +316,7 @@ async function runLoopCore(
         tools,
         onTextDelta,
         signal,
-        effort.applied && effort.wire !== undefined ? { reasoningEffort: effort.wire } : undefined,
+        effortOverride !== undefined ? { reasoningEffort: effortOverride } : undefined,
       );
       throwIfAborted(signal);
       const durationMs = Date.now() - startedAt;

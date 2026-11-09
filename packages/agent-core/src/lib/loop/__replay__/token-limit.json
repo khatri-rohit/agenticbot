@@ -36,7 +36,11 @@
         "promptTiers": true,
         "harnessNotes": true,
         "compactHomePrompt": false,
-        "situationCard": true
+        "situationCard": true,
+        "effortEscalation": true,
+        "stopCheck": true,
+        "sectionedSummary": true,
+        "learningLoop": true
       }
     },
     {

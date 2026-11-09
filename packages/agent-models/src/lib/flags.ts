@@ -28,6 +28,20 @@ export type HarnessFlags = {
    * commands, failures) that survives compaction.
    */
   situationCard: boolean;
+  /**
+   * After a tool error or a harness steering note, the rest of the run uses
+   * one reasoning rung above the baseline. It never steps back down.
+   */
+  effortEscalation: boolean;
+  /**
+   * An Agent run that edited files and then claims success without running
+   * a command since its last edit is sent back once to verify.
+   */
+  stopCheck: boolean;
+  /** Between-run compaction asks a side model for a sectioned summary; the extractive one is the fallback. */
+  sectionedSummary: boolean;
+  /** After a thread goes idle, a side model proposes memory updates, staged for the user's approval. */
+  learningLoop: boolean;
 };
 
 export const DEFAULT_HARNESS_FLAGS: HarnessFlags = {
@@ -36,6 +50,10 @@ export const DEFAULT_HARNESS_FLAGS: HarnessFlags = {
   harnessNotes: true,
   compactHomePrompt: false,
   situationCard: true,
+  effortEscalation: true,
+  stopCheck: true,
+  sectionedSummary: true,
+  learningLoop: true,
 };
 
 const FLAG_NAMES = Object.keys(DEFAULT_HARNESS_FLAGS) as Array<keyof HarnessFlags>;

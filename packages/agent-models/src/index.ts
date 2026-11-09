@@ -99,6 +99,7 @@ export {
   parseStartRunRequest,
   applyPostureToTools,
   isAskStrippedTool,
+  isReadOnlyPosture,
 } from './lib/run.js';
 
 export {
@@ -259,6 +260,7 @@ export type { ContextWindowMode } from './lib/context.js';
 export {
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  MIN_CONTEXT_WINDOW_TOKENS,
   contextBudgetForWindow,
   parseContextWindowMode,
   parseSnapshot,

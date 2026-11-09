@@ -101,28 +101,36 @@ export type ChatMessage =
 
 /**
  * Per-run workspace posture. Not a ThreadKind / ModeName.
- * Ask = read-only tool pack; Agent = full workspace tools. Default agent.
+ * Ask = read-only, answers questions. Plan = read-only, explores and writes
+ * a plan for the user to approve (approving = switching to Agent).
+ * Agent = full workspace tools. Default agent.
  */
-export type RunPosture = 'ask' | 'agent';
+export type RunPosture = 'ask' | 'plan' | 'agent';
 
-/** Workspace mutation tools. Ask must never register or execute these. */
+/** Workspace mutation tools. Read-only postures never register or execute these. */
 export const ASK_STRIPPED_TOOLS = ['edit_file', 'run_terminal'] as const;
 
 export function isAskStrippedTool(name: string): boolean {
   return (ASK_STRIPPED_TOOLS as readonly string[]).includes(name);
 }
 
-export function normalizeRunPosture(value: unknown): RunPosture {
-  if (typeof value !== 'string') return 'agent';
-  return value.trim().toLowerCase() === 'ask' ? 'ask' : 'agent';
+/** Ask and Plan cannot edit files or run commands; the tool gate enforces it. */
+export function isReadOnlyPosture(posture: RunPosture): boolean {
+  return posture !== 'agent';
 }
 
-/** Strip workspace write/exec tools when posture is Ask. */
+export function normalizeRunPosture(value: unknown): RunPosture {
+  if (typeof value !== 'string') return 'agent';
+  const posture = value.trim().toLowerCase();
+  return posture === 'ask' || posture === 'plan' ? posture : 'agent';
+}
+
+/** Strip workspace write/exec tools in a read-only posture. */
 export function applyPostureToTools(
   toolNames: string[],
   posture: RunPosture,
 ): string[] {
-  if (posture !== 'ask') return toolNames;
+  if (!isReadOnlyPosture(posture)) return toolNames;
   return toolNames.filter((name) => !isAskStrippedTool(name));
 }
 

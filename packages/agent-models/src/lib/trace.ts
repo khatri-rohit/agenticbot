@@ -62,6 +62,21 @@ export type TraceEvent =
       flags?: HarnessFlags;
     }
   | {
+      /** The final answer claimed success with no command after the last edit; sent back once. */
+      type: 'stop_check';
+      runId: string;
+      iteration: number;
+    }
+  | {
+      /** A tool error or steering note raised the rest of the run one reasoning rung. */
+      type: 'effort_escalated';
+      runId: string;
+      iteration: number;
+      from: string;
+      to: string;
+      reason: 'tool_error' | 'steering';
+    }
+  | {
       type: 'llm_request';
       runId: string;
       iteration: number;

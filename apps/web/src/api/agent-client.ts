@@ -314,6 +314,34 @@ export async function saveUserMemory(
   return op;
 }
 
+/** Memory suggestions waiting for approval (learning loop and staged writes). */
+export async function fetchPendingMemory(): Promise<MemoryOp[]> {
+  const res = await fetch(`${API_BASE}/api/agent/memory/pending`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load suggestions: ${res.status}`);
+  }
+  const { ops } = (await res.json()) as { ops: MemoryOp[] };
+  return ops;
+}
+
+export async function resolvePendingMemory(
+  opId: string,
+  decision: 'approve' | 'reject',
+): Promise<MemoryOp> {
+  const res = await fetch(`${API_BASE}/api/agent/memory/pending/${encodeURIComponent(opId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to ${decision} suggestion: ${res.status}`);
+  }
+  const { op } = (await res.json()) as { op: MemoryOp };
+  return op;
+}
+
 export async function revertMemoryOp(opId: string): Promise<MemoryOp> {
   const res = await fetch(`${API_BASE}/api/agent/memory/revert`, {
     method: 'POST',

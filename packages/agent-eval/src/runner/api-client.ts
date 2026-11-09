@@ -37,7 +37,7 @@ export class ApiClient {
     threadId: string;
     content: string;
     model: string;
-    posture: 'agent' | 'ask';
+    posture: 'agent' | 'ask' | 'plan';
     /** Omitted: the model default. `'auto'`: System 1 picks per iteration (enforce mode only). */
     thinking?: ThinkingValue;
   }): Promise<{ runId: string }> {

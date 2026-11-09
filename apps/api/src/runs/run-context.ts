@@ -24,6 +24,7 @@ import {
   createMemoryTool,
   createPlanTools,
   createRunToolset,
+  createSessionSearchTool,
   loadWorkspaceRules,
   packMentionedThread,
   getSkill,
@@ -191,6 +192,9 @@ export async function prepareRun(input: {
     webSearch: input.webSearch,
     hostTools: [
       ...planTools,
+      createSessionSearchTool(async (query, limit) =>
+        store.searchMessages(query, { excludeThreadId: input.threadId, limit }),
+      ),
       createMemoryTool({
         read: () => memory.read(workspaceRoot),
         apply: async (op) => {
