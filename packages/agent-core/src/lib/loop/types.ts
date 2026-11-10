@@ -9,6 +9,7 @@ import type {
   HarnessFlags,
   LedgerAppendMeta,
   LedgerRecord,
+  ResolvedModelSettings,
   RunPosture,
   RunUsage,
   SubagentSpec,
@@ -112,6 +113,11 @@ export type RunLoopConfig = {
   contextBudget?: ContextBudget;
   /** Harness switches resolved by the host at run start. Defaults to DEFAULT_HARNESS_FLAGS. */
   flags?: HarnessFlags;
+  /**
+   * Model-role picks resolved by the host at run start (file > env > run's
+   * model), recorded on run.started / run_start for eval attribution.
+   */
+  modelSettings?: ResolvedModelSettings;
   /**
    * Sub-agent runner. The loop binds it to this run (signal, budget,
    * capabilities) when the registry has `delegate`.

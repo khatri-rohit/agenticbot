@@ -184,6 +184,7 @@ async function runLoopCore(
     posture: s.posture,
     windowTokens: s.contextBudget.windowTokens,
     flags: s.flags,
+    ...(config.modelSettings ? { modelSettings: config.modelSettings } : {}),
     ...(config.contextReport?.windowSource
       ? { windowSource: config.contextReport.windowSource }
       : {}),
@@ -205,6 +206,7 @@ async function runLoopCore(
       ? { estimatedPromptTokens: config.estimatedPromptTokens }
       : {}),
     ...(config.contextReport ? { contextReport: config.contextReport } : {}),
+    ...(config.modelSettings ? { modelSettings: config.modelSettings } : {}),
     ...(limits.maxPromptTokens !== undefined
       ? { maxPromptTokens: limits.maxPromptTokens }
       : {}),

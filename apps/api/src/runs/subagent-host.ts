@@ -4,6 +4,7 @@ import {
   WORKSPACE_MODE,
   envelopeToChatMessage,
   type OllamaEndpoint,
+  type ResolvedModelSettings,
   type ThinkingValue,
 } from '@agent/agent-models';
 import {
@@ -15,7 +16,7 @@ import {
 } from '@agent/agent-core';
 
 import { capacityState } from '../models/capacity';
-import { modelRolesFor, resolveCallOptions, resolveContextBudget } from '../models/model-runtime';
+import { resolveCallOptions, resolveContextBudget } from '../models/model-runtime';
 import type { ThreadStore } from '../threads/thread-store';
 import { threadTraceSink } from '../platform/trace-sink.js';
 
@@ -27,8 +28,9 @@ import { threadTraceSink } from '../platform/trace-sink.js';
 export function createSubagentHost(deps: {
   store: ThreadStore;
   endpoint: OllamaEndpoint;
+  modelSettings?: ResolvedModelSettings;
 }): SubagentHost {
-  const { store, endpoint } = deps;
+  const { store, endpoint, modelSettings } = deps;
   return {
     async createThread(input) {
       const thread = await store.createThread(input.model, input.title, {
@@ -72,13 +74,16 @@ export function createSubagentHost(deps: {
       store.readBlobText(threadId, sha256, offset, length),
     writeLastRun: (threadId, lastRun) => store.writeLastRun(threadId, lastRun),
     // Behind weekly pace, review/advisor run on the main model instead of the
-    // strong one; explore already uses fast.
-    modelFor: (role, parentModel) =>
-      modelRolesFor(parentModel)[
-        role === 'strong' && endpoint === 'cloud' && capacityState() === 'conserve'
-          ? 'main'
-          : role
-      ],
+    // strong one; explore already uses fast. Settings picks (file > env >
+    // run's model) replace the env-only lookup when the host passed a snapshot.
+    modelFor: (role, parentModel) => {
+      if (role === 'strong' && endpoint === 'cloud' && capacityState() === 'conserve') {
+        return parentModel;
+      }
+      if (role === 'main') return parentModel;
+      const resolved = modelSettings?.roles[role];
+      return resolved && resolved.source !== 'default' ? resolved.model : parentModel;
+    },
     async modelCall(model, preference) {
       // The profile says off / default / max; the child model's own values
       // say what that means (off only if it offers off, max = its top level).

@@ -15,15 +15,28 @@ import {
   UserRound,
   Volume2,
 } from 'lucide-react';
-import { DEFAULT_MEMORY_CAPS, type MemoryOp } from '@agent/agent-models';
+import {
+  MODEL_SETTING_ROLES,
+  SIDE_CALL_THINKING_LEVELS,
+  DEFAULT_MEMORY_CAPS,
+  type MemoryOp,
+  type ModelRoleSetting,
+  type ModelSettingRole,
+  type ModelSettings,
+  type ResolvedModelSettings,
+  type SideCallThinking,
+} from '@agent/agent-models';
 import { useTheme } from '@/components/shell/theme-provider';
 import {
   fetchMemory,
   fetchPendingMemory,
+  getModelSettings,
+  putModelSettings,
   resolvePendingMemory,
   revertMemoryOp,
   saveUserMemory,
 } from '@/api/agent-client';
+import { useOllamaModels } from '@/features/composer/use-ollama-models';
 import { toastError, toastSuccess } from '@/hooks/use-toast';
 import { formatRelativeTime } from '@/lib/format-relative-time';
 import { Button } from '@/components/ui/button';
@@ -255,7 +268,7 @@ export function SidebarSettings({
   );
 }
 
-type Tab = 'profile' | 'notes' | 'history' | 'suggestions';
+type Tab = 'profile' | 'notes' | 'history' | 'suggestions' | 'models';
 
 function ProfileDialog({
   open,
@@ -277,6 +290,31 @@ function ProfileDialog({
   const [confirmRevertId, setConfirmRevertId] = useState<string | null>(null);
   const [revertingId, setRevertingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [modelSettings, setModelSettings] = useState<ModelSettings | null>(null);
+  const [modelSettingsResolved, setModelSettingsResolved] =
+    useState<ResolvedModelSettings | null>(null);
+  const [modelSettingsSaving, setModelSettingsSaving] = useState(false);
+  const [modelSettingsError, setModelSettingsError] = useState<string | null>(null);
+
+  // Load model-role settings once on open; the Models tab edits them.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void getModelSettings()
+      .then((view) => {
+        if (cancelled) return;
+        setModelSettings(view.settings);
+        setModelSettingsResolved(view.resolved);
+        setModelSettingsError(null);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setModelSettingsError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const loadAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -377,6 +415,7 @@ function ProfileDialog({
       id: 'suggestions',
       label: pending.length > 0 ? `Suggestions (${pending.length})` : 'Suggestions',
     },
+    { id: 'models', label: 'Models' },
   ];
 
   return (
@@ -434,6 +473,41 @@ function ProfileDialog({
             pending={pending}
             resolvingId={resolvingId}
             onResolve={(opId, decision) => void handleResolve(opId, decision)}
+          />
+        ) : tab === 'models' ? (
+          <ModelsTab
+            settings={modelSettings}
+            resolved={modelSettingsResolved}
+            saving={modelSettingsSaving}
+            error={modelSettingsError}
+            onRoleChange={(role, setting) =>
+              setModelSettings((prev) =>
+                prev
+                  ? { ...prev, roles: { ...prev.roles, [role]: setting } }
+                  : prev,
+              )
+            }
+            onThinkingChange={(key, value) =>
+              setModelSettings((prev) =>
+                prev
+                  ? { ...prev, thinking: { ...prev.thinking, [key]: value } }
+                  : prev,
+              )
+            }
+            onSave={async () => {
+              if (!modelSettings) return;
+              setModelSettingsSaving(true);
+              try {
+                const view = await putModelSettings(modelSettings);
+                setModelSettings(view.settings);
+                setModelSettingsResolved(view.resolved);
+                setModelSettingsError(null);
+              } catch (err) {
+                setModelSettingsError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setModelSettingsSaving(false);
+              }
+            }}
           />
         ) : (
           <HistoryTab
@@ -841,5 +915,182 @@ function SuggestionsTab({
         })}
       </ul>
     </ScrollArea>
+  );
+}
+
+const MODEL_ROLE_LABELS: Record<ModelSettingRole, string> = {
+  fast: 'Sub-agent fast',
+  strong: 'Sub-agent strong',
+  summary: 'Summarizer (compaction)',
+  title: 'Thread titles',
+};
+
+const MODEL_ROLE_HINTS: Record<ModelSettingRole, string> = {
+  fast: 'Explore sub-agents and other cheap side calls.',
+  strong: 'Review and advisor sub-agents.',
+  summary: 'Sectioned summaries when a thread compacts.',
+  title: 'Short titles for new threads.',
+};
+
+const ENV_VAR_FOR_ROLE: Record<ModelSettingRole, string> = {
+  fast: 'AGENT_MODEL_FAST',
+  strong: 'AGENT_MODEL_STRONG',
+  summary: 'AGENT_MODEL_SUMMARY',
+  title: 'TITLE_MODEL',
+};
+
+/**
+ * Settings → Models: one row per background role. Unset rows fall back to
+ * env, then to the run's own model; the caption shows which won.
+ */
+function ModelsTab({
+  settings,
+  resolved,
+  saving,
+  error,
+  onRoleChange,
+  onThinkingChange,
+  onSave,
+}: {
+  settings: ModelSettings | null;
+  resolved: ResolvedModelSettings | null;
+  saving: boolean;
+  error: string | null;
+  onRoleChange: (role: ModelSettingRole, setting: ModelRoleSetting) => void;
+  onThinkingChange: (key: 'summary' | 'learningReview', value: SideCallThinking) => void;
+  onSave: () => Promise<void>;
+}) {
+  const { cloudModels, localModels, localModelsLoading, localModelsError } =
+    useOllamaModels(true);
+
+  if (error) {
+    return (
+      <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-xs text-destructive">
+        {error}
+      </p>
+    );
+  }
+  if (!settings) {
+    return <ProfileSkeleton />;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">
+        Which model each background job uses. Unset roles fall back to the
+        environment variable, then to the run&apos;s own model. Applies to the
+        next run — no restart needed.
+      </p>
+      <ul role="list" className="flex flex-col gap-2.5">
+        {MODEL_SETTING_ROLES.map((role) => {
+          const setting = settings.roles[role];
+          const roleResolved = resolved?.roles[role];
+          const caption =
+            setting.model !== ''
+              ? 'from settings'
+              : roleResolved?.source === 'env'
+                ? `from ${ENV_VAR_FOR_ROLE[role]}`
+                : "default: the run's own model";
+          return (
+            <li key={role} className="flex flex-col gap-1">
+              <label
+                htmlFor={`model-role-${role}`}
+                className="type-caption font-medium text-foreground"
+              >
+                {MODEL_ROLE_LABELS[role]}
+              </label>
+              <select
+                id={`model-role-${role}`}
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                value={`${setting.endpoint}:${setting.model}`}
+                onChange={(event) => {
+                  const [endpoint, ...rest] = event.target.value.split(':');
+                  const model = rest.join(':');
+                  onRoleChange(role, {
+                    model,
+                    endpoint: endpoint === 'local' ? 'local' : 'cloud',
+                  });
+                }}
+              >
+                <option value="cloud:">Unset (env / run&apos;s model)</option>
+                <optgroup label="Cloud">
+                  {cloudModels.map((m) => (
+                    <option key={`cloud:${m.id}`} value={`cloud:${m.id}`}>
+                      {m.id}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Local">
+                  {localModelsLoading ? (
+                    <option disabled value="local:loading">
+                      Loading installed models…
+                    </option>
+                  ) : localModels.length === 0 ? (
+                    <option disabled value="local:none">
+                      {localModelsError ?? 'No local models found'}
+                    </option>
+                  ) : (
+                    localModels.map((m) => (
+                      <option key={`local:${m.id}`} value={`local:${m.id}`}>
+                        {m.id}
+                      </option>
+                    ))
+                  )}
+                </optgroup>
+              </select>
+              <span className="type-caption text-muted-foreground">
+                {MODEL_ROLE_HINTS[role]} · {caption}
+                {setting.model !== '' && roleResolved
+                  ? ` → ${roleResolved.model}`
+                  : roleResolved
+                    ? ` → ${roleResolved.model}`
+                    : ''}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex flex-col gap-2 border-t border-border pt-3">
+        <p className="type-caption font-medium text-foreground">Side-call thinking</p>
+        {(
+          [
+            ['summary', 'Summaries (compaction)'],
+            ['learningReview', 'Learning review (memory suggestions)'],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key} className="flex items-center justify-between gap-2">
+            <span className="text-xs text-foreground">{label}</span>
+            <select
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+              value={settings.thinking[key]}
+              onChange={(event) =>
+                onThinkingChange(key, event.target.value as SideCallThinking)
+              }
+            >
+              {SIDE_CALL_THINKING_LEVELS.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+        <p className="type-caption text-muted-foreground">
+          Higher thinking raises the output cap and timeout with it. Titles
+          always run thinking-off.
+        </p>
+      </div>
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          className="h-7 px-3 text-xs"
+          disabled={saving}
+          onClick={() => void onSave()}
+        >
+          {saving ? 'Saving…' : 'Save models'}
+        </Button>
+      </div>
+    </div>
   );
 }

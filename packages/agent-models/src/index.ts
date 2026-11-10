@@ -187,6 +187,23 @@ export type { HarnessFlags } from './lib/flags.js';
 export { DEFAULT_HARNESS_FLAGS, parseHarnessFlags } from './lib/flags.js';
 
 export type {
+  ModelSettingRole,
+  SideCallThinking,
+  ModelRoleSetting,
+  ModelSettings,
+  ModelSettingSource,
+  ResolvedModelSetting,
+  ResolvedModelSettings,
+} from './lib/model-settings.js';
+export {
+  MODEL_SETTING_ROLES,
+  SIDE_CALL_THINKING_LEVELS,
+  emptyModelSettings,
+  isModelSettingRole,
+  isSideCallThinking,
+} from './lib/model-settings.js';
+
+export type {
   MemoryTarget,
   MemoryOp,
   MemoryFiles,

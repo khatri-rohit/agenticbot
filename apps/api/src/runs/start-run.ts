@@ -28,6 +28,7 @@ import {
   createCapacityGate,
 } from '../models/capacity';
 import { resolveCallOptions, resolveContextBudget } from '../models/model-runtime';
+import { resolveModelSettings } from '../models/model-settings-store';
 import {
   getAgentHome,
   getThreadStore,
@@ -163,6 +164,9 @@ async function startClaimedRun(
 
   const useModel = model ?? thread.model ?? HOME_MODE.model;
   const endpoint = endpointFromLocal(local);
+  // Resolved once per run (file > env > run's model) and recorded on
+  // run.started; consumers below read this snapshot, never env directly.
+  const modelSettings = await resolveModelSettings(useModel, endpoint);
 
   // Before the user row is written, so a refusal leaves the ledger as it was.
   if (
@@ -246,6 +250,7 @@ async function startClaimedRun(
     flags: prepared.flags,
     envelopes,
     report: prepared.report,
+    modelSettings,
   });
   if (preRunSnapshot) prepared = await prepareRun(prepareInput);
 
@@ -312,6 +317,7 @@ async function startClaimedRun(
     contextReport: prepared.report,
     contextBudget: prepared.report.budget,
     flags: prepared.flags,
+    modelSettings,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     putBlob: (text) => store.putBlob(threadId, text),
     // Every model call's exact input/output, for the eval viewer. Off: AGENT_RECORD_MODEL_CALLS=0.
@@ -334,7 +340,7 @@ async function startClaimedRun(
       ? {
           subagents: createSubagentRunner({
             runManager,
-            host: createSubagentHost({ store, endpoint }),
+            host: createSubagentHost({ store, endpoint, modelSettings }),
           }),
         }
       : {}),
@@ -382,6 +388,7 @@ async function startClaimedRun(
         model: useModel,
         endpoint,
         enabled: prepared.flags.learningLoop,
+        modelSettings,
       });
       // A cancelled run leaves compaction to the next run's pre-run pass, so
       // nothing it writes can race that run's rewind.
@@ -394,6 +401,7 @@ async function startClaimedRun(
         endpoint,
         flags: prepared.flags,
         report: result.contextReport,
+        modelSettings,
       });
     },
   });
@@ -407,7 +415,7 @@ async function startClaimedRun(
   if (preRunSnapshot) emitCompacted(store, runId, threadId, preRunSnapshot);
 
   if (isFirstUserTurn && message) {
-    titleNewThread(store, threadId, message.content || 'Image chat', useModel, endpoint);
+    titleNewThread(store, threadId, message.content || 'Image chat', useModel, endpoint, modelSettings);
   }
 
   return { ok: true, runId };

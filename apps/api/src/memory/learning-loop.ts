@@ -5,6 +5,8 @@ import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/ch
 import {
   isWorkspaceKind,
   type OllamaEndpoint,
+  type ResolvedModelSettings,
+  type SideCallThinking,
 } from '@agent/agent-models';
 import {
   buildReviewMessages,
@@ -16,6 +18,7 @@ import {
   resolveReasoningEffort,
 } from '@agent/agent-core';
 
+import { sideCallBudget } from '../models/model-settings-store';
 import { getAgentHome, getMemoryStore, getThreadStore, runManager } from '../platform/instances';
 
 /**
@@ -26,7 +29,6 @@ import { getAgentHome, getMemoryStore, getThreadStore, runManager } from '../pla
  */
 
 const DEFAULT_IDLE_MS = 10 * 60_000;
-const REVIEW_TIMEOUT_MS = 30_000;
 const MIN_NEW_USER_TURNS = 2;
 
 const timers = new Map<string, NodeJS.Timeout>();
@@ -54,16 +56,36 @@ async function writeReviewedSeq(threadId: string, throughSeq: number): Promise<v
   await writeFile(reviewedPath(threadId), JSON.stringify({ throughSeq }), 'utf8');
 }
 
-/** AGENT_MODEL_FAST on cloud (a cloud id); the thread's own model on local. */
-function reviewModelFor(model: string, endpoint: OllamaEndpoint): string {
-  const fast = process.env.AGENT_MODEL_FAST?.trim();
-  return endpoint === 'cloud' && fast ? fast : model;
+/**
+ * The review model from the run's resolved settings (file > env > thread's
+ * model). Falls back to the thread's own model when no snapshot was passed.
+ */
+function reviewModelFor(
+  model: string,
+  modelSettings: ResolvedModelSettings | undefined,
+): string {
+  const summary = modelSettings?.roles.summary;
+  return summary && summary.source !== 'default' ? summary.model : model;
 }
 
-async function thinkingOff(model: string, endpoint: OllamaEndpoint): Promise<string | undefined> {
+/** Thinking preference mapped onto the model's own values (off = pre-settings behavior). */
+async function reviewThinking(
+  model: string,
+  endpoint: OllamaEndpoint,
+  thinking: SideCallThinking,
+): Promise<string | undefined> {
   try {
     const config = await getOllamaModelConfig(model, endpoint);
-    return config.thinking.values.includes(false) ? resolveReasoningEffort(config, false) : undefined;
+    if (thinking === 'off') {
+      return config.thinking.values.includes(false)
+        ? resolveReasoningEffort(config, false)
+        : undefined;
+    }
+    const wanted = thinking === 'low' ? false : true;
+    if (config.thinking.values.includes(wanted)) {
+      return resolveReasoningEffort(config, wanted);
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -73,6 +95,7 @@ async function reviewThread(input: {
   threadId: string;
   model: string;
   endpoint: OllamaEndpoint;
+  modelSettings?: ResolvedModelSettings;
 }): Promise<void> {
   const store = await getThreadStore();
   const thread = store.getThread(input.threadId);
@@ -86,17 +109,19 @@ async function reviewThread(input: {
   const workspaceRoot = isWorkspaceKind(thread.kind) ? thread.workspaceRoot : undefined;
   const memory = getMemoryStore();
   const files = await memory.read(workspaceRoot);
-  const model = reviewModelFor(input.model, input.endpoint);
-  const reasoningEffort = await thinkingOff(model, input.endpoint);
+  const model = reviewModelFor(input.model, input.modelSettings);
+  const thinking = input.modelSettings?.thinking.learningReview ?? 'off';
+  const reasoningEffort = await reviewThinking(model, input.endpoint, thinking);
+  const budget = sideCallBudget(thinking);
   const completion = await getClient(input.endpoint).chat.completions.create(
     {
       model,
       messages: buildReviewMessages({ envelopes, afterSeq, memory: files }),
-      max_tokens: 1_000,
+      max_tokens: budget.maxTokens,
       temperature: 0.2,
       ...(reasoningEffort !== undefined ? { reasoning_effort: reasoningEffort } : {}),
     } as ChatCompletionCreateParamsNonStreaming,
-    { signal: AbortSignal.timeout(REVIEW_TIMEOUT_MS) },
+    { signal: AbortSignal.timeout(budget.timeoutMs) },
   );
   const proposals = parseReviewProposals(completion.choices[0]?.message?.content ?? '', {
     threadId: input.threadId,
@@ -136,6 +161,7 @@ export function scheduleLearningReview(input: {
   model: string;
   endpoint: OllamaEndpoint;
   enabled: boolean;
+  modelSettings?: ResolvedModelSettings;
 }): void {
   if (!input.enabled) return;
   const existing = timers.get(input.threadId);

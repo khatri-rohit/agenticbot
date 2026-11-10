@@ -5,6 +5,8 @@ import type {
   HarnessFlags,
   LedgerEnvelope,
   OllamaEndpoint,
+  ResolvedModelSettings,
+  SideCallThinking,
   Snapshot,
 } from '@agent/agent-models';
 import {
@@ -18,28 +20,48 @@ import {
   traceCompactionEvent,
 } from '@agent/agent-core';
 
+import { sideCallBudget } from '../models/model-settings-store';
 import { runManager } from '../platform/instances';
 import { threadTraceSink } from '../platform/trace-sink.js';
 import type { ThreadStore } from '../threads/thread-store';
 
-/** Bounds the summary call. Pre-run compaction waits on it, so the user does too. */
-const SUMMARY_TIMEOUT_MS = 20_000;
-const SUMMARY_MAX_TOKENS = 1_500;
-
 /**
- * AGENT_MODEL_FAST (a cloud id) on cloud runs; the run's own model on local
- * runs, where a cloud id would not exist.
+ * The summary model from the run's resolved settings (file > env > run's
+ * model). Falls back to the run's own model when the host passed no
+ * snapshot — the pre-settings behavior.
  */
-function summaryModelFor(runModel: string, endpoint: OllamaEndpoint): string {
-  const fast = process.env.AGENT_MODEL_FAST?.trim();
-  return endpoint === 'cloud' && fast ? fast : runModel;
+function summaryModelFor(
+  runModel: string,
+  endpoint: OllamaEndpoint,
+  modelSettings: ResolvedModelSettings | undefined,
+): string {
+  const summary = modelSettings?.roles.summary;
+  return summary && summary.source !== 'default' ? summary.model : runModel;
 }
 
-/** Thinking off when the model offers off: thinking tokens would eat max_tokens. */
-async function summaryReasoningEffort(model: string, endpoint: OllamaEndpoint): Promise<string | undefined> {
+/**
+ * Thinking preference from settings, mapped onto the model's own values.
+ * `off` keeps the pre-settings behavior: thinking off when the model offers
+ * off, because thinking tokens would eat max_tokens.
+ */
+async function summaryReasoningEffort(
+  model: string,
+  endpoint: OllamaEndpoint,
+  thinking: SideCallThinking,
+): Promise<string | undefined> {
   try {
     const config = await getOllamaModelConfig(model, endpoint);
-    return config.thinking.values.includes(false) ? resolveReasoningEffort(config, false) : undefined;
+    if (thinking === 'off') {
+      return config.thinking.values.includes(false)
+        ? resolveReasoningEffort(config, false)
+        : undefined;
+    }
+    // low/medium/high: pick the model's own value nearest the preference.
+    const wanted = thinking === 'low' ? false : true;
+    if (config.thinking.values.includes(wanted)) {
+      return resolveReasoningEffort(config, wanted);
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -56,20 +78,23 @@ async function sectionedSummary(input: {
   envelopes: LedgerEnvelope[];
   throughSeq: number;
   previous: Snapshot | null;
+  modelSettings: ResolvedModelSettings | undefined;
 }): Promise<string | null> {
   try {
-    const model = summaryModelFor(input.model, input.endpoint);
-    const reasoningEffort = await summaryReasoningEffort(model, input.endpoint);
+    const model = summaryModelFor(input.model, input.endpoint, input.modelSettings);
+    const thinking = input.modelSettings?.thinking.summary ?? 'off';
+    const reasoningEffort = await summaryReasoningEffort(model, input.endpoint, thinking);
+    const budget = sideCallBudget(thinking);
     const params = {
       model,
       messages: buildSummaryMessages(input),
-      max_tokens: SUMMARY_MAX_TOKENS,
+      max_tokens: budget.maxTokens,
       temperature: 0.2,
       ...(reasoningEffort !== undefined ? { reasoning_effort: reasoningEffort } : {}),
     };
     const completion = await getClient(input.endpoint).chat.completions.create(
       params as ChatCompletionCreateParamsNonStreaming,
-      { signal: AbortSignal.timeout(SUMMARY_TIMEOUT_MS) },
+      { signal: AbortSignal.timeout(budget.timeoutMs) },
     );
     const reply = completion.choices[0]?.message?.content ?? '';
     return acceptSectionedSummary(reply, input.throughSeq);
@@ -97,6 +122,7 @@ export async function compactThread(input: {
   flags: HarnessFlags;
   envelopes: LedgerEnvelope[];
   report: ContextReport;
+  modelSettings?: ResolvedModelSettings;
 }): Promise<Snapshot | null> {
   const { store, envelopes } = input;
   const throughSeq = planCompaction(envelopes, input.report);
@@ -117,6 +143,7 @@ export async function compactThread(input: {
         envelopes,
         throughSeq,
         previous: existing,
+        modelSettings: input.modelSettings,
       })
     : null;
   const snapshot: Snapshot = sectioned
@@ -161,6 +188,7 @@ export async function maybeCompactThread(input: {
   endpoint: OllamaEndpoint;
   flags: HarnessFlags;
   report: ContextReport;
+  modelSettings?: ResolvedModelSettings;
 }): Promise<void> {
   if (!input.report.needsCompaction) return;
   const { store, threadId, runId } = input;
@@ -173,6 +201,7 @@ export async function maybeCompactThread(input: {
     flags: input.flags,
     envelopes: await store.hydrateEnvelopes(threadId),
     report: input.report,
+    modelSettings: input.modelSettings,
   });
   if (snapshot) emitCompacted(store, runId, threadId, snapshot);
 }

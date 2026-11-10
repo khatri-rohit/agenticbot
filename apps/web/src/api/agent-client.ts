@@ -6,10 +6,12 @@ import type {
   MemoryFiles,
   MemoryOp,
   MessageAttachment,
+  ModelSettings,
   OllamaBalance,
   OllamaEndpoint,
   OllamaListedModel,
   OllamaModelConfig,
+  ResolvedModelSettings,
   RunPosture,
   StartRunRequest,
   ThinkingValue,
@@ -227,6 +229,42 @@ export async function fetchCloudOllamaModels(): Promise<LocalOllamaModelsRespons
     throw new Error(body.error ?? `Failed to list cloud models: ${res.status}`);
   }
   return res.json() as Promise<LocalOllamaModelsResponse>;
+}
+
+export type ModelSettingsView = {
+  settings: ModelSettings;
+  resolved: ResolvedModelSettings;
+};
+
+/** Stored model-role picks and their resolution, for Settings → Models. */
+export async function getModelSettings(): Promise<ModelSettingsView> {
+  const res = await fetch(`${API_BASE}/api/agent/models/settings`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load model settings: ${res.status}`);
+  }
+  return res.json() as Promise<ModelSettingsView>;
+}
+
+/** Persist model-role picks. Invalid bodies are a 400 with `problems`. */
+export async function putModelSettings(
+  settings: ModelSettings,
+): Promise<ModelSettingsView> {
+  const res = await fetch(`${API_BASE}/api/agent/models/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const problems = Array.isArray((body as { problems?: unknown }).problems)
+      ? ((body as { problems: string[] }).problems.join('; '))
+      : '';
+    throw new Error(
+      problems || (body as { error?: string }).error || `Failed to save model settings: ${res.status}`,
+    );
+  }
+  return res.json() as Promise<ModelSettingsView>;
 }
 
 /** Fetch Ollama Cloud balance (session/weekly limits or USD credits). */
