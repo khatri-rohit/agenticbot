@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   Ban,
   Check,
@@ -281,7 +281,7 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
  * A settled-run summary strip ("Changed N files +a −b") sits above the
  * cards when the step wrote files — the glanceable number before detail.
  */
-export function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
+export const ToolStepList = memo(function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
   if (rows.length === 0) return null;
   const changes = changedFilesSummary(rows);
   return (
@@ -319,7 +319,7 @@ export function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
       })}
     </div>
   );
-}
+});
 
 /**
  * One tool call. Collapsed = fixed height (header + clipped content teaser +

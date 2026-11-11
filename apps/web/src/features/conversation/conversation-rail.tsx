@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/utils';
 
 export type ConversationAnchor = {
@@ -52,6 +52,9 @@ export function ConversationRail({
   // Scroll-spy: highlight the turn most visible in the scroll viewport.
   // Observes each turn section and picks the entry with the highest
   // intersection ratio as the active anchor.
+  const anchorsRef = useRef(anchors);
+  anchorsRef.current = anchors;
+
   useEffect(() => {
     const root = scrollContainerRef.current;
     if (!root || anchors.length < MIN_TURNS) return;
@@ -65,7 +68,7 @@ export function ConversationRail({
         }
         let bestId: string | null = null;
         let bestRatio = 0;
-        for (const anchor of anchors) {
+        for (const anchor of anchorsRef.current) {
           const ratio = ratios.get(anchor.id) ?? 0;
           if (ratio > bestRatio) {
             bestRatio = ratio;
@@ -82,7 +85,10 @@ export function ConversationRail({
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
-  }, [anchors, scrollContainerRef, getAnchorElement]);
+    // Rebuild only when the set of anchor IDs changes, not when tool
+    // activity mutates the last anchor's metadata. The callback reads
+    // anchorsRef.current so it always sees the latest data.
+  }, [anchors.length, scrollContainerRef, getAnchorElement]);
 
   if (anchors.length < MIN_TURNS) return null;
 

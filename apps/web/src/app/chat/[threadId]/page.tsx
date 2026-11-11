@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useRef } from 'react';
+import { useCallback, use, useEffect, useRef } from 'react';
 import { normalizeRunPosture } from '@agent/agent-models';
 import { ChatHeader } from '@/features/conversation/chat-header';
 import { MessageList } from '@/features/conversation/message-list';
@@ -67,6 +67,11 @@ export default function ChatThreadPage({
     );
   }, [sendMessage, setComposerOptions]);
 
+  const onContinue = useCallback(
+    () => sendMessage('Continue from where the last run stopped.'),
+    [sendMessage],
+  );
+
   return (
     <ChatShell
       header={<ChatHeader threadId={threadId} />}
@@ -119,16 +124,11 @@ export default function ChatThreadPage({
         chatState={chatState}
         isRunning={isRunning}
         threadKind={threadKind}
-        onRetryLastResponse={() => retryLastResponse()}
-        onEditLastUserMessage={(id, content) =>
-          editLastUserMessage(id, content)
-        }
+        onRetryLastResponse={retryLastResponse}
+        onEditLastUserMessage={editLastUserMessage}
         {...(isSubagentThread
           ? {}
-          : {
-              onContinue: () =>
-                sendMessage('Continue from where the last run stopped.'),
-            })}
+          : { onContinue })}
       />
     </ChatShell>
   );

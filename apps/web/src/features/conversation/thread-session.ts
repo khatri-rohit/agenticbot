@@ -199,13 +199,22 @@ export function createThreadSession(
         chat: {
           ...view.chat,
           ...viewFromLedger(ledger, view.chat),
-          // The ledger holds the committed messages now; drop the bridge.
+          // Ledger holds the committed messages now; clear the live run and
+          // bridge in one update so there's no flash between them.
+          activeRun: null,
           settledSnippets: [],
           settledToolActivity: [],
         },
       });
     } catch {
-      // The next load or run end rebuilds it.
+      // Ledger refetch failed — still clear the live run so the UI doesn't
+      // hang in "running" forever. The next load rebuilds from disk.
+      update({
+        chat: {
+          ...view.chat,
+          activeRun: null,
+        },
+      });
     }
     void refreshThreads();
     if (!busy() && view.queued) void flushQueue();

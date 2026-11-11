@@ -153,6 +153,16 @@ export function useAgentRun(threadId: string) {
     };
   }, []);
 
+  const retryLastResponse = useCallback(
+    () => sessionRef.current?.retry(composerOptions),
+    [composerOptions],
+  );
+  const editLastUserMessage = useCallback(
+    (messageId: string, content: string) =>
+      sessionRef.current?.edit(messageId, content, composerOptions),
+    [composerOptions],
+  );
+
   return {
     messages: view.messages,
     chatState: view.chat,
@@ -163,9 +173,8 @@ export function useAgentRun(threadId: string) {
     sendQueuedNow: () =>
       sessionRef.current?.sendQueuedNow(normalizeRunPosture(composerOptions.posture)),
     editQueuedMessage,
-    retryLastResponse: () => sessionRef.current?.retry(composerOptions),
-    editLastUserMessage: (messageId: string, content: string) =>
-      sessionRef.current?.edit(messageId, content, composerOptions),
+    retryLastResponse,
+    editLastUserMessage,
     stopGeneration: () => sessionRef.current?.stop(),
     resolvePendingChoice: (choiceId: string, answer: ChoiceAnswer) =>
       sessionRef.current?.answerChoice(choiceId, answer) ?? Promise.resolve(),

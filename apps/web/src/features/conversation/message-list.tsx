@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import { useStickToBottom } from '../../hooks/use-stick-to-bottom';
 import { Button } from '@/components/ui/button';
@@ -14,9 +14,18 @@ import {
   type Message,
   type System1FallbackKind,
   type System1RunReport,
+  type ThreadPlan,
 } from '@agent/agent-models';
-import type { ChatState, CompactionNotice, ToolActivity } from './chat-store';
-import { groupMessageTurns } from './group-message-turns';
+import type {
+  ChatState,
+  CompactionNotice,
+  LimitNotice,
+  PendingChoice,
+  SubagentActivity,
+  ToolActivity,
+  AssistantSnippet,
+} from './chat-store';
+import { groupMessageTurns, type MessageTurn } from './group-message-turns';
 import { buildTurnTimeline, summarizeTurnWork } from './turn-timeline';
 import {
   formatDuration,
@@ -64,17 +73,20 @@ export function MessageList({
   // Transcript Retry/Continue fire async actions; hold the button until the
   // request settles so a double-click cannot fire two.
   const [transcriptBusy, setTranscriptBusy] = useState(false);
-  const runTranscriptAction = async (action: () => void | Promise<void>) => {
-    if (transcriptBusy) return;
-    setTranscriptBusy(true);
-    try {
-      await action();
-    } catch {
-      toastError('The request failed — nothing was changed', 'Action failed');
-    } finally {
-      setTranscriptBusy(false);
-    }
-  };
+  const runTranscriptAction = useCallback(
+    async (action: () => void | Promise<void>) => {
+      if (transcriptBusy) return;
+      setTranscriptBusy(true);
+      try {
+        await action();
+      } catch {
+        toastError('The request failed — nothing was changed', 'Action failed');
+      } finally {
+        setTranscriptBusy(false);
+      }
+    },
+    [transcriptBusy],
+  );
 
   const streaming = chatState.activeRun?.streamingMessage;
   const toolActivity =
@@ -168,7 +180,7 @@ export function MessageList({
   useEffect(() => {
     followContent('auto');
   }, [
-    messages,
+    messages?.length,
     streaming?.content,
     toolActivity.length,
     assistantSnippets.length,
@@ -242,189 +254,31 @@ export function MessageList({
           <div className="flex flex-col gap-8">
             {turns.map((turn, index) => {
               const isLastTurn = index === lastTurnIndex;
-              const liveActivity = isLastTurn ? toolActivity : [];
-              const liveStreaming = isLastTurn ? streaming : null;
-              const liveSnippets = isLastTurn ? assistantSnippets : [];
-              const turnCompaction = turnOwnsCompaction(
-                turn.replies,
-                compactionNotice,
-                isLastTurn,
-              )
-                ? compactionNotice
-                : null;
-              const steps = buildTurnTimeline({
-                replies: turn.replies,
-                liveActivity,
-                snippets: liveSnippets,
-                activeRunId,
-                streaming: liveStreaming,
-                compaction: turnCompaction,
-                subagentActivity: chatState.activeRun?.subagentActivity,
-              });
-              // The turn footer (time · work summary · Copy/Retry) belongs at
-              // the end of the turn. When tool calls follow the last reply
-              // (e.g. an interrupted run), lift it below them.
-              const latestReplyStep = steps.find(
-                (step): step is Extract<typeof step, { type: 'assistant' }> =>
-                  step.type === 'assistant' &&
-                  step.message.id === latestAssistantMessageId,
-              );
-              const footerAfterSteps =
-                latestReplyStep !== undefined &&
-                steps.at(-1) !== latestReplyStep;
-              const showSteps =
-                turn.replies.length > 0 ||
-                liveActivity.length > 0 ||
-                liveSnippets.length > 0 ||
-                Boolean(liveStreaming?.content) ||
-                Boolean(turnCompaction);
-
               return (
-                <section
+                <TurnView
                   key={turn.userMessage.id}
-                  ref={(el) =>
-                    registerAnchor(
-                      turn.userMessage.id,
-                      el as HTMLDivElement | null,
-                    )
-                  }
-                  id={`conversation-anchor-${turn.userMessage.id}`}
-                  className="flex flex-col gap-3.5 scroll-mt-6"
-                  aria-label="Conversation turn"
-                >
-                  <UserMessage
-                    message={turn.userMessage}
-                    canEdit={
-                      isLastTurn && turn.userMessage.id === latestUserMessageId
-                    }
-                    hasResponseBelow={
-                      isLastTurn &&
-                      (turn.replies.length > 0 ||
-                        isRunning ||
-                        Boolean(streaming?.content) ||
-                        Boolean(turnCompaction))
-                    }
-                    onEditSubmit={onEditLastUserMessage}
-                  />
-
-                  {/* The run never replied (start failed, or stopped first). */}
-                  {isLastTurn && !isRunning && !showSteps ? (
-                    <div className="flex items-center gap-3 px-1" role="status">
-                      <p className="type-caption text-muted-foreground">
-                        {isUserCancelled(chatState.limitNotice?.reason ?? '')
-                          ? 'You stopped this run before it replied.'
-                          : 'The run failed to start.'}
-                      </p>
-                      <button
-                        type="button"
-                        disabled={transcriptBusy}
-                        onClick={() =>
-                          void runTranscriptAction(() => onRetryLastResponse())
-                        }
-                        className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted disabled:opacity-50"
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {/* Settled plan pins under its anchor user message; while
-                      a run is live the plan floats above the composer instead. */}
-                  {isLastTurn && !isRunning ? (
-                    <PlanChip plan={chatState.plan} />
-                  ) : null}
-
-                  {showSteps ? (
-                    <div className="flex min-w-0 flex-col gap-3">
-                      {steps.map((step) => {
-                        if (step.type === 'assistant') {
-                          const isLatestAssistant =
-                            step.message.id === latestAssistantMessageId;
-                          return (
-                            <AssistantMessage
-                              key={step.message.id}
-                              message={step.message}
-                              showMeta={isLatestAssistant && !footerAfterSteps}
-                              workSummary={
-                                isLatestAssistant
-                                  ? summarizeTurnWork(steps)
-                                  : undefined
-                              }
-                              turnStartedAt={turn.userMessage.createdAt}
-                              showRetry={!isRunning && isLatestAssistant}
-                              onRetry={onRetryLastResponse}
-                              retryDisabled={isRunning}
-                            />
-                          );
-                        }
-                        if (step.type === 'snippet') {
-                          return (
-                            <div
-                              key={`snippet-${step.messageId}`}
-                              className="min-w-0 max-w-full"
-                            >
-                              <article className="chat-prose type-body min-w-0 max-w-full">
-                                <AgentMarkdown content={step.content} />
-                              </article>
-                            </div>
-                          );
-                        }
-                        if (step.type === 'tools') {
-                          return (
-                            <ToolStepList key={step.key} rows={step.rows} />
-                          );
-                        }
-                        if (step.type === 'compaction') {
-                          return (
-                            <CompactionCard
-                              key={`compaction-${step.notice.runId ?? step.notice.throughSeq}`}
-                              notice={step.notice}
-                            />
-                          );
-                        }
-                        if (step.type === 'subagent') {
-                          return (
-                            <SubagentCard
-                              key={`subagent-${step.activity.subRunId}`}
-                              activity={step.activity}
-                            />
-                          );
-                        }
-                        return (
-                          <div key="stream" className="min-w-0 max-w-full">
-                            <article className="chat-prose type-body min-w-0 max-w-full">
-                              <AgentMarkdown content={step.content} streaming />
-                            </article>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-
-                  {footerAfterSteps && latestReplyStep ? (
-                    <TurnFooter
-                      message={latestReplyStep.message}
-                      workSummary={summarizeTurnWork(steps)}
-                      turnStartedAt={turn.userMessage.createdAt}
-                      showRetry={!isRunning}
-                      onRetry={onRetryLastResponse}
-                      retryDisabled={isRunning}
-                    />
-                  ) : null}
-
-                  {isLastTurn &&
-                  (isRunning || compactionNotice?.status === 'running') ? (
-                    <TurnStatusLine
-                      toolActivity={toolActivity}
-                      hasStreamingText={Boolean(streaming?.content)}
-                      compacting={compactionNotice?.status === 'running'}
-                      waitingForChoice={chatState.pendingChoices.length > 0}
-                      {...(chatState.activeRun?.runStartedAt
-                        ? { runStartedAt: chatState.activeRun.runStartedAt }
-                        : {})}
-                    />
-                  ) : null}
-                </section>
+                  turn={turn}
+                  isLastTurn={isLastTurn}
+                  isRunning={isRunning}
+                  toolActivity={isLastTurn ? toolActivity : EMPTY_TOOL_ACTIVITY}
+                  streaming={isLastTurn ? streaming : null}
+                  assistantSnippets={isLastTurn ? assistantSnippets : EMPTY_SNIPPETS}
+                  compactionNotice={compactionNotice}
+                  activeRunId={activeRunId}
+                  subagentActivity={chatState.activeRun?.subagentActivity}
+                  latestAssistantMessageId={latestAssistantMessageId}
+                  latestUserMessageId={latestUserMessageId}
+                  plan={chatState.plan}
+                  pendingChoices={chatState.pendingChoices}
+                  limitNotice={chatState.limitNotice}
+                  runStartedAt={chatState.activeRun?.runStartedAt}
+                  transcriptBusy={transcriptBusy}
+                  runTranscriptAction={runTranscriptAction}
+                  onRetryLastResponse={onRetryLastResponse}
+                  onEditLastUserMessage={onEditLastUserMessage}
+                  onContinue={onContinue}
+                  registerAnchor={registerAnchor}
+                />
               );
             })}
           </div>
@@ -679,7 +533,240 @@ function MessageMetaRow({
   );
 }
 
-function AssistantMessage({
+// Stable empty arrays so non-last turns get referentially identical props and
+// memo can skip them when only the streaming turn changes.
+const EMPTY_TOOL_ACTIVITY: ToolActivity[] = [];
+const EMPTY_SNIPPETS: AssistantSnippet[] = [];
+
+type TurnViewProps = {
+  turn: MessageTurn;
+  isLastTurn: boolean;
+  isRunning: boolean;
+  toolActivity: ToolActivity[];
+  streaming: { id: string; content: string } | null | undefined;
+  assistantSnippets: AssistantSnippet[];
+  compactionNotice: CompactionNotice | null;
+  activeRunId: string | undefined;
+  subagentActivity: SubagentActivity[] | undefined;
+  latestAssistantMessageId: string | null;
+  latestUserMessageId: string | null;
+  plan: ThreadPlan | null;
+  pendingChoices: PendingChoice[];
+  limitNotice: LimitNotice | null;
+  runStartedAt: string | undefined;
+  transcriptBusy: boolean;
+  runTranscriptAction: (action: () => void | Promise<void>) => void;
+  onRetryLastResponse: () => void | Promise<void>;
+  onEditLastUserMessage: (messageId: string, content: string) => void | Promise<void>;
+  onContinue?: () => void | Promise<void>;
+  registerAnchor: (id: string, el: HTMLDivElement | null) => void;
+};
+
+const TurnView = memo(function TurnView({
+  turn,
+  isLastTurn,
+  isRunning,
+  toolActivity,
+  streaming,
+  assistantSnippets,
+  compactionNotice,
+  activeRunId,
+  subagentActivity,
+  latestAssistantMessageId,
+  latestUserMessageId,
+  plan,
+  pendingChoices,
+  limitNotice,
+  runStartedAt,
+  transcriptBusy,
+  runTranscriptAction,
+  onRetryLastResponse,
+  onEditLastUserMessage,
+  onContinue,
+  registerAnchor,
+}: TurnViewProps) {
+  const turnCompaction = turnOwnsCompaction(
+    turn.replies,
+    compactionNotice,
+    isLastTurn,
+  )
+    ? compactionNotice
+    : null;
+
+  // F3/F4: memoize the timeline + work summary per turn. Non-last turns have
+  // stable inputs (empty live arrays, no streaming), so this runs once.
+  const steps = useMemo(
+    () =>
+      buildTurnTimeline({
+        replies: turn.replies,
+        liveActivity: toolActivity,
+        snippets: assistantSnippets,
+        activeRunId,
+        streaming,
+        compaction: turnCompaction,
+        subagentActivity,
+      }),
+    [
+      turn.replies,
+      toolActivity,
+      assistantSnippets,
+      activeRunId,
+      streaming,
+      turnCompaction,
+      subagentActivity,
+    ],
+  );
+
+  const workSummary = useMemo(() => summarizeTurnWork(steps), [steps]);
+
+  const latestReplyStep = steps.find(
+    (step): step is Extract<typeof step, { type: 'assistant' }> =>
+      step.type === 'assistant' &&
+      step.message.id === latestAssistantMessageId,
+  );
+  const footerAfterSteps =
+    latestReplyStep !== undefined && steps.at(-1) !== latestReplyStep;
+  const showSteps =
+    turn.replies.length > 0 ||
+    toolActivity.length > 0 ||
+    assistantSnippets.length > 0 ||
+    Boolean(streaming?.content) ||
+    Boolean(turnCompaction);
+
+  return (
+    <section
+      ref={(el) => registerAnchor(turn.userMessage.id, el as HTMLDivElement | null)}
+      id={`conversation-anchor-${turn.userMessage.id}`}
+      className="flex flex-col gap-3.5 scroll-mt-6"
+      aria-label="Conversation turn"
+      style={
+        isLastTurn
+          ? undefined
+          : {
+              contentVisibility: 'auto',
+              containIntrinsicSize: 'auto 600px',
+            }
+      }
+    >
+      <UserMessage
+        message={turn.userMessage}
+        canEdit={isLastTurn && turn.userMessage.id === latestUserMessageId}
+        hasResponseBelow={
+          isLastTurn &&
+          (turn.replies.length > 0 ||
+            isRunning ||
+            Boolean(streaming?.content) ||
+            Boolean(turnCompaction))
+        }
+        onEditSubmit={onEditLastUserMessage}
+      />
+
+      {isLastTurn && !isRunning && !showSteps ? (
+        <div className="flex items-center gap-3 px-1" role="status">
+          <p className="type-caption text-muted-foreground">
+            {isUserCancelled(limitNotice?.reason ?? '')
+              ? 'You stopped this run before it replied.'
+              : 'The run failed to start.'}
+          </p>
+          <button
+            type="button"
+            disabled={transcriptBusy}
+            onClick={() => void runTranscriptAction(() => onRetryLastResponse())}
+            className="type-caption rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {isLastTurn && !isRunning ? <PlanChip plan={plan} /> : null}
+
+      {showSteps ? (
+        <div className="flex min-w-0 flex-col gap-3">
+          {steps.map((step) => {
+            if (step.type === 'assistant') {
+              const isLatestAssistant =
+                step.message.id === latestAssistantMessageId;
+              return (
+                <AssistantMessage
+                  key={step.message.id}
+                  message={step.message}
+                  showMeta={isLatestAssistant && !footerAfterSteps}
+                  workSummary={isLatestAssistant ? workSummary : undefined}
+                  turnStartedAt={turn.userMessage.createdAt}
+                  showRetry={!isRunning && isLatestAssistant}
+                  onRetry={onRetryLastResponse}
+                  retryDisabled={isRunning}
+                />
+              );
+            }
+            if (step.type === 'snippet') {
+              return (
+                <div
+                  key={`snippet-${step.messageId}`}
+                  className="min-w-0 max-w-full"
+                >
+                  <article className="chat-prose type-body min-w-0 max-w-full">
+                    <AgentMarkdown content={step.content} />
+                  </article>
+                </div>
+              );
+            }
+            if (step.type === 'tools') {
+              return <ToolStepList key={step.key} rows={step.rows} />;
+            }
+            if (step.type === 'compaction') {
+              return (
+                <CompactionCard
+                  key={`compaction-${step.notice.runId ?? step.notice.throughSeq}`}
+                  notice={step.notice}
+                />
+              );
+            }
+            if (step.type === 'subagent') {
+              return (
+                <SubagentCard
+                  key={`subagent-${step.activity.subRunId}`}
+                  activity={step.activity}
+                />
+              );
+            }
+            return (
+              <div key="stream" className="min-w-0 max-w-full">
+                <article className="chat-prose type-body min-w-0 max-w-full">
+                  <AgentMarkdown content={step.content} streaming />
+                </article>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {footerAfterSteps && latestReplyStep ? (
+        <TurnFooter
+          message={latestReplyStep.message}
+          workSummary={workSummary}
+          turnStartedAt={turn.userMessage.createdAt}
+          showRetry={!isRunning}
+          onRetry={onRetryLastResponse}
+          retryDisabled={isRunning}
+        />
+      ) : null}
+
+      {isLastTurn && (isRunning || compactionNotice?.status === 'running') ? (
+        <TurnStatusLine
+          toolActivity={toolActivity}
+          hasStreamingText={Boolean(streaming?.content)}
+          compacting={compactionNotice?.status === 'running'}
+          waitingForChoice={pendingChoices.length > 0}
+          {...(runStartedAt ? { runStartedAt } : {})}
+        />
+      ) : null}
+    </section>
+  );
+});
+
+const AssistantMessage = memo(function AssistantMessage({
   message,
   showMeta = true,
   workSummary,
@@ -717,7 +804,7 @@ function AssistantMessage({
       ) : null}
     </div>
   );
-}
+});
 
 /** Time · work summary on the left, Copy/Retry for the final reply on the right. */
 function TurnFooter({

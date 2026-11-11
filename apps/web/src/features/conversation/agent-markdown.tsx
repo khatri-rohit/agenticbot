@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
 import { mermaid } from '@streamdown/mermaid';
@@ -112,7 +112,7 @@ function CitationChips({
  * Renders assistant markdown via Streamdown.
  * Use `streaming` while tokens are arriving so incomplete fences parse correctly.
  */
-export function AgentMarkdown({
+export const AgentMarkdown = memo(function AgentMarkdown({
   content,
   streaming = false,
 }: {
@@ -129,7 +129,7 @@ export function AgentMarkdown({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Streamdown sanitizes HTML, so banner headings cannot be marked in the
-  // markdown; mark them after each render. Styled in global.css.
+  // markdown; mark them after the markdown changes. Styled in global.css.
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
@@ -139,7 +139,7 @@ export function AgentMarkdown({
         isReportBanner(heading.textContent ?? ''),
       );
     }
-  });
+  }, [markdown, scheme]);
 
   if (!markdown) return null;
 
@@ -193,4 +193,4 @@ export function AgentMarkdown({
       <CitationChips citations={citations} />
     </div>
   );
-}
+});
