@@ -183,6 +183,8 @@ export type TraceEvent =
       afterTokens: number;
       /** Tool calls whose results became eviction cards in this pass. */
       toolCallIds?: string[];
+      /** `superseded`: a later result of the same read range or command replaced them. Absent = size-based eviction. */
+      reason?: 'superseded';
     }
   | {
       /** In-run extractive compaction of older iterations of this turn. */
@@ -248,7 +250,7 @@ export type TraceEvent =
       runId: string;
       iteration: number;
       toolName: string;
-      note: 'read_creep' | 'web_slices';
+      note: 'read_creep' | 'web_slices' | 'serial_reads';
       count: number;
     }
   | {

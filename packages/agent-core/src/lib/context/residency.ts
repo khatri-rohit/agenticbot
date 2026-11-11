@@ -48,10 +48,127 @@ function editCard(content: string): string {
   return `${header}\n(hunk evicted)`;
 }
 
-function evictionCard(info: ToolCallInfo | undefined, content: string, sha: string): string {
+function evictionCard(
+  info: ToolCallInfo | undefined,
+  content: string,
+  sha: string,
+  why = '',
+): string {
   const name = info?.name ?? 'tool';
   const args = info ? ` ${argsPreview(info.args)}` : '';
-  return `${CARD_PREFIX} ${name}${args} · ${content.length} chars · sha256:${sha} — call recall with this sha256 to read it again.`;
+  return `${CARD_PREFIX} ${name}${args}${why ? ` · ${why}` : ''} · ${content.length} chars · sha256:${sha} — call recall with this sha256 to read it again.`;
+}
+
+/** Tool call arguments as an object; malformed JSON reads as no arguments. */
+function parseArgs(raw: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A run_terminal result from a command that executed (see outcome-card). */
+function terminalRan(content: string): boolean {
+  const [first = '', second = ''] = content.split('\n', 2);
+  return first.startsWith('cwd:') && /^(exit|signal) /.test(second.trim());
+}
+
+/** Lines a read_file result shows, from its `[lines a–b of N]` header. */
+function readRange(content: string): { from: number; to: number } | null {
+  const match = /^\[lines (\d+)–(\d+) of /.exec(content);
+  return match ? { from: Number(match[1]), to: Number(match[2]) } : null;
+}
+
+/**
+ * Card older tool results that a later result in the prompt makes redundant,
+ * so the model does not carry two versions of one thing (and act on the
+ * stale one):
+ * - read_file whose line range a later resident read of the same path covers;
+ * - run_terminal whose exact command ran again later.
+ * Edits do not supersede reads: several edits from one read are normal, and
+ * carding that read would force a re-read. Cards keep the sha (recall).
+ * Applied only when it frees at least `inRunClearAtLeastTokens`, so the
+ * cached prefix changes rarely and in large steps, like eviction.
+ * `pathOf` returns the loop's canonical path for read_file args.
+ */
+export async function supersedeToolResults(
+  messages: ChatCompletionMessageParam[],
+  budget: ContextBudget,
+  tools: ChatCompletionTool[],
+  putBlob: (text: string) => Promise<string>,
+  pathOf: (args: Record<string, unknown>) => string | null,
+): Promise<EvictionResult | null> {
+  const calls = toolCallIndex(messages);
+  const laterReads = new Map<string, Array<{ from: number; to: number }>>();
+  const laterCommands = new Set<string>();
+  const candidates: Array<{ index: number; why: string }> = [];
+  let freedChars = 0;
+
+  // Newest first: each result is compared with what came after it.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== 'tool' || typeof message.content !== 'string') continue;
+    const content = message.content;
+    if (!isResident(content)) continue;
+    const info = calls.get(message.tool_call_id);
+    if (!info || (info.name !== 'read_file' && info.name !== 'run_terminal')) continue;
+    const args = parseArgs(info.args);
+
+    if (info.name === 'read_file') {
+      const path = pathOf(args);
+      const range = readRange(content);
+      if (!path || !range) continue;
+      const later = laterReads.get(path) ?? [];
+      const covered = later.some((r) => r.from <= range.from && r.to >= range.to);
+      if (covered && content.length >= MIN_EVICT_CHARS) {
+        candidates.push({ index: i, why: 'superseded by a later read of the same lines' });
+        freedChars += content.length - 250;
+      } else if (!covered) {
+        later.push(range);
+        laterReads.set(path, later);
+      }
+    } else if (info.name === 'run_terminal') {
+      const command = typeof args.command === 'string' ? args.command.trim() : '';
+      // Only a command that actually ran (`cwd: …` then `exit|signal`) counts:
+      // a blocked, skipped, or repeat-refused call must not card a real run.
+      if (!command || !terminalRan(content)) continue;
+      if (laterCommands.has(command)) {
+        if (content.length >= MIN_EVICT_CHARS) {
+          candidates.push({ index: i, why: 'superseded by a later run of the same command' });
+          freedChars += content.length - 250;
+        }
+      } else {
+        laterCommands.add(command);
+      }
+    }
+  }
+  if (candidates.length === 0) return null;
+  if (freedChars / CHARS_PER_TOKEN < budget.inRunClearAtLeastTokens) return null;
+
+  const beforeTokens = estimatePromptTokens(messages, tools);
+  const toolCallIds: string[] = [];
+  for (const { index, why } of candidates) {
+    const message = messages[index];
+    if (message?.role !== 'tool' || typeof message.content !== 'string') continue;
+    const info = calls.get(message.tool_call_id);
+    const sha = await putBlob(message.content);
+    messages[index] = {
+      role: 'tool',
+      tool_call_id: message.tool_call_id,
+      content: evictionCard(info, message.content, sha, why),
+    };
+    toolCallIds.push(message.tool_call_id);
+  }
+  return {
+    evicted: toolCallIds.length,
+    beforeTokens,
+    afterTokens: estimatePromptTokens(messages, tools),
+    toolCallIds,
+  };
 }
 
 export type EvictionResult = {
@@ -164,8 +281,15 @@ function clip(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
-/** One line per tool outcome: what was done and what came back. */
-function outcomeLine(info: ToolCallInfo | undefined, content: string): string {
+/**
+ * One line per tool outcome: what was done and what came back. `storedSha`
+ * is the blob of a large resident result folded here, so it stays recallable.
+ */
+function outcomeLine(
+  info: ToolCallInfo | undefined,
+  content: string,
+  storedSha?: string,
+): string {
   const name = info?.name ?? 'tool';
   const args = info ? argsPreview(info.args) : '';
   const first = content.split('\n')[0] ?? '';
@@ -179,7 +303,8 @@ function outcomeLine(info: ToolCallInfo | undefined, content: string): string {
     const sha = content.match(/sha256:([a-f0-9]{64})/)?.[1];
     outcome = sha ? `${content.length} chars, sha256:${sha}` : clip(first, 120);
   }
-  return `- ${name} ${args} → ${clip(outcome, 200)}`;
+  const recall = storedSha ? ` · sha256:${storedSha}` : '';
+  return `- ${name} ${args} → ${clip(outcome, 200)}${recall}`;
 }
 
 export type InRunCompactionResult = {
@@ -204,12 +329,14 @@ export type InRunCompactionResult = {
  * tool_call pairing stays valid. Prompt-only; the ledger is untouched.
  * `runStart` is the index of the first message this run appended.
  */
-export function compactCurrentRun(
+export async function compactCurrentRun(
   messages: ChatCompletionMessageParam[],
   runStart: number,
   budget: ContextBudget,
   tools: ChatCompletionTool[],
-): InRunCompactionResult | null {
+  /** Stores large resident results folded into the recap, so recall can bring them back. */
+  putBlob?: (text: string) => Promise<string>,
+): Promise<InRunCompactionResult | null> {
   const beforeTokens = estimatePromptTokens(messages, tools);
   const inputBudget = budget.windowTokens - budget.outputReserveTokens;
   if (beforeTokens < inputBudget * budget.inRunCompactRatio) return null;
@@ -257,7 +384,16 @@ export function compactCurrentRun(
       const text = clip(textOf(message.content), 300);
       if (text) lines.push(`Note: ${text}`);
     } else if (message.role === 'tool' && typeof message.content === 'string') {
-      lines.push(outcomeLine(calls.get(message.tool_call_id), message.content));
+      const info = calls.get(message.tool_call_id);
+      // Edit hunks are not worth keeping (the file is the source of truth);
+      // cards already carry their own sha.
+      const keepBody =
+        putBlob !== undefined &&
+        info?.name !== 'edit_file' &&
+        message.content.length >= MIN_EVICT_CHARS &&
+        isResident(message.content);
+      const storedSha = keepBody ? await putBlob(message.content) : undefined;
+      lines.push(outcomeLine(info, message.content, storedSha));
       toolCallIds.push(message.tool_call_id);
     }
   }
@@ -268,7 +404,7 @@ export function compactCurrentRun(
   }
   messages.splice(runStart, cutEnd - runStart, {
     role: 'assistant',
-    content: `${RECAP_PREFIX}\nEarlier steps of this run, condensed. Re-read files before relying on old contents.\n${recap}`,
+    content: `${RECAP_PREFIX}\nEarlier steps of this run, condensed. Re-read files before relying on old contents; recall a sha256 for an exact earlier result.\n${recap}`,
   });
 
   return {

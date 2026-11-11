@@ -1,6 +1,5 @@
 import {
   emptyThreadPlan,
-  parseDigest,
   parseThreadReview,
   sameReviewFingerprint,
   type LedgerEnvelope,

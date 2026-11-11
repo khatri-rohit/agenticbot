@@ -92,6 +92,10 @@ export type RunState = {
   unverifiedEdit: boolean;
   /** The stop check already sent the run back once. */
   stopChecked: boolean;
+  /** Consecutive turns whose only call was one read-stage tool. */
+  serialReadTurns: number;
+  /** This turn's single read result carries the serial-reads note. */
+  serialReadNoteDue: boolean;
 };
 
 export function createRunState(
@@ -192,6 +196,8 @@ export function createRunState(
     escalated: false,
     unverifiedEdit: false,
     stopChecked: false,
+    serialReadTurns: 0,
+    serialReadNoteDue: false,
   };
   return state;
 }

@@ -14,6 +14,7 @@ import {
   type ToolStage,
 } from '@agent/agent-models';
 
+import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import type { Tool } from '../tools/types';
 import { isEditSuccess } from '../tools/workspace/tools';
 import { outcomeKey, pathFromToolArgs, toolCallKey } from './call-identity';
@@ -48,6 +49,8 @@ const RESULT_PREVIEW_MAX = 20_000;
 
 /** Partial reads of one file (since its last edit) between grep hints. */
 const READ_CREEP_NOTE_EVERY = 3;
+/** Consecutive single-read turns between batching hints. */
+const SERIAL_READ_NOTE_EVERY = 4;
 
 const SKIP_LIMIT_REACHED = limitMessage(
   'limit.tools',
@@ -104,6 +107,26 @@ function withReadCreepNote(
   return `${result}\n\n(note) ${count} partial reads of ${readPath} since it last changed. To find a block, grep for its anchor line (grep returns path:line), then read from that line.`;
 }
 
+/**
+ * Every few turns in a row that each made one read call, say what that
+ * costs: each turn re-sends the whole prompt, and read-stage calls of one
+ * turn run in parallel. Shows the per-call size so the model can weigh it.
+ */
+function withSerialReadNote(s: RunState, toolName: string, result: string): string {
+  if (!s.serialReadNoteDue) return result;
+  s.serialReadNoteDue = false;
+  const perCall = estimatePromptTokens(s.messages, s.tools.definitions);
+  s.trace({
+    type: 'tool_note',
+    runId: s.runId,
+    iteration: s.iterations,
+    toolName,
+    note: 'serial_reads',
+    count: s.serialReadTurns,
+  });
+  return `${result}\n\n(note) ${s.serialReadTurns} turns in a row each made one read call, and every turn re-sends ~${Math.round(perCall / 1000)}k tokens of context. Put independent reads and searches in one turn; they run in parallel.`;
+}
+
 /** Every few in-order slices of one web source, point at query (or explore). */
 function withWebSliceNote(
   s: RunState,
@@ -128,6 +151,18 @@ function withWebSliceNote(
 
 /** Per-tool result shaping before the result joins the prompt and ledger. */
 function shapeToolResult(
+  s: RunState,
+  toolName: string,
+  args: Record<string, unknown>,
+  raw: string,
+  toolCallId: string,
+): string {
+  // Notes go on last: read dedupe hashes the bare result. The serial-reads
+  // note is only due on a turn whose single call is a read-stage tool.
+  return withSerialReadNote(s, toolName, shapeBareResult(s, toolName, args, raw, toolCallId));
+}
+
+function shapeBareResult(
   s: RunState,
   toolName: string,
   args: Record<string, unknown>,
@@ -691,6 +726,10 @@ export async function runToolTurn(
   for (const call of ready) {
     staged[toolStage(call.tool)].push(call);
   }
+  const singleRead =
+    turn.toolCalls.length === 1 && ready.length === 1 && staged.read.length === 1;
+  s.serialReadTurns = singleRead ? s.serialReadTurns + 1 : 0;
+  s.serialReadNoteDue = singleRead && s.serialReadTurns % SERIAL_READ_NOTE_EVERY === 0;
 
   // I4 staging: skill → read → network → exec → mutate → subagent.
   // skill, read, and subagent run parallel (executeReadyBatch);

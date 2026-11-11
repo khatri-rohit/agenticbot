@@ -167,7 +167,66 @@ describe('createEffortRouter', () => {
     expect(decision).toMatchObject({ wire: 'high', applied: true });
   });
 
-  it('falls back to the baseline when System 1 has no opinion', async () => {
+  it('holds the last answer when System 1 goes quiet, but the floor still wins', async () => {
+    const router = createEffortRouter();
+    const answers: Array<Record<string, number> | null> = [
+      { needs_at_least_medium: 0.05, needs_at_least_high: 0.01 },
+      { needs_at_least_medium: 0.05, needs_at_least_high: 0.01 },
+      null,
+      null,
+      null,
+    ];
+    const port = fakePort('enforce', async () => answers.shift() ?? null);
+    const policy = buildEffortPolicy(LEVELS, 'auto', true);
+    const decide = (signals: EffortSignals) =>
+      router.decide({ policy, system1: port, signals, state: () => 'state', onTrace: () => undefined });
+
+    expect((await decide({ ...QUIET, iteration: 4 })).wire).toBe('medium'); // lower_pending
+    expect((await decide({ ...QUIET, iteration: 5 })).wire).toBe('low'); // lower
+    // Next ask is due (cadence), but the budget is spent: keep System 1's
+    // last rung, not the baseline.
+    expect(await decide({ ...QUIET, iteration: 8 })).toMatchObject({
+      wire: 'low',
+      applied: true,
+      trace: expect.objectContaining({ reason: 'held', chosen: 'low' }),
+    });
+    // A write raises the floor to the baseline for this iteration only…
+    expect((await decide({ ...QUIET, iteration: 9, wrote: true })).wire).toBe('medium');
+    // …then the held rung comes back.
+    expect((await decide({ ...QUIET, iteration: 10 })).wire).toBe('low');
+    expect(answers).toEqual([]);
+  });
+
+  it('asks at events and every few quiet iterations, holding in between', async () => {
+    const router = createEffortRouter();
+    const easy = { needs_at_least_medium: 0.05, needs_at_least_high: 0.01 };
+    const hard = { needs_at_least_medium: 0.95, needs_at_least_high: 0.8 };
+    const answers = [easy, easy, hard, hard];
+    let asks = 0;
+    const port = fakePort('enforce', async () => {
+      asks += 1;
+      return answers.shift() ?? null;
+    });
+    const policy = buildEffortPolicy(LEVELS, 'auto', true);
+    const decide = (signals: EffortSignals) =>
+      router.decide({ policy, system1: port, signals, state: () => 'state', onTrace: () => undefined });
+
+    await decide({ ...QUIET, iteration: 4 }); // lower_pending
+    expect((await decide({ ...QUIET, iteration: 5 })).wire).toBe('low'); // confirming ask is never skipped
+    expect(await decide({ ...QUIET, iteration: 6 })).toMatchObject({
+      wire: 'low',
+      trace: expect.objectContaining({ reason: 'cadence_hold' }),
+    });
+    await decide({ ...QUIET, iteration: 7 });
+    expect(asks).toBe(2);
+    // Three quiet iterations after the last ask: ask again (and raise).
+    expect((await decide({ ...QUIET, iteration: 8 })).wire).toBe('high');
+    // An event (tool error) always asks, even right after an ask.
+    await decide({ ...QUIET, iteration: 9, toolError: true });
+    expect(asks).toBe(4);
+  });
+
+  it('falls back to the baseline when System 1 has never answered', async () => {
     const router = createEffortRouter();
     const decision = await router.decide({
       policy: buildEffortPolicy(LEVELS, 'auto', true),

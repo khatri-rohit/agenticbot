@@ -3,7 +3,9 @@ import {
   compactCurrentRun,
   evictToolResults,
   retireSkillBodies,
+  supersedeToolResults,
 } from '../context/residency';
+import { pathFromToolArgs } from './call-identity';
 import type { RunState } from './run-state';
 
 /**
@@ -30,11 +32,36 @@ export async function manageResidency(s: RunState): Promise<void> {
     });
   }
 
+  const putBlob = (text: string) => s.webSources.putBlob(text);
+
+  // Redundant results first (stale versions of a read or command), so the
+  // size-based pass below measures what is actually left.
+  const superseded = await supersedeToolResults(
+    s.messages,
+    s.contextBudget,
+    s.tools.definitions,
+    putBlob,
+    pathFromToolArgs,
+  );
+  if (superseded) {
+    s.readDedupe.forget(superseded.toolCallIds);
+    s.trace({
+      type: 'context_evicted',
+      runId: s.runId,
+      iteration: s.iterations,
+      evicted: superseded.evicted,
+      beforeTokens: superseded.beforeTokens,
+      afterTokens: superseded.afterTokens,
+      toolCallIds: superseded.toolCallIds,
+      reason: 'superseded',
+    });
+  }
+
   const evicted = await evictToolResults(
     s.messages,
     s.contextBudget,
     s.tools.definitions,
-    (text) => s.webSources.putBlob(text),
+    putBlob,
   );
   if (evicted) {
     s.readDedupe.forget(evicted.toolCallIds);
@@ -50,11 +77,12 @@ export async function manageResidency(s: RunState): Promise<void> {
   }
 
   if (s.prefixHeavy) return;
-  const compacted = compactCurrentRun(
+  const compacted = await compactCurrentRun(
     s.messages,
     s.runStart,
     s.contextBudget,
     s.tools.definitions,
+    putBlob,
   );
   if (!compacted) return;
   s.readDedupe.forget(compacted.toolCallIds);

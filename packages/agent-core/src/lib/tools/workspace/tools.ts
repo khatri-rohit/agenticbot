@@ -28,6 +28,8 @@ export const WORKSPACE_TERMINAL_TIMEOUT_MS = 120_000;
 export const WORKSPACE_GREP_MAX_MATCHES = 50;
 export const WORKSPACE_GREP_LINE_MAX_CHARS = 200;
 export const WORKSPACE_GREP_MAX_CHARS = 7_000;
+/** Upper bound for grep `context`; wider windows are what read_file is for. */
+export const WORKSPACE_GREP_MAX_CONTEXT = 5;
 export const WORKSPACE_GLOB_MAX_RESULTS = 200;
 export const WORKSPACE_WALK_MAX_FILES = 2_000;
 
@@ -316,6 +318,10 @@ export const grepTool: Tool = {
             type: 'string',
             description: 'Optional file glob to limit the search.',
           },
+          context: {
+            type: 'integer',
+            description: `Lines of surrounding context per match (0–${WORKSPACE_GREP_MAX_CONTEXT}). Default 0.`,
+          },
         },
         required: ['pattern'],
         additionalProperties: false,
@@ -329,6 +335,8 @@ export const grepTool: Tool = {
     whenNotToUse: ['The exact file path and contents are already in context.'],
     usage: [
       'Use a specific pattern. Optionally pass glob to skip unrelated files.',
+      'Pass context (e.g. 3) to see the lines around each match; often that replaces a follow-up read_file.',
+      'Matches print as path:line:text, context lines as path-line-text, groups split by --.',
       'Then read_file the hits you need. Do not edit a path you have not seen.',
     ],
   },
@@ -346,10 +354,26 @@ export const grepTool: Tool = {
       return `Invalid pattern: ${pattern}`;
     }
     const fileGlob = asString(args.glob).trim();
+    const context =
+      typeof args.context === 'number' && Number.isFinite(args.context)
+        ? Math.min(WORKSPACE_GREP_MAX_CONTEXT, Math.max(0, Math.floor(args.context)))
+        : 0;
     const files: string[] = [];
     await walkFiles(root, ctx.signal, files);
-    const hits: string[] = [];
+    const rows: string[] = [];
+    let matches = 0;
     let chars = 0;
+    const clipLine = (text: string) =>
+      text.length > WORKSPACE_GREP_LINE_MAX_CHARS
+        ? `${text.slice(0, WORKSPACE_GREP_LINE_MAX_CHARS)}…`
+        : text;
+    const push = (row: string): boolean => {
+      rows.push(row);
+      chars += row.length + 1;
+      return chars >= WORKSPACE_GREP_MAX_CHARS;
+    };
+    const truncated = () =>
+      `${rows.join('\n')}\n(grep truncated at ${WORKSPACE_GREP_MAX_MATCHES} matches / ${WORKSPACE_GREP_MAX_CHARS} chars)`;
     for (const abs of files) {
       if (ctx.signal.aborted) return 'Run cancelled';
       const rel = toPosixRelative(root, abs);
@@ -362,24 +386,26 @@ export const grepTool: Tool = {
       }
       if (text.includes('\0')) continue;
       const lines = text.split('\n');
+      // Last line index already printed in this file, so overlapping
+      // context windows print each line once (rg -C style).
+      let printedThrough = -1;
       for (let i = 0; i < lines.length; i++) {
         if (!regex.test(lines[i])) continue;
-        const line =
-          lines[i].length > WORKSPACE_GREP_LINE_MAX_CHARS
-            ? `${lines[i].slice(0, WORKSPACE_GREP_LINE_MAX_CHARS)}…`
-            : lines[i];
-        const row = `${rel}:${i + 1}:${line}`;
-        hits.push(row);
-        chars += row.length + 1;
-        if (
-          hits.length >= WORKSPACE_GREP_MAX_MATCHES ||
-          chars >= WORKSPACE_GREP_MAX_CHARS
-        ) {
-          return `${hits.join('\n')}\n(grep truncated at ${WORKSPACE_GREP_MAX_MATCHES} matches / ${WORKSPACE_GREP_MAX_CHARS} chars)`;
+        const from = Math.max(0, i - context, printedThrough + 1);
+        const to = Math.min(lines.length - 1, i + context);
+        if (context > 0 && rows.length > 0 && from > printedThrough + 1) {
+          if (push('--')) return truncated();
         }
+        for (let j = from; j <= to; j++) {
+          const sep = j === i || regex.test(lines[j]) ? ':' : '-';
+          if (push(`${rel}${sep}${j + 1}${sep}${clipLine(lines[j])}`)) return truncated();
+        }
+        printedThrough = Math.max(printedThrough, to);
+        matches += 1;
+        if (matches >= WORKSPACE_GREP_MAX_MATCHES) return truncated();
       }
     }
-    return hits.length > 0 ? hits.join('\n') : `(no matches for ${pattern})`;
+    return rows.length > 0 ? rows.join('\n') : `(no matches for ${pattern})`;
   },
 };
 

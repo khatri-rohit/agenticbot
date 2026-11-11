@@ -230,6 +230,9 @@ export function chooseRung(
   return { index: baselineIndex, reason: 'keep', lowerEligible: false };
 }
 
+/** Quiet iterations between System 1 asks while nothing changes (enforce). */
+export const EFFORT_ASK_EVERY = 3;
+
 export type EffortDecision = {
   /** reasoning_effort to send; undefined = send none (today's behaviour for that model). */
   wire?: string;
@@ -251,12 +254,18 @@ export type EffortRouterInput = {
 };
 
 /**
- * Per-run effort router. `decide` never throws; any failure returns the
- * baseline, which is exactly what the run sends without System 1.
+ * Per-run effort router. `decide` never throws. In enforce, a call with no
+ * answer (budget spent, breaker, timeout) holds System 1's last answer, floored
+ * by this iteration's rules; before any answer, or on an internal error, it
+ * returns the baseline, which is exactly what the run sends without System 1.
  */
 export function createEffortRouter() {
   let lowerEligible = false;
   let shadowLowerEligible = false;
+  /** Enforce only: the rung System 1's last real answer chose (before any floor). */
+  let lastScoredIndex: number | null = null;
+  /** Enforce only: when the last call was made, whether it was quiet, and its outcome. */
+  let lastAsk: { iteration: number; quiet: boolean; reason: string } | null = null;
 
   async function decide(input: EffortRouterInput): Promise<EffortDecision> {
     const { policy, system1, signals } = input;
@@ -323,12 +332,60 @@ export function createEffortRouter() {
         return keepBaseline();
       }
 
+      // Cadence: ask at events, not every iteration. A quiet iteration (no
+      // first turn, error, write, or instruction) right after a quiet,
+      // settled answer holds that answer without a call; the budget then
+      // lasts the whole run. lower_pending is never settled: its confirming
+      // ask must come next.
+      const quiet = floor.reason === 'none';
+      if (
+        lastScoredIndex !== null &&
+        lastAsk !== null &&
+        quiet &&
+        lastAsk.quiet &&
+        lastAsk.reason !== 'lower_pending' &&
+        signals.iteration - lastAsk.iteration < EFFORT_ASK_EVERY
+      ) {
+        const heldIndex = Math.max(lastScoredIndex, floor.index);
+        const wire = ladder[heldIndex]!.wire;
+        const applied = wire !== baseline;
+        if (applied) system1.markApplied();
+        return {
+          wire,
+          applied,
+          trace: {
+            mode: system1.mode,
+            baseline: ladder[baselineIndex]!.wire,
+            chosen: wire,
+            applied,
+            reason: 'cadence_hold',
+            floor: ladder[floor.index]!.key,
+          },
+        };
+      }
+
       const result = await run(lowerEligible);
-      lowerEligible = result.lowerEligible;
-      const wire = ladder[result.index]!.wire;
+      lastAsk = { iteration: signals.iteration, quiet, reason: result.trace.reason };
+      let index = result.index;
+      let trace = result.trace;
+      if (result.trace.reason === 'fallback') {
+        // No opinion this time (budget spent, breaker open, timeout, busy):
+        // hold System 1's last answer instead of reverting to the baseline,
+        // so a long run does not spend its tail at the user's top rung. The
+        // rules' floor still wins for this iteration (errors, writes, new
+        // instructions), and hysteresis state is untouched (no new evidence).
+        if (lastScoredIndex !== null) {
+          index = Math.max(lastScoredIndex, floor.index);
+          trace = { ...trace, chosen: ladder[index]!.wire, reason: 'held' };
+        }
+      } else {
+        lowerEligible = result.lowerEligible;
+        if (result.trace.reason !== 'inconsistent') lastScoredIndex = result.index;
+      }
+      const wire = ladder[index]!.wire;
       const applied = wire !== baseline;
       if (applied) system1.markApplied();
-      return { wire, applied, trace: { ...result.trace, applied } };
+      return { wire, applied, trace: { ...trace, applied } };
     } catch (error) {
       system1?.note('effort', 'internal', signals.iteration, error instanceof Error ? error.message : String(error));
       return keepBaseline();

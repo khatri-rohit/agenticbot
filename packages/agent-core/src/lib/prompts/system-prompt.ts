@@ -127,6 +127,7 @@ function workspacePrompt(registry: ToolRegistry, posture: RunPosture): string {
       ? '- Hand wide reading (more than ~5 files, several searches, web research) to delegate(explore) with a real objective and scope. Do one or two reads yourself.'
       : '',
     '- Do not re-read what is already above.',
+    '- Issue independent glob, grep, and read_file calls together in one turn; they run in parallel, and each extra turn re-sends the whole context. Use grep context to see surrounding lines instead of a follow-up read.',
     isAsk ? '' : '- Batch edits, then verify once.',
     '- When the run says the budget is nearly spent: finish the current step, verify, and report what is left.',
   ]
