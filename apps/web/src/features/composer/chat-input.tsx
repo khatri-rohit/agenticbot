@@ -1100,7 +1100,10 @@ export function ChatInput({
         })}
         rows={1}
         className={cn(
-          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none placeholder:text-subtle-foreground focus-visible:ring-0',
+          // Gutter must match SkillHighlightMirror: once text overflows,
+          // a scrollbar would narrow only the textarea, rewrap its lines and
+          // put the caret away from the visible (mirror) text.
+          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none [scrollbar-gutter:stable] placeholder:text-subtle-foreground focus-visible:ring-0',
           isHero && 'min-h-10',
           voiceLocked && 'caret-transparent',
         )}

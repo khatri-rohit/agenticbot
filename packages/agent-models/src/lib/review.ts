@@ -63,6 +63,8 @@ export type ReviewRunGlance = {
   iterations: number;
   toolCalls: number;
   promptTokens: number;
+  /** Per-run, over tool-iterating rounds only; null when fewer than 2 such rounds. */
+  promptGrowth?: number | null;
 };
 
 export type ReviewDigest = {
@@ -239,12 +241,17 @@ function parseRunGlance(value: unknown): ReviewRunGlance | null {
   if (typeof rec.runId !== 'string' || typeof rec.status !== 'string') return null;
   if (typeof rec.iterations !== 'number' || typeof rec.toolCalls !== 'number') return null;
   if (typeof rec.promptTokens !== 'number') return null;
+  const growth =
+    typeof rec.promptGrowth === 'number' && Number.isFinite(rec.promptGrowth)
+      ? rec.promptGrowth
+      : null;
   return {
     runId: rec.runId,
     status: rec.status,
     iterations: rec.iterations,
     toolCalls: rec.toolCalls,
     promptTokens: rec.promptTokens,
+    ...(growth === null ? { promptGrowth: null } : { promptGrowth: growth }),
   };
 }
 

@@ -381,6 +381,7 @@ export function analyzeThreadFrom(input: {
       iterations: m.iterations,
       toolCalls: m.toolCalls,
       promptTokens: m.promptTokens.own,
+      ...(m.promptGrowth === null ? { promptGrowth: null } : { promptGrowth: m.promptGrowth }),
     })),
   };
   const excerpts = pickExcerpts({

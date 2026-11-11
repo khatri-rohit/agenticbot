@@ -10,6 +10,7 @@ import {
 } from '@agent/agent-models';
 import { getThreadStore, runManager } from '../platform/instances';
 import { asyncRoute } from '../platform/http-errors';
+import { cancelLearningReview } from '../memory/learning-loop';
 import { readSettledLastRun } from '../runs/run-context';
 import { pickFolderDialog } from './pick-folder';
 
@@ -155,6 +156,7 @@ router.delete('/threads/:id', asyncRoute(async (req: Request, res: Response) => 
   const store = await getThreadStore();
   const ok = await store.deleteThread(req.params.id);
   if (!ok) return res.status(404).json({ error: 'Thread not found' });
+  cancelLearningReview(req.params.id);
   return res.json({ ok: true });
 }));
 

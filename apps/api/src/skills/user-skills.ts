@@ -7,6 +7,7 @@ import {
   rm,
   stat,
 } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -364,6 +365,17 @@ export async function installGitHubSkills(input: {
 
     const destRoot = path.join(input.agentHome, 'skills');
     await mkdir(destRoot, { recursive: true });
+    // Same policy as createUserSkill: never silently destroy an existing
+    // skill. Check every selection up front so a late collision cannot
+    // leave a partial install behind.
+    for (const skill of selected) {
+      if (existsSync(path.join(destRoot, skill.folderName))) {
+        throw new SkillImportError(
+          `A skill named "${skill.folderName}" already exists.`,
+          409,
+        );
+      }
+    }
     const installed: string[] = [];
     for (const skill of selected) {
       const from =
@@ -377,7 +389,6 @@ export async function installGitHubSkills(input: {
         throw new SkillImportError('Invalid skill path.', 400);
       }
       const to = path.join(destRoot, skill.folderName);
-      await rm(to, { recursive: true, force: true });
       if (skill.pathInRepo === '.') {
         await mkdir(to, { recursive: true });
         for (const name of await readdir(from)) {
@@ -390,6 +401,10 @@ export async function installGitHubSkills(input: {
       installed.push(skill.folderName);
     }
     invalidateSkillCatalog();
+    // The cached archive only serves this preview→install pair. Drop it on
+    // success so %TEMP% (never swept on Windows) does not collect up to
+    // MAX_ARCHIVE_BYTES per import. Kept on failure so a retry is offline.
+    await rm(archive, { force: true }).catch(() => undefined);
     return { installed };
   } finally {
     await rm(staging, { recursive: true, force: true });

@@ -104,24 +104,13 @@ export function MessageList({
   const turnAnchors = useMemo(() => {
     return turns.map((turn) => {
       const isLastTurn = turn === turns[turns.length - 1];
-      const liveActivity = isLastTurn ? toolActivity : [];
-      const liveSnippets = isLastTurn ? assistantSnippets : [];
-      const liveStreaming = isLastTurn ? streaming : null;
-      const turnCompaction = turnOwnsCompaction(
-        turn.replies,
-        compactionNotice,
-        isLastTurn,
-      )
-        ? compactionNotice
-        : null;
+      // toolCount only sums `tools` rows, which come from replies + live tool
+      // activity. Pass only those, so the deps below list everything read;
+      // snippets/stream/subagent/compaction steps never change the count.
       const steps = buildTurnTimeline({
         replies: turn.replies,
-        liveActivity,
-        snippets: liveSnippets,
+        liveActivity: isLastTurn ? toolActivity : EMPTY_TOOL_ACTIVITY,
         activeRunId,
-        streaming: liveStreaming,
-        compaction: turnCompaction,
-        subagentActivity: chatState.activeRun?.subagentActivity,
       });
       const toolCount = steps.reduce(
         (sum, step) => (step.type === 'tools' ? sum + step.rows.length : sum),
@@ -141,11 +130,7 @@ export function MessageList({
       }
       return { id: turn.userMessage.id, label, toolCount };
     });
-    // toolCount only sums `tools` steps, which come from toolActivity.
-    // streaming/assistantSnippets produce snippet/stream steps that do not
-    // affect the anchor, so they are excluded to avoid rebuilding every
-    // anchor on every assistant.delta during streaming.
-  }, [turns, toolActivity, compactionNotice, activeRunId]);
+  }, [turns, toolActivity, activeRunId]);
 
   const showRail = shouldShowConversationRail(turnAnchors.length);
 
@@ -167,15 +152,6 @@ export function MessageList({
     jumpToBottomAndFollow,
     enableStickToBottom,
   } = useStickToBottom(scrollRef);
-
-  const prevMessageCount = useRef(0);
-  useEffect(() => {
-    const count = messages?.length ?? 0;
-    if (count > prevMessageCount.current) {
-      enableStickToBottom();
-    }
-    prevMessageCount.current = count;
-  }, [messages?.length, enableStickToBottom]);
 
   useEffect(() => {
     followContent('auto');
@@ -200,13 +176,26 @@ export function MessageList({
     return null;
   }, [messages]);
 
-  const latestUserMessageId = useMemo(() => {
+  const latestUserMessage = useMemo(() => {
     if (!messages?.length) return null;
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') return messages[i].id;
+      if (messages[i].role === 'user') return messages[i];
     }
     return null;
   }, [messages]);
+  const latestUserMessageId = latestUserMessage?.id ?? null;
+  // An edit rewinds to the same ledger seq, so the new message reuses the
+  // old id (`msg_<thread>_<seq>`); its createdAt is what changes.
+  const latestUserKey = latestUserMessage
+    ? `${latestUserMessage.id}:${latestUserMessage.createdAt}`
+    : null;
+
+  // Re-pin only when a new user message lands (send, edit, or thread open).
+  // A reply settling into the ledger also grows the list, but must not yank
+  // a reader who scrolled up back to the bottom.
+  useEffect(() => {
+    if (latestUserKey) enableStickToBottom();
+  }, [latestUserKey, enableStickToBottom]);
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -265,7 +254,9 @@ export function MessageList({
                   assistantSnippets={isLastTurn ? assistantSnippets : EMPTY_SNIPPETS}
                   compactionNotice={compactionNotice}
                   activeRunId={activeRunId}
-                  subagentActivity={chatState.activeRun?.subagentActivity}
+                  subagentActivity={
+                    isLastTurn ? chatState.activeRun?.subagentActivity : undefined
+                  }
                   latestAssistantMessageId={latestAssistantMessageId}
                   latestUserMessageId={latestUserMessageId}
                   plan={chatState.plan}

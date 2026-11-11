@@ -16,7 +16,7 @@ import {
   getClient,
   getOllamaModelConfig,
   planCompaction,
-  resolveReasoningEffort,
+  sideCallReasoningEffort,
   traceCompactionEvent,
 } from '@agent/agent-core';
 
@@ -51,17 +51,7 @@ async function summaryReasoningEffort(
 ): Promise<string | undefined> {
   try {
     const config = await getOllamaModelConfig(model, endpoint);
-    if (thinking === 'off') {
-      return config.thinking.values.includes(false)
-        ? resolveReasoningEffort(config, false)
-        : undefined;
-    }
-    // low/medium/high: pick the model's own value nearest the preference.
-    const wanted = thinking === 'low' ? false : true;
-    if (config.thinking.values.includes(wanted)) {
-      return resolveReasoningEffort(config, wanted);
-    }
-    return undefined;
+    return sideCallReasoningEffort(config, thinking);
   } catch {
     return undefined;
   }

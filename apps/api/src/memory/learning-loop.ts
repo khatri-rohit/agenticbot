@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
 
@@ -15,7 +15,7 @@ import {
   getOllamaModelConfig,
   newUserTurns,
   parseReviewProposals,
-  resolveReasoningEffort,
+  sideCallReasoningEffort,
 } from '@agent/agent-core';
 
 import { sideCallBudget } from '../models/model-settings-store';
@@ -52,8 +52,13 @@ async function readReviewedSeq(threadId: string): Promise<number> {
 }
 
 async function writeReviewedSeq(threadId: string, throughSeq: number): Promise<void> {
-  await mkdir(path.dirname(reviewedPath(threadId)), { recursive: true });
-  await writeFile(reviewedPath(threadId), JSON.stringify({ throughSeq }), 'utf8');
+  const target = reviewedPath(threadId);
+  await mkdir(path.dirname(target), { recursive: true });
+  // Atomic like every other store: a crash mid-write must not reset the
+  // cursor to 0 and re-review the whole thread.
+  const tmp = `${target}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify({ throughSeq }), 'utf8');
+  await rename(tmp, target);
 }
 
 /**
@@ -76,16 +81,7 @@ async function reviewThinking(
 ): Promise<string | undefined> {
   try {
     const config = await getOllamaModelConfig(model, endpoint);
-    if (thinking === 'off') {
-      return config.thinking.values.includes(false)
-        ? resolveReasoningEffort(config, false)
-        : undefined;
-    }
-    const wanted = thinking === 'low' ? false : true;
-    if (config.thinking.values.includes(wanted)) {
-      return resolveReasoningEffort(config, wanted);
-    }
-    return undefined;
+    return sideCallReasoningEffort(config, thinking);
   } catch {
     return undefined;
   }
@@ -182,4 +178,16 @@ export function scheduleLearningReview(input: {
   // Never keeps the process alive on shutdown.
   timer.unref();
   timers.set(input.threadId, timer);
+}
+
+/**
+ * Call when a thread is deleted: drop its pending review timer so it cannot
+ * fire against a deleted thread's ledger.
+ */
+export function cancelLearningReview(threadId: string): void {
+  const timer = timers.get(threadId);
+  if (timer) {
+    clearTimeout(timer);
+    timers.delete(threadId);
+  }
 }

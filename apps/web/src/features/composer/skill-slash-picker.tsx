@@ -85,7 +85,9 @@ export function SkillHighlightMirror({
     <div
       ref={mirrorRef}
       aria-hidden
-      className="type-composer pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1 py-2 text-foreground"
+      // `scrollbar-gutter: stable` reserves the same width the textarea's
+      // scrollbar takes, so both wrap at the same column.
+      className="type-composer pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1 py-2 text-foreground [scrollbar-gutter:stable]"
     >
       {parts.map((part, index) =>
         part.known ? (

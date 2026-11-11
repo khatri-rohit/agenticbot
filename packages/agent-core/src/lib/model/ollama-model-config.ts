@@ -8,6 +8,7 @@ import type {
   OllamaListedModel,
   OllamaModelConfig,
   OllamaThinkingConfig,
+  SideCallThinking,
   ThinkingMode,
   ThinkingValue,
 } from '@agent/agent-models';
@@ -110,6 +111,23 @@ export function resolveReasoningEffort(
 
 function cacheKey(endpoint: OllamaEndpoint, model: string): string {
   return `${endpoint}:${model}`;
+}
+
+/**
+ * Side-call thinking preference (off/low/medium/high) mapped onto the
+ * model's own thinking values via resolveReasoningEffort, which already
+ * owns the fallback policy (nearest supported level, else model default).
+ */
+export function sideCallReasoningEffort(
+  cfg: OllamaModelConfig,
+  thinking: SideCallThinking,
+): string | undefined {
+  if (thinking === 'off') {
+    return cfg.thinking.values.includes(false)
+      ? resolveReasoningEffort(cfg, false)
+      : undefined;
+  }
+  return resolveReasoningEffort(cfg, thinking);
 }
 
 /** Cached config only — never touches the network. */

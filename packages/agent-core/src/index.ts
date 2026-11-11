@@ -25,6 +25,7 @@ export {
   listOllamaModels,
   peekOllamaModelConfig,
   resolveReasoningEffort,
+  sideCallReasoningEffort,
 } from './lib/model/ollama-model-config';
 
 // Loop

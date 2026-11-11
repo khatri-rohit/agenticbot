@@ -1,5 +1,6 @@
 import {
   emptyThreadPlan,
+  parseDigest,
   parseThreadReview,
   sameReviewFingerprint,
   type LedgerEnvelope,
@@ -184,6 +185,49 @@ describe('analyzeThreadFrom', () => {
     expect(digest.findings.some((finding) => finding.kind === 'good')).toBe(true);
     expect(digest.numbers.runs).toBe(1);
     expect(digest.numbers.edits).toBe(0);
+  });
+
+  it('carries per-run prompt growth into the digest runs glance', () => {
+    const metrics = serialReads(4);
+    const { digest } = analyzeThreadFrom({
+      threadId: 't1',
+      title: 'Growth',
+      plan: emptyThreadPlan('t1'),
+      ledger: envelopes([
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: 'done' },
+      ]),
+      runs: [{ ...metrics, children: [], tracePath: 'r1.jsonl', depth: 0, traceWarnings: 0 }],
+      metrics: [metrics],
+    });
+    // serialReads uses 1000*i tokens per tool-iterating round → 4000/1000
+    expect(digest.runs[0].promptGrowth).toBe(4);
+  });
+
+  it('parses stale stored artifacts whose digest lacks promptGrowth', () => {
+    const metrics = answerRun();
+    const { fingerprint, digest } = analyzeThreadFrom({
+      threadId: 't1',
+      title: 'Math',
+      plan: emptyThreadPlan('t1'),
+      ledger: envelopes([{ role: 'user', content: 'What is 2+2?' }]),
+      runs: [{ ...metrics, children: [], tracePath: 'r1.jsonl', depth: 0, traceWarnings: 0 }],
+      metrics: [metrics],
+    });
+    const stale = {
+      threadId: digest.threadId,
+      createdAt: '2026-11-07T00:00:00.000Z',
+      fingerprint,
+      digest: {
+        ...digest,
+        runs: [{ runId: 'r1', status: 'completed', iterations: 2, toolCalls: 0, promptTokens: 100 }],
+      },
+      narrative: null,
+    };
+    const stored = parseThreadReview(stale);
+    expect(stored).not.toBeNull();
+    expect(stored?.digest.runs[0]?.promptGrowth).toBeNull();
+    expect(stored?.digest.runs[0]?.promptTokens).toBe(100);
   });
 
   it('flags edits on a question as misread intent', () => {
