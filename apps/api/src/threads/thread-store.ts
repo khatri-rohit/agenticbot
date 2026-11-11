@@ -520,6 +520,7 @@ export class ThreadStore {
         : {}),
       ...(input.meta?.toolOutcome ? { toolOutcome: input.meta.toolOutcome } : {}),
       ...(input.meta?.webTrust ? { webTrust: input.meta.webTrust } : {}),
+      ...(input.meta?.messageId ? { messageId: input.meta.messageId } : {}),
       ...(input.skills ? { skills: input.skills } : {}),
     };
 

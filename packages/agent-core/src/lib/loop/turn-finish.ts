@@ -107,7 +107,7 @@ async function finalizeAnswer(
       role: 'assistant',
       content,
     },
-    { durationMs, runDurationMs: Date.now() - s.runStartedAt },
+    { durationMs, runDurationMs: Date.now() - s.runStartedAt, messageId: finalMessageId },
   );
 
   emit?.({
@@ -237,7 +237,7 @@ export async function settleFinalAnswer(
       role: 'assistant',
       content: turn.content ?? '',
     },
-    { durationMs, runDurationMs: Date.now() - s.runStartedAt },
+    { durationMs, runDurationMs: Date.now() - s.runStartedAt, messageId },
   );
 
   emit?.({

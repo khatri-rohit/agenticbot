@@ -624,6 +624,9 @@ const TurnView = memo(function TurnView({
       step.type === 'assistant' &&
       step.message.id === latestAssistantMessageId,
   );
+  // The thread's latest assistant reply lives in this turn — retry is only
+  // valid there (retry rewinds the ledger to that point).
+  const isLatestTurnReply = latestReplyStep !== undefined;
   const footerAfterSteps =
     latestReplyStep !== undefined && steps.at(-1) !== latestReplyStep;
   const showSteps =
@@ -691,7 +694,7 @@ const TurnView = memo(function TurnView({
                 <AssistantMessage
                   key={step.message.id}
                   message={step.message}
-                  showMeta={isLatestAssistant && !footerAfterSteps}
+                  showMeta={!footerAfterSteps}
                   workSummary={isLatestAssistant ? workSummary : undefined}
                   turnStartedAt={turn.userMessage.createdAt}
                   showRetry={!isRunning && isLatestAssistant}
@@ -701,15 +704,23 @@ const TurnView = memo(function TurnView({
               );
             }
             if (step.type === 'snippet') {
+              // Render through AssistantMessage with the same key the
+              // committed ledger row will use (envelope.messageId), so the
+              // settle swap reconciles in place instead of remounting.
               return (
-                <div
-                  key={`snippet-${step.messageId}`}
-                  className="min-w-0 max-w-full"
-                >
-                  <article className="chat-prose type-body min-w-0 max-w-full">
-                    <AgentMarkdown content={step.content} />
-                  </article>
-                </div>
+                <AssistantMessage
+                  key={step.messageId}
+                  showMeta={false}
+                  message={{
+                    id: step.messageId,
+                    threadId: turn.userMessage.threadId,
+                    runId: activeRunId ?? null,
+                    role: 'assistant',
+                    content: step.content,
+                    status: 'complete',
+                    createdAt: turn.userMessage.createdAt,
+                  }}
+                />
               );
             }
             if (step.type === 'tools') {
@@ -732,11 +743,20 @@ const TurnView = memo(function TurnView({
               );
             }
             return (
-              <div key="stream" className="min-w-0 max-w-full">
-                <article className="chat-prose type-body min-w-0 max-w-full">
-                  <AgentMarkdown content={step.content} streaming />
-                </article>
-              </div>
+              <AssistantMessage
+                key={step.messageId}
+                showMeta={false}
+                streaming
+                message={{
+                  id: step.messageId,
+                  threadId: turn.userMessage.threadId,
+                  runId: activeRunId ?? null,
+                  role: 'assistant',
+                  content: step.content,
+                  status: 'complete',
+                  createdAt: turn.userMessage.createdAt,
+                }}
+              />
             );
           })}
         </div>
@@ -747,7 +767,7 @@ const TurnView = memo(function TurnView({
           message={latestReplyStep.message}
           workSummary={workSummary}
           turnStartedAt={turn.userMessage.createdAt}
-          showRetry={!isRunning}
+          showRetry={!isRunning && isLatestTurnReply}
           onRetry={onRetryLastResponse}
           retryDisabled={isRunning}
         />
@@ -774,23 +794,26 @@ const AssistantMessage = memo(function AssistantMessage({
   onRetry,
   retryDisabled,
   turnStartedAt,
+  streaming = false,
 }: {
   message: Message;
-  /** Meta footer (start time · run duration · Copy) only on the turn's final response. */
+  /** Meta footer (start time · run duration · Copy) on every committed reply. */
   showMeta?: boolean;
   workSummary?: string;
   /** The turn's user message time; fallback start for old rows. */
   turnStartedAt?: string;
   showRetry?: boolean;
-  onRetry: () => void | Promise<void>;
+  onRetry?: () => void | Promise<void>;
   retryDisabled?: boolean;
+  /** True while tokens are still arriving for this reply. */
+  streaming?: boolean;
 }) {
   if (!message.content.trim()) return null;
 
   return (
     <div className="min-w-0 max-w-full">
       <article className="chat-prose type-body min-w-0 max-w-full">
-        <AgentMarkdown content={message.content} />
+        <AgentMarkdown content={message.content} streaming={streaming} />
       </article>
       {showMeta ? (
         <TurnFooter
@@ -819,7 +842,7 @@ function TurnFooter({
   workSummary?: string;
   turnStartedAt?: string;
   showRetry?: boolean;
-  onRetry: () => void | Promise<void>;
+  onRetry?: () => void | Promise<void>;
   retryDisabled?: boolean;
 }) {
   const timing = answerTiming(message, turnStartedAt);

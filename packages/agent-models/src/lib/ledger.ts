@@ -43,6 +43,12 @@ export type LedgerAppendMeta = {
   toolOutcome?: ToolOutcome;
   /** On web tool rows: what the call made fetchable. */
   webTrust?: WebTrust;
+  /**
+   * Assistant rows only: the loop's messageId for this reply (the id the
+   * SSE stream used). Lets clients key the streamed and committed renderings
+   * of one reply identically, so the settle swap does not remount the DOM.
+   */
+  messageId?: string;
 };
 
 export type LedgerSystemRecord = {
@@ -92,6 +98,8 @@ export type LedgerEnvelope = {
   skills?: { selected: string[] };
   /** Tool rows only; absent on rows written before outcomes were stored. */
   toolOutcome?: ToolOutcome;
+  /** Assistant rows only: the loop's messageId for this reply (the id the SSE stream used). */
+  messageId?: string;
   /** Web tool rows only (see WebTrust). */
   webTrust?: WebTrust;
 };
@@ -168,7 +176,7 @@ export function envelopeToUiMessage(
   }
   if (chat.role === 'assistant') {
     return {
-      id,
+      id: envelope.messageId ?? id,
       threadId: envelope.threadId,
       runId: envelope.runId,
       role: 'assistant',

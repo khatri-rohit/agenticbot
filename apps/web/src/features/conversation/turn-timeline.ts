@@ -24,7 +24,7 @@ export type TimelineStep =
   | { type: 'tools'; key: string; rows: ToolCallRow[] }
   | { type: 'compaction'; notice: CompactionNotice }
   | { type: 'subagent'; activity: SubagentActivity }
-  | { type: 'stream'; content: string };
+  | { type: 'stream'; messageId: string; content: string };
 
 function previewToArgs(value: unknown): string | undefined {
   if (value == null) return undefined;
@@ -229,9 +229,10 @@ export function buildTurnTimeline(input: {
     steps.push({ type: 'subagent', activity });
   }
 
-  const streamContent = input.streaming?.content.trim();
-  if (streamContent) {
-    steps.push({ type: 'stream', content: streamContent });
+  const stream = input.streaming;
+  const streamContent = stream?.content.trim();
+  if (stream && streamContent) {
+    steps.push({ type: 'stream', messageId: stream.id, content: streamContent });
   }
 
   if (input.compaction) {

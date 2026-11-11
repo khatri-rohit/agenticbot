@@ -345,7 +345,7 @@ async function runLoopCore(
             content: turn.content || null,
             tool_calls: turn.toolCalls,
           },
-          { durationMs },
+          { durationMs, messageId },
         );
         turnToolCalls = turn.toolCalls;
 
