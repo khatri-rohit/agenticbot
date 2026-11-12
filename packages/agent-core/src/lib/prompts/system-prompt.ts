@@ -94,7 +94,11 @@ function toolProtocol(registry: ToolRegistry, isWorkspace: boolean): string {
  * failure seen in traces (drift, false "verified", ritual tool calls, wide
  * reads in the parent). Stable text first; the date sits at the very end.
  */
-function workspacePrompt(registry: ToolRegistry, posture: RunPosture): string {
+/**
+ * `stateCard`: the harness card is sent each call. Off (the A/B baseline),
+ * the prompt must not describe a card the model will never see.
+ */
+function workspacePrompt(registry: ToolRegistry, posture: RunPosture, stateCard: boolean): string {
   // Plan shares Ask's read-only sections; its own text replaces how-you-work and the report.
   const isAsk = posture !== 'agent';
   const isPlan = posture === 'plan';
@@ -129,12 +133,16 @@ function workspacePrompt(registry: ToolRegistry, posture: RunPosture): string {
     '- Do not re-read what is already above.',
     '- Issue independent glob, grep, and read_file calls together in one turn; they run in parallel, and each extra turn re-sends the whole context. Use grep context to see surrounding lines instead of a follow-up read.',
     has('record_finding')
-      ? '- When the task is to find or explain something, record each fact you confirm with record_finding (claim plus path:line) as you go. The record stays on the harness card, so the reads behind it can leave the context without being read again; write the answer from the record.'
+      ? stateCard
+        ? '- When the task is to find or explain something, record each fact you confirm with record_finding (claim plus path:line) as you go. The record stays on the harness card, so the reads behind it can leave the context without being read again; write the answer from the record.'
+        : '- When the task is to find or explain something, record each fact you confirm with record_finding (claim plus path:line) as you go, so the reads behind it can leave the context; write the answer from your recorded findings.'
       : '',
     '- An "(evicted)" card stands for a result that left the context: read_file again for current contents, or recall its sha256 for that exact text.',
     isAsk ? '' : '- Batch edits, then verify once.',
     '- When the run says the budget is nearly spent: finish the current step, verify, and report what is left.',
-    '- A "[Harness card]" message may close the conversation: the run\'s current phase, working set, recorded findings, open items and advice, rebuilt every step by the harness (not the user). Use it; do not answer it.',
+    stateCard
+      ? '- A "[Harness card]" message may close the conversation: the run\'s current phase, working set, recorded findings, open items and advice, rebuilt every step by the harness (not the user). Use it; do not answer it.'
+      : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -145,7 +153,7 @@ Check that you answered the question that was asked, with evidence, and named wh
     : `# Before you report done
 Ask what this could break: callers of anything you changed, edge cases and error paths, and whether you did what the user actually asked.${
         has('delegate')
-          ? ' For a change beyond a file or two, run delegate(review) once after edits pass the check (the harness card says when); skip it for a small change. Fix findings inside the request and list the rest.'
+          ? ` For a change beyond a file or two, run delegate(review) once after edits pass the check${stateCard ? ' (the harness card says when)' : ''}; skip it for a small change. Fix findings inside the request and list the rest.`
           : ''
       }`;
 
@@ -255,9 +263,9 @@ export function buildSystemPrompt(
   registry: ToolRegistry,
   mode?: ModeName,
   posture: RunPosture = 'agent',
-  options: { compactHome?: boolean } = {},
+  options: { compactHome?: boolean; stateCard?: boolean } = {},
 ): string {
-  if (mode === 'workspace') return workspacePrompt(registry, posture);
+  if (mode === 'workspace') return workspacePrompt(registry, posture, options.stateCard ?? true);
   if (options.compactHome) return compactHomePrompt(registry);
 
   return `

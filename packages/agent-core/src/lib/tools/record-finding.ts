@@ -15,7 +15,7 @@ export const record_finding: Tool = {
     function: {
       name: 'record_finding',
       description:
-        'Record one confirmed fact for this task: a short claim and its evidence. The harness card keeps every recorded finding in view for the rest of the run, so the file reads behind it can leave the prompt and you will not need to read them again. Record facts as you confirm them; write your answer from the record.',
+        'Record one confirmed fact for this task: a short claim and its evidence. Recorded findings are kept for the rest of the run, so the file reads behind them can leave the prompt and you will not need to read them again. Record facts as you confirm them; write your answer from them.',
       parameters: {
         type: 'object',
         properties: {

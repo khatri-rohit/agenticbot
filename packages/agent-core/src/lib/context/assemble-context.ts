@@ -571,7 +571,7 @@ export function assembleContext(
     input.tools,
     input.mode,
     input.posture ?? 'agent',
-    { compactHome: flags.compactHomePrompt },
+    { compactHome: flags.compactHomePrompt, stateCard: flags.stateCard },
   );
   const systemMessage: ChatCompletionMessageParam = {
     role: 'system',
