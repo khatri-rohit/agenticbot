@@ -418,3 +418,49 @@ describe('repeated reads are answered, not fatal', () => {
     expect(results.filter((text) => text.startsWith('Not run again'))).toHaveLength(0);
   });
 });
+
+describe('runLoop tool-call cap without a report tool', () => {
+  it('a parent run halts at maxToolCalls mid-batch, with no report-only refusals', async () => {
+    const tools = createToolRegistry([noop]);
+    const results: string[] = [];
+    const trace: { type: string; ids?: string[] }[] = [];
+    const lastMessages: ChatCompletionMessageParam[][] = [];
+    let n = 0;
+    const modelCall: ModelCallFn = async (_model, messages, registry) => {
+      lastMessages.push([...messages]);
+      if (registry.definitions.length === 0) {
+        return { content: 'handoff', toolCalls: [], finishReason: 'stop' };
+      }
+      n += 1;
+      return {
+        content: '',
+        toolCalls: [0, 1, 2].map((i) => ({
+          id: `c${n}-${i}`,
+          type: 'function' as const,
+          function: { name: 'noop', arguments: JSON.stringify({ n, i }) },
+        })),
+        finishReason: 'tool_calls',
+      };
+    };
+    const result = await runLoop(modelCall, [{ role: 'user', content: 'go' }], tools, {
+      model: 'test',
+      mode: 'home',
+      limits: { maxIterations: 20, maxToolCalls: 5, maxRepeatedToolCalls: 2, toolTimeoutMs: 5_000 },
+      trace: (event) => trace.push(event as never),
+      onMessage: (record) => {
+        if (record.role === 'tool') results.push(String(record.content));
+      },
+    });
+    expect(result.status).toBe('incomplete');
+    expect(result.limitReason).toMatch(/^limit\.tools: max tool calls exceeded \(5\)/);
+    expect(result.toolCalls).toBe(5);
+    // Second turn: two calls run, the third trips the cap and is skipped.
+    expect(n).toBe(2);
+    expect(results.filter((text) => text.includes('Skipped: tool call limit reached'))).toHaveLength(1);
+    expect(results.some((text) => text.includes('only `report` is available'))).toBe(false);
+    expect(trace.some((event) => event.ids?.some((id) => id.startsWith('report_only:')))).toBe(false);
+    // The parent keeps the plain handoff instruction.
+    const instruction = String(lastMessages.at(-1)?.at(-1)?.content ?? '');
+    expect(instruction).toContain('This run stopped at a limit; tools are off. If the request can be answered');
+  });
+});

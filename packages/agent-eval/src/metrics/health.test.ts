@@ -73,6 +73,25 @@ describe('harness health', () => {
     expect(health.advice.byKind['open:unchecked']).toEqual({ shown: 1, followed: 0 });
   });
 
+  it('counts a recorded finding as following stall advice and the unrecorded-reads item', () => {
+    const finding = { name: 'record_finding', args: { claim: 'c', evidence: 'a.ts:1' }, preview: 'Recorded finding 1.' };
+    const lines = [
+      ...step(1, [read('a.ts')]),
+      { type: 'policy_decision', runId, iteration: 2, kind: 'card', ids: ['advice:stall', 'open:unrecorded'] } as TraceLine,
+      ...step(2, [finding]),
+    ];
+    const health = computeHealth(lines, 2_000);
+    expect(health.advice.byKind['advice:stall']).toEqual({ shown: 1, followed: 1 });
+    expect(health.advice.byKind['open:unrecorded']).toEqual({ shown: 1, followed: 1 });
+
+    const ignored = [
+      ...step(1, [read('a.ts')]),
+      { type: 'policy_decision', runId, iteration: 2, kind: 'card', ids: ['open:unrecorded'] } as TraceLine,
+      ...step(2, [read('b.ts')]),
+    ];
+    expect(computeHealth(ignored, 2_000).advice.byKind['open:unrecorded']).toEqual({ shown: 1, followed: 0 });
+  });
+
   it('flags low-effort steps that make no progress; searches alone are not progress', () => {
     const lines = [
       ...step(1, [read('a.ts')], 'none'),

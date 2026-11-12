@@ -3,6 +3,7 @@ import {
   FINDING_EVIDENCE_MAX_CHARS,
   FINDINGS_MAX,
   TASK_STATE_COMMANDS_MAX,
+  type RunPosture,
   type TaskClass,
   type TaskCommand,
   type TaskFinding,
@@ -61,19 +62,16 @@ function argString(args: unknown, key: string): string {
 
 const CLASS_RANK: Record<TaskClass, number> = { small: 0, medium: 1, long: 2 };
 
-/** Words that make a request a change to the workspace. */
-const CHANGE_REQUEST_RE =
-  /\b(fix|implement|add|change|edit|refactor|update|rename|write|create|delete|remove|patch|migrate|replace|move|convert|bump|upgrade)\b/i;
-
 /**
- * The task's provisional shape from the request text. A home run (no
- * workspace) answers; a workspace request that asks for a change changes;
- * anything else is research. Evidence corrects it later: an edit makes the
- * task a change, whatever the request said.
+ * The task's provisional shape from the run's setup, never from the
+ * request's words. A home run (no workspace) answers; a read-only posture
+ * (ask, plan) cannot edit, so it researches; an agent in a workspace is
+ * unknown until evidence says: an edit makes it a change, a recorded
+ * finding makes it research.
  */
-export function inferTaskShape(request: string, hasWorkspace: boolean): TaskShape {
+export function inferTaskShape(hasWorkspace: boolean, posture: RunPosture): TaskShape {
   if (!hasWorkspace) return 'answer';
-  return CHANGE_REQUEST_RE.test(request) ? 'change' : 'research';
+  return posture === 'agent' ? 'unknown' : 'research';
 }
 
 /** `src/a.ts:12`, `src/a.ts:12-30` or `src/a.ts` → `src/a.ts`; URLs and quotes → null. */
@@ -88,7 +86,7 @@ export class TaskStateTracker {
   private phase: TaskPhase = 'orient';
   private currentIteration = 0;
   private klass: TaskClass = 'small';
-  private shapeValue: TaskShape = 'research';
+  private shapeValue: TaskShape = 'unknown';
   private readonly findings: TaskFinding[] = [];
   /** Paths a recorded finding cites (its evidence names them). */
   private readonly cited = new Set<string>();
@@ -327,6 +325,8 @@ export class TaskStateTracker {
       const path = citedPath(part);
       if (path) this.cited.add(path);
     }
+    // A recorded fact is research evidence; an edit still outranks it.
+    if (this.shapeValue !== 'change') this.shapeValue = 'research';
   }
 
   /** Promote the class as evidence grows; never demote within a run. */

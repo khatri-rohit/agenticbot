@@ -27,6 +27,8 @@ export const SERIAL_READ_ADVICE_AFTER = 4;
 /** The card is skipped on the first steps of a run unless it has something to say. */
 const QUIET_STEPS = 2;
 const WORKING_SET_MAX = 6;
+/** Files read that no finding cites before the card asks for findings. */
+export const UNRECORDED_READS_OPEN_AT = 4;
 
 function tokensK(tokens: number): string {
   if (tokens < 1_000) return `${Math.round(tokens)}`;
@@ -57,6 +59,8 @@ export function composeStateCard(
   // The step this card goes out with (the tracker advances on its llm_request).
   const step = s.iterations;
   const changing = task.shape === 'change';
+  // No evidence yet whether the task changes the workspace: advice stays neutral.
+  const unknown = task.shape === 'unknown';
   const canRecord = s.tools.byName.has('record_finding');
   const findings = task.evidence.findings;
 
@@ -96,6 +100,16 @@ export function composeStateCard(
     open.push('Edits pass the check: run delegate(review) once, then report.');
     ids.push('open:review');
   }
+  if (!changing && canRecord) {
+    // Reads no finding stands for must stay in the prompt or be read again.
+    const unrecorded = task.workingSet.filter((entry) => entry.reads > 0 && !s.task.isCited(entry.path)).length;
+    if (unrecorded >= UNRECORDED_READS_OPEN_AT) {
+      open.push(
+        `${unrecorded} file(s) read are not cited by any finding: record each confirmed fact with record_finding (claim + path:line), so those reads can leave the context without being read again.`,
+      );
+      ids.push('open:unrecorded');
+    }
+  }
 
   const advice: string[] = [];
   if (s.serialReadTurns >= SERIAL_READ_ADVICE_AFTER) {
@@ -113,7 +127,11 @@ export function composeStateCard(
       : '';
     const act = changing
       ? 'Act on what you have: make the change.'
-      : canRecord
+      : unknown
+        ? canRecord
+          ? 'Act on what you have: make the change if one was asked; otherwise record what you confirmed with record_finding and answer from the record.'
+          : 'Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed.'
+        : canRecord
         ? 'Record what you have confirmed with record_finding and answer from the record; say what was not found.'
         : 'Answer from what you have confirmed; say what was not found.';
     advice.push(
@@ -125,7 +143,9 @@ export function composeStateCard(
     advice.push(
       changing
         ? 'Run budget nearly spent: finish the current step, run the check once, and report what is done and what is left. Do not start new work.'
-        : 'Run budget nearly spent: stop searching. Answer now from what is recorded and say what is still open.',
+        : unknown
+          ? 'Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work.'
+          : 'Run budget nearly spent: stop searching. Answer now from what is recorded and say what is still open.',
     );
     ids.push('advice:budget');
   }

@@ -164,4 +164,71 @@ describe('harness card task record', () => {
     expect(card).toMatch(/stop searching\. Answer now from what is recorded/);
     expect(card).not.toMatch(/run the check/);
   });
+
+  it('words stall and budget advice neutrally while the shape is unknown', () => {
+    const unknown: TraceEvent = { type: 'run_start', runId, model: 'm', taskShape: 'unknown' };
+    const card = buildStateCard(
+      state({ events: [unknown], stalled: { idle: 300_000, max: 1_000_000 }, nearLimit: true }),
+      40_000,
+    ) ?? '';
+    expect(card).toMatch(/task small unknown/);
+    expect(card).toMatch(
+      /Act on what you have: make the change if one was asked; otherwise record what you confirmed with record_finding and answer from the record\./,
+    );
+    expect(card).not.toMatch(/Act on what you have: make the change\./);
+    expect(card).toMatch(/finish the current step, verify any edits once, and report what is done and what is left/);
+    expect(card).not.toMatch(/run the check/);
+
+    const noRecord = buildStateCard(
+      state({ events: [unknown], stalled: { idle: 300_000, max: 1_000_000 }, tools: ['read_file', 'edit_file'] }),
+      40_000,
+    ) ?? '';
+    expect(noRecord).toMatch(/make the change if one was asked; otherwise answer from what you have confirmed\./);
+    expect(noRecord).not.toMatch(/record_finding/);
+  });
+});
+
+describe('harness card unrecorded reads', () => {
+  const readEvents = (iteration: number, id: string, path: string): TraceEvent[] => [
+    { type: 'tool_start', runId, iteration, toolName: 'read_file', toolCallId: id, args: { path } },
+    { type: 'tool_complete', runId, iteration, toolName: 'read_file', toolCallId: id, durationMs: 0, resultPreview: '[lines 1–9 of 9]' },
+  ];
+  const finding = (iteration: number, id: string, claim: string, evidence: string): TraceEvent => ({
+    type: 'tool_start',
+    runId,
+    iteration,
+    toolName: 'record_finding',
+    toolCallId: id,
+    args: { claim, evidence },
+  });
+  const reads = (paths: string[]) => paths.flatMap((path, i) => readEvents(i + 1, `r${i}`, path));
+  const item = /Open: (\d+) file\(s\) read are not cited by any finding: record each confirmed fact with record_finding \(claim \+ path:line\), so those reads can leave the context without being read again\./;
+
+  it('appears at 4 uncited files read, not at 3', () => {
+    expect(buildStateCard(state({ events: reads(['a.ts', 'b.ts', 'c.ts']) }), 5_000) ?? '').not.toMatch(item);
+    const traced: TraceEvent[] = [];
+    const s = state({ events: reads(['a.ts', 'b.ts', 'c.ts', 'd.ts']) });
+    (s as unknown as { trace: (event: TraceEvent) => void }).trace = (event) => traced.push(event);
+    const sent = withStateCard(s, [], 5_000);
+    expect(String(sent[0]?.content)).toMatch(item);
+    expect(String(sent[0]?.content)).toMatch(/Open: 4 file\(s\) read/);
+    expect(traced).toEqual([expect.objectContaining({ kind: 'card', ids: expect.arrayContaining(['open:unrecorded']) })]);
+  });
+
+  it('disappears once findings cite the files', () => {
+    const events = [
+      ...reads(['a.ts', 'b.ts', 'c.ts', 'd.ts']),
+      finding(5, 'f1', 'A sets the port', 'a.ts:3'),
+      finding(5, 'f2', 'B reads it', 'b.ts:7'),
+    ];
+    const card = buildStateCard(state({ events, iterations: 6 }), 5_000) ?? '';
+    expect(card).not.toMatch(item);
+  });
+
+  it('is not shown for a change, or without record_finding', () => {
+    const four = reads(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+    const change = [...four, ...edit(5, 'e', 'a.ts')];
+    expect(buildStateCard(state({ events: change, iterations: 6 }), 5_000) ?? '').not.toMatch(item);
+    expect(buildStateCard(state({ events: four, tools: ['read_file'] }), 5_000) ?? '').not.toMatch(item);
+  });
 });

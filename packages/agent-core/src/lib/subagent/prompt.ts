@@ -7,6 +7,7 @@ import {
 
 import { getSkill, skillCore } from '../tools/skills';
 import type { Tool } from '../tools/types';
+import { getSubagentProfile } from './profiles';
 import {
   DIGEST_MAX_CHARS,
   UNTRUSTED_SUBAGENT_BEGIN,
@@ -84,13 +85,19 @@ export function childSkills(names: string[]): { name: string; body: string }[] {
 /** The user message that opens the child run. */
 export function buildBrief(spec: SubagentSpec, userRequest?: string): string {
   const calls = spec.thoroughness ? THOROUGHNESS_TOOL_CALLS[spec.thoroughness] : undefined;
+  // The harness keeps one call past the effort budget for `report` and
+  // refuses every other tool once it is reached (see turn-tools.ts).
+  const reports = getSubagentProfile(spec.profile)?.report === true;
+  const effort = !calls
+    ? ''
+    : reports
+      ? `Effort: ${spec.thoroughness}: up to ${calls} tool calls. When they are used up, only \`report\` remains and every other tool is refused. Batch independent searches in one turn, and leave room to report what you found with the gaps that remain.`
+      : `Effort: ${spec.thoroughness}: up to ${calls} tool calls, then the run stops. Batch independent searches in one turn, and report what you have with the gaps that remain before you reach it.`;
   return [
     `Objective: ${spec.objective}`,
     `Scope: ${spec.scope}`,
     spec.outputFocus ? `Report focus: ${spec.outputFocus}` : '',
-    calls
-      ? `Effort: ${spec.thoroughness}: up to ${calls} tool calls, then the run stops. Batch independent searches in one turn, and report what you have with the gaps that remain before you reach it.`
-      : '',
+    effort,
     userRequest ? `The user's request this work serves:\n${clip(userRequest, 2_000)}` : '',
   ]
     .filter(Boolean)

@@ -42,7 +42,7 @@
         "learningLoop": true,
         "stateCard": true
       },
-      "taskShape": "research"
+      "taskShape": "unknown"
     },
     {
       "type": "context_shape",
@@ -167,7 +167,7 @@
       "runId": "replay-run",
       "iteration": 3,
       "messages": 6,
-      "promptTokens": 1116,
+      "promptTokens": 1115,
       "residentToolTokens": 1003,
       "residueTokens": 47,
       "prefixStableMessages": 2
@@ -345,7 +345,7 @@
         "phase": "report",
         "iteration": 5,
         "taskClass": "small",
-        "shape": "research",
+        "shape": "unknown",
         "workingSet": [
           {
             "path": "big1.ts",
@@ -869,7 +869,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small research · ~1k tokens per call\nWorking set: big2.ts; 1 file(s) read earlier are no longer in full view (read_file again if needed)"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small unknown · ~1k tokens per call\nWorking set: big2.ts; 1 file(s) read earlier are no longer in full view (read_file again if needed)"
       }
     ],
     [
@@ -936,7 +936,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 4 · task small research · ~1k tokens per call\nWorking set: big3.ts; 2 file(s) read earlier are no longer in full view (read_file again if needed)"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 4 · task small unknown · ~1k tokens per call\nWorking set: big3.ts; 2 file(s) read earlier are no longer in full view (read_file again if needed)"
       }
     ],
     [
@@ -1022,7 +1022,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 5 · task small research · ~1k tokens per call\nWorking set: big4.ts; 3 file(s) read earlier are no longer in full view (read_file again if needed)\nAdvice:\n- 4 turns in a row made one read call, and each turn re-sends ~1k tokens. Put independent reads and searches in one turn; they run in parallel."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 5 · task small unknown · ~1k tokens per call\nWorking set: big4.ts; 3 file(s) read earlier are no longer in full view (read_file again if needed)\nAdvice:\n- 4 turns in a row made one read call, and each turn re-sends ~1k tokens. Put independent reads and searches in one turn; they run in parallel."
       }
     ]
   ]

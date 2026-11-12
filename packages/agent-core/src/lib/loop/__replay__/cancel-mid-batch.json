@@ -42,7 +42,7 @@
         "learningLoop": true,
         "stateCard": true
       },
-      "taskShape": "research"
+      "taskShape": "unknown"
     },
     {
       "type": "context_shape",
@@ -105,7 +105,7 @@
         "phase": "change",
         "iteration": 1,
         "taskClass": "small",
-        "shape": "research",
+        "shape": "unknown",
         "workingSet": [],
         "evidence": {
           "edits": 0,

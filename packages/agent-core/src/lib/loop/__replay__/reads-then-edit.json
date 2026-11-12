@@ -42,7 +42,7 @@
         "learningLoop": true,
         "stateCard": true
       },
-      "taskShape": "research"
+      "taskShape": "unknown"
     },
     {
       "type": "context_shape",

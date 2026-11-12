@@ -61,6 +61,28 @@ const REPEAT_BLOCKED = limitMessage(
   'This exact tool call has already been attempted multiple times. Do not repeat it.',
 );
 
+/** Refusal once only the reserved `report` call is left in a sub-agent's budget. */
+const REPORT_ONLY_REFUSAL =
+  'Tool budget used: only `report` is available now. Call report with what you found (path:line evidence) and what is still open.';
+
+/** Turns in a row that only drew report-only refusals before the run ends on limit.tools. */
+const MAX_REPORT_ONLY_TURNS = 2;
+
+/**
+ * A run with a `report` tool keeps its last budgeted call for `report`:
+ * once only that reserve is left, every other call is refused (a row, not
+ * a halt), so the model gets another turn to report.
+ */
+function reportOnly(s: RunState, toolName: string): boolean {
+  const max = s.limits.maxToolCalls;
+  return (
+    max !== undefined &&
+    toolName !== 'report' &&
+    s.tools.byName.has('report') &&
+    s.totalToolCalls >= max - 1
+  );
+}
+
 /** Answer to a repeated read or fetch: points at the result already made. */
 function repeatAnswered(earlier: number): string {
   return `Not run again: this exact call already ran ${earlier} time(s) in this run with the same arguments, and its result has not changed. Use the earlier result: it is above, or an (evicted) card whose sha \`recall\` restores. Ask something different if you need more.`;
@@ -75,7 +97,7 @@ type ReadyToolCall = {
 
 type AdmitResult =
   | { kind: 'ready'; call: ReadyToolCall }
-  | { kind: 'filled' }
+  | { kind: 'filled'; reportOnly?: true }
   | {
       kind: 'halt';
       reason: 'limit' | 'repeat';
@@ -303,6 +325,18 @@ async function admitToolCall(
   }
 
   guard.knownTool();
+
+  if (reportOnly(s, toolName)) {
+    await record.refuse(toolCall, REPORT_ONLY_REFUSAL);
+    s.trace({
+      type: 'policy_decision',
+      runId: s.runId,
+      iteration: s.iterations,
+      kind: 'guard',
+      ids: [`report_only:${toolName}`],
+    });
+    return { kind: 'filled', reportOnly: true };
+  }
 
   if (isReadOnlyPosture(s.posture) && isAskStrippedTool(toolName)) {
     await record.refuse(
@@ -687,6 +721,7 @@ export async function runToolTurn(
   const ready: ReadyToolCall[] = [];
   let halt: Extract<AdmitResult, { kind: 'halt' }> | null = null;
   let haltIndex = 0;
+  let reportOnlyRefused = 0;
   s.steering.startTurn();
   for (let index = 0; index < turn.toolCalls.length; index++) {
     if (s.signal?.aborted) {
@@ -706,8 +741,23 @@ export async function runToolTurn(
       haltIndex = index;
       break;
     }
-    if (admitted.kind === 'filled') continue;
+    if (admitted.kind === 'filled') {
+      if (admitted.reportOnly) reportOnlyRefused += 1;
+      continue;
+    }
     ready.push(admitted.call);
+  }
+
+  // A child that keeps calling other tools after the report-only refusal
+  // would spin until its iteration cap; end it on the tool limit instead.
+  s.reportOnlyTurns =
+    halt === null && ready.length === 0 && reportOnlyRefused > 0 ? s.reportOnlyTurns + 1 : 0;
+  if (s.reportOnlyTurns >= MAX_REPORT_ONLY_TURNS) {
+    noteLimit(
+      s,
+      limitMessage('limit.tools', `max tool calls exceeded (${s.limits.maxToolCalls})`),
+    );
+    return await completeAfterLimit(s);
   }
 
   // A model that only retries closed web tools spends a full call per

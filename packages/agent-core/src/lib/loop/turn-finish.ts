@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { limitMessage, type ModelTurn, type TokenUsage } from '@agent/agent-models';
+import {
+  limitMessage,
+  REPORT_MAX_CHARS,
+  type ModelTurn,
+  type TokenUsage,
+} from '@agent/agent-models';
 
 import { stubLiveToolResults } from '../context/assemble-context';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
@@ -21,6 +26,13 @@ import { preview } from './tool-call-record';
 /** Tools-off final call after a limit; doubles as the handoff the next run continues from. */
 const LIMIT_HANDOFF_INSTRUCTION =
   'This run stopped at a limit; tools are off. If the request can be answered from the information above, answer it now and say what is uncertain. Otherwise write a short handoff for the next run: what is done (files changed, what was verified), what is left, and the exact next step.';
+
+/**
+ * The same handoff for a sub-agent (a run with a `report` tool): its answer
+ * becomes the report the parent reads, so it asks for the report's shape
+ * and size, with the gaps first-class.
+ */
+const REPORT_LIMIT_HANDOFF_INSTRUCTION = `This run stopped at a limit; tools are off and \`report\` can no longer be called. Write your report as plain text now, under ${REPORT_MAX_CHARS.toLocaleString('en-US')} characters in total (the parent reads that much; text past it is cut). Use this shape: 1) Status: partial, plus one line on where you stopped; 2) Findings: one line each with path:line evidence; 3) Open: what you could not find or verify and the exact next search. List the gaps even if the findings are short. No preamble, no repeated tool output.`;
 
 /** Tools-off final call after the user skipped an offer_choice: a summary they can decide from. */
 const DEFERRED_CHOICE_INSTRUCTION =
@@ -156,7 +168,10 @@ export function finishPaused(s: RunState, reason: string): CoreResult {
 
 export async function completeAfterLimit(s: RunState): Promise<CoreResult> {
   stubLiveToolResults(s.messages, s.contextBudget, s.runStart, s.flags);
-  const final = await finalizeAnswer(s, LIMIT_HANDOFF_INSTRUCTION);
+  const final = await finalizeAnswer(
+    s,
+    s.tools.byName.has('report') ? REPORT_LIMIT_HANDOFF_INSTRUCTION : LIMIT_HANDOFF_INSTRUCTION,
+  );
   emitTurnCompleted(s, s.iterations, final.usage);
   s.emit?.({
     type: 'run.completed',

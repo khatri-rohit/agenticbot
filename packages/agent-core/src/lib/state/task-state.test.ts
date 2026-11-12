@@ -220,13 +220,16 @@ describe('TaskStateTracker verification and class', () => {
 });
 
 describe('task shape and findings', () => {
-  it('infers the shape from the request and corrects it on the first edit', () => {
-    expect(inferTaskShape('What does the harness card show?', true)).toBe('research');
-    expect(inferTaskShape('Fix the scroll bug in message-list', true)).toBe('change');
-    expect(inferTaskShape('Fix my bike?', false)).toBe('answer');
-    // "address" is not "add": whole words only.
-    expect(inferTaskShape('Which address does the API bind?', true)).toBe('research');
+  it('starts the shape from the run setup, never from request words', () => {
+    expect(inferTaskShape(false, 'agent')).toBe('answer');
+    expect(inferTaskShape(false, 'ask')).toBe('answer');
+    expect(inferTaskShape(true, 'ask')).toBe('research');
+    expect(inferTaskShape(true, 'plan')).toBe('research');
+    expect(inferTaskShape(true, 'agent')).toBe('unknown');
+    expect(new TaskStateTracker().shape).toBe('unknown');
+  });
 
+  it('corrects the shape on the first edit', () => {
     const tracker = new TaskStateTracker();
     feed(tracker, [{ type: 'run_start', runId, model: 'm', taskShape: 'research' }]);
     expect(tracker.shape).toBe('research');
@@ -236,6 +239,25 @@ describe('task shape and findings', () => {
       complete(1, 'e', 'edit_file', 'Patched a.ts', { outcome: 'ok' }),
     ]);
     expect(tracker.snapshot().shape).toBe('change');
+  });
+
+  it('moves unknown to research on a recorded finding; an edit wins over research', () => {
+    const tracker = new TaskStateTracker();
+    feed(tracker, [{ type: 'run_start', runId, model: 'm', taskShape: 'unknown' }, request(1)]);
+    // An incomplete finding is no evidence.
+    feed(tracker, [start(1, 'f0', 'record_finding', { claim: 'x', evidence: '' })]);
+    expect(tracker.shape).toBe('unknown');
+    feed(tracker, [start(1, 'f1', 'record_finding', { claim: 'Port is 3000', evidence: 'src/main.ts:12' })]);
+    expect(tracker.shape).toBe('research');
+    feed(tracker, [
+      request(2),
+      start(2, 'e', 'edit_file', { path: 'src/main.ts' }),
+      complete(2, 'e', 'edit_file', 'Patched src/main.ts', { outcome: 'ok' }),
+    ]);
+    expect(tracker.shape).toBe('change');
+    // A later finding does not take the change back.
+    feed(tracker, [request(3), start(3, 'f2', 'record_finding', { claim: 'Port is now 4000', evidence: 'src/main.ts:12' })]);
+    expect(tracker.shape).toBe('change');
   });
 
   it('records findings, ignores duplicates and incomplete ones, and knows the files they cite', () => {

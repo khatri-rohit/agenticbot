@@ -100,6 +100,8 @@ export type RunState = {
   serialReadTurns: number;
   /** This turn's single read result carries the serial-reads note. */
   serialReadNoteDue: boolean;
+  /** Consecutive turns whose calls were all refused because only `report` was left. */
+  reportOnlyTurns: number;
   /** One-shot advice for the next harness card (consumed when the card is built). */
   readonly advisories: string[];
   /** Fingerprints of the previous call's messages, for the prefix-stability measure. */
@@ -205,6 +207,7 @@ export function createRunState(
     stopChecked: false,
     serialReadTurns: 0,
     serialReadNoteDue: false,
+    reportOnlyTurns: 0,
     advisories: [],
     promptKeys: [],
   };

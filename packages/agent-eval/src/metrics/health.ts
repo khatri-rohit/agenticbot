@@ -103,6 +103,7 @@ function toolsByStep(lines: TraceLine[]): Map<number, StepTool[]> {
 }
 
 const isEdit = (tool: StepTool) => tool.name === 'edit_file' && tool.ok && !/^(Error|oldText span)/.test(tool.preview);
+const isFinding = (tool: StepTool) => tool.name === 'record_finding' && tool.ok && tool.preview.startsWith('Recorded');
 const isCheck = (tool: StepTool) => tool.name === 'run_terminal' && tool.exitCode !== undefined;
 const isPartialRead = (tool: StepTool) => {
   const range = RANGE.exec(tool.preview);
@@ -117,7 +118,8 @@ function followed(id: string, window: StepTool[][], answered: boolean): boolean 
     const path = id.slice('advice:read_creep:'.length);
     return !all.some((tool) => tool.name === 'read_file' && pathOf(tool.args) === path && isPartialRead(tool));
   }
-  if (id === 'advice:stall') return answered || all.some(isEdit);
+  if (id === 'advice:stall') return answered || all.some((tool) => isEdit(tool) || isFinding(tool));
+  if (id === 'open:unrecorded') return all.some(isFinding);
   if (id === 'advice:budget') return answered;
   if (id === 'advice:one_shot' || id === 'open:review') return all.some((tool) => tool.name === 'delegate');
   if (id === 'open:unchecked') return all.some(isCheck);

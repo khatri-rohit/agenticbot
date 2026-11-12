@@ -211,17 +211,82 @@ describe('foldResidue', () => {
     expect(String(messages[1]?.content)).toContain(`sha256:${'0'.repeat(63)}1`);
   });
 
-  it('stops at the first step that still holds resident content', async () => {
+  /** Every tool row's call is issued by an assistant row earlier in the array. */
+  const pairingValid = (messages: ChatCompletionMessageParam[]) => {
+    const issued = new Set<string>();
+    for (const message of messages) {
+      if (message.role === 'assistant') for (const call of message.tool_calls ?? []) issued.add(call.id);
+      if (message.role === 'tool' && !issued.has(message.tool_call_id)) return false;
+    }
+    return true;
+  };
+
+  it('keeps a step with resident content in place and folds card-only steps before and after it', async () => {
     const messages = steps(12, [3]);
-    // A lower mark, so three steps' residue is worth a fold (at least half the mark).
-    const result = await foldResidue(messages, 1, { ...small, inRunResidueFoldTokens: 600 }, []);
-    expect(result?.toolCallIds).toEqual(['c0', 'c1', 'c2']);
+    const result = await foldResidue(messages, 1, small, []);
+    expect(result?.toolCallIds).toEqual(['c0', 'c1', 'c2', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9']);
+    expect(String(messages[1]?.content)).toMatch(/^\(compacted progress\)/);
+    // The resident step sits right after the recap, then the two newest.
+    expect(messages[2]?.role === 'assistant' && messages[2].tool_calls?.[0]?.id).toBe('c3');
     expect(contentOf(messages, 'c3')).toMatch(/^\[lines/);
+    expect(messages.filter((m) => m.role === 'tool').map((m) => (m as { tool_call_id: string }).tool_call_id))
+      .toEqual(['c3', 'c10', 'c11']);
+    expect(pairingValid(messages)).toBe(true);
+  });
+
+  it('a sub-agent report early in the run does not block folding later card-only steps', async () => {
+    const report = `subagent:profile=explore reportSha=${'f'.repeat(64)}\n${'r'.repeat(3_000)}`;
+    const messages = steps(12);
+    // Step 1 becomes a delegate call whose report must never be removed.
+    messages[3] = {
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id: 'd', type: 'function', function: { name: 'delegate', arguments: '{"profile":"explore"}' } }],
+    };
+    messages[4] = { role: 'tool', tool_call_id: 'd', content: report };
+    const result = await foldResidue(messages, 1, small, []);
+    expect(result?.toolCallIds).toEqual(['c0', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9']);
+    expect(contentOf(messages, 'd')).toBe(report);
+    expect(pairingValid(messages)).toBe(true);
+  });
+
+  it('leaves tool_call pairing valid after folding around several live steps', async () => {
+    const messages = steps(14, [1, 5, 6, 10]);
+    const result = await foldResidue(messages, 1, { ...small, inRunResidueFoldTokens: 600 }, []);
+    expect(result).not.toBeNull();
+    expect(pairingValid(messages)).toBe(true);
+    for (const id of ['c1', 'c5', 'c6', 'c10']) expect(contentOf(messages, id)).toMatch(/^\[lines/);
+  });
+
+  it('keeps prior recap lines and appends new ones in order', async () => {
+    const messages = steps(12);
+    messages.splice(1, 0, { role: 'assistant', content: '(compacted progress)\nheader\n- earlier line one\n- earlier line two' });
+    const result = await foldResidue(messages, 1, small, []);
+    expect(result?.toolCallIds).toHaveLength(10);
+    const recap = String(messages[1]?.content);
+    expect(recap.match(/\(compacted progress\)/g)).toHaveLength(1);
+    const one = recap.indexOf('earlier line one');
+    const two = recap.indexOf('earlier line two');
+    const c0 = recap.indexOf('f0.ts');
+    const c9 = recap.indexOf('f9.ts');
+    expect(one).toBeGreaterThan(-1);
+    expect(one).toBeLessThan(two);
+    expect(two).toBeLessThan(c0);
+    expect(c0).toBeLessThan(c9);
+    expect(pairingValid(messages)).toBe(true);
+  });
+
+  it('never folds the newest keep-N steps', async () => {
+    const messages = steps(12);
+    const result = await foldResidue(messages, 1, { ...small, inRunKeepToolResults: 4 }, []);
+    expect(result?.toolCallIds).toEqual(['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']);
+    for (const id of ['c8', 'c9', 'c10', 'c11']) expect(contentOf(messages, id)).toBe(card(Number(id.slice(1))));
   });
 
   it('does not fold a stretch too small to be worth changing the cached prompt', async () => {
-    // Only three steps are foldable before a resident one: under half the 1k mark.
-    expect(await foldResidue(steps(12, [3]), 1, small, [])).toBeNull();
+    // Residue (mostly live steps' call arguments) passes the mark, but only
+    // two card-only steps are foldable: under half the 1k mark.
+    expect(await foldResidue(steps(12, [2, 3, 4, 5, 6, 7, 8, 9]), 1, small, [])).toBeNull();
   });
 
   it('does nothing under the residue mark', async () => {

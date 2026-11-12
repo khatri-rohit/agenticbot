@@ -42,7 +42,7 @@
         "learningLoop": true,
         "stateCard": true
       },
-      "taskShape": "research"
+      "taskShape": "unknown"
     },
     {
       "type": "context_shape",
@@ -204,7 +204,7 @@
       "runId": "replay-run",
       "iteration": 4,
       "messages": 8,
-      "promptTokens": 3074,
+      "promptTokens": 3073,
       "residentToolTokens": 3006,
       "residueTokens": 19,
       "prefixStableMessages": 5
@@ -991,7 +991,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small research · ~2k tokens per call\nWorking set: f2.ts, f1.ts"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small unknown · ~2k tokens per call\nWorking set: f2.ts, f1.ts"
       }
     ],
     [
@@ -1058,7 +1058,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 4 · task small research · ~3k tokens per call\nWorking set: f3.ts, f2.ts, f1.ts"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 4 · task small unknown · ~3k tokens per call\nWorking set: f3.ts, f2.ts, f1.ts"
       }
     ],
     [

@@ -489,7 +489,7 @@ export async function compactCurrentRun(
   // A milestone folds by design, not to reach a mark: never prefix-heavy.
   const prefixHeavy = !milestone && estimate > lowMark;
 
-  const toolCallIds = await foldIntoRecap(messages, runStart, start, cutEnd, priorRecap, putBlob);
+  const toolCallIds = await foldIntoRecap(messages, runStart, start, [[start, cutEnd]], priorRecap, putBlob);
   return {
     beforeTokens,
     afterTokens: estimatePromptTokens(messages, tools),
@@ -528,9 +528,11 @@ function residueChars(messages: ChatCompletionMessageParam[], from: number, to =
  * Fold old steps that hold nothing resident any more (their results are all
  * cards, stubs or small) into the recap, once this run's residue (cards and
  * old call arguments) passes `inRunResidueFoldTokens`. Unlike the size mark,
- * this cannot remove working-set content: it stops at the first step that
- * still has a resident result, a sub-agent report, or live state (plan).
- * The newest `inRunKeepToolResults` steps stay. Prompt-only.
+ * this cannot remove working-set content: a step that still has a resident
+ * result, a sub-agent report, or live state (plan) stays where it is, and
+ * the card-only steps before and after it fold. The newest
+ * `inRunKeepToolResults` steps stay. Whole steps only, so tool_call pairing
+ * stays valid. Prompt-only.
  */
 export async function foldResidue(
   messages: ChatCompletionMessageParam[],
@@ -546,9 +548,11 @@ export async function foldResidue(
   }
   const removable = groupStarts.length - Math.max(1, budget.inRunKeepToolResults);
   const calls = toolCallIndex(messages);
-  let cutEnd = start;
+  const ranges: Array<[number, number]> = [];
+  let foldedResidue = 0;
   for (let g = 0; g < removable; g++) {
-    const from = groupStarts[g]!;
+    // The first step's range starts at `start`, as the contiguous fold did.
+    const from = g === 0 ? start : groupStarts[g]!;
     const to = groupStarts[g + 1] ?? messages.length;
     const holdsLive = messages.slice(from, to).some((message) => {
       if (message.role !== 'tool' || typeof message.content !== 'string') return false;
@@ -556,52 +560,57 @@ export async function foldResidue(
       if (name === 'delegate' || (name && NEVER_EVICT.has(name))) return message.content.length >= MIN_EVICT_CHARS;
       return isResident(message.content) && message.content.length >= MIN_EVICT_CHARS;
     });
-    if (holdsLive) break;
-    cutEnd = to;
+    if (holdsLive) continue;
+    ranges.push([from, to]);
+    foldedResidue += residueChars(messages, from, to);
   }
   // Worth a change to the cached prompt only when it clears a real share of the mark.
-  if (cutEnd === start || residueChars(messages, start, cutEnd) / CHARS_PER_TOKEN < budget.inRunResidueFoldTokens / 2) {
+  if (ranges.length === 0 || foldedResidue / CHARS_PER_TOKEN < budget.inRunResidueFoldTokens / 2) {
     return null;
   }
   const beforeTokens = estimatePromptTokens(messages, tools);
-  const toolCallIds = await foldIntoRecap(messages, runStart, start, cutEnd, priorRecap);
+  const toolCallIds = await foldIntoRecap(messages, runStart, start, ranges, priorRecap);
   return { beforeTokens, afterTokens: estimatePromptTokens(messages, tools), toolCallIds, prefixHeavy: false };
 }
 
 /**
- * Replace messages [runStart, cutEnd) with one recap: the prior recap, then
- * one line per note and tool outcome of the folded steps. Large resident
- * results are stored first so their sha stays recallable.
+ * Replace the folded `ranges` (ascending, disjoint, whole steps at or after
+ * the recap start) with one recap at `runStart`: the prior recap, then one
+ * line per note and tool outcome of the folded steps, in order. Steps between
+ * ranges stay in place, in order, after the recap. Large resident results are
+ * stored first so their sha stays recallable.
  */
 async function foldIntoRecap(
   messages: ChatCompletionMessageParam[],
   runStart: number,
   start: number,
-  cutEnd: number,
+  ranges: Array<[number, number]>,
   priorRecap: string,
   putBlob?: (text: string) => Promise<string>,
 ): Promise<string[]> {
   const calls = toolCallIndex(messages);
   const lines: string[] = priorRecap ? [priorRecap] : [];
   const toolCallIds: string[] = [];
-  for (let i = start; i < cutEnd; i++) {
-    const message = messages[i];
-    if (!message) continue;
-    if (message.role === 'assistant') {
-      const text = clip(textOf(message.content), 300);
-      if (text) lines.push(`Note: ${text}`);
-    } else if (message.role === 'tool' && typeof message.content === 'string') {
-      const info = calls.get(message.tool_call_id);
-      // Edit hunks are not worth keeping (the file is the source of truth);
-      // cards already carry their own sha.
-      const keepBody =
-        putBlob !== undefined &&
-        info?.name !== 'edit_file' &&
-        message.content.length >= MIN_EVICT_CHARS &&
-        isResident(message.content);
-      const storedSha = keepBody ? await putBlob(message.content) : undefined;
-      lines.push(outcomeLine(info, message.content, storedSha));
-      toolCallIds.push(message.tool_call_id);
+  for (const [from, to] of ranges) {
+    for (let i = from; i < to; i++) {
+      const message = messages[i];
+      if (!message) continue;
+      if (message.role === 'assistant') {
+        const text = clip(textOf(message.content), 300);
+        if (text) lines.push(`Note: ${text}`);
+      } else if (message.role === 'tool' && typeof message.content === 'string') {
+        const info = calls.get(message.tool_call_id);
+        // Edit hunks are not worth keeping (the file is the source of truth);
+        // cards already carry their own sha.
+        const keepBody =
+          putBlob !== undefined &&
+          info?.name !== 'edit_file' &&
+          message.content.length >= MIN_EVICT_CHARS &&
+          isResident(message.content);
+        const storedSha = keepBody ? await putBlob(message.content) : undefined;
+        lines.push(outcomeLine(info, message.content, storedSha));
+        toolCallIds.push(message.tool_call_id);
+      }
     }
   }
 
@@ -609,10 +618,23 @@ async function foldIntoRecap(
   if (recap.length > RECAP_MAX_CHARS) {
     recap = `…\n${recap.slice(recap.length - RECAP_MAX_CHARS)}`;
   }
-  messages.splice(runStart, cutEnd - runStart, {
-    role: 'assistant',
-    content: `${RECAP_PREFIX}\nEarlier steps of this run, condensed. Re-read files before relying on old contents; recall a sha256 for an exact earlier result.\n${recap}`,
-  });
+  // Steps before and between folded ranges stay, in order, after the recap.
+  const kept: ChatCompletionMessageParam[] = [];
+  let at = start;
+  for (const [from, to] of ranges) {
+    kept.push(...messages.slice(at, from));
+    at = to;
+  }
+  const cutEnd = Math.max(at, start);
+  messages.splice(
+    runStart,
+    cutEnd - runStart,
+    {
+      role: 'assistant',
+      content: `${RECAP_PREFIX}\nEarlier steps of this run, condensed. Re-read files before relying on old contents; recall a sha256 for an exact earlier result.\n${recap}`,
+    },
+    ...kept,
+  );
   return toolCallIds;
 }
 

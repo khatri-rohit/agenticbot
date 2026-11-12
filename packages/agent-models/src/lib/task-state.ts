@@ -63,10 +63,14 @@ export type TaskClass = 'small' | 'medium' | 'long';
 /**
  * What the task asks for, which decides what counts as evidence: `change`
  * (edits, then a passing check), `research` (recorded findings about the
- * workspace), `answer` (a reply, no workspace). Inferred from the request
- * at the start and corrected by evidence (an edit makes it `change`).
+ * workspace), `answer` (a reply, no workspace), or `unknown` (no evidence
+ * yet). Never guessed from the request's words: the start value comes from
+ * the run's setup (no workspace → `answer`; read-only posture → `research`;
+ * agent posture in a workspace → `unknown`), and evidence corrects it: an
+ * edit makes it `change` (always wins), a recorded finding makes it
+ * `research` unless it is already `change`.
  */
-export type TaskShape = 'change' | 'research' | 'answer';
+export type TaskShape = 'change' | 'research' | 'answer' | 'unknown';
 
 /** One fact the model recorded with record_finding. */
 export type TaskFinding = {
