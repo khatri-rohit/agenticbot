@@ -11,10 +11,14 @@ import {
   CHILD_BUDGET_SHARE,
   childAllocation,
   DEFAULT_CONTEXT_BUDGET,
+  FINDING_CLAIM_MAX_CHARS,
+  FINDING_EVIDENCE_MAX_CHARS,
+  FINDINGS_MAX,
   GREP_WINDOW,
   liveResultCapChars,
   MAX_CONCURRENT_SUBAGENTS,
   READ_WINDOW,
+  RECORD_CARD_MAX_CHARS,
   REPORT_MAX_CHARS,
   THOROUGHNESS_TOOL_CALLS,
   type SubagentThoroughness,
@@ -24,6 +28,7 @@ import { createDelegateTool } from './subagent/delegate';
 import { getSubagentProfile, listSubagentProfiles } from './subagent/profiles';
 import { buildBrief, createReportTool } from './subagent/prompt';
 import { DIGEST_MAX_CHARS } from './subagent/types';
+import { record_finding } from './tools/record-finding';
 import {
   WORKSPACE_GREP_MAX_CHARS,
   WORKSPACE_GREP_MAX_CONTEXT,
@@ -80,6 +85,22 @@ describe('I8: one value per quantity', () => {
     const text = JSON.stringify(delegate.definition);
     for (const level of LEVELS) expect(text).toContain(`${level} (${THOROUGHNESS_TOOL_CALLS[level]} tool calls)`);
     expect(text).toContain(`at most ${MAX_CONCURRENT_SUBAGENTS} at a time`);
+  });
+
+  it('record_finding states the same size limits the task state applies, and the card can show a full record', () => {
+    const text = JSON.stringify(record_finding.definition);
+    expect(text).toContain(`max ${FINDING_CLAIM_MAX_CHARS} chars`);
+    expect(text).toContain(`max ${FINDING_EVIDENCE_MAX_CHARS} chars`);
+    // A typical finding (~120 chars) fits the card for the whole record.
+    expect(FINDINGS_MAX * 120).toBeLessThanOrEqual(RECORD_CARD_MAX_CHARS);
+  });
+
+  it('the residue fold and the resident low mark sit inside their caps', () => {
+    expect(DEFAULT_CONTEXT_BUDGET.inRunResidentLowRatio).toBeGreaterThan(0);
+    expect(DEFAULT_CONTEXT_BUDGET.inRunResidentLowRatio).toBeLessThan(1);
+    // Folding must start well before the size mark would.
+    const input = DEFAULT_CONTEXT_BUDGET.windowTokens - DEFAULT_CONTEXT_BUDGET.outputReserveTokens;
+    expect(DEFAULT_CONTEXT_BUDGET.inRunResidueFoldTokens).toBeLessThan(input * DEFAULT_CONTEXT_BUDGET.inRunCompactRatio);
   });
 
   it('parallel children can never be promised more than the parent has left', () => {

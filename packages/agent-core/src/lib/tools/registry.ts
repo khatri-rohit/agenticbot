@@ -5,6 +5,7 @@ import { offer_choice } from './offer-choice';
 import { createDelegateTool } from '../subagent/delegate';
 import { listSubagentProfiles } from '../subagent/profiles';
 import { recall } from './recall';
+import { record_finding } from './record-finding';
 import { load_skill } from './skills';
 import type { Tool, ToolRegistry } from './types';
 import { WEB_SEARCH_TOOLS } from './web/tools';
@@ -26,7 +27,7 @@ const providers = new Map<string, ToolProvider>([
     'builtin',
     {
       id: 'builtin',
-      tools: () => [load_skill, offer_choice, recall, ...WEB_SEARCH_TOOLS, ...WORKSPACE_TOOLS],
+      tools: () => [load_skill, offer_choice, recall, record_finding, ...WEB_SEARCH_TOOLS, ...WORKSPACE_TOOLS],
     },
   ],
   [

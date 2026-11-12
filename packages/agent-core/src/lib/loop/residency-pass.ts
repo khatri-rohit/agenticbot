@@ -1,19 +1,27 @@
 import { stubLiveToolResults } from '../context/assemble-context';
 import {
   compactCurrentRun,
+  foldResidue,
   manageWorkingSet,
   retireSkillBodies,
   type EvictionReason,
+  type InRunCompactionResult,
 } from '../context/residency';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { pathFromToolArgs } from './call-identity';
 import type { RunState } from './run-state';
 
 /**
- * Prompt-only residency after a tool turn: cap oversized recent results,
- * keep tool results to the working set (task state decides what is in use),
- * then fold old iterations of this run — at a verified milestone, or when
- * the prompt passes the size mark.
+ * Prompt-only residency after a tool turn, in this order:
+ * 1. cap oversized recent results and retire applied skill bodies;
+ * 2. at a verified milestone (a check passed after edits), fold the run's
+ *    earlier steps into the recap: one change to the cached prompt at a
+ *    known point, before anything else trims what it would fold;
+ * 3. keep tool results to the working set (task state decides what is in
+ *    use; findings stand for the files they cite; past the cap, down to the
+ *    low mark in one pass);
+ * 4. fold old steps that hold only cards once their residue passes its mark;
+ * 5. otherwise fold old iterations when the prompt passes the size mark.
  */
 export async function manageResidency(s: RunState): Promise<void> {
   stubLiveToolResults(s.messages, s.contextBudget, s.runStart, s.flags);
@@ -37,6 +45,19 @@ export async function manageResidency(s: RunState): Promise<void> {
 
   const putBlob = (text: string) => s.webSources.putBlob(text);
 
+  const milestone = atVerifiedMilestone(s);
+  if (milestone) {
+    const compacted = await compactCurrentRun(
+      s.messages,
+      s.runStart,
+      s.contextBudget,
+      s.tools.definitions,
+      putBlob,
+      { milestone: true },
+    );
+    if (compacted) traceFold(s, compacted, 'milestone');
+  }
+
   const evicted = await manageWorkingSet(
     s.messages,
     s.runStart,
@@ -49,12 +70,13 @@ export async function manageResidency(s: RunState): Promise<void> {
       callIteration: (id) => s.task.callIteration(id),
       lastTouch: (path) => s.task.lastTouch(path),
       isUnchecked: (path) => s.task.isUnchecked(path),
+      isCited: (path) => s.task.isCited(path),
     },
   );
   if (evicted) {
     s.readDedupe.forget(evicted.toolCallIds);
-    // One trace line per reason, so eval can tell stale copies, cold files
-    // and budget pressure apart. Token counts are for the whole pass.
+    // One trace line per reason, so eval can tell stale copies, cold files,
+    // cited files and budget pressure apart. Token counts are for the whole pass.
     for (const [reason, ids] of Object.entries(evicted.byReason) as Array<[EvictionReason, string[]]>) {
       s.trace({
         type: 'context_evicted',
@@ -69,28 +91,19 @@ export async function manageResidency(s: RunState): Promise<void> {
     }
   }
 
-  const milestone = atVerifiedMilestone(s);
-  if (s.prefixHeavy && !milestone) return;
+  const folded = await foldResidue(s.messages, s.runStart, s.contextBudget, s.tools.definitions);
+  if (folded) traceFold(s, folded, 'residue');
+
+  if (milestone || s.prefixHeavy) return;
   const compacted = await compactCurrentRun(
     s.messages,
     s.runStart,
     s.contextBudget,
     s.tools.definitions,
     putBlob,
-    { milestone },
   );
   if (!compacted) return;
-  s.readDedupe.forget(compacted.toolCallIds);
-  for (const id of compacted.toolCallIds) s.skillLoads.delete(id);
-  s.trace({
-    type: 'context_compacted_inrun',
-    runId: s.runId,
-    iteration: s.iterations,
-    beforeTokens: compacted.beforeTokens,
-    afterTokens: compacted.afterTokens,
-    toolCallIds: compacted.toolCallIds,
-    ...(milestone ? { reason: 'milestone' as const } : {}),
-  });
+  traceFold(s, compacted, undefined);
   if (compacted.prefixHeavy) {
     // Prior turns alone keep the prompt over the low mark. Folding one
     // more iteration per call would rewrite the prefix every call, so stop;
@@ -103,6 +116,21 @@ export async function manageResidency(s: RunState): Promise<void> {
       promptTokens: compacted.afterTokens,
     });
   }
+}
+
+/** Forget what a fold removed and trace it. `reason` undefined = the size mark. */
+function traceFold(s: RunState, fold: InRunCompactionResult, reason: 'milestone' | 'residue' | undefined): void {
+  s.readDedupe.forget(fold.toolCallIds);
+  for (const id of fold.toolCallIds) s.skillLoads.delete(id);
+  s.trace({
+    type: 'context_compacted_inrun',
+    runId: s.runId,
+    iteration: s.iterations,
+    beforeTokens: fold.beforeTokens,
+    afterTokens: fold.afterTokens,
+    toolCallIds: fold.toolCallIds,
+    ...(reason ? { reason } : {}),
+  });
 }
 
 /**

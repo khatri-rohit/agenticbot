@@ -172,6 +172,12 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
         title: asString(args.question) || 'choice',
         action: 'Choice',
       };
+    case 'record_finding':
+      return {
+        kind: 'other',
+        title: asString(args.claim) || 'finding',
+        action: 'Finding',
+      };
     default:
       return { kind: 'other', title: row.toolName, action: row.toolName };
   }

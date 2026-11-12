@@ -1,8 +1,13 @@
 import {
+  FINDING_CLAIM_MAX_CHARS,
+  FINDING_EVIDENCE_MAX_CHARS,
+  FINDINGS_MAX,
   TASK_STATE_COMMANDS_MAX,
   type TaskClass,
   type TaskCommand,
+  type TaskFinding,
   type TaskPhase,
+  type TaskShape,
   type TaskStateSnapshot,
   type TraceEvent,
   type WorkingSetEntry,
@@ -56,10 +61,37 @@ function argString(args: unknown, key: string): string {
 
 const CLASS_RANK: Record<TaskClass, number> = { small: 0, medium: 1, long: 2 };
 
+/** Words that make a request a change to the workspace. */
+const CHANGE_REQUEST_RE =
+  /\b(fix|implement|add|change|edit|refactor|update|rename|write|create|delete|remove|patch|migrate|replace|move|convert|bump|upgrade)\b/i;
+
+/**
+ * The task's provisional shape from the request text. A home run (no
+ * workspace) answers; a workspace request that asks for a change changes;
+ * anything else is research. Evidence corrects it later: an edit makes the
+ * task a change, whatever the request said.
+ */
+export function inferTaskShape(request: string, hasWorkspace: boolean): TaskShape {
+  if (!hasWorkspace) return 'answer';
+  return CHANGE_REQUEST_RE.test(request) ? 'change' : 'research';
+}
+
+/** `src/a.ts:12`, `src/a.ts:12-30` or `src/a.ts` → `src/a.ts`; URLs and quotes → null. */
+export function citedPath(evidence: string): string | null {
+  const first = evidence.trim().split(/[\s,;]+/)[0] ?? '';
+  if (!first || /^[a-z]+:\/\//i.test(first) || /^["'`]/.test(first)) return null;
+  const path = first.replace(/:\d+(?:[-–]\d+)?$/, '').replace(/\\/g, '/').replace(/^\.\//, '');
+  return /[./]/.test(path) ? path : null;
+}
+
 export class TaskStateTracker {
   private phase: TaskPhase = 'orient';
   private currentIteration = 0;
   private klass: TaskClass = 'small';
+  private shapeValue: TaskShape = 'research';
+  private readonly findings: TaskFinding[] = [];
+  /** Paths a recorded finding cites (its evidence names them). */
+  private readonly cited = new Set<string>();
   private readonly workingSet = new Map<string, WorkingSetEntry>();
   private edits = 0;
   private failedEdits = 0;
@@ -84,6 +116,25 @@ export class TaskStateTracker {
 
   get taskClass(): TaskClass {
     return this.klass;
+  }
+
+  get shape(): TaskShape {
+    return this.shapeValue;
+  }
+
+  /** Findings recorded so far. */
+  get findingCount(): number {
+    return this.findings.length;
+  }
+
+  /** Set the provisional shape at the start of a run (see inferTaskShape). */
+  setShape(shape: TaskShape): void {
+    this.shapeValue = shape;
+  }
+
+  /** A recorded finding cites this path, so the finding stands for its reads. */
+  isCited(path: string): boolean {
+    return this.cited.has(path);
   }
 
   /** A successful edit has no check after it yet. */
@@ -114,6 +165,9 @@ export class TaskStateTracker {
   /** Fold one event in; returns the phase change it caused, if any. */
   apply(event: TraceEvent): PhaseChange | null {
     switch (event.type) {
+      case 'run_start':
+        if (event.taskShape) this.shapeValue = event.taskShape;
+        return null;
       case 'llm_request':
         if (event.final) return null;
         this.currentIteration = event.iteration;
@@ -158,6 +212,7 @@ export class TaskStateTracker {
       phase: this.phase,
       iteration: this.currentIteration,
       taskClass: this.klass,
+      shape: this.shapeValue,
       workingSet: [...this.workingSet.values()].map((entry) => ({ ...entry })),
       evidence: {
         edits: this.edits,
@@ -168,12 +223,17 @@ export class TaskStateTracker {
         uncheckedFiles: [...this.uncheckedFiles],
         lastCheck: this.lastCheck,
         reviewed: this.reviewed,
+        findings: this.findings.map((finding) => ({ ...finding })),
       },
       phaseIterations: { ...this.phaseIterations },
     };
   }
 
   private onToolStart(name: string, args: unknown): PhaseChange | null {
+    if (name === 'record_finding') {
+      this.recordFinding(args);
+      return null;
+    }
     if (name === 'edit_file') return this.move('change', 'edit_file');
     if (name === 'run_terminal') {
       if (!isCheckCommand(argString(args, 'command'))) return this.move('locate', 'command');
@@ -219,6 +279,8 @@ export class TaskStateTracker {
         return;
       }
       this.edits += 1;
+      // An edit is a change, whatever the request looked like.
+      this.shapeValue = 'change';
       this.unverifiedSince ??= event.iteration;
       if (path) {
         this.uncheckedFiles.add(path);
@@ -245,6 +307,25 @@ export class TaskStateTracker {
         this.unverifiedSince = null;
         this.uncheckedFiles.clear();
       }
+    }
+  }
+
+  /**
+   * Record one finding from record_finding's arguments (the tool validates
+   * them for the model; this keeps the state sane on its own). Duplicates of
+   * a claim are ignored; the oldest leave past FINDINGS_MAX.
+   */
+  private recordFinding(args: unknown): void {
+    const claim = argString(args, 'claim').slice(0, FINDING_CLAIM_MAX_CHARS);
+    const evidence = argString(args, 'evidence').slice(0, FINDING_EVIDENCE_MAX_CHARS);
+    if (!claim || !evidence) return;
+    if (this.findings.some((finding) => finding.claim === claim)) return;
+    const topic = argString(args, 'topic');
+    this.findings.push({ claim, evidence, ...(topic ? { topic } : {}), iteration: this.currentIteration });
+    if (this.findings.length > FINDINGS_MAX) this.findings.shift();
+    for (const part of evidence.split(/[;,]\s*/)) {
+      const path = citedPath(part);
+      if (path) this.cited.add(path);
     }
   }
 

@@ -41,7 +41,8 @@
         "sectionedSummary": true,
         "learningLoop": true,
         "stateCard": true
-      }
+      },
+      "taskShape": "research"
     },
     {
       "type": "context_shape",
@@ -192,7 +193,7 @@
       "runId": "replay-run",
       "iteration": 3,
       "messages": 7,
-      "promptTokens": 99,
+      "promptTokens": 100,
       "residentToolTokens": 11,
       "residueTokens": 18,
       "prefixStableMessages": 4
@@ -231,6 +232,7 @@
         "phase": "report",
         "iteration": 3,
         "taskClass": "small",
+        "shape": "change",
         "workingSet": [
           {
             "path": "a.ts",
@@ -258,7 +260,8 @@
             "a.ts"
           ],
           "lastCheck": null,
-          "reviewed": false
+          "reviewed": false,
+          "findings": []
         },
         "phaseIterations": {
           "orient": 1,
@@ -648,7 +651,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: change · step 3 · task small · ~182 tokens per call\nWorking set: a.ts (edited, unchecked), b.ts\nOpen: Edits since step 2 have no check yet (build, typecheck, test or lint)."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: change · step 3 · task small change · ~182 tokens per call\nWorking set: a.ts (edited, unchecked), b.ts\nOpen: Edits since step 2 have no check yet (build, typecheck, test or lint)."
       }
     ]
   ]

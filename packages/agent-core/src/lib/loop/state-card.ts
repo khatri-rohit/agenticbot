@@ -1,5 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
+import { RECORD_CARD_MAX_CHARS, type TaskFinding } from '@agent/agent-models';
+
 import { residentReadPaths } from '../context/residency';
 import { pathFromToolArgs } from './call-identity';
 import type { RunState } from './run-state';
@@ -8,17 +10,20 @@ import type { RunState } from './run-state';
  * The harness card: one ephemeral message appended to each model call,
  * rebuilt from task state every time and never stored in the live messages
  * or the ledger. It replaces notes that used to be appended to tool results
- * and the prompt (read creep, serial reads, stall, budget, advisor hint):
- * those persisted, cost tokens on every later call, and changed the prompt.
- * The card sits after the cached prefix, so the prefix stays stable.
+ * and the prompt (serial reads, stall, budget, advisor hint): those
+ * persisted, cost tokens on every later call, and changed the prompt. The
+ * card sits after the cached prefix, so the prefix stays stable.
+ *
+ * It also carries the task record: the findings recorded with
+ * record_finding. They are the run's durable research memory, so file reads
+ * can leave the prompt without being read again, and the answer is written
+ * from them.
  */
 
 export const CARD_HEADER = '[Harness card: this run\'s state, rebuilt every step by the harness, not from the user]';
 
 /** Turns in a row whose only call was one read-stage tool before batching advice. */
 export const SERIAL_READ_ADVICE_AFTER = 4;
-/** Slices of one large file (since it last changed) before grep advice. */
-export const READ_CREEP_ADVICE_AFTER = 3;
 /** The card is skipped on the first steps of a run unless it has something to say. */
 const QUIET_STEPS = 2;
 const WORKING_SET_MAX = 6;
@@ -26,6 +31,11 @@ const WORKING_SET_MAX = 6;
 function tokensK(tokens: number): string {
   if (tokens < 1_000) return `${Math.round(tokens)}`;
   return tokens >= 1_000_000 ? `${(tokens / 1_000_000).toFixed(1)}M` : `${Math.round(tokens / 1000)}k`;
+}
+
+function findingLine(finding: TaskFinding): string {
+  const topic = finding.topic ? `[${finding.topic}] ` : '';
+  return `- ${topic}${finding.claim} — ${finding.evidence}`;
 }
 
 /** Text of the card for this call, or null when it has nothing to say. */
@@ -46,6 +56,9 @@ export function composeStateCard(
   const task = s.task.snapshot();
   // The step this card goes out with (the tracker advances on its llm_request).
   const step = s.iterations;
+  const changing = task.shape === 'change';
+  const canRecord = s.tools.byName.has('record_finding');
+  const findings = task.evidence.findings;
 
   // Working set as the prompt holds it right now, newest touch first: files
   // whose latest read is resident, plus files being changed. A file whose
@@ -91,15 +104,6 @@ export function composeStateCard(
     );
     ids.push('advice:serial_reads');
   }
-  const creeping = [...s.partialReadsByPath.entries()]
-    .filter(([, count]) => count >= READ_CREEP_ADVICE_AFTER)
-    .slice(0, 2);
-  for (const [path, count] of creeping) {
-    advice.push(
-      `${count} slices of ${path} so far: grep for the anchor line (grep returns path:line), then read from that offset.`,
-    );
-    ids.push(`advice:read_creep:${path}`);
-  }
   const stall = s.steering.stalled();
   if (stall) {
     const spent = s.budget.spent();
@@ -107,14 +111,21 @@ export function composeStateCard(
     const delegate = s.tools.byName.has('delegate')
       ? ' If one specific fact is missing, delegate(explore) with that question instead of searching more.'
       : '';
+    const act = changing
+      ? 'Act on what you have: make the change.'
+      : canRecord
+        ? 'Record what you have confirmed with record_finding and answer from the record; say what was not found.'
+        : 'Answer from what you have confirmed; say what was not found.';
     advice.push(
-      `${tokensK(stall.idle)} tokens (${Math.round((stall.idle / stall.max) * 100)}% of the run budget) since the last edit; about ${callsLeft} calls left at this size. Act on what you have: make the change, or answer if no change was asked.${delegate}`,
+      `${tokensK(stall.idle)} tokens (${Math.round((stall.idle / stall.max) * 100)}% of the run budget) since the last evidence (an edit, a passing check or a recorded finding); about ${callsLeft} calls left at this size. ${act}${delegate}`,
     );
     ids.push('advice:stall');
   }
   if (s.budget.nearLimit()) {
     advice.push(
-      'Run budget nearly spent: finish the current step, run the check once, and report what is done and what is left. Do not start new work.',
+      changing
+        ? 'Run budget nearly spent: finish the current step, run the check once, and report what is done and what is left. Do not start new work.'
+        : 'Run budget nearly spent: stop searching. Answer now from what is recorded and say what is still open.',
     );
     ids.push('advice:budget');
   }
@@ -122,13 +133,13 @@ export function composeStateCard(
   advice.push(...oneShot);
   if (oneShot.length > 0) ids.push('advice:one_shot');
 
-  const hasNews = open.length > 0 || advice.length > 0;
+  const hasNews = open.length > 0 || advice.length > 0 || findings.length > 0;
   if (!hasNews && (step <= QUIET_STEPS || task.workingSet.length === 0)) return null;
 
   const budget = s.limits.maxPromptTokens;
   const lines = [
     CARD_HEADER,
-    `Phase: ${task.phase} · step ${step} · task ${task.taskClass} · ~${tokensK(perCallTokens)} tokens per call${
+    `Phase: ${task.phase} · step ${step} · task ${task.taskClass} ${task.shape} · ~${tokensK(perCallTokens)} tokens per call${
       budget !== undefined ? ` · ${tokensK(s.budget.spent())} of ${tokensK(budget)} run budget used` : ''
     }`,
   ];
@@ -143,6 +154,23 @@ export function composeStateCard(
         ? `${files.length > 0 ? '; ' : ''}${cold} file(s) read earlier are no longer in full view (read_file again if needed)`
         : '';
     lines.push(`Working set: ${files.join(', ')}${more}${older}`);
+  }
+  if (findings.length > 0) {
+    // Newest first within the size bound, shown oldest first.
+    const shown: string[] = [];
+    let chars = 0;
+    for (let i = findings.length - 1; i >= 0; i--) {
+      const line = findingLine(findings[i]!);
+      if (chars + line.length > RECORD_CARD_MAX_CHARS && shown.length > 0) break;
+      shown.unshift(line);
+      chars += line.length + 1;
+    }
+    const hidden = findings.length - shown.length;
+    lines.push(
+      `Record (${findings.length} finding(s); answer from these and cite their evidence):`,
+      ...(hidden > 0 ? [`- (${hidden} older finding(s) not shown; they are in your earlier record_finding calls)`] : []),
+      ...shown,
+    );
   }
   if (open.length > 0) lines.push(...open.map((line) => `Open: ${line}`));
   if (advice.length > 0) lines.push('Advice:', ...advice.map((line) => `- ${line}`));

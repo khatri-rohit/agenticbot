@@ -41,7 +41,8 @@
         "sectionedSummary": true,
         "learningLoop": true,
         "stateCard": true
-      }
+      },
+      "taskShape": "research"
     },
     {
       "type": "context_shape",
@@ -104,6 +105,7 @@
         "phase": "change",
         "iteration": 1,
         "taskClass": "small",
+        "shape": "research",
         "workingSet": [],
         "evidence": {
           "edits": 0,
@@ -113,7 +115,8 @@
           "unverifiedSince": null,
           "uncheckedFiles": [],
           "lastCheck": null,
-          "reviewed": false
+          "reviewed": false,
+          "findings": []
         },
         "phaseIterations": {
           "orient": 1

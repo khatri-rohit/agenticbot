@@ -18,6 +18,10 @@ export type HealthMetrics = {
   prefixStability: number | null;
   /** Reads that returned a line range already returned, with no edit of that file between. */
   reReads: { reads: number; sameRange: number; rate: number | null };
+  /** Re-reads of text that had been removed from the prompt (the model paid a step to get it back). */
+  restores: number;
+  /** Findings recorded with record_finding (research evidence). */
+  findings: number;
   /** Identical searches (grep/glob, same arguments) with no edit between. */
   repeatSearches: { searches: number; repeats: number; rate: number | null };
   /** Repeated reads/fetches the guard answered instead of running or ending the run. */
@@ -46,7 +50,7 @@ export type HealthMetrics = {
     toolCalls: number;
     within: boolean;
   } | null;
-  /** Evidence units (successful edits + passing checks) and total prompt tokens per unit. */
+  /** Evidence units (successful edits, passing checks after edits, recorded findings) and total prompt tokens per unit. */
   evidence: number;
   costPerEvidence: number | null;
 };
@@ -157,6 +161,7 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
   let searches = 0;
   let repeats = 0;
   let evidence = 0;
+  let findings = 0;
   let editedSinceCheck = false;
   const effort = new Map(linesOf(lines, 'llm_request').map((line) => [line.iteration, String(line.reasoningEffort ?? 'default')]));
   const touched = new Set<string>();
@@ -198,6 +203,10 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
         if (seenSearches.has(key)) repeats += 1;
         seenSearches.add(key);
       } else if (tool.name === 'delegate') {
+        progress = true;
+      } else if (tool.name === 'record_finding' && tool.preview.startsWith('Recorded')) {
+        evidence += 1;
+        findings += 1;
         progress = true;
       }
     }
@@ -252,6 +261,8 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
         : null,
     prefixStability: stableCalls > 0 ? stableSum / stableCalls : null,
     reReads: { reads, sameRange, rate: ratio(sameRange, reads) },
+    restores: linesOf(lines, 'context_restored').length,
+    findings,
     repeatSearches: { searches, repeats, rate: ratio(repeats, searches) },
     guardAnswered: linesOf(lines, 'policy_decision').filter((line) => line.kind === 'guard').length,
     advice: { shown, followed: followedCount, rate: ratio(followedCount, shown), byKind },

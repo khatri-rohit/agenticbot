@@ -41,7 +41,8 @@
         "sectionedSummary": true,
         "learningLoop": true,
         "stateCard": true
-      }
+      },
+      "taskShape": "research"
     },
     {
       "type": "context_shape",
@@ -154,7 +155,7 @@
       "runId": "replay-run",
       "iteration": 3,
       "messages": 6,
-      "promptTokens": 2062,
+      "promptTokens": 2064,
       "residentToolTokens": 2004,
       "residueTokens": 13,
       "prefixStableMessages": 3
@@ -203,7 +204,7 @@
       "runId": "replay-run",
       "iteration": 4,
       "messages": 8,
-      "promptTokens": 3071,
+      "promptTokens": 3074,
       "residentToolTokens": 3006,
       "residueTokens": 19,
       "prefixStableMessages": 5
@@ -269,7 +270,7 @@
       "runId": "replay-run",
       "iteration": 5,
       "messages": 10,
-      "promptTokens": 3105,
+      "promptTokens": 3107,
       "residentToolTokens": 3009,
       "residueTokens": 25,
       "prefixStableMessages": 7
@@ -342,7 +343,7 @@
       "runId": "replay-run",
       "iteration": 6,
       "messages": 5,
-      "promptTokens": 211,
+      "promptTokens": 213,
       "residentToolTokens": 8,
       "residueTokens": 9,
       "prefixStableMessages": 1
@@ -381,6 +382,7 @@
         "phase": "report",
         "iteration": 6,
         "taskClass": "small",
+        "shape": "change",
         "workingSet": [
           {
             "path": "f1.ts",
@@ -427,7 +429,8 @@
             "afterEdit": true,
             "check": true
           },
-          "reviewed": false
+          "reviewed": false,
+          "findings": []
         },
         "phaseIterations": {
           "orient": 1,
@@ -988,7 +991,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small · ~2k tokens per call\nWorking set: f2.ts, f1.ts"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small research · ~2k tokens per call\nWorking set: f2.ts, f1.ts"
       }
     ],
     [
@@ -1055,7 +1058,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 4 · task small · ~3k tokens per call\nWorking set: f3.ts, f2.ts, f1.ts"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 4 · task small research · ~3k tokens per call\nWorking set: f3.ts, f2.ts, f1.ts"
       }
     ],
     [
@@ -1141,7 +1144,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: change · step 5 · task small · ~3k tokens per call\nWorking set: f1.ts (edited, unchecked), f3.ts, f2.ts\nOpen: Edits since step 4 have no check yet (build, typecheck, test or lint)."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: change · step 5 · task small change · ~3k tokens per call\nWorking set: f1.ts (edited, unchecked), f3.ts, f2.ts\nOpen: Edits since step 4 have no check yet (build, typecheck, test or lint)."
       }
     ],
     [
@@ -1174,7 +1177,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: verify · step 6 · task small · ~288 tokens per call\nWorking set: 3 file(s) read earlier are no longer in full view (read_file again if needed)"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: verify · step 6 · task small change · ~288 tokens per call\nWorking set: 3 file(s) read earlier are no longer in full view (read_file again if needed)"
       }
     ]
   ]

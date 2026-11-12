@@ -15,7 +15,7 @@ import {
 import { refreshContextReport } from '../context/assemble-context';
 import { consoleTrace } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
-import { TaskStateTracker } from '../state/task-state';
+import { inferTaskShape, TaskStateTracker } from '../state/task-state';
 import { measureContextShape } from './context-shape';
 import { withStateCard } from './state-card';
 import {
@@ -69,6 +69,17 @@ export type {
  * (own + sub-agents), and one `run_finish` trace closes the run whichever
  * path ended it.
  */
+/** The newest user message's text: the request this run serves. */
+function lastUserText(messages: ChatCompletionMessageParam[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== 'user') continue;
+    if (typeof message.content === 'string') return message.content;
+    return message.content.map((part) => (part.type === 'text' ? part.text : '')).join(' ');
+  }
+  return '';
+}
+
 export async function runLoop(
   modelCall: ModelCallFn,
   messages: ChatCompletionMessageParam[],
@@ -198,6 +209,7 @@ async function runLoopCore(
     posture: s.posture,
     windowTokens: s.contextBudget.windowTokens,
     flags: s.flags,
+    taskShape: inferTaskShape(lastUserText(messages), config.mode === 'workspace'),
     ...(config.modelSettings ? { modelSettings: config.modelSettings } : {}),
     ...(config.contextReport?.windowSource
       ? { windowSource: config.contextReport.windowSource }

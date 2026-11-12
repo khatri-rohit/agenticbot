@@ -1,12 +1,24 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
 import { gradeTrial } from './score.js';
 import { loadTasks, parseTask } from './task.js';
 
-const tasksDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../evals/tasks');
+/** The repo's evals/tasks, found from wherever the test runner was started. */
+function findTasksDir(): string {
+  let dir = process.cwd();
+  for (;;) {
+    const candidate = path.join(dir, 'evals', 'tasks');
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error('evals/tasks not found above the working directory');
+    dir = parent;
+  }
+}
+
+const tasksDir = findTasksDir();
 
 describe('task matrix', () => {
   it('loads one task per shape, with answer checks where files cannot grade', async () => {

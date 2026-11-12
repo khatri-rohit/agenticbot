@@ -30,6 +30,17 @@ export type ContextBudget = {
    * last check stay resident.
    */
   inRunColdAfterIterations: number;
+  /**
+   * Low mark of the resident cap, as a share of it. Past the cap, results
+   * leave in one pass down to this share, so the next few results fit
+   * without another pass (each pass changes the cached prompt).
+   */
+  inRunResidentLowRatio: number;
+  /**
+   * Residue mark: once this run's cards and old call arguments pass it, old
+   * steps whose results have all left fold into the recap.
+   */
+  inRunResidueFoldTokens: number;
   /** Newest non-file tool results that never go cold; also the in-run recap's kept iterations. */
   inRunKeepToolResults: number;
   /** Skip a cold/superseded pass that frees less than this (each pass breaks the cached prefix). */
@@ -74,6 +85,8 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   keepAttachmentsForTurns: 2,
   compactToRatio: 0.25,
   inRunResidentToolTokens: 24_000,
+  inRunResidentLowRatio: 0.5,
+  inRunResidueFoldTokens: 6_000,
   inRunColdAfterIterations: 4,
   inRunKeepToolResults: 4,
   inRunClearAtLeastTokens: 10_000,
@@ -131,6 +144,7 @@ export function contextBudgetForWindow(
     ...base,
     windowTokens,
     inRunResidentToolTokens: Math.min(base.inRunResidentToolTokens, Math.floor(input * 0.15)),
+    inRunResidueFoldTokens: Math.min(base.inRunResidueFoldTokens, Math.floor(input * 0.05)),
     inRunClearAtLeastTokens: Math.min(
       base.inRunClearAtLeastTokens,
       Math.floor(input * 0.1),

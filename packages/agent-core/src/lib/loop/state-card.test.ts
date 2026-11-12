@@ -14,7 +14,6 @@ function state(over: {
   iterations?: number;
   tools?: string[];
   serialReadTurns?: number;
-  partialReads?: Array<[string, number]>;
   stalled?: { idle: number; max: number };
   nearLimit?: boolean;
   advisories?: string[];
@@ -31,9 +30,8 @@ function state(over: {
     posture: 'agent',
     contextBudget: DEFAULT_CONTEXT_BUDGET,
     flags: { ...DEFAULT_HARNESS_FLAGS, stateCard: over.stateCard ?? true },
-    tools: { byName: new Map((over.tools ?? ['read_file', 'edit_file', 'run_terminal']).map((name) => [name, {}])) },
+    tools: { byName: new Map((over.tools ?? ['read_file', 'edit_file', 'run_terminal', 'record_finding']).map((name) => [name, {}])) },
     serialReadTurns: over.serialReadTurns ?? 0,
-    partialReadsByPath: new Map(over.partialReads ?? []),
     steering: { stalled: () => over.stalled },
     budget: { spent: () => 120_000, nearLimit: () => (over.nearLimit ? { spent: 1, limit: 1 } : undefined) },
     limits: { maxPromptTokens: 1_000_000 },
@@ -60,7 +58,7 @@ describe('harness card', () => {
     const card = buildStateCard(state({ events: edit(4, 'e', 'src/a.ts'), iterations: 5 }), 36_000);
     expect(card).not.toBeNull();
     expect(card).toContain(CARD_HEADER);
-    expect(card).toMatch(/Phase: change · step 5 · task small · ~36k tokens per call · 120k of 1\.0M run budget used/);
+    expect(card).toMatch(/Phase: change · step 5 · task small change · ~36k tokens per call · 120k of 1\.0M run budget used/);
     expect(card).toMatch(/Working set: src\/a\.ts \(edited, unchecked\)/);
     expect(card).toMatch(/Open: Edits since step 4 have no check yet/);
   });
@@ -86,15 +84,14 @@ describe('harness card', () => {
   it('turns repeated-pattern conditions into advice while they hold, and one-shot advice once', () => {
     const s = state({
       serialReadTurns: 4,
-      partialReads: [['big.ts', 3]],
       stalled: { idle: 300_000, max: 1_000_000 },
       nearLimit: true,
       advisories: ['Try the advisor.'],
     });
     const card = buildStateCard(s, 40_000) ?? '';
     expect(card).toMatch(/- 4 turns in a row made one read call, and each turn re-sends ~40k tokens/);
-    expect(card).toMatch(/- 3 slices of big\.ts so far: grep for the anchor line/);
-    expect(card).toMatch(/- 300k tokens \(30% of the run budget\) since the last edit; about 22 calls left/);
+    expect(card).not.toMatch(/slices of/);
+    expect(card).toMatch(/- 300k tokens \(30% of the run budget\) since the last evidence \(an edit, a passing check or a recorded finding\); about 22 calls left/);
     expect(card).toMatch(/- Run budget nearly spent/);
     expect(card).toMatch(/- Try the advisor\./);
     expect(buildStateCard(s, 40_000) ?? '').not.toMatch(/Try the advisor/);
@@ -134,5 +131,37 @@ describe('harness card working set', () => {
     expect(card).toMatch(/Working set: b\.ts; 1 file\(s\) read earlier are no longer in full view/);
     expect(card).not.toMatch(/Working set: .*a\.ts/);
     expect(card).toMatch(/~850 tokens per call/);
+  });
+});
+
+describe('harness card task record', () => {
+  const finding = (iteration: number, id: string, claim: string, evidence: string): TraceEvent => ({
+    type: 'tool_start',
+    runId,
+    iteration,
+    toolName: 'record_finding',
+    toolCallId: id,
+    args: { claim, evidence },
+  });
+  const research: TraceEvent = { type: 'run_start', runId, model: 'm', taskShape: 'research' };
+
+  it('shows recorded findings with their evidence, even on an early step', () => {
+    const card = buildStateCard(
+      state({ events: [research, finding(1, 'f1', 'The cap is 20 tiles per tab', 'src/TileRibbon.tsx:104')], iterations: 2 }),
+      5_000,
+    ) ?? '';
+    expect(card).toMatch(/task small research/);
+    expect(card).toMatch(/Record \(1 finding\(s\); answer from these and cite their evidence\):/);
+    expect(card).toMatch(/- The cap is 20 tiles per tab — src\/TileRibbon\.tsx:104/);
+  });
+
+  it('words stall and budget advice for research: answer from the record, do not run a check', () => {
+    const card = buildStateCard(
+      state({ events: [research], stalled: { idle: 300_000, max: 1_000_000 }, nearLimit: true }),
+      40_000,
+    ) ?? '';
+    expect(card).toMatch(/Record what you have confirmed with record_finding and answer from the record/);
+    expect(card).toMatch(/stop searching\. Answer now from what is recorded/);
+    expect(card).not.toMatch(/run the check/);
   });
 });

@@ -94,7 +94,28 @@ export function residentReadPaths(
   return new Set([...latest].filter(([, resident]) => resident).map(([path]) => path));
 }
 
-export type EvictionReason = 'superseded' | 'cold' | 'budget';
+export type EvictionReason = 'superseded' | 'cold' | 'cited' | 'budget';
+
+/** Sub-agent report shas named in delegate results (`reportSha=<sha>` in the header). */
+function reportShas(messages: ChatCompletionMessageParam[], calls: Map<string, ToolCallInfo>): Set<string> {
+  const shas = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== 'tool' || typeof message.content !== 'string') continue;
+    if (calls.get(message.tool_call_id)?.name !== 'delegate') continue;
+    for (const match of message.content.matchAll(/reportSha=([a-f0-9]{64})/g)) shas.add(match[1]!);
+  }
+  return shas;
+}
+
+/**
+ * A result that cost a sub-agent run to produce: a delegate report, or a
+ * recall of one. Getting it back would mean running the child again, so it
+ * is never removed to save tokens (it is small next to what it stands for).
+ */
+function isReport(info: ToolCallInfo | undefined, args: Record<string, unknown>, shas: Set<string>): boolean {
+  if (info?.name === 'delegate') return true;
+  return info?.name === 'recall' && typeof args.sha256 === 'string' && shas.has(args.sha256.trim().toLowerCase());
+}
 
 export type EvictionResult = {
   evicted: number;
@@ -118,6 +139,8 @@ export type WorkingSetView = {
   lastTouch(path: string): number | undefined;
   /** The path was edited since the last check: it is being changed, keep it. */
   isUnchecked(path: string): boolean;
+  /** A recorded finding cites the path: the finding stands for its reads. */
+  isCited?(path: string): boolean;
 };
 
 type Candidate = {
@@ -130,41 +153,49 @@ type Candidate = {
   path: string | null;
   superseded: boolean;
   cold: boolean;
+  /** A recorded finding cites this result's file. */
+  cited: boolean;
   /** Must stay: being changed, or this iteration's result. */
   pinned: boolean;
 };
 
+/**
+ * What a removed result leaves: tool, arguments, why, size and the sha that
+ * restores it. Short on purpose, because cards stay for the rest of the run;
+ * how to restore is said once (recall's description, the system prompt).
+ */
 function workingSetCard(candidate: Candidate, content: string, sha: string, reason: EvictionReason): string {
   const name = candidate.info?.name ?? 'tool';
   const args = candidate.info ? ` ${argsPreview(candidate.info.args)}` : '';
-  const why =
-    reason === 'superseded'
-      ? name === 'read_file'
-        ? 'superseded by a later read of the same lines'
-        : 'superseded by a later run of the same command'
-      : `not used since iteration ${candidate.touch}`;
-  const again =
-    name === 'read_file'
-      ? 'read_file again for the current contents, or recall this sha256 for this exact text.'
-      : 'call recall with this sha256 to read it again.';
-  return `${CARD_PREFIX} ${name}${args} · ${why} · ${content.length} chars · sha256:${sha} — ${again}`;
+  const range = name === 'read_file' ? readRange(content) : null;
+  const lines = range ? ` [${range.from}–${range.to}]` : '';
+  return `${CARD_PREFIX} ${name}${args}${lines} · ${reason} · ${content.length} chars · sha256:${sha}`;
 }
 
 /**
- * Keep this run's tool results to the working set (task state decides):
+ * Keep this run's tool results to the working set (task state decides).
+ * Results are priced: what it costs to get one back against what it costs
+ * to keep sending it.
  * - superseded: a later resident read covers the same lines of the same
  *   file, or the same command ran again (only commands that executed count);
  * - cold: a file not read or edited for `inRunColdAfterIterations`, or any
  *   other result that old, except the newest `inRunKeepToolResults` non-file
  *   results;
- * - budget: past `inRunResidentToolTokens` of resident results, least
- *   recently touched first.
- * A file edited since the last check, and this iteration's results, always
- * stay. Edits never supersede reads (several edits from one read are
- * normal). Superseded and cold cards apply in steps of at least
- * `inRunClearAtLeastTokens` (each pass changes the cached prefix); the
- * budget applies at once. Every card keeps a sha for recall. Results from
- * earlier turns are only superseded (assembleContext already stubs them).
+ * - cited: a recorded finding cites the file, so the finding stands for it;
+ * - budget: past `inRunResidentToolTokens` of resident results, cited
+ *   results first, then least recently touched (larger first on a tie),
+ *   down to the low mark (`inRunResidentLowRatio` of the cap) in one pass.
+ * Never removed: a file edited since the last check, this iteration's
+ * results, and sub-agent reports (and recalls of them), which would cost a
+ * child run to get back. Edits never supersede reads (several edits from
+ * one read are normal).
+ *
+ * Removal happens in passes, because each pass changes the cached prompt:
+ * a pass runs when resident results pass the cap, or when stale (superseded,
+ * cold, cited) results free at least `inRunClearAtLeastTokens`. A pass that
+ * runs for the cap also takes the stale results. Between passes nothing
+ * leaves. Every card keeps a sha for recall. Results from earlier turns are
+ * only superseded (assembleContext already stubs them).
  */
 export async function manageWorkingSet(
   messages: ChatCompletionMessageParam[],
@@ -176,6 +207,9 @@ export async function manageWorkingSet(
   view: WorkingSetView,
 ): Promise<EvictionResult | null> {
   const calls = toolCallIndex(messages);
+  const shas = reportShas(messages, calls);
+  // Reports are resident and count toward the cap, but never leave.
+  let reportChars = 0;
   const laterReads = new Map<string, Array<{ from: number; to: number }>>();
   const laterCommands = new Set<string>();
   const candidates: Candidate[] = [];
@@ -192,6 +226,10 @@ export async function manageWorkingSet(
     if (info && NEVER_EVICT.has(info.name)) continue;
     const args = info ? parseArgs(info.args) : {};
     const inRun = i >= runStart;
+    if (isReport(info, args, shas)) {
+      if (inRun) reportChars += content.length;
+      continue;
+    }
 
     let superseded = false;
     let path: string | null = null;
@@ -231,6 +269,7 @@ export async function manageWorkingSet(
       }
     }
     const pinned = (path !== null && view.isUnchecked(path)) || own >= view.iteration;
+    const cited = inRun && path !== null && view.isCited?.(path) === true;
     candidates.push({
       index: i,
       toolCallId: message.tool_call_id,
@@ -240,35 +279,47 @@ export async function manageWorkingSet(
       path,
       superseded,
       cold: cold && !pinned,
+      cited: cited && !pinned,
       pinned,
     });
   }
 
-  // Superseded results are stale even when pinned: the newer copy is resident.
+  // Stale results: superseded (even when pinned: the newer copy is
+  // resident), cold, or stood for by a finding.
   const chosen = new Map<number, EvictionReason>();
-  let stepChars = 0;
+  let staleChars = 0;
   for (const candidate of candidates) {
-    if (candidate.superseded) {
-      chosen.set(candidate.index, 'superseded');
-      stepChars += candidate.chars - 250;
-    } else if (candidate.cold) {
-      chosen.set(candidate.index, 'cold');
-      stepChars += candidate.chars - 250;
-    }
+    const reason: EvictionReason | null = candidate.superseded
+      ? 'superseded'
+      : candidate.cold
+        ? 'cold'
+        : candidate.cited
+          ? 'cited'
+          : null;
+    if (!reason) continue;
+    chosen.set(candidate.index, reason);
+    staleChars += candidate.chars - 250;
   }
-  if (stepChars / CHARS_PER_TOKEN < budget.inRunClearAtLeastTokens) chosen.clear();
 
-  // The resident cap applies at once: oldest touch first, never pinned.
-  const budgetChars = budget.inRunResidentToolTokens * CHARS_PER_TOKEN;
-  let residentChars = candidates
-    .filter((candidate) => candidate.index >= runStart && !chosen.has(candidate.index))
-    .reduce((sum, candidate) => sum + candidate.chars, 0);
-  if (residentChars > budgetChars) {
-    const byAge = candidates
+  const highChars = budget.inRunResidentToolTokens * CHARS_PER_TOKEN;
+  const lowChars = highChars * budget.inRunResidentLowRatio;
+  const residentOf = () =>
+    reportChars +
+    candidates
+      .filter((candidate) => candidate.index >= runStart && !chosen.has(candidate.index))
+      .reduce((sum, candidate) => sum + candidate.chars, 0);
+  const overCap = residentOf() > highChars;
+  // No pass this step: stale results wait until they are worth a pass.
+  if (!overCap && staleChars / CHARS_PER_TOKEN < budget.inRunClearAtLeastTokens) return null;
+
+  if (overCap) {
+    // Down to the low mark in one pass, so the next results fit without one.
+    let residentChars = residentOf();
+    const order = candidates
       .filter((candidate) => candidate.index >= runStart && !candidate.pinned && !chosen.has(candidate.index))
-      .sort((a, b) => a.touch - b.touch || a.index - b.index);
-    for (const candidate of byAge) {
-      if (residentChars <= budgetChars) break;
+      .sort((a, b) => a.touch - b.touch || b.chars - a.chars || a.index - b.index);
+    for (const candidate of order) {
+      if (residentChars <= lowChars) break;
       chosen.set(candidate.index, 'budget');
       residentChars -= candidate.chars;
     }
@@ -412,13 +463,7 @@ export async function compactCurrentRun(
   const lowMark = milestone ? 0 : inputBudget * budget.inRunCompactToRatio;
 
   // An existing recap sits at runStart; fold it into the new one.
-  let start = runStart;
-  let priorRecap = '';
-  const first = messages[start];
-  if (first?.role === 'assistant' && textOf(first.content).startsWith(RECAP_PREFIX)) {
-    priorRecap = textOf(first.content).slice(RECAP_PREFIX.length).trim();
-    start += 1;
-  }
+  const { start, priorRecap } = recapStart(messages, runStart);
 
   const groupStarts: number[] = [];
   for (let i = start; i < messages.length; i++) {
@@ -444,6 +489,98 @@ export async function compactCurrentRun(
   // A milestone folds by design, not to reach a mark: never prefix-heavy.
   const prefixHeavy = !milestone && estimate > lowMark;
 
+  const toolCallIds = await foldIntoRecap(messages, runStart, start, cutEnd, priorRecap, putBlob);
+  return {
+    beforeTokens,
+    afterTokens: estimatePromptTokens(messages, tools),
+    toolCallIds,
+    prefixHeavy,
+  };
+}
+
+/** Where the run's own steps begin (after an existing recap) and that recap's text. */
+function recapStart(messages: ChatCompletionMessageParam[], runStart: number): { start: number; priorRecap: string } {
+  const first = messages[runStart];
+  if (first?.role === 'assistant' && textOf(first.content).startsWith(RECAP_PREFIX)) {
+    return { start: runStart + 1, priorRecap: textOf(first.content).slice(RECAP_PREFIX.length).trim() };
+  }
+  return { start: runStart, priorRecap: '' };
+}
+
+/** Text this run can no longer remove: cards of removed results and its tool calls' arguments. */
+function residueChars(messages: ChatCompletionMessageParam[], from: number, to = messages.length): number {
+  let chars = 0;
+  for (let i = from; i < to; i++) {
+    const message = messages[i];
+    if (!message) continue;
+    if (message.role === 'tool' && typeof message.content === 'string' && !isResident(message.content)) {
+      chars += message.content.length;
+    } else if (message.role === 'assistant' && message.tool_calls) {
+      for (const call of message.tool_calls) {
+        if ('function' in call) chars += call.function.name.length + call.function.arguments.length;
+      }
+    }
+  }
+  return chars;
+}
+
+/**
+ * Fold old steps that hold nothing resident any more (their results are all
+ * cards, stubs or small) into the recap, once this run's residue (cards and
+ * old call arguments) passes `inRunResidueFoldTokens`. Unlike the size mark,
+ * this cannot remove working-set content: it stops at the first step that
+ * still has a resident result, a sub-agent report, or live state (plan).
+ * The newest `inRunKeepToolResults` steps stay. Prompt-only.
+ */
+export async function foldResidue(
+  messages: ChatCompletionMessageParam[],
+  runStart: number,
+  budget: ContextBudget,
+  tools: ChatCompletionTool[],
+): Promise<InRunCompactionResult | null> {
+  if (residueChars(messages, runStart) / CHARS_PER_TOKEN < budget.inRunResidueFoldTokens) return null;
+  const { start, priorRecap } = recapStart(messages, runStart);
+  const groupStarts: number[] = [];
+  for (let i = start; i < messages.length; i++) {
+    if (messages[i]?.role === 'assistant') groupStarts.push(i);
+  }
+  const removable = groupStarts.length - Math.max(1, budget.inRunKeepToolResults);
+  const calls = toolCallIndex(messages);
+  let cutEnd = start;
+  for (let g = 0; g < removable; g++) {
+    const from = groupStarts[g]!;
+    const to = groupStarts[g + 1] ?? messages.length;
+    const holdsLive = messages.slice(from, to).some((message) => {
+      if (message.role !== 'tool' || typeof message.content !== 'string') return false;
+      const name = calls.get(message.tool_call_id)?.name;
+      if (name === 'delegate' || (name && NEVER_EVICT.has(name))) return message.content.length >= MIN_EVICT_CHARS;
+      return isResident(message.content) && message.content.length >= MIN_EVICT_CHARS;
+    });
+    if (holdsLive) break;
+    cutEnd = to;
+  }
+  // Worth a change to the cached prompt only when it clears a real share of the mark.
+  if (cutEnd === start || residueChars(messages, start, cutEnd) / CHARS_PER_TOKEN < budget.inRunResidueFoldTokens / 2) {
+    return null;
+  }
+  const beforeTokens = estimatePromptTokens(messages, tools);
+  const toolCallIds = await foldIntoRecap(messages, runStart, start, cutEnd, priorRecap);
+  return { beforeTokens, afterTokens: estimatePromptTokens(messages, tools), toolCallIds, prefixHeavy: false };
+}
+
+/**
+ * Replace messages [runStart, cutEnd) with one recap: the prior recap, then
+ * one line per note and tool outcome of the folded steps. Large resident
+ * results are stored first so their sha stays recallable.
+ */
+async function foldIntoRecap(
+  messages: ChatCompletionMessageParam[],
+  runStart: number,
+  start: number,
+  cutEnd: number,
+  priorRecap: string,
+  putBlob?: (text: string) => Promise<string>,
+): Promise<string[]> {
   const calls = toolCallIndex(messages);
   const lines: string[] = priorRecap ? [priorRecap] : [];
   const toolCallIds: string[] = [];
@@ -476,23 +613,28 @@ export async function compactCurrentRun(
     role: 'assistant',
     content: `${RECAP_PREFIX}\nEarlier steps of this run, condensed. Re-read files before relying on old contents; recall a sha256 for an exact earlier result.\n${recap}`,
   });
+  return toolCallIds;
+}
 
-  return {
-    beforeTokens,
-    afterTokens: estimatePromptTokens(messages, tools),
-    toolCallIds,
-    prefixHeavy,
-  };
+const SEARCH_KEY = 'search|';
+
+function canonicalArgs(args: Record<string, unknown>): string {
+  return JSON.stringify(Object.keys(args).sort().map((key) => [key, args[key]]));
 }
 
 /**
- * Answers a read_file that returns exactly what an earlier read of the same
- * path and range returned — only while that earlier result is still in the
- * prompt in full. Eviction and compaction call `forget`; an edit to the path
- * or any terminal command (formatters, codegen) invalidates it.
+ * Answers a read_file or search (grep, glob) that returns exactly what an
+ * earlier identical call returned, while that earlier result is still in
+ * the prompt in full: the model gets a pointer instead of the same text
+ * twice. Eviction and compaction call `forget`; a re-read of text that was
+ * removed is then a restore (the caller traces it). An edit to the path
+ * invalidates its reads and every search; any terminal command (formatters,
+ * codegen) invalidates everything.
  */
 export class ReadDedupe {
   private seen = new Map<string, { sha: string; iteration: number; toolCallId: string }>();
+  /** Keys whose result left the prompt, with the sha it had: a matching re-read is a restore. */
+  private removed = new Map<string, string>();
 
   /** `path` is the loop's canonical form, so `./a.ts` and `a.ts` share a key. */
   apply(
@@ -501,8 +643,8 @@ export class ReadDedupe {
     result: string,
     iteration: number,
     toolCallId: string,
-  ): string {
-    if (!path || result.startsWith('Error')) return result;
+  ): { text: string; restored: boolean } {
+    if (!path || result.startsWith('Error')) return { text: result, restored: false };
     // Key on the lines actually returned: a file that fits comes back whole
     // whatever offset/limit asked, so two differently-sliced asks can be
     // the same read. Args are the fallback for results without a header.
@@ -513,7 +655,31 @@ export class ReadDedupe {
     const sha = sha256Text(result);
     const prior = this.seen.get(key);
     if (prior && prior.sha === sha) {
-      return `${UNCHANGED_PREFIX} since iteration ${prior.iteration}) ${path}: identical to the earlier read_file result above.`;
+      return {
+        text: `${UNCHANGED_PREFIX} since iteration ${prior.iteration}) ${path}: identical to the earlier read_file result above.`,
+        restored: false,
+      };
+    }
+    const restored = this.removed.get(key) === sha;
+    this.removed.delete(key);
+    this.seen.set(key, { sha, iteration, toolCallId });
+    return { text: result, restored };
+  }
+
+  /** Same idea for grep and glob: an identical search with nothing edited since answers with a pointer. */
+  applySearch(
+    toolName: string,
+    args: Record<string, unknown>,
+    result: string,
+    iteration: number,
+    toolCallId: string,
+  ): string {
+    if (result.startsWith('Error') || result.startsWith('Invalid')) return result;
+    const key = `${SEARCH_KEY}${toolName}|${canonicalArgs(args)}`;
+    const sha = sha256Text(result);
+    const prior = this.seen.get(key);
+    if (prior && prior.sha === sha) {
+      return `${UNCHANGED_PREFIX} since iteration ${prior.iteration}) ${toolName}: identical to the earlier result above.`;
     }
     this.seen.set(key, { sha, iteration, toolCallId });
     return result;
@@ -524,18 +690,25 @@ export class ReadDedupe {
     const gone = new Set(toolCallIds);
     if (gone.size === 0) return;
     for (const [key, entry] of this.seen) {
-      if (gone.has(entry.toolCallId)) this.seen.delete(key);
+      if (!gone.has(entry.toolCallId)) continue;
+      this.seen.delete(key);
+      if (!key.startsWith(SEARCH_KEY)) this.removed.set(key, entry.sha);
     }
   }
 
+  /** An edit changed this file: its reads and every search may return something else now. */
   invalidatePath(path: string): void {
     const prefix = `${path.trim()}|`;
-    for (const key of this.seen.keys()) {
-      if (key.startsWith(prefix)) this.seen.delete(key);
+    for (const key of [...this.seen.keys()]) {
+      if (key.startsWith(prefix) || key.startsWith(SEARCH_KEY)) this.seen.delete(key);
+    }
+    for (const key of [...this.removed.keys()]) {
+      if (key.startsWith(prefix)) this.removed.delete(key);
     }
   }
 
   clear(): void {
     this.seen.clear();
+    this.removed.clear();
   }
 }

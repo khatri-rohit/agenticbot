@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { TraceEvent } from '@agent/agent-models';
 
-import { isCheckCommand, TaskStateTracker } from './task-state';
+import { citedPath, inferTaskShape, isCheckCommand, TaskStateTracker } from './task-state';
 
 const runId = 'r1';
 const request = (iteration: number): TraceEvent => ({ type: 'llm_request', runId, iteration });
@@ -216,5 +216,52 @@ describe('TaskStateTracker verification and class', () => {
     expect(tracker.lastTouch('a.ts')).toBe(5);
     expect(tracker.lastTouch('missing.ts')).toBeUndefined();
     expect(tracker.snapshot().evidence.reviewed).toBe(true);
+  });
+});
+
+describe('task shape and findings', () => {
+  it('infers the shape from the request and corrects it on the first edit', () => {
+    expect(inferTaskShape('What does the harness card show?', true)).toBe('research');
+    expect(inferTaskShape('Fix the scroll bug in message-list', true)).toBe('change');
+    expect(inferTaskShape('Fix my bike?', false)).toBe('answer');
+    // "address" is not "add": whole words only.
+    expect(inferTaskShape('Which address does the API bind?', true)).toBe('research');
+
+    const tracker = new TaskStateTracker();
+    feed(tracker, [{ type: 'run_start', runId, model: 'm', taskShape: 'research' }]);
+    expect(tracker.shape).toBe('research');
+    feed(tracker, [
+      request(1),
+      start(1, 'e', 'edit_file', { path: 'a.ts' }),
+      complete(1, 'e', 'edit_file', 'Patched a.ts', { outcome: 'ok' }),
+    ]);
+    expect(tracker.snapshot().shape).toBe('change');
+  });
+
+  it('records findings, ignores duplicates and incomplete ones, and knows the files they cite', () => {
+    const tracker = new TaskStateTracker();
+    feed(tracker, [
+      request(3),
+      start(3, 'f1', 'record_finding', { claim: 'Max 20 tiles', evidence: 'src/TileRibbon.tsx:104; src/IndividualTile.tsx:370-371' }),
+      start(3, 'f2', 'record_finding', { claim: 'Max 20 tiles', evidence: 'src/TileRibbon.tsx:104' }),
+      start(3, 'f3', 'record_finding', { claim: 'No evidence given', evidence: '' }),
+      start(3, 'f4', 'record_finding', { claim: 'Docs say so', evidence: 'https://example.com/page' }),
+    ]);
+    const findings = tracker.snapshot().evidence.findings;
+    expect(findings.map((finding) => finding.claim)).toEqual(['Max 20 tiles', 'Docs say so']);
+    expect(findings[0]).toMatchObject({ iteration: 3 });
+    expect(tracker.findingCount).toBe(2);
+    expect(tracker.isCited('src/TileRibbon.tsx')).toBe(true);
+    expect(tracker.isCited('src/IndividualTile.tsx')).toBe(true);
+    expect(tracker.isCited('https://example.com/page')).toBe(false);
+  });
+
+  it('reads a cited path from path:line evidence and skips URLs and quotes', () => {
+    expect(citedPath('src/a.ts:12')).toBe('src/a.ts');
+    expect(citedPath('./src/a.ts:12-30')).toBe('src/a.ts');
+    expect(citedPath('src/a.ts')).toBe('src/a.ts');
+    expect(citedPath('https://x.dev/a')).toBeNull();
+    expect(citedPath('"Maximum tile limit"')).toBeNull();
+    expect(citedPath('somewhere')).toBeNull();
   });
 });

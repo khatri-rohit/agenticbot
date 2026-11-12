@@ -24,6 +24,7 @@ import {
   type TraceEvent,
 } from '@agent/agent-models';
 
+import { record_finding } from '../tools/record-finding';
 import { createToolRegistry } from '../tools/registry';
 import type { Tool } from '../tools/types';
 import { runLoop } from './loop';
@@ -92,7 +93,7 @@ function tools(ws: Workspace, report: string): Tool[] {
     },
   });
   const delegate = tool('delegate', 'subagent', async () => report);
-  return [read, grep, edit, check, delegate];
+  return [read, grep, edit, check, delegate, record_finding];
 }
 
 // ---------------------------------------------------------------- the model
@@ -108,6 +109,8 @@ type Behaviour = {
   repeatSearch?: number;
   /** After gathering: edit these files, re-read them, run a passing check. */
   edit?: string[];
+  /** Record each fact with record_finding when it first comes into view (with the next calls, no extra step). */
+  record?: boolean;
 };
 
 const factsIn = (text: string) => [...text.matchAll(/FACT-(\d+)/g)].map((m) => Number(m[1]));
@@ -127,6 +130,7 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
   const seen = new Set<number>();
   const located = new Map<number, string>();
   const verified = new Set<number>();
+  const recorded = new Set<number>();
   let repeats = behaviour.repeatSearch ?? 0;
   const edits = behaviour.edit ?? [];
   let editStage = edits.length > 0 ? 0 : 3;
@@ -135,6 +139,11 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
     calls += 1;
     const visible = new Set<number>();
     for (const message of messages as ChatCompletionMessageParam[]) {
+      // The harness card's record keeps recorded facts in view.
+      if (message.role === 'user' && body(message).startsWith('[Harness card')) {
+        for (const fact of factsIn(body(message))) visible.add(fact);
+        continue;
+      }
       if (message.role !== 'tool') continue;
       const text = body(message);
       if (text.startsWith('(evicted)')) continue;
@@ -143,16 +152,25 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
     }
     for (const fact of visible) seen.add(fact);
     const prompt = Math.ceil(JSON.stringify(messages).length / 4);
-    const turn = (toolCalls: PendingToolCall[]): ModelTurn => ({
-      content: '',
-      toolCalls,
-      finishReason: 'tool_calls',
-      usage: { promptTokens: prompt, completionTokens: 30 },
-    });
     const call = (name: string, args: Record<string, unknown>): PendingToolCall => ({
       id: `c${calls}-${name}-${Math.random().toString(36).slice(2, 8)}`,
       type: 'function',
       function: { name, arguments: JSON.stringify(args) },
+    });
+    // New facts in view are recorded alongside whatever the turn does next.
+    const records = behaviour.record
+      ? [...visible]
+          .filter((fact) => !recorded.has(fact) && located.has(fact))
+          .map((fact) => {
+            recorded.add(fact);
+            return call('record_finding', { claim: `fact${fact} is FACT-${fact}`, evidence: `${located.get(fact)}:7` });
+          })
+      : [];
+    const turn = (toolCalls: PendingToolCall[]): ModelTurn => ({
+      content: '',
+      toolCalls: [...records, ...toolCalls],
+      finishReason: 'tool_calls',
+      usage: { promptTokens: prompt, completionTokens: 30 },
     });
 
     if (delegatePending) {
@@ -188,6 +206,7 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
       for (const fact of next) verified.add(fact);
       return turn(next.map((fact) => call('read_file', { path: located.get(fact) })));
     }
+    if (records.length > 0) return turn([]);
     return { content: 'All facts found.', toolCalls: [], finishReason: 'stop', usage: { promptTokens: prompt, completionTokens: 30 } };
   };
 }
@@ -222,16 +241,25 @@ const of = <T extends TraceEvent['type']>(sim: Sim, type: T) =>
 
 /** Shapes the invariants are measured on (a small matrix of model behaviours). */
 const SHAPES = {
-  /** Research over many mid-size files, two reads per turn. */
-  research: () => simulate({ facts: 16, batch: 2 }, workspace(16, 20_000)),
+  /** Research over many mid-size files, two reads per turn, facts recorded as found. */
+  research: () => simulate({ facts: 16, batch: 2, record: true }, workspace(16, 20_000)),
+  /** The same research by a model that never records: what the record saves. */
+  unrecorded: () => simulate({ facts: 16, batch: 2 }, workspace(16, 20_000)),
+  /** A long research run over many small files: residue builds up and is folded. */
+  long: () => simulate({ facts: 120, batch: 3, record: true }, workspace(120, 4_000)),
   /** Many small files read one at a time: cold results, not the cap. */
   serial: () => simulate({ facts: 14, batch: 1 }, workspace(14, 8_000)),
   /** A delegate report first, then the parent's own reads. */
-  delegated: () => simulate({ facts: 12, batch: 2, delegated: 6 }, workspace(12, 20_000)),
+  delegated: () => simulate({ facts: 12, batch: 2, delegated: 6, record: true }, workspace(12, 20_000)),
   /** A search the model repeats. */
   repeat: () => simulate({ facts: 3, batch: 1, repeatSearch: 4 }, workspace(3, 4_000)),
   /** Gather, edit, re-read the edited file, pass a check. */
-  change: () => simulate({ facts: 6, batch: 2, edit: ['src/f1.ts'] }, workspace(6, 20_000)),
+  /** A multi-file change: four large files edited and re-read, then a passing check (the milestone). */
+  change: () =>
+    simulate(
+      { facts: 4, batch: 2, edit: ['src/f1.ts', 'src/f2.ts', 'src/f3.ts', 'src/f4.ts'] },
+      workspace(4, 30_000),
+    ),
   /** Two large files still in view, both edited and re-read: the old reads are superseded. */
   rework: () => simulate({ facts: 2, batch: 2, edit: ['src/f1.ts', 'src/f2.ts'] }, workspace(2, 30_000)),
 };
@@ -289,17 +317,47 @@ describe('harness invariants over a reacting model', () => {
     expect(of(await run('research'), 'context_evicted').length).toBeGreaterThan(0);
   });
 
-  // Phase 2 (priced working set): removal only at boundaries, to a low mark.
-  it.fails('I1: removals happen at boundaries, not every step', async () => {
-    const sim = await run('research');
-    const removalSteps = new Set(of(sim, 'context_evicted').map((event) => event.iteration)).size;
-    expect(removalSteps).toBeLessThanOrEqual(Math.ceil(sim.steps / REMOVAL_EVERY_STEPS));
+  it('I1: removals happen at boundaries, not every step', async () => {
+    for (const name of ['research', 'unrecorded', 'long'] as ShapeName[]) {
+      const sim = await run(name);
+      const removalSteps = new Set(of(sim, 'context_evicted').map((event) => event.iteration)).size;
+      expect(removalSteps, name).toBeLessThanOrEqual(Math.ceil(sim.steps / REMOVAL_EVERY_STEPS));
+    }
   });
 
-  it('I2: residue stays a bounded share of the prompt', async () => {
-    for (const name of ['research', 'serial', 'delegated'] as ShapeName[]) {
-      const last = of(await run(name), 'context_shape').at(-1)!;
-      expect(last.residueTokens / last.promptTokens, name).toBeLessThanOrEqual(RESIDUE_MAX_SHARE);
+  it('I1: a pass for the cap goes down to the low mark (no trimming to the cap)', async () => {
+    const budget = DEFAULT_CONTEXT_BUDGET;
+    const low = budget.inRunResidentToolTokens * budget.inRunResidentLowRatio;
+    let checked = 0;
+    for (const name of ['research', 'unrecorded', 'change'] as ShapeName[]) {
+      const sim = await run(name);
+      const shapes = of(sim, 'context_shape');
+      const passes = of(sim, 'context_evicted').filter((event) => event.reason === 'budget');
+      checked += passes.length;
+      for (const pass of passes) {
+        const next = shapes.find((shape) => shape.iteration === pass.iteration + 1);
+        if (!next) continue;
+        // This step's own results are pinned for one step, so they may sit above the mark.
+        const pinned = of(sim, 'tool_complete')
+          .filter((event) => event.iteration === pass.iteration)
+          .reduce((sum, event) => sum + Math.ceil((event.resultChars ?? 0) / 4), 0);
+        expect(next.residentToolTokens, `${name} after step ${pass.iteration}`).toBeLessThanOrEqual(low + pinned + 200);
+      }
+    }
+    // The cap is exercised somewhere (without findings to stand in for reads).
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('I2: residue never grows past its fold mark (or a quarter of the prompt)', async () => {
+    // A share alone misleads when the prompt is small because findings
+    // stand in for reads; the property is that residue stays bounded.
+    const mark = DEFAULT_CONTEXT_BUDGET.inRunResidueFoldTokens;
+    for (const name of ['research', 'unrecorded', 'serial', 'delegated', 'long'] as ShapeName[]) {
+      for (const shape of of(await run(name), 'context_shape')) {
+        expect(shape.residueTokens, `${name} step ${shape.iteration}`).toBeLessThanOrEqual(
+          Math.max(mark + GROWTH_SLACK_TOKENS, shape.promptTokens * RESIDUE_MAX_SHARE),
+        );
+      }
     }
   });
 
@@ -342,17 +400,27 @@ describe('harness invariants over a reacting model', () => {
     expect(finish.usage?.own.promptTokens ?? 0).toBeLessThanOrEqual(allocation.maxPromptTokens + lastCall);
   });
 
-  // Phase 2 (priced working set) and phase 4 (reports join the record).
-  it.fails('I5: a sub-agent report is never removed to save tokens', async () => {
+  it('I5: a sub-agent report is never removed to save tokens', async () => {
     const sim = await run('delegated');
     const reportIds = new Set(of(sim, 'tool_start').filter((event) => event.toolName === 'delegate').map((event) => event.toolCallId));
     const removed = of(sim, 'context_evicted').flatMap((event) => event.toolCallIds ?? []);
     expect(removed.filter((id) => reportIds.has(id))).toEqual([]);
   });
 
-  // Phase 2 (restores from sha) and phase 3 (findings recorded, not re-read).
-  it.fails('I6: an unchanged range is never charged a fresh model step', async () => {
-    expect(sameRangeReReads(await run('research'))).toBe(0);
+  it('I6: an unchanged range is never charged a fresh model step when findings are recorded', async () => {
+    for (const name of ['research', 'delegated', 'long'] as ShapeName[]) {
+      expect(sameRangeReReads(await run(name)), name).toBe(0);
+    }
+  });
+
+  it('the record is what removes re-reads: the same task without it re-reads, and costs more', async () => {
+    const recorded = await run('research');
+    const unrecorded = await run('unrecorded');
+    expect(sameRangeReReads(unrecorded)).toBeGreaterThan(0);
+    // Each re-read is a restore of text that was removed earlier.
+    expect(of(unrecorded, 'context_restored').length).toBeGreaterThan(0);
+    const spent = (sim: Sim) => of(sim, 'run_finish')[0]?.usage?.own.promptTokens ?? 0;
+    expect(spent(recorded)).toBeLessThan(spent(unrecorded));
   });
 
   it('I6 holds where nothing was removed (the measure itself is sound)', async () => {
@@ -366,7 +434,9 @@ describe('harness invariants over a reacting model', () => {
     'context_evicted:budget',
     'context_evicted:cold',
     'context_evicted:superseded',
+    'context_evicted:cited',
     'context_compacted_inrun:milestone',
+    'context_compacted_inrun:residue',
     'policy_decision:guard',
   ];
 
@@ -382,13 +452,15 @@ describe('harness invariants over a reacting model', () => {
     expect(REACHABLE.filter((mechanism) => !fired.has(mechanism))).toEqual([]);
   });
 
-  // Phase 2: the size-triggered in-run compaction sits above where the
-  // resident cap and residue level off, so it never fires (dead code).
-  it.fails('I7: size-triggered in-run compaction is reachable', async () => {
+  // Phase 6 (conversation): the size-mark compaction (45% of the window)
+  // sits above where the resident cap and the residue fold keep a run's own
+  // context, so only a heavy prior conversation can reach it. These shapes
+  // start from one user message; a multi-turn shape arrives with phase 6.
+  it.fails('I7: size-mark in-run compaction is reachable', async () => {
     const fired = new Set<string>();
     for (const name of Object.keys(SHAPES) as ShapeName[]) {
       for (const event of (await run(name)).trace) {
-        if (event.type === 'context_compacted_inrun' && event.reason !== 'milestone') fired.add('size');
+        if (event.type === 'context_compacted_inrun' && event.reason === undefined) fired.add('size');
       }
     }
     expect(fired.has('size')).toBe(true);

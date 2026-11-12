@@ -58,6 +58,21 @@ export function liveResultCapChars(toolName: string | undefined, fallback: numbe
 }
 
 /**
+ * Findings a run keeps (record_finding), and the size of each part. The cap
+ * is high on purpose: a dropped finding is research the model must redo (a
+ * 12-section fact sheet records ~100 facts).
+ */
+export const FINDINGS_MAX = 200;
+export const FINDING_CLAIM_MAX_CHARS = 400;
+export const FINDING_EVIDENCE_MAX_CHARS = 200;
+/**
+ * Characters of findings the harness card shows (~6k tokens), newest first.
+ * Typical findings are ~120 characters, so ~200 fit; past it, the oldest
+ * are counted, not shown.
+ */
+export const RECORD_CARD_MAX_CHARS = 24_000;
+
+/**
  * Sub-agent report: the child writes at most this much and the parent's
  * digest shows all of it, so nothing is cut between them (~2k tokens).
  */

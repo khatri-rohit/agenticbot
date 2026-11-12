@@ -79,8 +79,6 @@ export type RunState = {
   readonly readDedupe: ReadDedupe;
   /** load_skill results still resident in full: tool_call_id → name + iteration. */
   readonly skillLoads: Map<string, { name: string; iteration: number }>;
-  /** Partial reads per path since its last edit. */
-  readonly partialReadsByPath: Map<string, number>;
   /** What each web call made fetchable, until its row is written. */
   readonly trustByCall: Map<string, WebTrust>;
   /** Effort-router rule inputs, read from traced events; cleared after every model call. */
@@ -194,7 +192,6 @@ export function createRunState(
     ),
     readDedupe: new ReadDedupe(),
     skillLoads: new Map(),
-    partialReadsByPath: new Map(),
     trustByCall: new Map(),
     turnSignals,
     iterations: 0,

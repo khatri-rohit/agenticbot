@@ -128,9 +128,13 @@ function workspacePrompt(registry: ToolRegistry, posture: RunPosture): string {
       : '',
     '- Do not re-read what is already above.',
     '- Issue independent glob, grep, and read_file calls together in one turn; they run in parallel, and each extra turn re-sends the whole context. Use grep context to see surrounding lines instead of a follow-up read.',
+    has('record_finding')
+      ? '- When the task is to find or explain something, record each fact you confirm with record_finding (claim plus path:line) as you go. The record stays on the harness card, so the reads behind it can leave the context without being read again; write the answer from the record.'
+      : '',
+    '- An "(evicted)" card stands for a result that left the context: read_file again for current contents, or recall its sha256 for that exact text.',
     isAsk ? '' : '- Batch edits, then verify once.',
     '- When the run says the budget is nearly spent: finish the current step, verify, and report what is left.',
-    '- A "[Harness card]" message may close the conversation: the run\'s current phase, working set, open items and advice, rebuilt every step by the harness (not the user). Use it; do not answer it.',
+    '- A "[Harness card]" message may close the conversation: the run\'s current phase, working set, recorded findings, open items and advice, rebuilt every step by the harness (not the user). Use it; do not answer it.',
   ]
     .filter(Boolean)
     .join('\n');

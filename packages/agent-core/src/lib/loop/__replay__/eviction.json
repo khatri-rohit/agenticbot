@@ -41,7 +41,8 @@
         "sectionedSummary": true,
         "learningLoop": true,
         "stateCard": true
-      }
+      },
+      "taskShape": "research"
     },
     {
       "type": "context_shape",
@@ -155,7 +156,7 @@
       "iteration": 2,
       "evicted": 1,
       "beforeTokens": 2117,
-      "afterTokens": 1175,
+      "afterTokens": 1148,
       "toolCallIds": [
         "r1"
       ],
@@ -166,16 +167,16 @@
       "runId": "replay-run",
       "iteration": 3,
       "messages": 6,
-      "promptTokens": 1140,
+      "promptTokens": 1116,
       "residentToolTokens": 1003,
-      "residueTokens": 74,
+      "residueTokens": 47,
       "prefixStableMessages": 2
     },
     {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 3,
-      "estimatedPromptTokens": 1175
+      "estimatedPromptTokens": 1148
     },
     {
       "type": "llm_response",
@@ -215,8 +216,8 @@
       "runId": "replay-run",
       "iteration": 3,
       "evicted": 1,
-      "beforeTokens": 2212,
-      "afterTokens": 1270,
+      "beforeTokens": 2185,
+      "afterTokens": 1216,
       "toolCallIds": [
         "r2"
       ],
@@ -227,16 +228,16 @@
       "runId": "replay-run",
       "iteration": 4,
       "messages": 8,
-      "promptTokens": 1207,
+      "promptTokens": 1156,
       "residentToolTokens": 1003,
-      "residueTokens": 141,
+      "residueTokens": 88,
       "prefixStableMessages": 4
     },
     {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 4,
-      "estimatedPromptTokens": 1270
+      "estimatedPromptTokens": 1216
     },
     {
       "type": "llm_response",
@@ -284,8 +285,8 @@
       "runId": "replay-run",
       "iteration": 4,
       "evicted": 1,
-      "beforeTokens": 2307,
-      "afterTokens": 1365,
+      "beforeTokens": 2253,
+      "afterTokens": 1284,
       "toolCallIds": [
         "r3"
       ],
@@ -305,16 +306,16 @@
       "runId": "replay-run",
       "iteration": 5,
       "messages": 10,
-      "promptTokens": 1312,
+      "promptTokens": 1234,
       "residentToolTokens": 1003,
-      "residueTokens": 208,
+      "residueTokens": 128,
       "prefixStableMessages": 6
     },
     {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 5,
-      "estimatedPromptTokens": 1365
+      "estimatedPromptTokens": 1284
     },
     {
       "type": "llm_response",
@@ -344,6 +345,7 @@
         "phase": "report",
         "iteration": 5,
         "taskClass": "small",
+        "shape": "research",
         "workingSet": [
           {
             "path": "big1.ts",
@@ -382,7 +384,8 @@
           "unverifiedSince": null,
           "uncheckedFiles": [],
           "lastCheck": null,
-          "reviewed": false
+          "reviewed": false,
+          "findings": []
         },
         "phaseIterations": {
           "orient": 1,
@@ -843,7 +846,7 @@
       {
         "role": "tool",
         "tool_call_id": "r1",
-        "content": "(evicted) read_file {\"path\":\"big1.ts\"} · not used since iteration 1 · 4009 chars · sha256:e0b6be53ecc33a06746cc87ac078e5d643368e3182fdda8043d814a33fda82ef — read_file again for the current contents, or recall this sha256 for this exact text."
+        "content": "(evicted) read_file {\"path\":\"big1.ts\"} · budget · 4009 chars · sha256:e0b6be53ecc33a06746cc87ac078e5d643368e3182fdda8043d814a33fda82ef"
       },
       {
         "role": "assistant",
@@ -866,7 +869,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small · ~1k tokens per call\nWorking set: big2.ts; 1 file(s) read earlier are no longer in full view (read_file again if needed)"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small research · ~1k tokens per call\nWorking set: big2.ts; 1 file(s) read earlier are no longer in full view (read_file again if needed)"
       }
     ],
     [
@@ -891,7 +894,7 @@
       {
         "role": "tool",
         "tool_call_id": "r1",
-        "content": "(evicted) read_file {\"path\":\"big1.ts\"} · not used since iteration 1 · 4009 chars · sha256:e0b6be53ecc33a06746cc87ac078e5d643368e3182fdda8043d814a33fda82ef — read_file again for the current contents, or recall this sha256 for this exact text."
+        "content": "(evicted) read_file {\"path\":\"big1.ts\"} · budget · 4009 chars · sha256:e0b6be53ecc33a06746cc87ac078e5d643368e3182fdda8043d814a33fda82ef"
       },
       {
         "role": "assistant",
@@ -910,7 +913,7 @@
       {
         "role": "tool",
         "tool_call_id": "r2",
-        "content": "(evicted) read_file {\"path\":\"big2.ts\"} · not used since iteration 2 · 4009 chars · sha256:2e7d8ec2c19932561e2a05d84634b46a658b38ff92c112bbabd12b15015ea294 — read_file again for the current contents, or recall this sha256 for this exact text."
+        "content": "(evicted) read_file {\"path\":\"big2.ts\"} · budget · 4009 chars · sha256:2e7d8ec2c19932561e2a05d84634b46a658b38ff92c112bbabd12b15015ea294"
       },
       {
         "role": "assistant",
@@ -933,7 +936,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 4 · task small · ~1k tokens per call\nWorking set: big3.ts; 2 file(s) read earlier are no longer in full view (read_file again if needed)"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 4 · task small research · ~1k tokens per call\nWorking set: big3.ts; 2 file(s) read earlier are no longer in full view (read_file again if needed)"
       }
     ],
     [
@@ -958,7 +961,7 @@
       {
         "role": "tool",
         "tool_call_id": "r1",
-        "content": "(evicted) read_file {\"path\":\"big1.ts\"} · not used since iteration 1 · 4009 chars · sha256:e0b6be53ecc33a06746cc87ac078e5d643368e3182fdda8043d814a33fda82ef — read_file again for the current contents, or recall this sha256 for this exact text."
+        "content": "(evicted) read_file {\"path\":\"big1.ts\"} · budget · 4009 chars · sha256:e0b6be53ecc33a06746cc87ac078e5d643368e3182fdda8043d814a33fda82ef"
       },
       {
         "role": "assistant",
@@ -977,7 +980,7 @@
       {
         "role": "tool",
         "tool_call_id": "r2",
-        "content": "(evicted) read_file {\"path\":\"big2.ts\"} · not used since iteration 2 · 4009 chars · sha256:2e7d8ec2c19932561e2a05d84634b46a658b38ff92c112bbabd12b15015ea294 — read_file again for the current contents, or recall this sha256 for this exact text."
+        "content": "(evicted) read_file {\"path\":\"big2.ts\"} · budget · 4009 chars · sha256:2e7d8ec2c19932561e2a05d84634b46a658b38ff92c112bbabd12b15015ea294"
       },
       {
         "role": "assistant",
@@ -996,7 +999,7 @@
       {
         "role": "tool",
         "tool_call_id": "r3",
-        "content": "(evicted) read_file {\"path\":\"big3.ts\"} · not used since iteration 3 · 4009 chars · sha256:3be366ddb0785bc7091fea710f489d28a2fac5bbb27550d5be9ef6d8ac796129 — read_file again for the current contents, or recall this sha256 for this exact text."
+        "content": "(evicted) read_file {\"path\":\"big3.ts\"} · budget · 4009 chars · sha256:3be366ddb0785bc7091fea710f489d28a2fac5bbb27550d5be9ef6d8ac796129"
       },
       {
         "role": "assistant",
@@ -1019,7 +1022,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 5 · task small · ~1k tokens per call\nWorking set: big4.ts; 3 file(s) read earlier are no longer in full view (read_file again if needed)\nAdvice:\n- 4 turns in a row made one read call, and each turn re-sends ~1k tokens. Put independent reads and searches in one turn; they run in parallel."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 5 · task small research · ~1k tokens per call\nWorking set: big4.ts; 3 file(s) read earlier are no longer in full view (read_file again if needed)\nAdvice:\n- 4 turns in a row made one read call, and each turn re-sends ~1k tokens. Put independent reads and searches in one turn; they run in parallel."
       }
     ]
   ]

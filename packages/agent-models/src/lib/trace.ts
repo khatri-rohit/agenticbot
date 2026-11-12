@@ -3,7 +3,7 @@ import type { HarnessFlags } from './flags.js';
 import type { RunUsage, TokenUsage } from './run.js';
 import type { System1EffortTrace, System1RunReport } from './system1.js';
 import type { SubagentThoroughness } from './subagent.js';
-import type { TaskPhase, TaskStateSnapshot } from './task-state.js';
+import type { TaskPhase, TaskShape, TaskStateSnapshot } from './task-state.js';
 import type { ToolStage } from './tool-context.js';
 
 /**
@@ -62,6 +62,8 @@ export type TraceEvent =
       layers?: ContextReportLayer[];
       /** Harness switches this run used (absent on traces from before flags). */
       flags?: HarnessFlags;
+      /** Provisional task shape from the request (see TaskShape); evidence may correct it. */
+      taskShape?: TaskShape;
     }
   | {
       /** The final answer claimed success with no command after the last edit; sent back once. */
@@ -188,10 +190,11 @@ export type TraceEvent =
       /**
        * Why these left the working set: `superseded` (a later read of the same
        * lines or run of the same command), `cold` (not used for a few
-       * iterations), `budget` (resident cap). Absent on older traces
-       * (size-triggered eviction).
+       * iterations), `cited` (a recorded finding cites the file, so the
+       * finding stands for it), `budget` (resident cap, removed down to the
+       * low mark in one pass). Absent on older traces (size-triggered eviction).
        */
-      reason?: 'superseded' | 'cold' | 'budget';
+      reason?: 'superseded' | 'cold' | 'cited' | 'budget';
     }
   | {
       /** In-run extractive compaction of older iterations of this turn. */
@@ -202,8 +205,24 @@ export type TraceEvent =
       afterTokens: number;
       /** Tool calls whose rows were folded into the recap. */
       toolCallIds?: string[];
-      /** `milestone`: folded at a verified checkpoint (a check passed after edits). Absent = size mark. */
-      reason?: 'milestone';
+      /**
+       * `milestone`: folded at a verified checkpoint (a check passed after
+       * edits). `residue`: old steps whose results had all left were folded
+       * once their cards and call arguments passed the residue mark. Absent =
+       * size mark.
+       */
+      reason?: 'milestone' | 'residue';
+    }
+  | {
+      /**
+       * A read returned a range whose identical text had been removed from
+       * the prompt earlier: the model paid a step to get it back.
+       */
+      type: 'context_restored';
+      runId: string;
+      iteration: number;
+      toolCallId: string;
+      path: string;
     }
   | {
       type: 'skill_loaded';

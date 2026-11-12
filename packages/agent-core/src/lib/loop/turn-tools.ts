@@ -19,7 +19,8 @@ import type { Tool } from '../tools/types';
 import { isEditSuccess } from '../tools/workspace/tools';
 import { outcomeKey, pathFromToolArgs, toolCallKey } from './call-identity';
 import { manageResidency } from './residency-pass';
-import { READ_CREEP_ADVICE_AFTER, SERIAL_READ_ADVICE_AFTER } from './state-card';
+import { isCheckCommand } from '../state/task-state';
+import { SERIAL_READ_ADVICE_AFTER } from './state-card';
 import {
   emitTurnCompleted,
   noteLimit,
@@ -48,8 +49,6 @@ const USER_SKIPPED_CHOICE =
  */
 const RESULT_PREVIEW_MAX = 20_000;
 
-/** Partial reads of one file (since its last edit) between grep hints. */
-const READ_CREEP_NOTE_EVERY = READ_CREEP_ADVICE_AFTER;
 /** Consecutive single-read turns between batching hints. */
 const SERIAL_READ_NOTE_EVERY = SERIAL_READ_ADVICE_AFTER;
 
@@ -84,34 +83,6 @@ type AdmitResult =
     };
 
 type BatchOutcome = 'ok' | 'deferred' | 'halted';
-
-/**
- * Walking a file a few lines at a time (offset/limit reads) is how a run
- * loses its place; every few partial reads of one file, point at grep.
- */
-function withReadCreepNote(s: RunState, readPath: string, result: string): string {
-  // A slice is what came back, not what was asked: a file that fits the
-  // read window returns whole even when offset/limit were passed.
-  const header = /^\[lines (\d+)–(\d+) of (\d+)/.exec(result);
-  const partial =
-    header !== null &&
-    (Number(header[1]) > 1 || Number(header[2]) < Number(header[3]));
-  if (!partial) return result;
-  const count = (s.partialReadsByPath.get(readPath) ?? 0) + 1;
-  s.partialReadsByPath.set(readPath, count);
-  if (count % READ_CREEP_NOTE_EVERY !== 0) return result;
-  s.trace({
-    type: 'tool_note',
-    runId: s.runId,
-    iteration: s.iterations,
-    toolName: 'read_file',
-    note: 'read_creep',
-    count,
-  });
-  // With the harness card on, the advice lives there (rebuilt each step).
-  if (s.flags.stateCard) return result;
-  return `${result}\n\n(note) ${count} partial reads of ${readPath} since it last changed. To find a block, grep for its anchor line (grep returns path:line), then read from that line.`;
-}
 
 /**
  * Every few turns in a row that each made one read call, say what that
@@ -185,7 +156,15 @@ function shapeBareResult(
     const readPath = pathFromToolArgs(args);
     if (readPath === null) return result;
     const shaped = s.readDedupe.apply(readPath, args, result, s.iterations, toolCallId);
-    return withReadCreepNote(s, readPath, shaped);
+    // The same text was removed earlier and the model paid a step to get it
+    // back: measured, so the working-set pricing can be judged.
+    if (shaped.restored) {
+      s.trace({ type: 'context_restored', runId: s.runId, iteration: s.iterations, toolCallId, path: readPath });
+    }
+    return shaped.text;
+  }
+  if (toolName === 'grep' || toolName === 'glob') {
+    return s.readDedupe.applySearch(toolName, args, result, s.iterations, toolCallId);
   }
   if (toolName === 'web_fetch') {
     return withWebSliceNote(s, args, result);
@@ -206,10 +185,7 @@ function shapeBareResult(
   }
   if (toolName === 'edit_file' && isEditSuccess(result)) {
     const editPath = pathFromToolArgs(args);
-    if (editPath !== null) {
-      s.readDedupe.invalidatePath(editPath);
-      s.partialReadsByPath.delete(editPath);
-    }
+    if (editPath !== null) s.readDedupe.invalidatePath(editPath);
   } else if (toolName === 'run_terminal') {
     s.readDedupe.clear();
   }
@@ -552,6 +528,15 @@ async function settleReturned(
   // fresh instead of accumulating toward a false stuck-ness halt.
   if (toolName === 'edit_file' && isEditSuccess(result)) {
     s.guard.editSucceeded();
+    s.steering.markProgress();
+  }
+  // Other evidence is progress too: a recorded finding (research), and a
+  // project check that passed. Stall advice counts from the last evidence.
+  const passingCheck =
+    toolName === 'run_terminal' &&
+    classified?.exitCode === 0 &&
+    isCheckCommand(typeof args.command === 'string' ? args.command : '');
+  if ((toolName === 'record_finding' && result.startsWith('Recorded')) || passingCheck) {
     s.steering.markProgress();
   }
   return 'ok';

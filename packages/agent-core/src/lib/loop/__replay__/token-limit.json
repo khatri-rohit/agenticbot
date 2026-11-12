@@ -42,7 +42,8 @@
         "sectionedSummary": true,
         "learningLoop": true,
         "stateCard": true
-      }
+      },
+      "taskShape": "research"
     },
     {
       "type": "context_shape",
@@ -172,7 +173,7 @@
       "runId": "replay-run",
       "iteration": 3,
       "messages": 6,
-      "promptTokens": 110,
+      "promptTokens": 104,
       "residentToolTokens": 9,
       "residueTokens": 13,
       "prefixStableMessages": 3
@@ -268,6 +269,7 @@
         "phase": "blocked",
         "iteration": 3,
         "taskClass": "small",
+        "shape": "research",
         "workingSet": [
           {
             "path": "f1.ts",
@@ -299,7 +301,8 @@
           "unverifiedSince": null,
           "uncheckedFiles": [],
           "lastCheck": null,
-          "reviewed": false
+          "reviewed": false,
+          "findings": []
         },
         "phaseIterations": {
           "orient": 1,
@@ -712,7 +715,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small · ~121 tokens per call · 8k of 10k run budget used\nWorking set: f2.ts, f1.ts\nAdvice:\n- Run budget nearly spent: finish the current step, run the check once, and report what is done and what is left. Do not start new work."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small research · ~121 tokens per call · 8k of 10k run budget used\nWorking set: f2.ts, f1.ts\nAdvice:\n- Run budget nearly spent: stop searching. Answer now from what is recorded and say what is still open."
       }
     ],
     [

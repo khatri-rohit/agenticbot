@@ -79,6 +79,7 @@ export const WORKSPACE_MODE: ModeConfig = {
     'session_search',
     'plan',
     'todo',
+    'record_finding',
     'offer_choice',
     'delegate',
   ],

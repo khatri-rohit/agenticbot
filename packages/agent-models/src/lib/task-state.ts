@@ -49,6 +49,8 @@ export type TaskEvidence = {
   lastCheck: TaskCommand | null;
   /** A delegate(review) was started this run. */
   reviewed: boolean;
+  /** Facts recorded this run, oldest first (capped; see FINDINGS_MAX). */
+  findings: TaskFinding[];
 };
 
 /**
@@ -58,11 +60,29 @@ export type TaskEvidence = {
  */
 export type TaskClass = 'small' | 'medium' | 'long';
 
+/**
+ * What the task asks for, which decides what counts as evidence: `change`
+ * (edits, then a passing check), `research` (recorded findings about the
+ * workspace), `answer` (a reply, no workspace). Inferred from the request
+ * at the start and corrected by evidence (an edit makes it `change`).
+ */
+export type TaskShape = 'change' | 'research' | 'answer';
+
+/** One fact the model recorded with record_finding. */
+export type TaskFinding = {
+  claim: string;
+  /** path:line, a URL, or a quoted string. */
+  evidence: string;
+  topic?: string;
+  iteration: number;
+};
+
 export type TaskStateSnapshot = {
   phase: TaskPhase;
   /** Iteration of the latest model call. */
   iteration: number;
   taskClass: TaskClass;
+  shape: TaskShape;
   workingSet: WorkingSetEntry[];
   evidence: TaskEvidence;
   /** Model calls made while in each phase. */
