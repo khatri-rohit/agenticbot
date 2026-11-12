@@ -1,0 +1,18 @@
+{
+  "id": "m3-read-only-extraction",
+  "suite": "matrix",
+  "repo": { "source": ".", "commit": "022dc3a" },
+  "prompt": "Collect facts about the harness card in packages/agent-core (the per-call message that starts with '[Harness card'). Do not change any file. Report, each with path:line evidence: (1) the file that builds it; (2) after how many single-read turns in a row it advises batching (name the constant and its value); (3) after how many slices of one file it advises grep (constant and value); (4) for how many early steps it stays silent when it has nothing to say (constant and value); (5) how many working-set files it lists at most (constant and value). Write [NOT FOUND] for anything you cannot find.",
+  "posture": "ask",
+  "checks": [],
+  "files": [],
+  "answer": [
+    { "mustMatch": "state-card\\.ts" },
+    { "mustMatch": "SERIAL_READ_ADVICE_AFTER[^\\n]*\\b4\\b|\\b4\\b[^\\n]*SERIAL_READ_ADVICE_AFTER" },
+    { "mustMatch": "READ_CREEP_ADVICE_AFTER[^\\n]*\\b3\\b|\\b3\\b[^\\n]*READ_CREEP_ADVICE_AFTER" },
+    { "mustMatch": "QUIET_STEPS[^\\n]*\\b2\\b|\\b2\\b[^\\n]*QUIET_STEPS" },
+    { "mustMatch": "WORKING_SET_MAX[^\\n]*\\b6\\b|\\b6\\b[^\\n]*WORKING_SET_MAX" }
+  ],
+  "scope": { "allow": [] },
+  "budget": { "maxPromptTokens": 600000, "maxMinutes": 10 }
+}

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { isPauseStop, isResumableStop, RUN_CANCELLED_REASON, type ThinkingValue, type ThreadLastRun } from '@agent/agent-models';
 
 import { readCatalog } from '../read/catalog.js';
+import { readLedger } from '../read/ledger.js';
 import { listRuns } from '../read/runs.js';
 import { linesOf, readRunTrace } from '../read/trace.js';
 import { flattenRuns, loadRunMetrics } from '../metrics/load.js';
@@ -69,6 +70,7 @@ export type TrialResult = {
   reason?: string;
   checksPassed?: boolean;
   filesPassed?: boolean;
+  answersPassed?: boolean;
   scopeViolations?: string[];
   budgetOk?: boolean;
   continues: number;
@@ -227,17 +229,23 @@ export async function runTrial(
     finishedAt: '',
   };
   try {
+    // A home task is a chat: no checkout, no workspace on the thread.
+    const home = task.mode === 'home';
     const workdirs = path.join(opts.evalHome, 'workdirs');
-    const tree = await checkout({
-      source: path.resolve(opts.harnessRoot, task.repo.source),
-      commit: task.repo.commit,
-      dir: path.join(workdirs, `${task.id}-${trial}`),
-    });
-    result.deps = tree.deps;
-    result.depsMs = tree.depsMs;
+    const tree = home
+      ? undefined
+      : await checkout({
+          source: path.resolve(opts.harnessRoot, task.repo.source),
+          commit: task.repo.commit,
+          dir: path.join(workdirs, `${task.id}-${trial}`),
+        });
+    if (tree) {
+      result.deps = tree.deps;
+      result.depsMs = tree.depsMs;
+    }
 
     const thread = await api.createThread({
-      workspaceRoot: tree.dir,
+      ...(tree ? { workspaceRoot: tree.dir } : {}),
       model: opts.model,
       title: `eval ${task.id} #${trial}`,
     });
@@ -309,9 +317,16 @@ export async function runTrial(
     result.promptTokens = promptTokens;
     result.minutes = Math.round(minutes * 10) / 10;
 
+    const lastRunId = result.runIds.at(-1);
+    const answer = (await readLedger(opts.evalHome, thread.id)).envelopes
+      .filter((envelope) => envelope.runId === lastRunId && envelope.record.role === 'assistant')
+      .map((envelope) => (typeof envelope.record.content === 'string' ? envelope.record.content : ''))
+      .filter(Boolean)
+      .at(-1);
     const grade = await gradeTrial({
       task,
-      dir: tree.dir,
+      ...(tree ? { dir: tree.dir } : {}),
+      ...(answer ? { answer } : {}),
       promptTokens,
       minutes,
       ...(limitReason ? { unresolvedLimit: limitReason } : {}),
@@ -319,6 +334,7 @@ export async function runTrial(
     result.grade = grade;
     result.checksPassed = grade.checksPassed;
     result.filesPassed = grade.filesPassed;
+    result.answersPassed = grade.answersPassed;
     result.scopeViolations = grade.scopeViolations;
     result.budgetOk = grade.budget.ok;
     result.status = grade.passed ? 'passed' : 'failed';

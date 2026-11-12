@@ -1,0 +1,15 @@
+{
+  "id": "m7-shell-commands",
+  "suite": "matrix",
+  "repo": { "source": ".", "commit": "022dc3a" },
+  "prompt": "Using run_terminal (not the file tools), count the .json files directly in evals/tasks/regression and print the installed Node.js version. Report both numbers. Change nothing.",
+  "posture": "agent",
+  "checks": [],
+  "files": [],
+  "answer": [
+    { "mustMatch": "\\b3\\b" },
+    { "mustMatch": "v?\\d+\\.\\d+\\.\\d+" }
+  ],
+  "scope": { "allow": [] },
+  "budget": { "maxPromptTokens": 300000, "maxMinutes": 6 }
+}

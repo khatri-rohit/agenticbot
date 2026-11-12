@@ -34,8 +34,8 @@ class FakeAgent implements TrialClient {
     private readonly script: ScriptedRun[],
   ) {}
 
-  async createThread(input: { workspaceRoot: string }): Promise<{ id: string }> {
-    this.workspace = input.workspaceRoot;
+  async createThread(input: { workspaceRoot?: string }): Promise<{ id: string }> {
+    this.workspace = input.workspaceRoot ?? '';
     return { id: 'thread-1' };
   }
 

@@ -1,0 +1,18 @@
+{
+  "id": "m5-delegation-research",
+  "suite": "matrix",
+  "repo": { "source": ".", "commit": "022dc3a" },
+  "prompt": "Answer these questions about this repository, citing path:line for each, without changing any file. They span apps/api, packages/agent-core and packages/agent-eval. (1) Which file grades an eval trial, and by what factor of its token budget does the eval runner cancel a trial (name the constant)? (2) Which route file handles POST /run that starts an agent run? (3) How many sub-agents may run in parallel per parent run (name the constant)? (4) At how many characters is a sub-agent's digest cut for the parent (name the constant)? Write [NOT FOUND] for anything you cannot find.",
+  "posture": "ask",
+  "checks": [],
+  "files": [],
+  "answer": [
+    { "mustMatch": "score\\.ts" },
+    { "mustMatch": "OVER_BUDGET_FACTOR[^\\n]*\\b2\\b|\\b2\\b[^\\n]*OVER_BUDGET_FACTOR" },
+    { "mustMatch": "runs\\.routes\\.ts" },
+    { "mustMatch": "MAX_CONCURRENT_SUBAGENTS[^\\n]*\\b4\\b|\\b4\\b[^\\n]*MAX_CONCURRENT_SUBAGENTS" },
+    { "mustMatch": "DIGEST_MAX_CHARS[^\\n]*6[,_ ]?000|6[,_ ]?000[^\\n]*DIGEST_MAX_CHARS" }
+  ],
+  "scope": { "allow": [] },
+  "budget": { "maxPromptTokens": 1500000, "maxMinutes": 15 }
+}

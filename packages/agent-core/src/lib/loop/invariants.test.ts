@@ -33,12 +33,20 @@ import type { ModelCallFn, RunLoopConfig } from './types';
 
 type Workspace = Map<string, string>;
 
-/** `files` files of about `chars` characters; file i holds FACT-i on line 7. */
+/**
+ * `files` files of about `chars` characters. File i has a searchable anchor
+ * on line 2 and its fact (FACT-i) on line 7, so a search finds where a fact
+ * is but only a read shows it.
+ */
 function workspace(files: number, chars: number): Workspace {
   const out: Workspace = new Map();
   for (let i = 1; i <= files; i++) {
     const lines = Array.from({ length: Math.max(10, Math.ceil(chars / 60)) }, (_, n) =>
-      n === 6 ? `export const fact${i} = 'FACT-${i}';`.padEnd(59, ' ') : `// filler line ${n + 1} of file ${i}`.padEnd(59, '.'),
+      n === 1
+        ? `// anchor fact-${i}`.padEnd(59, ' ')
+        : n === 6
+          ? `export const fact${i} = 'FACT-${i}';`.padEnd(59, ' ')
+          : `// filler line ${n + 1} of file ${i}`.padEnd(59, '.'),
     );
     out.set(`src/f${i}.ts`, lines.join('\n'));
   }
@@ -98,8 +106,8 @@ type Behaviour = {
   delegated?: number;
   /** Repeat the first search this many extra times (a model that forgot it searched). */
   repeatSearch?: number;
-  /** After gathering: edit f1, re-read it, run a passing check. */
-  editAndCheck?: boolean;
+  /** After gathering: edit these files, re-read them, run a passing check. */
+  edit?: string[];
 };
 
 const factsIn = (text: string) => [...text.matchAll(/FACT-(\d+)/g)].map((m) => Number(m[1]));
@@ -120,7 +128,8 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
   const located = new Map<number, string>();
   const verified = new Set<number>();
   let repeats = behaviour.repeatSearch ?? 0;
-  let editStage = behaviour.editAndCheck ? 0 : 3;
+  const edits = behaviour.edit ?? [];
+  let editStage = edits.length > 0 ? 0 : 3;
   let delegatePending = (behaviour.delegated ?? 0) > 0;
   return async (_model, messages) => {
     calls += 1;
@@ -130,7 +139,7 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
       const text = body(message);
       if (text.startsWith('(evicted)')) continue;
       for (const fact of factsIn(text)) visible.add(fact);
-      for (const m of text.matchAll(/(src\/f\d+\.ts):\d+:.*FACT-(\d+)/g)) located.set(Number(m[2]), m[1]!);
+      for (const m of text.matchAll(/(src\/f\d+\.ts):\d+:.*anchor fact-(\d+)/g)) located.set(Number(m[2]), m[1]!);
     }
     for (const fact of visible) seen.add(fact);
     const prompt = Math.ceil(JSON.stringify(messages).length / 4);
@@ -152,7 +161,7 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
     }
     if (repeats > 0) {
       repeats -= 1;
-      return turn([call('grep', { pattern: 'FACT-1\\b' })]);
+      return turn([call('grep', { pattern: 'anchor fact-1\\b' })]);
     }
     const missing = Array.from({ length: behaviour.facts }, (_, i) => i + 1).filter((fact) => !seen.has(fact));
     if (missing.length > 0) {
@@ -161,14 +170,14 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
         next.map((fact) =>
           located.has(fact)
             ? call('read_file', { path: located.get(fact) })
-            : call('grep', { pattern: `FACT-${fact}\\b` }),
+            : call('grep', { pattern: `anchor fact-${fact}\\b` }),
         ),
       );
     }
     if (editStage < 3) {
       editStage += 1;
-      if (editStage === 1) return turn([call('edit_file', { path: 'src/f1.ts' })]);
-      if (editStage === 2) return turn([call('read_file', { path: 'src/f1.ts' })]);
+      if (editStage === 1) return turn(edits.map((path) => call('edit_file', { path })));
+      if (editStage === 2) return turn(edits.map((path) => call('read_file', { path })));
       return turn([call('run_terminal', { command: 'npm test' })]);
     }
     const stale = Array.from({ length: behaviour.facts }, (_, i) => i + 1).filter(
@@ -222,7 +231,9 @@ const SHAPES = {
   /** A search the model repeats. */
   repeat: () => simulate({ facts: 3, batch: 1, repeatSearch: 4 }, workspace(3, 4_000)),
   /** Gather, edit, re-read the edited file, pass a check. */
-  change: () => simulate({ facts: 6, batch: 2, editAndCheck: true }, workspace(6, 20_000)),
+  change: () => simulate({ facts: 6, batch: 2, edit: ['src/f1.ts'] }, workspace(6, 20_000)),
+  /** Two large files still in view, both edited and re-read: the old reads are superseded. */
+  rework: () => simulate({ facts: 2, batch: 2, edit: ['src/f1.ts', 'src/f2.ts'] }, workspace(2, 30_000)),
 };
 type ShapeName = keyof typeof SHAPES;
 const runs = new Map<ShapeName, Promise<Sim>>();

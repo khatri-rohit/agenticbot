@@ -1,0 +1,20 @@
+{
+  "id": "m1-small-edit",
+  "suite": "matrix",
+  "repo": { "source": ".", "commit": "022dc3a" },
+  "prompt": "In packages/agent-core/src/lib/tools/workspace/path.ts, `globMatch` treats `{` and `}` literally, so a pattern like `**/*.{ts,tsx}` matches nothing. Make it support `{a,b}` alternatives (a `{` without a matching `}` stays literal). Add a test for it to packages/agent-core/src/lib/tools/workspace/tools.test.ts and run that test file. Change nothing else.",
+  "posture": "agent",
+  "checks": [
+    { "run": "npx vitest run --root packages/agent-core src/lib/tools/workspace/tools.test.ts", "expectExit": 0, "timeoutSec": 180 }
+  ],
+  "files": [
+    { "path": "packages/agent-core/src/lib/tools/workspace/tools.test.ts", "mustMatch": "\\{[a-z]+,[a-z]+" }
+  ],
+  "scope": {
+    "allow": [
+      "packages/agent-core/src/lib/tools/workspace/path.ts",
+      "packages/agent-core/src/lib/tools/workspace/tools.test.ts"
+    ]
+  },
+  "budget": { "maxPromptTokens": 600000, "maxMinutes": 10 }
+}
