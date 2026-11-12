@@ -93,6 +93,16 @@
       }
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 5,
+      "promptTokens": 203,
+      "residentToolTokens": 34,
+      "residueTokens": 32,
+      "prefixStableMessages": 1
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 1,

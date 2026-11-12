@@ -231,6 +231,16 @@
       "cause": "limit"
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 3,
+      "messages": 8,
+      "promptTokens": 113,
+      "residentToolTokens": 13,
+      "residueTokens": 19,
+      "prefixStableMessages": 5
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 3,

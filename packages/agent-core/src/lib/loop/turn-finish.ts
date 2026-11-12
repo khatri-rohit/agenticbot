@@ -14,6 +14,7 @@ import {
   type CoreResult,
   type RunState,
 } from './run-state';
+import { measureContextShape } from './context-shape';
 import { OPEN_PLAN_WORK_NUDGE } from './steering-notes';
 import { preview } from './tool-call-record';
 
@@ -73,6 +74,11 @@ async function finalizeAnswer(
   const noTools: ToolRegistry = { definitions: [], byName: new Map() };
   // The tool-less finalize prompt is everything in `messages` right now.
   const estimatedPrompt = estimatePromptTokens(s.messages);
+  // Measured like every other call, so a run that ends on a limit has no
+  // unmeasured last call.
+  const measured = measureContextShape(s.messages, s.runStart, s.promptKeys);
+  s.promptKeys = measured.keys;
+  s.trace({ type: 'context_shape', runId, iteration: s.iterations, ...measured.shape });
   s.trace({
     type: 'llm_request',
     runId,
