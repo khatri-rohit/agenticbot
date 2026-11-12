@@ -184,8 +184,13 @@ export type TraceEvent =
       afterTokens: number;
       /** Tool calls whose results became eviction cards in this pass. */
       toolCallIds?: string[];
-      /** `superseded`: a later result of the same read range or command replaced them. Absent = size-based eviction. */
-      reason?: 'superseded';
+      /**
+       * Why these left the working set: `superseded` (a later read of the same
+       * lines or run of the same command), `cold` (not used for a few
+       * iterations), `budget` (resident cap). Absent on older traces
+       * (size-triggered eviction).
+       */
+      reason?: 'superseded' | 'cold' | 'budget';
     }
   | {
       /** In-run extractive compaction of older iterations of this turn. */
@@ -196,6 +201,8 @@ export type TraceEvent =
       afterTokens: number;
       /** Tool calls whose rows were folded into the recap. */
       toolCallIds?: string[];
+      /** `milestone`: folded at a verified checkpoint (a check passed after edits). Absent = size mark. */
+      reason?: 'milestone';
     }
   | {
       type: 'skill_loaded';

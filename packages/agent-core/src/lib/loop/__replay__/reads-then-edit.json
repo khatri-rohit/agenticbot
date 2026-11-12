@@ -39,7 +39,8 @@
         "effortEscalation": true,
         "stopCheck": true,
         "sectionedSummary": true,
-        "learningLoop": true
+        "learningLoop": true,
+        "stateCard": true
       }
     },
     {
@@ -190,6 +191,7 @@
       "state": {
         "phase": "report",
         "iteration": 3,
+        "taskClass": "small",
         "workingSet": [
           {
             "path": "a.ts",
@@ -212,7 +214,12 @@
           "failedEdits": 0,
           "commands": [],
           "toolErrors": 0,
-          "unverifiedSince": 2
+          "unverifiedSince": 2,
+          "uncheckedFiles": [
+            "a.ts"
+          ],
+          "lastCheck": null,
+          "reviewed": false
         },
         "phaseIterations": {
           "orient": 1,
@@ -599,6 +606,10 @@
         "role": "tool",
         "tool_call_id": "e1",
         "content": "Patched a.ts"
+      },
+      {
+        "role": "user",
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: change · step 3 · task small · ~182 tokens per call\nWorking set: a.ts (edited, unchecked), b.ts\nOpen: Edits since step 2 have no check yet (build, typecheck, test or lint)."
       }
     ]
   ]

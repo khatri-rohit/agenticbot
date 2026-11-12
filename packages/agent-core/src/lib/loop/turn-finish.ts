@@ -26,22 +26,23 @@ const DEFERRED_CHOICE_INSTRUCTION =
   'The user skipped your question to decide later; tools are off. Do not pick an option or continue the work. Write the reply they will decide from: 1) one or two lines on what was done so far and where it stopped; 2) the open question; 3) each option by its label: what it would do, its trade-offs (effort, risk, what it changes) and when it is the right pick; 4) your recommendation and why; 5) how to answer next time (for example "Go with <label>", several options, or other direction). Keep it scannable.';
 
 const STOP_CHECK_NOTE =
-  'Your answer reports success, but no command has run since your last edit. Run the project verification (build, typecheck or tests) now, or say plainly what is not verified.';
+  'Your answer reports success, but no check (build, typecheck, test or lint) has run since your last edit. Run the project check now, or say plainly what is not verified.';
 
 const CLAIMS_SUCCESS = /\b(works|working now|passes|passing|fixed|verified|succeeds|all tests pass)\b/i;
 const ADMITS_UNVERIFIED = /\b(not verified|unverified|could not verify|couldn't verify|did not verify|didn't verify|not tested|untested)\b/i;
 
 /**
  * Once per run: an Agent run that edited files and then claims success with
- * no command since its last edit goes back to verify. A heuristic, so it
- * never fires twice and never fires when the answer admits it is unverified.
+ * no check (task state: build/typecheck/test/lint that ran) since its last
+ * edit goes back to verify. Never fires twice, and never when the answer
+ * admits it is unverified.
  */
 function needsStopCheck(s: RunState, answer: string): boolean {
   return (
     s.flags.stopCheck &&
     !s.stopChecked &&
     s.posture === 'agent' &&
-    s.unverifiedEdit &&
+    s.task.unchecked &&
     s.tools.byName.has('run_terminal') &&
     CLAIMS_SUCCESS.test(answer) &&
     !ADMITS_UNVERIFIED.test(answer)

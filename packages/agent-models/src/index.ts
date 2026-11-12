@@ -33,6 +33,7 @@ export type {
 
 export { TASK_STATE_COMMANDS_MAX } from './lib/task-state.js';
 export type {
+  TaskClass,
   TaskCommand,
   TaskEvidence,
   TaskPhase,

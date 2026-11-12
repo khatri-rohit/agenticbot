@@ -1,16 +1,19 @@
 import { stubLiveToolResults } from '../context/assemble-context';
 import {
   compactCurrentRun,
-  evictToolResults,
+  manageWorkingSet,
   retireSkillBodies,
-  supersedeToolResults,
+  type EvictionReason,
 } from '../context/residency';
+import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { pathFromToolArgs } from './call-identity';
 import type { RunState } from './run-state';
 
 /**
  * Prompt-only residency after a tool turn: cap oversized recent results,
- * evict old results to cards, then collapse old iterations of this run.
+ * keep tool results to the working set (task state decides what is in use),
+ * then fold old iterations of this run — at a verified milestone, or when
+ * the prompt passes the size mark.
  */
 export async function manageResidency(s: RunState): Promise<void> {
   stubLiveToolResults(s.messages, s.contextBudget, s.runStart, s.flags);
@@ -34,55 +37,47 @@ export async function manageResidency(s: RunState): Promise<void> {
 
   const putBlob = (text: string) => s.webSources.putBlob(text);
 
-  // Redundant results first (stale versions of a read or command), so the
-  // size-based pass below measures what is actually left.
-  const superseded = await supersedeToolResults(
+  const evicted = await manageWorkingSet(
     s.messages,
+    s.runStart,
     s.contextBudget,
     s.tools.definitions,
     putBlob,
     pathFromToolArgs,
-  );
-  if (superseded) {
-    s.readDedupe.forget(superseded.toolCallIds);
-    s.trace({
-      type: 'context_evicted',
-      runId: s.runId,
+    {
       iteration: s.iterations,
-      evicted: superseded.evicted,
-      beforeTokens: superseded.beforeTokens,
-      afterTokens: superseded.afterTokens,
-      toolCallIds: superseded.toolCallIds,
-      reason: 'superseded',
-    });
-  }
-
-  const evicted = await evictToolResults(
-    s.messages,
-    s.contextBudget,
-    s.tools.definitions,
-    putBlob,
+      callIteration: (id) => s.task.callIteration(id),
+      lastTouch: (path) => s.task.lastTouch(path),
+      isUnchecked: (path) => s.task.isUnchecked(path),
+    },
   );
   if (evicted) {
     s.readDedupe.forget(evicted.toolCallIds);
-    s.trace({
-      type: 'context_evicted',
-      runId: s.runId,
-      iteration: s.iterations,
-      evicted: evicted.evicted,
-      beforeTokens: evicted.beforeTokens,
-      afterTokens: evicted.afterTokens,
-      toolCallIds: evicted.toolCallIds,
-    });
+    // One trace line per reason, so eval can tell stale copies, cold files
+    // and budget pressure apart. Token counts are for the whole pass.
+    for (const [reason, ids] of Object.entries(evicted.byReason) as Array<[EvictionReason, string[]]>) {
+      s.trace({
+        type: 'context_evicted',
+        runId: s.runId,
+        iteration: s.iterations,
+        evicted: ids.length,
+        beforeTokens: evicted.beforeTokens,
+        afterTokens: evicted.afterTokens,
+        toolCallIds: ids,
+        reason,
+      });
+    }
   }
 
-  if (s.prefixHeavy) return;
+  const milestone = atVerifiedMilestone(s);
+  if (s.prefixHeavy && !milestone) return;
   const compacted = await compactCurrentRun(
     s.messages,
     s.runStart,
     s.contextBudget,
     s.tools.definitions,
     putBlob,
+    { milestone },
   );
   if (!compacted) return;
   s.readDedupe.forget(compacted.toolCallIds);
@@ -94,6 +89,7 @@ export async function manageResidency(s: RunState): Promise<void> {
     beforeTokens: compacted.beforeTokens,
     afterTokens: compacted.afterTokens,
     toolCallIds: compacted.toolCallIds,
+    ...(milestone ? { reason: 'milestone' as const } : {}),
   });
   if (compacted.prefixHeavy) {
     // Prior turns alone keep the prompt over the low mark. Folding one
@@ -107,4 +103,18 @@ export async function manageResidency(s: RunState): Promise<void> {
       promptTokens: compacted.afterTokens,
     });
   }
+}
+
+/**
+ * A check passed this iteration after edits (verified state), and this
+ * run's own context is big enough that folding it pays for the one-time
+ * change to the cached prefix.
+ */
+function atVerifiedMilestone(s: RunState): boolean {
+  const check = s.task.snapshot().evidence.lastCheck;
+  if (!check || check.iteration !== s.iterations || check.exitCode !== 0 || !check.afterEdit) {
+    return false;
+  }
+  const ownTokens = estimatePromptTokens(s.messages.slice(s.runStart));
+  return ownTokens >= 2 * s.contextBudget.inRunClearAtLeastTokens;
 }

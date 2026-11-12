@@ -18,13 +18,21 @@ export type ContextBudget = {
   /** Between-run compaction cuts older turns until history fits this share of the input budget. */
   compactToRatio: number;
   /**
-   * In-run eviction starts once the live prompt passes this many tokens.
-   * Absolute on purpose: per-call cost stays bounded on a 1M window.
+   * Cap on this run's resident tool results (the working set). Past it, the
+   * least recently touched results become cards at once. Absolute on
+   * purpose: every call re-sends them, so per-call cost stays bounded on a
+   * 1M window.
    */
-  inRunEvictTokens: number;
-  /** Most recent tool results kept verbatim during eviction. */
+  inRunResidentToolTokens: number;
+  /**
+   * A file not read or edited for this many iterations (other results: this
+   * many iterations old) is cold and becomes a card. Files edited since the
+   * last check stay resident.
+   */
+  inRunColdAfterIterations: number;
+  /** Newest non-file tool results that never go cold; also the in-run recap's kept iterations. */
   inRunKeepToolResults: number;
-  /** Skip an eviction pass that frees less than this (each pass breaks the cached prefix). */
+  /** Skip a cold/superseded pass that frees less than this (each pass breaks the cached prefix). */
   inRunClearAtLeastTokens: number;
   /** In-run extractive compaction of the current turn starts at this share of the input budget. */
   inRunCompactRatio: number;
@@ -65,7 +73,8 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   keepToolResultsForTurns: 2,
   keepAttachmentsForTurns: 2,
   compactToRatio: 0.25,
-  inRunEvictTokens: 40_000,
+  inRunResidentToolTokens: 24_000,
+  inRunColdAfterIterations: 4,
   inRunKeepToolResults: 4,
   inRunClearAtLeastTokens: 10_000,
   inRunCompactRatio: 0.45,
@@ -121,7 +130,7 @@ export function contextBudgetForWindow(
   return {
     ...base,
     windowTokens,
-    inRunEvictTokens: Math.min(base.inRunEvictTokens, Math.floor(input * 0.5)),
+    inRunResidentToolTokens: Math.min(base.inRunResidentToolTokens, Math.floor(input * 0.15)),
     inRunClearAtLeastTokens: Math.min(
       base.inRunClearAtLeastTokens,
       Math.floor(input * 0.1),

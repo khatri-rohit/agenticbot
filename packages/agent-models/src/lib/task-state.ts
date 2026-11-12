@@ -29,8 +29,10 @@ export type TaskCommand = {
   /** Absent when the command did not run (blocked, timed out without a code). */
   exitCode?: number;
   iteration: number;
-  /** Ran while a successful edit had no command after it. */
+  /** Ran while a successful edit had no check after it. */
   afterEdit: boolean;
+  /** A project check (build, typecheck, test, lint, compile); only these verify edits. */
+  check: boolean;
 };
 
 export type TaskEvidence = {
@@ -39,14 +41,28 @@ export type TaskEvidence = {
   /** Most recent last; capped (see TASK_STATE_COMMANDS_MAX). */
   commands: TaskCommand[];
   toolErrors: number;
-  /** Iteration of the first successful edit not yet followed by a command; null when none. */
+  /** Iteration of the first successful edit not yet followed by a check that ran; null when none. */
   unverifiedSince: number | null;
+  /** Files edited since the last check that ran. */
+  uncheckedFiles: string[];
+  /** The latest check that ran. */
+  lastCheck: TaskCommand | null;
+  /** A delegate(review) was started this run. */
+  reviewed: boolean;
 };
+
+/**
+ * Size of the task, from evidence as it grows (never guessed up front):
+ * small ≤2 edited files, ≤3 edits, <12 steps; long ≥40 steps or ≥8 edited
+ * files; medium between. Only ever promoted within a run.
+ */
+export type TaskClass = 'small' | 'medium' | 'long';
 
 export type TaskStateSnapshot = {
   phase: TaskPhase;
   /** Iteration of the latest model call. */
   iteration: number;
+  taskClass: TaskClass;
   workingSet: WorkingSetEntry[];
   evidence: TaskEvidence;
   /** Model calls made while in each phase. */

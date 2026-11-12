@@ -16,6 +16,7 @@ import { refreshContextReport } from '../context/assemble-context';
 import { consoleTrace } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { TaskStateTracker } from '../state/task-state';
+import { withStateCard } from './state-card';
 import {
   createEffortRouter,
   type EffortDecision,
@@ -300,13 +301,17 @@ async function runLoopCore(
       });
       const sentEffort = effortOverride ?? effort.wire;
 
+      // The live prompt plus this step's harness card (ephemeral: rebuilt
+      // from state each call, never stored in messages or the ledger).
+      const sent = withStateCard(s, messages, estimatedPrompt);
+
       trace({
         type: 'llm_request',
         runId,
         iteration: s.iterations,
         estimatedPromptTokens: estimatedPrompt,
         ...(sentEffort !== undefined ? { reasoningEffort: sentEffort } : {}),
-        ...(recorder ? { input: recorder.input(messages, tools) } : {}),
+        ...(recorder ? { input: recorder.input(sent, tools) } : {}),
       });
       emit?.({ type: 'turn.started', runId, iteration: s.iterations });
 
@@ -326,7 +331,7 @@ async function runLoopCore(
       const startedAt = Date.now();
       const turn = await modelCall(
         config.model,
-        messages,
+        sent,
         tools,
         onTextDelta,
         signal,

@@ -130,6 +130,7 @@ function workspacePrompt(registry: ToolRegistry, posture: RunPosture): string {
     '- Issue independent glob, grep, and read_file calls together in one turn; they run in parallel, and each extra turn re-sends the whole context. Use grep context to see surrounding lines instead of a follow-up read.',
     isAsk ? '' : '- Batch edits, then verify once.',
     '- When the run says the budget is nearly spent: finish the current step, verify, and report what is left.',
+    '- A "[Harness card]" message may close the conversation: the run\'s current phase, working set, open items and advice, rebuilt every step by the harness (not the user). Use it; do not answer it.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -140,7 +141,7 @@ Check that you answered the question that was asked, with evidence, and named wh
     : `# Before you report done
 Ask what this could break: callers of anything you changed, edge cases and error paths, and whether you did what the user actually asked.${
         has('delegate')
-          ? ' Once edits pass verification, run delegate(review) once; fix findings inside the request and list the rest.'
+          ? ' For a change beyond a file or two, run delegate(review) once after edits pass the check (the harness card says when); skip it for a small change. Fix findings inside the request and list the rest.'
           : ''
       }`;
 

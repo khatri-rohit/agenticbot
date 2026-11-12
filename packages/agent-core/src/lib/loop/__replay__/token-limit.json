@@ -40,7 +40,8 @@
         "effortEscalation": true,
         "stopCheck": true,
         "sectionedSummary": true,
-        "learningLoop": true
+        "learningLoop": true,
+        "stateCard": true
       }
     },
     {
@@ -141,7 +142,7 @@
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 3,
-      "estimatedPromptTokens": 168
+      "estimatedPromptTokens": 121
     },
     {
       "type": "llm_response",
@@ -194,7 +195,7 @@
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 3,
-      "estimatedPromptTokens": 254,
+      "estimatedPromptTokens": 207,
       "final": true
     },
     {
@@ -217,6 +218,7 @@
       "state": {
         "phase": "blocked",
         "iteration": 3,
+        "taskClass": "small",
         "workingSet": [
           {
             "path": "f1.ts",
@@ -245,7 +247,10 @@
           "failedEdits": 0,
           "commands": [],
           "toolErrors": 0,
-          "unverifiedSince": null
+          "unverifiedSince": null,
+          "uncheckedFiles": [],
+          "lastCheck": null,
+          "reviewed": false
         },
         "phaseIterations": {
           "orient": 1,
@@ -658,7 +663,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness note, not from the user] Run budget nearly spent. Finish the current step, run verification once, and report what is done and what is left. Do not start new work."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small · ~121 tokens per call · 8k of 10k run budget used\nWorking set: f2.ts, f1.ts\nAdvice:\n- Run budget nearly spent: finish the current step, run the check once, and report what is done and what is left. Do not start new work."
       }
     ],
     [
@@ -703,10 +708,6 @@
         "role": "tool",
         "tool_call_id": "r2",
         "content": "contents of f2.ts"
-      },
-      {
-        "role": "user",
-        "content": "[Harness note, not from the user] Run budget nearly spent. Finish the current step, run verification once, and report what is done and what is left. Do not start new work."
       },
       {
         "role": "assistant",

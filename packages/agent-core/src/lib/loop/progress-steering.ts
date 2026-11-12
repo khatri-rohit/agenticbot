@@ -84,16 +84,23 @@ export class ProgressSteering {
     return this.gatedTurnStreak >= MAX_GATED_TURNS ? this.gatedTurnStreak : null;
   }
 
-  /** Idle spend, once per stretch without progress when it crosses the nudge mark. */
-  takeStallNudge(): { idle: number; max: number } | undefined {
-    if (this.stallNudged || !this.enabled) return undefined;
+  /** Idle spend while it is past the nudge mark (not consumed: the harness card reads it every call). */
+  stalled(): { idle: number; max: number } | undefined {
+    if (!this.enabled) return undefined;
     const max = this.budget.maxPromptTokens!;
     const idle = this.idleTokens();
     const conserving = this.conserving();
     const ratio = conserving ? STALL_NUDGE_RATIO_CONSERVE : STALL_NUDGE_RATIO;
     const ceiling = conserving ? STALL_NUDGE_MAX_TOKENS_CONSERVE : STALL_NUDGE_MAX_TOKENS;
-    if (idle < Math.min(max * ratio, ceiling)) return undefined;
+    return idle >= Math.min(max * ratio, ceiling) ? { idle, max } : undefined;
+  }
+
+  /** Idle spend, once per stretch without progress when it crosses the nudge mark. */
+  takeStallNudge(): { idle: number; max: number } | undefined {
+    if (this.stallNudged) return undefined;
+    const stall = this.stalled();
+    if (!stall) return undefined;
     this.stallNudged = true;
-    return { idle, max };
+    return stall;
   }
 }

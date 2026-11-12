@@ -19,6 +19,7 @@ import type { Tool } from '../tools/types';
 import { isEditSuccess } from '../tools/workspace/tools';
 import { outcomeKey, pathFromToolArgs, toolCallKey } from './call-identity';
 import { manageResidency } from './residency-pass';
+import { READ_CREEP_ADVICE_AFTER, SERIAL_READ_ADVICE_AFTER } from './state-card';
 import {
   emitTurnCompleted,
   noteLimit,
@@ -48,9 +49,9 @@ const USER_SKIPPED_CHOICE =
 const RESULT_PREVIEW_MAX = 20_000;
 
 /** Partial reads of one file (since its last edit) between grep hints. */
-const READ_CREEP_NOTE_EVERY = 3;
+const READ_CREEP_NOTE_EVERY = READ_CREEP_ADVICE_AFTER;
 /** Consecutive single-read turns between batching hints. */
-const SERIAL_READ_NOTE_EVERY = 4;
+const SERIAL_READ_NOTE_EVERY = SERIAL_READ_ADVICE_AFTER;
 
 const SKIP_LIMIT_REACHED = limitMessage(
   'limit.tools',
@@ -102,6 +103,8 @@ function withReadCreepNote(s: RunState, readPath: string, result: string): strin
     note: 'read_creep',
     count,
   });
+  // With the harness card on, the advice lives there (rebuilt each step).
+  if (s.flags.stateCard) return result;
   return `${result}\n\n(note) ${count} partial reads of ${readPath} since it last changed. To find a block, grep for its anchor line (grep returns path:line), then read from that line.`;
 }
 
@@ -122,6 +125,7 @@ function withSerialReadNote(s: RunState, toolName: string, result: string): stri
     note: 'serial_reads',
     count: s.serialReadTurns,
   });
+  if (s.flags.stateCard) return result;
   return `${result}\n\n(note) ${s.serialReadTurns} turns in a row each made one read call, and every turn re-sends ~${Math.round(perCall / 1000)}k tokens of context. Put independent reads and searches in one turn; they run in parallel.`;
 }
 
@@ -524,9 +528,6 @@ async function settleReturned(
   if (toolName === 'edit_file' && isEditSuccess(result)) {
     s.guard.editSucceeded();
     s.steering.markProgress();
-    s.unverifiedEdit = true;
-  } else if (toolName === 'run_terminal') {
-    s.unverifiedEdit = false;
   }
   return 'ok';
 }

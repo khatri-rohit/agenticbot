@@ -42,6 +42,12 @@ export type HarnessFlags = {
   sectionedSummary: boolean;
   /** After a thread goes idle, a side model proposes memory updates, staged for the user's approval. */
   learningLoop: boolean;
+  /**
+   * One ephemeral harness card (task state, budget, advice) is appended to
+   * each model call instead of appending notes to tool results and the
+   * prompt. Off = the earlier notes, for A/B.
+   */
+  stateCard: boolean;
 };
 
 export const DEFAULT_HARNESS_FLAGS: HarnessFlags = {
@@ -54,6 +60,7 @@ export const DEFAULT_HARNESS_FLAGS: HarnessFlags = {
   stopCheck: true,
   sectionedSummary: true,
   learningLoop: true,
+  stateCard: true,
 };
 
 const FLAG_NAMES = Object.keys(DEFAULT_HARNESS_FLAGS) as Array<keyof HarnessFlags>;

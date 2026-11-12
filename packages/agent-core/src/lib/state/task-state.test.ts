@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { TraceEvent } from '@agent/agent-models';
 
-import { TaskStateTracker } from './task-state';
+import { isCheckCommand, TaskStateTracker } from './task-state';
 
 const runId = 'r1';
 const request = (iteration: number): TraceEvent => ({ type: 'llm_request', runId, iteration });
@@ -43,7 +43,7 @@ describe('TaskStateTracker', () => {
       { type: 'llm_response', runId, iteration: 4, finishReason: 'stop', hasToolCalls: false },
     ]);
     expect(changes.map((change) => change.to)).toEqual(['locate', 'change', 'verify', 'report']);
-    expect(changes[2]?.cause).toBe('command after edit');
+    expect(changes[2]?.cause).toBe('check after edit');
 
     const state = tracker.snapshot();
     expect(state.phase).toBe('report');
@@ -59,10 +59,17 @@ describe('TaskStateTracker', () => {
         lastEditIteration: 2,
       }),
     ]);
-    expect(state.evidence).toMatchObject({ edits: 1, failedEdits: 0, unverifiedSince: null });
-    expect(state.evidence.commands).toEqual([
-      { command: 'npm test', exitCode: 0, iteration: 3, afterEdit: true },
-    ]);
+    expect(state.evidence).toMatchObject({
+      edits: 1,
+      failedEdits: 0,
+      unverifiedSince: null,
+      uncheckedFiles: [],
+      reviewed: false,
+    });
+    const npmTest = { command: 'npm test', exitCode: 0, iteration: 3, afterEdit: true, check: true };
+    expect(state.evidence.commands).toEqual([npmTest]);
+    expect(state.evidence.lastCheck).toEqual(npmTest);
+    expect(state.taskClass).toBe('small');
     // Each model call counts toward the phase the run was in when it was made.
     expect(state.phaseIterations).toEqual({ orient: 1, locate: 1, change: 1, verify: 1 });
   });
@@ -128,5 +135,86 @@ describe('TaskStateTracker after a limit', () => {
       { type: 'llm_response', runId, iteration: 2, finishReason: 'stop', hasToolCalls: false, final: true },
     ]);
     expect(tracker.current).toBe('blocked');
+  });
+});
+
+describe('isCheckCommand', () => {
+  it('counts builds, typechecks, tests and lints; not looking around', () => {
+    for (const command of [
+      'npm test',
+      'npx nx run @agent/agent-core:typecheck',
+      'npx nx run-many -t test -p @agent/web',
+      'pnpm lint',
+      'cargo check',
+      'go vet ./...',
+      'npx tsc --noEmit',
+      'npm run build',
+    ]) {
+      expect(isCheckCommand(command), command).toBe(true);
+    }
+    for (const command of [
+      'npx nx show project @agent/web --json',
+      'git status',
+      'git checkout -b x',
+      'ls build',
+      'cat package.json',
+      'node scripts/print.js',
+      '',
+    ]) {
+      expect(isCheckCommand(command), command).toBe(false);
+    }
+  });
+});
+
+describe('TaskStateTracker verification and class', () => {
+  it('only a check that ran verifies edits; other commands are locate', () => {
+    const tracker = new TaskStateTracker();
+    const changes = feed(tracker, [
+      start(1, 'a', 'edit_file', { path: 'a.ts' }),
+      complete(1, 'a', 'edit_file', 'Patched a.ts', { outcome: 'ok' }),
+      start(2, 'b', 'run_terminal', { command: 'npx nx show project @agent/web' }),
+      complete(2, 'b', 'run_terminal', 'cwd: /w\nexit 0', { exitCode: 0 }),
+    ]);
+    expect(changes.at(-1)).toMatchObject({ to: 'locate', cause: 'command' });
+    expect(tracker.unchecked).toBe(true);
+    expect(tracker.isUnchecked('a.ts')).toBe(true);
+    expect(tracker.snapshot().evidence.commands[0]).toMatchObject({ check: false, afterEdit: true });
+
+    feed(tracker, [
+      start(3, 'c', 'run_terminal', { command: 'npm test' }),
+      complete(3, 'c', 'run_terminal', 'cwd: /w\nexit 1', { exitCode: 1 }),
+    ]);
+    // A failing check still ran: the edit is checked, and the failure is on record.
+    expect(tracker.unchecked).toBe(false);
+    expect(tracker.snapshot().evidence.lastCheck).toMatchObject({ exitCode: 1, check: true });
+  });
+
+  it('promotes the task class from evidence and never demotes it', () => {
+    const tracker = new TaskStateTracker();
+    const events: TraceEvent[] = [];
+    for (let i = 1; i <= 3; i++) {
+      events.push(start(i, `e${i}`, 'edit_file', { path: `f${i}.ts` }));
+      events.push(complete(i, `e${i}`, 'edit_file', `Patched f${i}.ts`, { outcome: 'ok' }));
+    }
+    feed(tracker, [...events, request(4)]);
+    expect(tracker.taskClass).toBe('medium'); // 3 edited files
+    feed(tracker, [request(40)]);
+    expect(tracker.taskClass).toBe('long');
+    feed(tracker, [request(41)]);
+    expect(tracker.taskClass).toBe('long');
+  });
+
+  it('records review and per-call iteration and file touches', () => {
+    const tracker = new TaskStateTracker();
+    feed(tracker, [
+      request(5),
+      start(5, 'r', 'read_file', { path: 'a.ts' }),
+      complete(5, 'r', 'read_file', '[lines 1–10 of 10]'),
+      start(7, 'd', 'delegate', { profile: 'review', objective: 'review' }),
+    ]);
+    expect(tracker.callIteration('r')).toBe(5);
+    expect(tracker.lastTouch('a.ts')).toBe(5);
+    expect(tracker.lastTouch('missing.ts')).toBeUndefined();
+    expect(tracker.snapshot().evidence.reviewed).toBe(true);
   });
 });

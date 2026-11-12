@@ -39,7 +39,8 @@
         "effortEscalation": true,
         "stopCheck": true,
         "sectionedSummary": true,
-        "learningLoop": true
+        "learningLoop": true,
+        "stateCard": true
       }
     },
     {
@@ -92,13 +93,17 @@
       "state": {
         "phase": "change",
         "iteration": 1,
+        "taskClass": "small",
         "workingSet": [],
         "evidence": {
           "edits": 0,
           "failedEdits": 0,
           "commands": [],
           "toolErrors": 1,
-          "unverifiedSince": null
+          "unverifiedSince": null,
+          "uncheckedFiles": [],
+          "lastCheck": null,
+          "reviewed": false
         },
         "phaseIterations": {
           "orient": 1
