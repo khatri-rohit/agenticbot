@@ -45,6 +45,16 @@
       }
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 1,
+      "promptTokens": 3,
+      "residentToolTokens": 0,
+      "residueTokens": 0,
+      "prefixStableMessages": 0
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 1,
@@ -92,6 +102,16 @@
       "resultChars": 17
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 2,
+      "messages": 3,
+      "promptTokens": 14,
+      "residentToolTokens": 5,
+      "residueTokens": 7,
+      "prefixStableMessages": 1
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 2,
@@ -137,6 +157,25 @@
       "reason": "prompt tokens",
       "promptTokens": 8000,
       "limitPromptTokens": 10000
+    },
+    {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 3,
+      "kind": "card",
+      "ids": [
+        "advice:budget"
+      ]
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 3,
+      "messages": 6,
+      "promptTokens": 110,
+      "residentToolTokens": 9,
+      "residueTokens": 13,
+      "prefixStableMessages": 3
     },
     {
       "type": "llm_request",

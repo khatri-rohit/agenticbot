@@ -11,6 +11,16 @@ import {
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 
+import {
+  DIFF_MAX_CHARS,
+  GLOB_MAX_RESULTS,
+  GREP_WINDOW,
+  READ_WINDOW,
+  TERMINAL_WINDOW,
+  WALK_MAX_FILES,
+  liveResultCapChars,
+} from '@agent/agent-models';
+
 import type { Tool } from '../types';
 import { isOutboundHttpShellCommand } from '../web/trust';
 import {
@@ -20,36 +30,22 @@ import {
   toPosixRelative,
 } from './path';
 
-/** M4a: cap tool payloads before they hit the ledger (large bodies spill to blobs there). */
 /**
- * Read window. Sized against the cost of a model call, not of one result:
- * at a ~36k-token prompt, a 40k-char (~10k-token) read that saves even one
- * follow-up call pays for itself several times over.
+ * Tool windows come from the harness limits module (agent-models), so the
+ * live cap, read dedupe and these tools agree on one value per quantity.
  */
-export const WORKSPACE_READ_MAX_CHARS = 40_000;
-export const WORKSPACE_READ_MAX_LINES = 2_000;
-export const WORKSPACE_READ_MAX_LOAD_BYTES = 1_000_000;
-export const WORKSPACE_TERMINAL_MAX_CHARS = 8_000;
-export const WORKSPACE_TERMINAL_TIMEOUT_MS = 120_000;
-export const WORKSPACE_GREP_MAX_MATCHES = 100;
-export const WORKSPACE_GREP_LINE_MAX_CHARS = 200;
-/** Room for context lines; a cut search sends the model back for another. */
-export const WORKSPACE_GREP_MAX_CHARS = 12_000;
-
-/**
- * Largest result the live prompt keeps for a tool that sizes its own output
- * (header and note slack included). The generic live cap must not cut a
- * result again after the tool already chose its window.
- */
-export function liveResultCapChars(toolName: string | undefined, fallback: number): number {
-  if (toolName === 'read_file') return Math.max(fallback, WORKSPACE_READ_MAX_CHARS + 1_000);
-  if (toolName === 'grep') return Math.max(fallback, WORKSPACE_GREP_MAX_CHARS + 500);
-  return fallback;
-}
-/** Upper bound for grep `context`; wider windows are what read_file is for. */
-export const WORKSPACE_GREP_MAX_CONTEXT = 5;
-export const WORKSPACE_GLOB_MAX_RESULTS = 200;
-export const WORKSPACE_WALK_MAX_FILES = 2_000;
+export const WORKSPACE_READ_MAX_CHARS = READ_WINDOW.maxChars;
+export const WORKSPACE_READ_MAX_LINES = READ_WINDOW.maxLines;
+export const WORKSPACE_READ_MAX_LOAD_BYTES = READ_WINDOW.maxLoadBytes;
+export const WORKSPACE_TERMINAL_MAX_CHARS = TERMINAL_WINDOW.maxChars;
+export const WORKSPACE_TERMINAL_TIMEOUT_MS = TERMINAL_WINDOW.timeoutMs;
+export const WORKSPACE_GREP_MAX_MATCHES = GREP_WINDOW.maxMatches;
+export const WORKSPACE_GREP_LINE_MAX_CHARS = GREP_WINDOW.lineMaxChars;
+export const WORKSPACE_GREP_MAX_CHARS = GREP_WINDOW.maxChars;
+export { liveResultCapChars };
+export const WORKSPACE_GREP_MAX_CONTEXT = GREP_WINDOW.maxContext;
+export const WORKSPACE_GLOB_MAX_RESULTS = GLOB_MAX_RESULTS;
+export const WORKSPACE_WALK_MAX_FILES = WALK_MAX_FILES;
 
 const SKIP_DIRS = new Set([
   'node_modules',
@@ -372,10 +368,17 @@ export const grepTool: Tool = {
       return `Invalid pattern: ${pattern}`;
     }
     const fileGlob = asString(args.glob).trim();
-    const context =
+    const askedContext =
       typeof args.context === 'number' && Number.isFinite(args.context)
-        ? Math.min(WORKSPACE_GREP_MAX_CONTEXT, Math.max(0, Math.floor(args.context)))
+        ? Math.max(0, Math.floor(args.context))
         : 0;
+    const context = Math.min(WORKSPACE_GREP_MAX_CONTEXT, askedContext);
+    // Say so when the window was narrowed, so the model does not ask again
+    // with a larger number.
+    const note =
+      askedContext > context
+        ? `\n(context capped at ${WORKSPACE_GREP_MAX_CONTEXT} lines; use read_file with offset for a wider window)`
+        : '';
     const files: string[] = [];
     await walkFiles(root, ctx.signal, files);
     const rows: string[] = [];
@@ -391,7 +394,7 @@ export const grepTool: Tool = {
       return chars >= WORKSPACE_GREP_MAX_CHARS;
     };
     const truncated = () =>
-      `${rows.join('\n')}\n(grep truncated at ${WORKSPACE_GREP_MAX_MATCHES} matches / ${WORKSPACE_GREP_MAX_CHARS} chars)`;
+      `${rows.join('\n')}\n(grep truncated at ${WORKSPACE_GREP_MAX_MATCHES} matches / ${WORKSPACE_GREP_MAX_CHARS} chars)${note}`;
     for (const abs of files) {
       if (ctx.signal.aborted) return 'Run cancelled';
       const rel = toPosixRelative(root, abs);
@@ -423,7 +426,7 @@ export const grepTool: Tool = {
         if (matches >= WORKSPACE_GREP_MAX_MATCHES) return truncated();
       }
     }
-    return rows.length > 0 ? rows.join('\n') : `(no matches for ${pattern})`;
+    return rows.length > 0 ? `${rows.join('\n')}${note}` : `(no matches for ${pattern})`;
   },
 };
 
@@ -493,7 +496,7 @@ export const readFileTool: Tool = {
  * whole: every extra call re-sends the whole prompt, which costs far more
  * than the extra lines.
  */
-export const WORKSPACE_READ_MIN_LINES = 200;
+export const WORKSPACE_READ_MIN_LINES = READ_WINDOW.minLines;
 
 /**
  * read_file result: a `[lines a–b of N]` header, then the raw lines (no
@@ -707,13 +710,23 @@ export const editFileTool: Tool = {
   },
 };
 
+/**
+ * The shell run_terminal hands commands to (`spawn` with `shell: true`):
+ * cmd.exe on Windows (ComSpec), /bin/sh elsewhere. Named in the tool
+ * description because models default to bash syntax, which cmd rejects.
+ */
+export function terminalShellNote(platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32'
+    ? 'Commands run in cmd.exe on Windows: use cmd syntax (&&, dir, set NAME=value). Bash loops, $VAR, `ls a b` and single-quoted arguments do not work.'
+    : 'Commands run in /bin/sh.';
+}
+
 export const runTerminalTool: Tool = {
   definition: {
     type: 'function',
     function: {
       name: 'run_terminal',
-      description:
-        'Run a command in the open workspace folder (compile, test, build, etc.). cwd is always the workspace root. Output is capped.',
+      description: `Run a command in the open workspace folder (compile, test, build, etc.). cwd is always the workspace root. Output is capped. ${terminalShellNote()}`,
       parameters: {
         type: 'object',
         properties: {
@@ -854,7 +867,7 @@ function runWorkspaceCommand(
   });
 }
 
-export const WORKSPACE_DIFF_MAX_CHARS = 12_000;
+export const WORKSPACE_DIFF_MAX_CHARS = DIFF_MAX_CHARS;
 
 /** git with fixed args (no shell), cwd jailed to the workspace root. */
 function runGit(

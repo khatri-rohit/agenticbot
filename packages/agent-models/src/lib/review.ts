@@ -65,6 +65,28 @@ export type ReviewRunGlance = {
   promptTokens: number;
   /** Per-run, over tool-iterating rounds only; null when fewer than 2 such rounds. */
   promptGrowth?: number | null;
+  /** Harness health shares (0–1, null when the trace lacks the event); see agent-eval metrics/health.ts. */
+  health?: ReviewRunHealth;
+};
+
+/** Which harness mechanism misbehaved in a run, as shares the Review can cite. */
+export type ReviewRunHealth = {
+  /** Steps on which results were removed from the prompt. */
+  removalStepShare: number | null;
+  /** Residue (cards + old call arguments) share of the last prompt. */
+  residueShare: number | null;
+  /** Leading messages unchanged call to call (cache reuse). */
+  prefixStability: number | null;
+  /** Reads of a line range already returned. */
+  reReadRate: number | null;
+  /** Identical searches repeated. */
+  repeatSearchRate: number | null;
+  /** Card items whose asked behaviour followed. */
+  adviceFollowRate: number | null;
+  /** Sub-agents' share of the run's prompt tokens. */
+  childShare: number | null;
+  /** Steps at low reasoning effort that made no progress. */
+  lowEffortWithoutProgress: number;
 };
 
 export type ReviewDigest = {
@@ -245,6 +267,7 @@ function parseRunGlance(value: unknown): ReviewRunGlance | null {
     typeof rec.promptGrowth === 'number' && Number.isFinite(rec.promptGrowth)
       ? rec.promptGrowth
       : null;
+  const health = parseRunHealth(rec.health);
   return {
     runId: rec.runId,
     status: rec.status,
@@ -252,6 +275,24 @@ function parseRunGlance(value: unknown): ReviewRunGlance | null {
     toolCalls: rec.toolCalls,
     promptTokens: rec.promptTokens,
     ...(growth === null ? { promptGrowth: null } : { promptGrowth: growth }),
+    ...(health ? { health } : {}),
+  };
+}
+
+function parseRunHealth(value: unknown): ReviewRunHealth | undefined {
+  const rec = asRecord(value);
+  if (!rec) return undefined;
+  const share = (key: string): number | null =>
+    typeof rec[key] === 'number' && Number.isFinite(rec[key]) ? (rec[key] as number) : null;
+  return {
+    removalStepShare: share('removalStepShare'),
+    residueShare: share('residueShare'),
+    prefixStability: share('prefixStability'),
+    reReadRate: share('reReadRate'),
+    repeatSearchRate: share('repeatSearchRate'),
+    adviceFollowRate: share('adviceFollowRate'),
+    childShare: share('childShare'),
+    lowEffortWithoutProgress: share('lowEffortWithoutProgress') ?? 0,
   };
 }
 

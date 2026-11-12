@@ -44,6 +44,16 @@
       }
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 1,
+      "promptTokens": 3,
+      "residentToolTokens": 0,
+      "residueTokens": 0,
+      "prefixStableMessages": 0
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 1,
@@ -112,6 +122,16 @@
       "resultChars": 16
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 2,
+      "messages": 4,
+      "promptTokens": 23,
+      "residentToolTokens": 8,
+      "residueTokens": 12,
+      "prefixStableMessages": 1
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 2,
@@ -157,6 +177,25 @@
       "durationMs": 0,
       "resultPreview": "Patched a.ts",
       "resultChars": 12
+    },
+    {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 3,
+      "kind": "card",
+      "ids": [
+        "open:unchecked"
+      ]
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 3,
+      "messages": 7,
+      "promptTokens": 99,
+      "residentToolTokens": 11,
+      "residueTokens": 18,
+      "prefixStableMessages": 4
     },
     {
       "type": "llm_request",

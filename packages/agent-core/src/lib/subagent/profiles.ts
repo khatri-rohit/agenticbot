@@ -8,9 +8,10 @@ import { getSkill } from '../tools/skills';
 import type { SubagentContext, SubagentLimits, SubagentProfile } from './types';
 
 /**
- * Room for real research and review. A child's prompt tokens are also capped
- * at CHILD_BUDGET_SHARE of what the parent has left, so children cannot
- * outspend the parent however high this is.
+ * Ceiling for real research and review. The effort level of a brief
+ * (childAllocation) sets the child's actual limits below this, and its
+ * prompt tokens are also capped at CHILD_BUDGET_SHARE of what the parent
+ * has left, so children cannot outspend the parent.
  */
 const RESEARCH_LIMITS: SubagentLimits = {
   maxIterations: 200,
@@ -34,6 +35,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     thinking: 'off',
     tools: ['glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
     limits: RESEARCH_LIMITS,
+    // A brief that names no effort gets a bounded one, not 450 calls.
+    defaultThoroughness: 'medium',
     context: 'none',
     rules: false,
     report: true,

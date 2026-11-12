@@ -382,6 +382,16 @@ export function analyzeThreadFrom(input: {
       toolCalls: m.toolCalls,
       promptTokens: m.promptTokens.own,
       ...(m.promptGrowth === null ? { promptGrowth: null } : { promptGrowth: m.promptGrowth }),
+      health: {
+        removalStepShare: m.health.removalStepShare,
+        residueShare: m.health.residueShare?.last ?? null,
+        prefixStability: m.health.prefixStability,
+        reReadRate: m.health.reReads.rate,
+        repeatSearchRate: m.health.repeatSearches.rate,
+        adviceFollowRate: m.health.advice.rate,
+        childShare: m.childShare,
+        lowEffortWithoutProgress: m.health.effortVsProgress.lowEffortWithoutProgress,
+      },
     })),
   };
   const excerpts = pickExcerpts({

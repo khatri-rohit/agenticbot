@@ -44,6 +44,16 @@
       }
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 1,
+      "promptTokens": 3,
+      "residentToolTokens": 0,
+      "residueTokens": 0,
+      "prefixStableMessages": 0
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 1,
@@ -91,6 +101,16 @@
       "resultChars": 4007
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 2,
+      "messages": 3,
+      "promptTokens": 1011,
+      "residentToolTokens": 1002,
+      "residueTokens": 7,
+      "prefixStableMessages": 1
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 2,
@@ -130,6 +150,16 @@
       "resultChars": 4007
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 3,
+      "messages": 6,
+      "promptTokens": 2062,
+      "residentToolTokens": 2004,
+      "residueTokens": 13,
+      "prefixStableMessages": 3
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 3,
@@ -167,6 +197,16 @@
       "durationMs": 0,
       "resultPreview": "f3.ts:\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...",
       "resultChars": 4007
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 4,
+      "messages": 8,
+      "promptTokens": 3071,
+      "residentToolTokens": 3006,
+      "residueTokens": 19,
+      "prefixStableMessages": 5
     },
     {
       "type": "llm_request",
@@ -214,6 +254,25 @@
       "durationMs": 0,
       "resultPreview": "Patched f1.ts",
       "resultChars": 13
+    },
+    {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 5,
+      "kind": "card",
+      "ids": [
+        "open:unchecked"
+      ]
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 5,
+      "messages": 10,
+      "promptTokens": 3105,
+      "residentToolTokens": 3009,
+      "residueTokens": 25,
+      "prefixStableMessages": 7
     },
     {
       "type": "llm_request",
@@ -277,6 +336,16 @@
         "e1"
       ],
       "reason": "milestone"
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 6,
+      "messages": 5,
+      "promptTokens": 211,
+      "residentToolTokens": 8,
+      "residueTokens": 9,
+      "prefixStableMessages": 1
     },
     {
       "type": "llm_request",

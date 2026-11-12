@@ -44,6 +44,16 @@
       }
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 1,
+      "promptTokens": 3,
+      "residentToolTokens": 0,
+      "residueTokens": 0,
+      "prefixStableMessages": 0
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 1,

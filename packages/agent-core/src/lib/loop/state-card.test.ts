@@ -25,6 +25,8 @@ function state(over: {
   for (const event of over.events ?? []) task.apply(event);
   return {
     task,
+    runId,
+    trace: () => undefined,
     iterations: over.iterations ?? 5,
     posture: 'agent',
     contextBudget: DEFAULT_CONTEXT_BUDGET,

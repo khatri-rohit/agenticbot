@@ -16,6 +16,7 @@ import { refreshContextReport } from '../context/assemble-context';
 import { consoleTrace } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { TaskStateTracker } from '../state/task-state';
+import { measureContextShape } from './context-shape';
 import { withStateCard } from './state-card';
 import {
   createEffortRouter,
@@ -304,6 +305,9 @@ async function runLoopCore(
       // The live prompt plus this step's harness card (ephemeral: rebuilt
       // from state each call, never stored in messages or the ledger).
       const sent = withStateCard(s, messages, estimatedPrompt);
+      const measured = measureContextShape(sent, s.runStart, s.promptKeys);
+      s.promptKeys = measured.keys;
+      trace({ type: 'context_shape', runId, iteration: s.iterations, ...measured.shape });
 
       trace({
         type: 'llm_request',

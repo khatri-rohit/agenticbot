@@ -2,6 +2,7 @@ import type { ContextReportLayer, ContextWindowSource } from './context.js';
 import type { HarnessFlags } from './flags.js';
 import type { RunUsage, TokenUsage } from './run.js';
 import type { System1EffortTrace, System1RunReport } from './system1.js';
+import type { SubagentThoroughness } from './subagent.js';
 import type { TaskPhase, TaskStateSnapshot } from './task-state.js';
 import type { ToolStage } from './tool-context.js';
 
@@ -289,4 +290,50 @@ export type TraceEvent =
       type: 'task_state';
       runId: string;
       state: TaskStateSnapshot;
+    }
+  | {
+      /**
+       * What one model call is made of, measured on the messages it was sent
+       * (harness card included). Token counts are chars/4 estimates.
+       */
+      type: 'context_shape';
+      runId: string;
+      iteration: number;
+      messages: number;
+      /** Whole prompt (messages only, no tool schemas). */
+      promptTokens: number;
+      /** Tool results of this run still in full. */
+      residentToolTokens: number;
+      /**
+       * What can no longer leave the prompt: cards of removed results plus
+       * the argument text of this run's earlier tool calls.
+       */
+      residueTokens: number;
+      /** Leading messages identical to the previous call's (a cache-stable prefix). */
+      prefixStableMessages: number;
+    }
+  | {
+      /**
+       * A harness decision with its reasons. `card`: the open items and
+       * advice the harness card showed on this call. `guard`: a guard acted
+       * instead of running a call (e.g. a repeat answered from earlier).
+       */
+      type: 'policy_decision';
+      runId: string;
+      iteration: number;
+      kind: 'card' | 'guard';
+      ids: string[];
+    }
+  | {
+      /** A sub-agent's budget, written to the child's trace before it starts. */
+      type: 'child_budget';
+      runId: string;
+      parentRunId: string;
+      profile: string;
+      thoroughness?: SubagentThoroughness;
+      maxToolCalls: number;
+      maxIterations: number;
+      maxPromptTokens: number;
+      /** Parent prompt tokens left (after other children's promises) when this one started. */
+      parentRemaining?: number;
     };

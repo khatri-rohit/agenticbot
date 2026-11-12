@@ -62,6 +62,11 @@ const REPEAT_BLOCKED = limitMessage(
   'This exact tool call has already been attempted multiple times. Do not repeat it.',
 );
 
+/** Answer to a repeated read or fetch: points at the result already made. */
+function repeatAnswered(earlier: number): string {
+  return `Not run again: this exact call already ran ${earlier} time(s) in this run with the same arguments, and its result has not changed. Use the earlier result: it is above, or an (evicted) card whose sha \`recall\` restores. Ask something different if you need more.`;
+}
+
 type ReadyToolCall = {
   toolCall: ChatCompletionMessageToolCall;
   toolName: string;
@@ -404,9 +409,29 @@ async function admitToolCall(
   // the same build after an edit is legitimate verification, and outcome dedup
   // (MAX_IDENTICAL_OUTCOMES) catches true stuck-ness. The arg-repeat guard
   // stays for mutate/read/network/skill.
+  const stage = toolStage(tool);
+  // Reads and web fetches change nothing, so a repeat is answered instead of
+  // ending the run: the earlier result is still in context or restorable
+  // from its card's sha. Only a call that keeps coming back past twice the
+  // limit stops the run (a model in a loop).
   if (
     repeatCount > limits.maxRepeatedToolCalls &&
-    toolStage(tool) !== 'exec'
+    repeatCount <= limits.maxRepeatedToolCalls * 2 &&
+    (stage === 'read' || stage === 'network')
+  ) {
+    await record.refuse(toolCall, repeatAnswered(repeatCount - 1));
+    s.trace({
+      type: 'policy_decision',
+      runId: s.runId,
+      iteration: s.iterations,
+      kind: 'guard',
+      ids: [`repeat_answered:${toolName}`],
+    });
+    return { kind: 'filled' };
+  }
+  if (
+    repeatCount > limits.maxRepeatedToolCalls &&
+    stage !== 'exec'
   ) {
     noteLimit(
       s,

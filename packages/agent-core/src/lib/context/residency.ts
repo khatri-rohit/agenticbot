@@ -27,7 +27,8 @@ const MIN_EVICT_CHARS = 800;
  * retireSkillBodies instead, which keeps their core rules.
  */
 const NEVER_EVICT = new Set(['plan', 'todo', 'load_skill']);
-const CARD_PREFIX = '(evicted)';
+/** Text a removed tool result starts with. */
+export const CARD_PREFIX = '(evicted)';
 const SKILL_CARD_PREFIX = '(skill card)';
 const UNCHANGED_PREFIX = '(unchanged';
 const RECAP_PREFIX = '(compacted progress)';

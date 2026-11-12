@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { globMatch } from './path';
 import {
   formatFileRead,
+  terminalShellNote,
   WORKSPACE_READ_MAX_CHARS,
   WORKSPACE_READ_MIN_LINES,
   WORKSPACE_TOOLS,
@@ -91,8 +93,43 @@ describe('grep context', () => {
   it('clamps context to the maximum', async () => {
     const root = await workspace();
     const out = String(await grep?.execute({ pattern: 'hit C', context: 99 }, ctx(root)));
-    // Match on line 10, context capped at 5: lines 5–11 (the file ends at 11).
-    expect(out.split('\n')).toHaveLength(7);
+    // Match on line 10, context capped at 5: lines 5–11 (the file ends at 11),
+    // then one line that says the window was narrowed.
+    const rows = out.split('\n');
+    expect(rows).toHaveLength(8);
+    expect(rows.at(-1)).toMatch(/^\(context capped at 5 lines; use read_file with offset/);
+  });
+
+  it('says nothing about the cap when the asked context fits', async () => {
+    const root = await workspace();
+    const out = String(await grep?.execute({ pattern: 'hit C', context: 2 }, ctx(root)));
+    expect(out).not.toMatch(/context capped/);
+  });
+});
+
+describe('glob syntax', () => {
+  it('matches brace alternatives and character classes', () => {
+    expect(globMatch('src/a/Button.tsx', '**/*.{ts,tsx,js}')).toBe(true);
+    expect(globMatch('src/a/Button.css', '**/*.{ts,tsx,js}')).toBe(false);
+    expect(globMatch('src/Components/DashBoard/DashBoard.tsx', 'src/**/*[Dd]ash[Bb]oard*')).toBe(true);
+    expect(globMatch('src/x/index.ts', 'src/**/[!_]*.ts')).toBe(true);
+    expect(globMatch('src/x/_private.ts', 'src/**/[!_]*.ts')).toBe(false);
+    expect(globMatch('a/b.test.ts', '**/*.{spec,test}.{ts,tsx}')).toBe(true);
+  });
+
+  it('nests braces and keeps a lone brace literal', () => {
+    expect(globMatch('src/app/page.tsx', 'src/{app,{lib,pages}}/*.tsx')).toBe(true);
+    expect(globMatch('src/pages/x.tsx', 'src/{app,{lib,pages}}/*.tsx')).toBe(true);
+    expect(globMatch('src/{x.ts', 'src/{x.ts')).toBe(true);
+    expect(globMatch('a.b', 'a?b')).toBe(true);
+    expect(globMatch('a/b', 'a?b')).toBe(false);
+  });
+});
+
+describe('run_terminal shell note', () => {
+  it('names cmd.exe on Windows and sh elsewhere', () => {
+    expect(terminalShellNote('win32')).toMatch(/cmd\.exe/);
+    expect(terminalShellNote('linux')).toMatch(/\/bin\/sh/);
   });
 });
 

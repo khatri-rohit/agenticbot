@@ -30,6 +30,19 @@ function tokensK(tokens: number): string {
 
 /** Text of the card for this call, or null when it has nothing to say. */
 export function buildStateCard(s: RunState, perCallTokens: number): string | null {
+  return composeStateCard(s, perCallTokens)?.text ?? null;
+}
+
+/**
+ * The card plus the ids of the open items and advice it shows, so the trace
+ * can tell when each piece of advice first appeared (phase-0 measure of
+ * whether advice changes behaviour).
+ */
+export function composeStateCard(
+  s: RunState,
+  perCallTokens: number,
+): { text: string; ids: string[] } | null {
+  const ids: string[] = [];
   const task = s.task.snapshot();
   // The step this card goes out with (the tracker advances on its llm_request).
   const step = s.iterations;
@@ -51,10 +64,12 @@ export function buildStateCard(s: RunState, perCallTokens: number): string | nul
     open.push(
       `Edits since step ${task.evidence.unverifiedSince} have no check yet (build, typecheck, test or lint).`,
     );
+    ids.push('open:unchecked');
   }
   const lastCheck = task.evidence.lastCheck;
   if (lastCheck && lastCheck.exitCode !== 0 && task.evidence.unverifiedSince === null) {
     open.push(`Last check failed: \`${lastCheck.command}\` exited ${lastCheck.exitCode}.`);
+    ids.push('open:check_failed');
   }
   if (
     s.posture === 'agent' &&
@@ -66,6 +81,7 @@ export function buildStateCard(s: RunState, perCallTokens: number): string | nul
     !task.evidence.reviewed
   ) {
     open.push('Edits pass the check: run delegate(review) once, then report.');
+    ids.push('open:review');
   }
 
   const advice: string[] = [];
@@ -73,6 +89,7 @@ export function buildStateCard(s: RunState, perCallTokens: number): string | nul
     advice.push(
       `${s.serialReadTurns} turns in a row made one read call, and each turn re-sends ~${tokensK(perCallTokens)} tokens. Put independent reads and searches in one turn; they run in parallel.`,
     );
+    ids.push('advice:serial_reads');
   }
   const creeping = [...s.partialReadsByPath.entries()]
     .filter(([, count]) => count >= READ_CREEP_ADVICE_AFTER)
@@ -81,6 +98,7 @@ export function buildStateCard(s: RunState, perCallTokens: number): string | nul
     advice.push(
       `${count} slices of ${path} so far: grep for the anchor line (grep returns path:line), then read from that offset.`,
     );
+    ids.push(`advice:read_creep:${path}`);
   }
   const stall = s.steering.stalled();
   if (stall) {
@@ -92,13 +110,17 @@ export function buildStateCard(s: RunState, perCallTokens: number): string | nul
     advice.push(
       `${tokensK(stall.idle)} tokens (${Math.round((stall.idle / stall.max) * 100)}% of the run budget) since the last edit; about ${callsLeft} calls left at this size. Act on what you have: make the change, or answer if no change was asked.${delegate}`,
     );
+    ids.push('advice:stall');
   }
   if (s.budget.nearLimit()) {
     advice.push(
       'Run budget nearly spent: finish the current step, run the check once, and report what is done and what is left. Do not start new work.',
     );
+    ids.push('advice:budget');
   }
-  advice.push(...s.advisories.splice(0));
+  const oneShot = s.advisories.splice(0);
+  advice.push(...oneShot);
+  if (oneShot.length > 0) ids.push('advice:one_shot');
 
   const hasNews = open.length > 0 || advice.length > 0;
   if (!hasNews && (step <= QUIET_STEPS || task.workingSet.length === 0)) return null;
@@ -124,7 +146,7 @@ export function buildStateCard(s: RunState, perCallTokens: number): string | nul
   }
   if (open.length > 0) lines.push(...open.map((line) => `Open: ${line}`));
   if (advice.length > 0) lines.push('Advice:', ...advice.map((line) => `- ${line}`));
-  return lines.join('\n');
+  return { text: lines.join('\n'), ids };
 }
 
 /** The messages one model call sends: the live prompt plus this step's card. */
@@ -134,6 +156,10 @@ export function withStateCard(
   perCallTokens: number,
 ): ChatCompletionMessageParam[] {
   if (!s.flags.stateCard) return messages;
-  const card = buildStateCard(s, perCallTokens);
-  return card ? [...messages, { role: 'user', content: card }] : messages;
+  const card = composeStateCard(s, perCallTokens);
+  if (!card) return messages;
+  if (card.ids.length > 0) {
+    s.trace({ type: 'policy_decision', runId: s.runId, iteration: s.iterations, kind: 'card', ids: card.ids });
+  }
+  return [...messages, { role: 'user', content: card.text }];
 }

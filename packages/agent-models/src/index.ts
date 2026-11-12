@@ -294,6 +294,23 @@ export {
   resolveContextWindow,
 } from './lib/context.js';
 
+export {
+  CHILD_BUDGET_SHARE,
+  CHILD_TOKENS_PER_TOOL_CALL,
+  DIFF_MAX_CHARS,
+  GLOB_MAX_RESULTS,
+  GREP_WINDOW,
+  MAX_CONCURRENT_SUBAGENTS,
+  READ_WINDOW,
+  REPORT_MAX_CHARS,
+  TERMINAL_WINDOW,
+  THOROUGHNESS_TOOL_CALLS,
+  WALK_MAX_FILES,
+  childAllocation,
+  liveResultCapChars,
+} from './lib/harness-limits.js';
+export type { ChildLimits } from './lib/harness-limits.js';
+
 export { REVIEW_FINDING_KINDS } from './lib/review.js';
 export type {
   ReviewAlignment,
@@ -305,6 +322,7 @@ export type {
   ReviewNarrative,
   ReviewNumbers,
   ReviewRunGlance,
+  ReviewRunHealth,
   ThreadReview,
 } from './lib/review.js';
 export {

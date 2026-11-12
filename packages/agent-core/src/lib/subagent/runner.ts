@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import {
+  childAllocation,
   emptyRunUsage,
   lastRunFrom,
   type ContextBudget,
@@ -35,7 +36,6 @@ import {
 } from './prompt';
 import { getSubagentProfile } from './profiles';
 import {
-  CHILD_BUDGET_SHARE,
   CHILD_STRIPPED_TOOLS,
   MAX_CONCURRENT_SUBAGENTS,
   type SubagentProfile,
@@ -211,14 +211,20 @@ export function createSubagentRunner(deps: {
       parent.posture,
     );
 
-    // Refuse before creating a thread when the parent has nothing left to share.
-    if (
-      parent.remainingPromptTokens !== undefined &&
-      Math.floor(
-        Math.max(0, parent.remainingPromptTokens - (reserved.get(parent.runId) ?? 0)) *
-          CHILD_BUDGET_SHARE,
-      ) <= 0
-    ) {
+    // The child's limits: the brief's effort (or the profile's default) as
+    // a budget, under the profile ceiling and a share of what the parent has
+    // left. Refuse before creating a thread when nothing is left to share.
+    const thoroughness = spec.thoroughness ?? profile.defaultThoroughness;
+    const allocate = () =>
+      childAllocation({
+        profile: profile.limits,
+        ...(thoroughness ? { thoroughness } : {}),
+        ...(parent.remainingPromptTokens !== undefined
+          ? { parentRemaining: parent.remainingPromptTokens }
+          : {}),
+        promised: reserved.get(parent.runId) ?? 0,
+      });
+    if (!allocate()) {
       return failure(spec, 'error', 'No run budget left for a sub-agent. Finish the work yourself.');
     }
 
@@ -231,13 +237,7 @@ export function createSubagentRunner(deps: {
     // bigger than its share, the child could only spend its cap on a forced
     // final answer, so refuse before creating a thread.
     if (profile.context === 'fork' && parent.remainingPromptTokens !== undefined) {
-      const available = Math.min(
-        profile.limits.maxPromptTokens,
-        Math.floor(
-          Math.max(0, parent.remainingPromptTokens - (reserved.get(parent.runId) ?? 0)) *
-            CHILD_BUDGET_SHARE,
-        ),
-      );
+      const available = allocate()?.maxPromptTokens ?? 0;
       const needed = estimatePromptTokens(parent.forkMessages());
       if (needed > available) {
         return failure(
@@ -329,7 +329,7 @@ export function createSubagentRunner(deps: {
         skills: bound,
       });
       const brief = buildBrief(
-        spec,
+        thoroughness ? { ...spec, thoroughness } : spec,
         profile.context === 'diff'
           ? lastUserRequest(parentMessages)
           : undefined,
@@ -343,17 +343,8 @@ export function createSubagentRunner(deps: {
     }
 
     const promised = reserved.get(parent.runId) ?? 0;
-    const carve =
-      parent.remainingPromptTokens === undefined
-        ? profile.limits.maxPromptTokens
-        : Math.min(
-            profile.limits.maxPromptTokens,
-            Math.floor(
-              Math.max(0, parent.remainingPromptTokens - promised) *
-                CHILD_BUDGET_SHARE,
-            ),
-          );
-    if (carve <= 0) {
+    const allocation = allocate();
+    if (!allocation) {
       return failure(
         spec,
         'error',
@@ -361,6 +352,20 @@ export function createSubagentRunner(deps: {
         threadId,
       );
     }
+    // Narrowed copy for the closure below.
+    const granted = allocation;
+    const carve = granted.maxPromptTokens;
+    host.trace(threadId)?.({
+      type: 'child_budget',
+      runId: subRunId,
+      parentRunId: parent.runId,
+      profile: profile.name,
+      ...(thoroughness ? { thoroughness } : {}),
+      ...allocation,
+      ...(parent.remainingPromptTokens !== undefined
+        ? { parentRemaining: Math.max(0, parent.remainingPromptTokens - promised) }
+        : {}),
+    });
     reserved.set(parent.runId, promised + carve);
     try {
       return await startAndSettle(carve);
@@ -411,8 +416,8 @@ export function createSubagentRunner(deps: {
           tools,
           modelCall,
           limits: {
-            maxIterations: profile.limits.maxIterations,
-            maxToolCalls: profile.limits.maxToolCalls,
+            maxIterations: granted.maxIterations,
+            maxToolCalls: granted.maxToolCalls,
             maxRepeatedToolCalls: 3,
             toolTimeoutMs: 60_000,
             maxWallMs: profile.limits.maxWallMs,

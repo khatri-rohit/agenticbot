@@ -104,6 +104,8 @@ export type RunState = {
   serialReadNoteDue: boolean;
   /** One-shot advice for the next harness card (consumed when the card is built). */
   readonly advisories: string[];
+  /** Fingerprints of the previous call's messages, for the prefix-stability measure. */
+  promptKeys: string[];
 };
 
 export function createRunState(
@@ -207,6 +209,7 @@ export function createRunState(
     serialReadTurns: 0,
     serialReadNoteDue: false,
     advisories: [],
+    promptKeys: [],
   };
   return state;
 }

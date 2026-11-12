@@ -1,4 +1,9 @@
-import type { SubagentReport, SubagentSpec } from '@agent/agent-models';
+import {
+  REPORT_MAX_CHARS,
+  THOROUGHNESS_TOOL_CALLS,
+  type SubagentReport,
+  type SubagentSpec,
+} from '@agent/agent-models';
 
 import { getSkill, skillCore } from '../tools/skills';
 import type { Tool } from '../tools/types';
@@ -10,8 +15,6 @@ import {
 } from './types';
 
 const RULES_MAX_CHARS = 4_000;
-
-const THOROUGHNESS_CALLS = { quick: 10, medium: 40, thorough: 150 } as const;
 
 /**
  * Child system prompt. Deliberately small (~1k tokens + rules): role,
@@ -80,12 +83,14 @@ export function childSkills(names: string[]): { name: string; body: string }[] {
 
 /** The user message that opens the child run. */
 export function buildBrief(spec: SubagentSpec, userRequest?: string): string {
-  const calls = spec.thoroughness ? THOROUGHNESS_CALLS[spec.thoroughness] : undefined;
+  const calls = spec.thoroughness ? THOROUGHNESS_TOOL_CALLS[spec.thoroughness] : undefined;
   return [
     `Objective: ${spec.objective}`,
     `Scope: ${spec.scope}`,
     spec.outputFocus ? `Report focus: ${spec.outputFocus}` : '',
-    calls ? `Effort: ${spec.thoroughness} (about ${calls} tool calls).` : '',
+    calls
+      ? `Effort: ${spec.thoroughness}: up to ${calls} tool calls, then the run stops. Batch independent searches in one turn, and report what you have with the gaps that remain before you reach it.`
+      : '',
     userRequest ? `The user's request this work serves:\n${clip(userRequest, 2_000)}` : '',
   ]
     .filter(Boolean)
@@ -162,7 +167,7 @@ export function createReportTool(onReport: (report: SubagentReport) => void): To
       type: 'function',
       function: {
         name: 'report',
-        description: 'Submit your final result. Call once; the run ends after it.',
+        description: `Submit your final result. Call once; the run ends after it. Keep the whole report under ${REPORT_MAX_CHARS.toLocaleString('en-US')} characters: one line per finding, and list what you could not find in openQuestions. The parent reads it whole; text past that is cut.`,
         parameters: {
           type: 'object',
           properties: {
