@@ -31,6 +31,15 @@ export type {
   System1Report,
 } from './lib/event.js';
 
+export { TASK_STATE_COMMANDS_MAX } from './lib/task-state.js';
+export type {
+  TaskCommand,
+  TaskEvidence,
+  TaskPhase,
+  TaskStateSnapshot,
+  WorkingSetEntry,
+} from './lib/task-state.js';
+
 export { SYSTEM1_AUTO_THINKING } from './lib/system1.js';
 export type {
   System1EffortTrace,

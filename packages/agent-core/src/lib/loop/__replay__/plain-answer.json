@@ -62,6 +62,33 @@
       "durationMs": 0
     },
     {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 1,
+      "from": "orient",
+      "to": "report",
+      "cause": "answer"
+    },
+    {
+      "type": "task_state",
+      "runId": "replay-run",
+      "state": {
+        "phase": "report",
+        "iteration": 1,
+        "workingSet": [],
+        "evidence": {
+          "edits": 0,
+          "failedEdits": 0,
+          "commands": [],
+          "toolErrors": 0,
+          "unverifiedSince": null
+        },
+        "phaseIterations": {
+          "orient": 1
+        }
+      }
+    },
+    {
       "type": "run_finish",
       "runId": "replay-run",
       "iterations": 1,

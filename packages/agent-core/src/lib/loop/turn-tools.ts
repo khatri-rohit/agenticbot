@@ -83,16 +83,14 @@ type BatchOutcome = 'ok' | 'deferred' | 'halted';
  * Walking a file a few lines at a time (offset/limit reads) is how a run
  * loses its place; every few partial reads of one file, point at grep.
  */
-function withReadCreepNote(
-  s: RunState,
-  readPath: string,
-  args: Record<string, unknown>,
-  result: string,
-): string {
+function withReadCreepNote(s: RunState, readPath: string, result: string): string {
+  // A slice is what came back, not what was asked: a file that fits the
+  // read window returns whole even when offset/limit were passed.
+  const header = /^\[lines (\d+)–(\d+) of (\d+)/.exec(result);
   const partial =
-    (typeof args.offset === 'number' && args.offset > 1) ||
-    typeof args.limit === 'number';
-  if (!partial || result.startsWith('[empty file]')) return result;
+    header !== null &&
+    (Number(header[1]) > 1 || Number(header[2]) < Number(header[3]));
+  if (!partial) return result;
   const count = (s.partialReadsByPath.get(readPath) ?? 0) + 1;
   s.partialReadsByPath.set(readPath, count);
   if (count % READ_CREEP_NOTE_EVERY !== 0) return result;
@@ -178,7 +176,7 @@ function shapeBareResult(
     const readPath = pathFromToolArgs(args);
     if (readPath === null) return result;
     const shaped = s.readDedupe.apply(readPath, args, result, s.iterations, toolCallId);
-    return withReadCreepNote(s, readPath, args, shaped);
+    return withReadCreepNote(s, readPath, shaped);
   }
   if (toolName === 'web_fetch') {
     return withWebSliceNote(s, args, result);

@@ -15,6 +15,7 @@ import {
 import { refreshContextReport } from '../context/assemble-context';
 import { consoleTrace } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { TaskStateTracker } from '../state/task-state';
 import {
   createEffortRouter,
   type EffortDecision,
@@ -73,15 +74,26 @@ export async function runLoop(
   config: RunLoopConfig,
 ): Promise<RunLoopResult> {
   const runId = config.runId ?? randomUUID();
-  const trace = config.trace ?? ((event: TraceEvent) => consoleTrace(event));
+  const sink = config.trace ?? ((event: TraceEvent) => consoleTrace(event));
+  // Task state is reduced from the same event stream the sink records, so an
+  // offline reader can rebuild it from the trace; phase changes are traced
+  // right after the event that caused them.
+  const task = new TaskStateTracker();
+  const trace = (event: TraceEvent): void => {
+    sink(event);
+    const change = task.apply(event);
+    if (change) sink({ type: 'task_phase', runId, iteration: task.iteration, ...change });
+  };
   const usage = emptyRunUsage();
   const startedAt = Date.now();
   const result = await runLoopCore(modelCall, messages, tools, {
     ...config,
     runId,
     trace,
+    task,
   }, usage, startedAt);
   await reportSystem1(config, runId, trace);
+  sink({ type: 'task_state', runId, state: task.snapshot() });
   trace({
     type: 'run_finish',
     runId,

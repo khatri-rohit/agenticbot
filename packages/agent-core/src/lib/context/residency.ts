@@ -433,7 +433,13 @@ export class ReadDedupe {
     toolCallId: string,
   ): string {
     if (!path || result.startsWith('Error')) return result;
-    const key = `${path}|${String(args.offset ?? '')}|${String(args.limit ?? '')}`;
+    // Key on the lines actually returned: a file that fits comes back whole
+    // whatever offset/limit asked, so two differently-sliced asks can be
+    // the same read. Args are the fallback for results without a header.
+    const range = readRange(result);
+    const key = range
+      ? `${path}|${range.from}-${range.to}`
+      : `${path}|${String(args.offset ?? '')}|${String(args.limit ?? '')}`;
     const sha = sha256Text(result);
     const prior = this.seen.get(key);
     if (prior && prior.sha === sha) {

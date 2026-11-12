@@ -72,6 +72,14 @@
       }
     },
     {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 1,
+      "from": "orient",
+      "to": "locate",
+      "cause": "read_file"
+    },
+    {
       "type": "tool_start",
       "runId": "replay-run",
       "iteration": 1,
@@ -132,6 +140,14 @@
       }
     },
     {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 2,
+      "from": "locate",
+      "to": "change",
+      "cause": "edit_file"
+    },
+    {
       "type": "tool_complete",
       "runId": "replay-run",
       "iteration": 2,
@@ -159,6 +175,51 @@
         "completionTokens": 20
       },
       "durationMs": 0
+    },
+    {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 3,
+      "from": "change",
+      "to": "report",
+      "cause": "answer"
+    },
+    {
+      "type": "task_state",
+      "runId": "replay-run",
+      "state": {
+        "phase": "report",
+        "iteration": 3,
+        "workingSet": [
+          {
+            "path": "a.ts",
+            "reads": 1,
+            "edits": 1,
+            "failedEdits": 0,
+            "lastReadIteration": 1,
+            "lastEditIteration": 2
+          },
+          {
+            "path": "b.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 1
+          }
+        ],
+        "evidence": {
+          "edits": 1,
+          "failedEdits": 0,
+          "commands": [],
+          "toolErrors": 0,
+          "unverifiedSince": 2
+        },
+        "phaseIterations": {
+          "orient": 1,
+          "locate": 1,
+          "change": 1
+        }
+      }
     },
     {
       "type": "run_finish",

@@ -72,6 +72,14 @@
       }
     },
     {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 1,
+      "from": "orient",
+      "to": "locate",
+      "cause": "read_file"
+    },
+    {
       "type": "tool_complete",
       "runId": "replay-run",
       "iteration": 1,
@@ -257,6 +265,63 @@
         "completionTokens": 20
       },
       "durationMs": 0
+    },
+    {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 5,
+      "from": "locate",
+      "to": "report",
+      "cause": "answer"
+    },
+    {
+      "type": "task_state",
+      "runId": "replay-run",
+      "state": {
+        "phase": "report",
+        "iteration": 5,
+        "workingSet": [
+          {
+            "path": "big1.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 1
+          },
+          {
+            "path": "big2.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 2
+          },
+          {
+            "path": "big3.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 3
+          },
+          {
+            "path": "big4.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 4
+          }
+        ],
+        "evidence": {
+          "edits": 0,
+          "failedEdits": 0,
+          "commands": [],
+          "toolErrors": 0,
+          "unverifiedSince": null
+        },
+        "phaseIterations": {
+          "orient": 1,
+          "locate": 4
+        }
+      }
     },
     {
       "type": "run_finish",

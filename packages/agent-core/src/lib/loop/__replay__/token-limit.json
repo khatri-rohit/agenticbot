@@ -73,6 +73,14 @@
       }
     },
     {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 1,
+      "from": "orient",
+      "to": "locate",
+      "cause": "read_file"
+    },
+    {
       "type": "tool_complete",
       "runId": "replay-run",
       "iteration": 1,
@@ -175,6 +183,14 @@
       "reason": "limit.tokens: prompt token budget spent (12000 of 10000)"
     },
     {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 3,
+      "from": "locate",
+      "to": "blocked",
+      "cause": "limit"
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 3,
@@ -194,6 +210,48 @@
       },
       "durationMs": 0,
       "final": true
+    },
+    {
+      "type": "task_state",
+      "runId": "replay-run",
+      "state": {
+        "phase": "blocked",
+        "iteration": 3,
+        "workingSet": [
+          {
+            "path": "f1.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 1
+          },
+          {
+            "path": "f2.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 2
+          },
+          {
+            "path": "f3.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 3
+          }
+        ],
+        "evidence": {
+          "edits": 0,
+          "failedEdits": 0,
+          "commands": [],
+          "toolErrors": 0,
+          "unverifiedSince": null
+        },
+        "phaseIterations": {
+          "orient": 1,
+          "locate": 2
+        }
+      }
     },
     {
       "type": "run_finish",

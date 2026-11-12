@@ -35,6 +35,7 @@ import {
 import type { ToolRegistry } from '../tools/types';
 import { stubWebSourceCard } from '../tools/web/source';
 import { hostListedWebUrls } from '../tools/web/trust';
+import { liveResultCapChars } from '../tools/workspace/tools';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { outcomeCard, toolCallIndex, type ToolCallInfo } from './outcome-card';
 import { buildEvidenceLog, buildSituationCard } from './situation';
@@ -433,7 +434,14 @@ export function stubLiveToolResults(
     // Already a stub or a residency card (which carries the sha to recall).
     if (/^\((stub|evicted|skill card|unchanged)/.test(content)) continue;
     const old = i < keepToolsFrom;
-    const overCap = content.length > maxToolChars;
+    // A tool that sizes its own window (read_file, grep) keeps that window in
+    // the live prompt; only results past it are cut here.
+    let cap = maxToolChars;
+    if (!old && content.length > maxToolChars) {
+      callInfo ??= toolCallIndex(messages);
+      cap = liveResultCapChars(callInfo.get(message.tool_call_id)?.name, maxToolChars);
+    }
+    const overCap = content.length > cap;
     if (!old && !overCap) continue;
     if (old) {
       const card = stubWebSourceCard(content, message.tool_call_id);
@@ -457,7 +465,7 @@ export function stubLiveToolResults(
       messages[i] = {
         role: 'tool',
         tool_call_id: message.tool_call_id,
-        content: capRecentToolContent(content, maxToolChars),
+        content: capRecentToolContent(content, cap),
       };
     }
     stubbed++;

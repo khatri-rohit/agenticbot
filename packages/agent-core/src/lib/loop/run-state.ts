@@ -21,6 +21,7 @@ import {
 
 import { refreshContextReport } from '../context/assemble-context';
 import { ReadDedupe } from '../context/residency';
+import type { TaskStateTracker } from '../state/task-state';
 import type { Tool, ToolRegistry } from '../tools/types';
 import { createCallRecorder, type CallRecorder } from './call-record';
 import { resolveLimits, type AgentLimits } from './limits';
@@ -33,7 +34,12 @@ import type { ModelCallFn, RunLoopConfig, RunLoopResult } from './types';
 import { WebSourceStore } from './web-sources';
 
 export type LoopTrace = (event: TraceEvent) => void;
-export type LoopConfig = RunLoopConfig & { runId: string; trace: LoopTrace };
+export type LoopConfig = RunLoopConfig & {
+  runId: string;
+  trace: LoopTrace;
+  /** Task state reduced from this run's trace (see state/task-state.ts). */
+  task: TaskStateTracker;
+};
 export type CoreResult = Omit<RunLoopResult, 'usage'>;
 
 /**
@@ -60,6 +66,8 @@ export type RunState = {
   readonly flags: HarnessFlags;
   /** Wraps config.trace and feeds turnSignals. */
   readonly trace: LoopTrace;
+  /** Phase, working set and evidence for this run, read-only to the loop. */
+  readonly task: TaskStateTracker;
   /** Wraps config.emit and adds run spend to completion events. */
   readonly emit: ((event: AgentEventWithoutSeq) => void) | undefined;
   readonly budget: RunBudget;
@@ -167,6 +175,7 @@ export function createRunState(
     contextBudget: config.contextBudget ?? DEFAULT_CONTEXT_BUDGET,
     flags: config.flags ?? DEFAULT_HARNESS_FLAGS,
     trace,
+    task: config.task,
     emit,
     budget,
     steering,

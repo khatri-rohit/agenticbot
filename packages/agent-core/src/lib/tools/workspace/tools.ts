@@ -20,14 +20,32 @@ import {
   toPosixRelative,
 } from './path';
 
-/** M4a: cap tool payloads before they hit the ledger. Stay under assembler stub (8k). */
-export const WORKSPACE_READ_MAX_CHARS = 7_000;
+/** M4a: cap tool payloads before they hit the ledger (large bodies spill to blobs there). */
+/**
+ * Read window. Sized against the cost of a model call, not of one result:
+ * at a ~36k-token prompt, a 40k-char (~10k-token) read that saves even one
+ * follow-up call pays for itself several times over.
+ */
+export const WORKSPACE_READ_MAX_CHARS = 40_000;
+export const WORKSPACE_READ_MAX_LINES = 2_000;
 export const WORKSPACE_READ_MAX_LOAD_BYTES = 1_000_000;
 export const WORKSPACE_TERMINAL_MAX_CHARS = 8_000;
 export const WORKSPACE_TERMINAL_TIMEOUT_MS = 120_000;
-export const WORKSPACE_GREP_MAX_MATCHES = 50;
+export const WORKSPACE_GREP_MAX_MATCHES = 100;
 export const WORKSPACE_GREP_LINE_MAX_CHARS = 200;
-export const WORKSPACE_GREP_MAX_CHARS = 7_000;
+/** Room for context lines; a cut search sends the model back for another. */
+export const WORKSPACE_GREP_MAX_CHARS = 12_000;
+
+/**
+ * Largest result the live prompt keeps for a tool that sizes its own output
+ * (header and note slack included). The generic live cap must not cut a
+ * result again after the tool already chose its window.
+ */
+export function liveResultCapChars(toolName: string | undefined, fallback: number): number {
+  if (toolName === 'read_file') return Math.max(fallback, WORKSPACE_READ_MAX_CHARS + 1_000);
+  if (toolName === 'grep') return Math.max(fallback, WORKSPACE_GREP_MAX_CHARS + 500);
+  return fallback;
+}
 /** Upper bound for grep `context`; wider windows are what read_file is for. */
 export const WORKSPACE_GREP_MAX_CONTEXT = 5;
 export const WORKSPACE_GLOB_MAX_RESULTS = 200;
@@ -414,8 +432,7 @@ export const readFileTool: Tool = {
     type: 'function',
     function: {
       name: 'read_file',
-      description:
-        'Read a text file inside the open workspace. Large files are truncated.',
+      description: `Read a text file inside the open workspace. Returns the whole file when it fits (up to ${WORKSPACE_READ_MAX_LINES} lines / ${WORKSPACE_READ_MAX_CHARS} chars); larger files return a window from offset.`,
       parameters: {
         type: 'object',
         properties: {
@@ -446,7 +463,8 @@ export const readFileTool: Tool = {
       'Pass a relative path from glob/grep.',
       'Read before edit_file so oldText is a unique span from this file.',
       'Output starts with [lines a–b of N]; it is not file content. A cut read names the offset to continue from.',
-      'To find a block in a large file, grep for its anchor line first, then read from that line.',
+      'Read the whole file: omit offset and limit. A file that fits is returned whole anyway, so slices only add calls.',
+      'Only for a file larger than the window: grep for the anchor line (grep returns path:line), then read from that offset.',
     ],
   },
   risk: 'read',
@@ -470,13 +488,22 @@ export const readFileTool: Tool = {
   },
 };
 
-/** Reads narrower than this are widened: a 3-line slice costs a model call and shows no surroundings. */
-export const WORKSPACE_READ_MIN_LINES = 40;
+/**
+ * Windows narrower than this are widened on files too large to return
+ * whole: every extra call re-sends the whole prompt, which costs far more
+ * than the extra lines.
+ */
+export const WORKSPACE_READ_MIN_LINES = 200;
 
 /**
  * read_file result: a `[lines a–b of N]` header, then the raw lines (no
  * per-line numbers, so spans copy cleanly into edit_file oldText). Cuts on a
  * line boundary and names the offset to continue from.
+ *
+ * The unit of a read is the file: when the whole file fits the read window
+ * (WORKSPACE_READ_MAX_LINES lines and WORKSPACE_READ_MAX_CHARS chars) it is
+ * returned whole, whatever offset/limit asked for. Slicing a file that fits
+ * only multiplies model calls (each re-sends the prompt) for no saving.
  */
 export function formatFileRead(
   text: string,
@@ -490,16 +517,24 @@ export function formatFileRead(
   const of = `${total}${partial ? '+ (file larger than the 1 MB read window)' : ''}`;
   if (text.length === 0) return '[empty file]';
 
-  const offset =
+  const fitsWhole =
+    !partial &&
+    total <= WORKSPACE_READ_MAX_LINES &&
+    text.length <= WORKSPACE_READ_MAX_CHARS;
+  const askedOffset =
     typeof offsetRaw === 'number' && offsetRaw > 1 ? Math.floor(offsetRaw) : 1;
+  const offset = fitsWhole ? 1 : askedOffset;
   if (offset > total) {
     return `[offset ${offset} is past end of file (${of} lines)]`;
   }
   const requested =
-    typeof limitRaw === 'number' && limitRaw > 0
+    !fitsWhole && typeof limitRaw === 'number' && limitRaw > 0
       ? Math.floor(limitRaw)
       : total;
-  const limit = Math.max(requested, WORKSPACE_READ_MIN_LINES);
+  const limit = Math.min(
+    WORKSPACE_READ_MAX_LINES,
+    Math.max(requested, WORKSPACE_READ_MIN_LINES),
+  );
   const start = offset - 1;
   const end = Math.min(total, start + limit);
 
@@ -522,7 +557,9 @@ export function formatFileRead(
   const footer =
     last < end
       ? `\n\n(read_file truncated at line ${last} of ${of} — continue with offset=${last + 1})`
-      : '';
+      : last < total
+        ? `\n\n(window ends at line ${last} of ${of} — continue with offset=${last + 1})`
+        : '';
   return `${header}\n${kept.join('\n')}${footer}`;
 }
 

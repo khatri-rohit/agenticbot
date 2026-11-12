@@ -2,6 +2,7 @@ import type { ContextReportLayer, ContextWindowSource } from './context.js';
 import type { HarnessFlags } from './flags.js';
 import type { RunUsage, TokenUsage } from './run.js';
 import type { System1EffortTrace, System1RunReport } from './system1.js';
+import type { TaskPhase, TaskStateSnapshot } from './task-state.js';
 import type { ToolStage } from './tool-context.js';
 
 /**
@@ -265,4 +266,20 @@ export type TraceEvent =
       type: 'system1_report';
       runId: string;
       report: System1RunReport;
+    }
+  | {
+      /** The task state moved to another phase (see TaskPhase). */
+      type: 'task_phase';
+      runId: string;
+      iteration: number;
+      from: TaskPhase;
+      to: TaskPhase;
+      /** The event that moved it, e.g. `edit_file`, `command after edit`, `limit`. */
+      cause: string;
+    }
+  | {
+      /** Task state at run end, written just before run_finish. */
+      type: 'task_state';
+      runId: string;
+      state: TaskStateSnapshot;
     };

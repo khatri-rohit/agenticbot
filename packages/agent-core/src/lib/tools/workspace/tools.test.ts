@@ -3,7 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { WORKSPACE_TOOLS } from './tools';
+import {
+  formatFileRead,
+  WORKSPACE_READ_MAX_CHARS,
+  WORKSPACE_READ_MIN_LINES,
+  WORKSPACE_TOOLS,
+} from './tools';
 
 function ctx(workspaceRoot: string) {
   return {
@@ -88,5 +93,33 @@ describe('grep context', () => {
     const out = String(await grep?.execute({ pattern: 'hit C', context: 99 }, ctx(root)));
     // Match on line 10, context capped at 5: lines 5–11 (the file ends at 11).
     expect(out.split('\n')).toHaveLength(7);
+  });
+});
+
+describe('read_file unit', () => {
+  const lines = (n: number, width = 10) =>
+    Array.from({ length: n }, (_, i) => `l${i + 1}`.padEnd(width, '.')).join('\n') + '\n';
+
+  it('returns a file that fits the window whole, whatever offset/limit ask', () => {
+    const out = formatFileRead(lines(300), 120, 10);
+    expect(out.split('\n')[0]).toBe('[lines 1–300 of 300]');
+    expect(out).not.toMatch(/continue with offset/);
+  });
+
+  it('windows a file larger than the window from the offset, at least the minimum lines', () => {
+    // Wider than the char window: 4,000 lines × 21 chars.
+    const big = lines(4_000, 20);
+    expect(big.length).toBeGreaterThan(WORKSPACE_READ_MAX_CHARS);
+    const out = formatFileRead(big, 1_000, 5);
+    const header = out.split('\n')[0];
+    expect(header).toBe(`[lines 1000–${1_000 + WORKSPACE_READ_MIN_LINES - 1} of 4000]`);
+    expect(out).toMatch(/continue with offset=1200/);
+  });
+
+  it('cuts a large file at the char window and names where to continue', () => {
+    const big = lines(4_000, 20);
+    const out = formatFileRead(big, undefined, undefined);
+    expect(out.length).toBeLessThanOrEqual(WORKSPACE_READ_MAX_CHARS + 200);
+    expect(out).toMatch(/read_file truncated at line \d+ of 4000 — continue with offset=\d+/);
   });
 });
