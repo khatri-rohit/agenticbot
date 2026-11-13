@@ -308,11 +308,12 @@ export const globTool: Tool = {
       matches.push(rel);
       if (matches.length >= WORKSPACE_GLOB_MAX_RESULTS) break;
     }
-    if (matches.length === 0) return `(no files matched ${pattern})`;
+    // An incomplete walk must show on "no files matched" too, or it reads as an absence.
     const extra =
       files.length >= WORKSPACE_WALK_MAX_FILES
-        ? `\n(walk stopped at ${WORKSPACE_WALK_MAX_FILES} files)`
+        ? `\n(walk stopped at ${WORKSPACE_WALK_MAX_FILES} files; narrow the pattern to a folder to search the rest)`
         : '';
+    if (matches.length === 0) return `(no files matched ${pattern})${extra}`;
     return `${matches.join('\n')}${extra}`;
   },
 };
@@ -378,12 +379,19 @@ export const grepTool: Tool = {
     const context = Math.min(WORKSPACE_GREP_MAX_CONTEXT, askedContext);
     // Say so when the window was narrowed, so the model does not ask again
     // with a larger number.
-    const note =
+    const contextNote =
       askedContext > context
         ? `\n(context capped at ${WORKSPACE_GREP_MAX_CONTEXT} lines; use read_file with offset for a wider window)`
         : '';
     const files: string[] = [];
     await walkFiles(root, ctx.signal, files);
+    // A walk that stopped early searched only part of the workspace: say so,
+    // above all on "no matches", which would otherwise read as an absence.
+    const walkNote =
+      files.length >= WORKSPACE_WALK_MAX_FILES
+        ? `\n(searched only the first ${WORKSPACE_WALK_MAX_FILES} files of the workspace; narrow with glob to search the rest before concluding something is absent)`
+        : '';
+    const note = `${contextNote}${walkNote}`;
     const rows: string[] = [];
     let matches = 0;
     let chars = 0;
@@ -429,7 +437,7 @@ export const grepTool: Tool = {
         if (matches >= WORKSPACE_GREP_MAX_MATCHES) return truncated();
       }
     }
-    return rows.length > 0 ? `${rows.join('\n')}${note}` : `(no matches for ${pattern})`;
+    return rows.length > 0 ? `${rows.join('\n')}${note}` : `(no matches for ${pattern})${walkNote}`;
   },
 };
 
@@ -793,13 +801,17 @@ export const runTerminalTool: Tool = {
     type: 'function',
     function: {
       name: 'run_terminal',
-      description: `Run a command in the open workspace folder (compile, test, build, etc.). cwd is always the workspace root. Output is capped. ${terminalShellNote()}`,
+      description: `Run a command in the open workspace folder (compile, test, build, etc.). cwd is always the workspace root. Output is capped, keeping its start and its end (where errors and summaries are). ${terminalShellNote()}`,
       parameters: {
         type: 'object',
         properties: {
           command: {
             type: 'string',
             description: 'Shell command to run in the workspace root.',
+          },
+          timeoutSec: {
+            type: 'integer',
+            description: `Optional: seconds before the command is killed. Default ${TERMINAL_WINDOW.timeoutMs / 1000}; up to ${TERMINAL_WINDOW.maxTimeoutMs / 1000} for a long build or full test suite. Never start servers or watch modes: they do not exit.`,
           },
         },
         required: ['command'],
@@ -837,7 +849,7 @@ export const runTerminalTool: Tool = {
     const command = asString(args.command).trim();
     const denied = deniedTerminalCommand(command);
     if (denied) return `Command blocked: ${denied}`;
-    return runWorkspaceCommand(command, root, ctx.signal);
+    return runWorkspaceCommand(command, root, ctx.signal, WORKSPACE_TERMINAL_MAX_CHARS, terminalTimeoutMs(args.timeoutSec));
   },
 };
 
@@ -860,12 +872,51 @@ function killProcessTree(pid: number): void {
   }
 }
 
+/**
+ * Captures a command's output within `maxChars`, keeping the start and the
+ * end: builds and tests print what matters (errors, the summary, the exit
+ * reason) last, so cutting only the end hid exactly that. The middle is
+ * dropped with a marker that says how much. Memory stays bounded however
+ * much the command prints.
+ */
+export function createOutputCapture(maxChars: number, headChars: number = TERMINAL_WINDOW.headChars) {
+  const head = Math.min(headChars, Math.floor(maxChars / 2));
+  const tailMax = maxChars - head;
+  let start = '';
+  let tail = '';
+  let total = 0;
+  return {
+    append(text: string): void {
+      total += text.length;
+      if (start.length < head) {
+        const room = head - start.length;
+        start += text.slice(0, room);
+        text = text.slice(room);
+      }
+      if (text) tail = (tail + text).slice(-tailMax);
+    },
+    text(): string {
+      const cut = total - start.length - tail.length;
+      if (cut <= 0) return start + tail;
+      return `${start}\n… (${cut} characters of output cut here; the start and the end are kept) …\n${tail}`;
+    },
+  };
+}
+
+/** The command timeout: the default, or `timeoutSec` within [1s, the maximum]. */
+export function terminalTimeoutMs(timeoutSec: unknown): number {
+  if (typeof timeoutSec !== 'number' || !Number.isFinite(timeoutSec) || timeoutSec <= 0) {
+    return TERMINAL_WINDOW.timeoutMs;
+  }
+  return Math.min(TERMINAL_WINDOW.maxTimeoutMs, Math.max(1_000, Math.round(timeoutSec * 1000)));
+}
+
 function runWorkspaceCommand(
   command: string,
   cwd: string,
   signal: AbortSignal,
-  maxChars = WORKSPACE_TERMINAL_MAX_CHARS,
-  timeoutMs = WORKSPACE_TERMINAL_TIMEOUT_MS,
+  maxChars: number = WORKSPACE_TERMINAL_MAX_CHARS,
+  timeoutMs: number = WORKSPACE_TERMINAL_TIMEOUT_MS,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -879,24 +930,13 @@ function runWorkspaceCommand(
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });
-    let combined = '';
-    let truncatedOut = false;
+    const output = createOutputCapture(maxChars);
     let settled = false;
-    const append = (chunk: Buffer | string) => {
-      if (truncatedOut) return;
-      combined += chunk.toString();
-      if (combined.length > maxChars) {
-        combined = combined.slice(0, maxChars);
-        truncatedOut = true;
-      }
-    };
+    const append = (chunk: Buffer | string) => output.append(chunk.toString());
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
 
-    const bodyText = () =>
-      truncatedOut
-        ? `${combined}\n\n(run_terminal truncated at ${maxChars} chars)`
-        : combined;
+    const bodyText = () => output.text();
 
     const finish = (error?: Error, value?: string) => {
       if (settled) return;
@@ -916,7 +956,11 @@ function runWorkspaceCommand(
       if (child.pid) killProcessTree(child.pid);
       finish(
         undefined,
-        `cwd: ${cwd}\nexit timeout\n${bodyText()}\n\n(run_terminal killed after ${timeoutMs}ms)`.trimEnd(),
+        `cwd: ${cwd}\nexit timeout\n${bodyText()}\n\n(run_terminal killed after ${Math.round(timeoutMs / 1000)}s${
+          timeoutMs < TERMINAL_WINDOW.maxTimeoutMs
+            ? `; if the command is a long build or test run, run it again with timeoutSec up to ${TERMINAL_WINDOW.maxTimeoutMs / 1000}`
+            : ''
+        })`.trimEnd(),
       );
     }, timeoutMs);
 

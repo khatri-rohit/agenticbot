@@ -37,9 +37,27 @@ export const GREP_WINDOW = {
 } as const;
 
 export const GLOB_MAX_RESULTS = 200;
-export const WALK_MAX_FILES = 2_000;
+/**
+ * Files one glob/grep walk visits (node_modules, .git, dist and the like are
+ * skipped). Sized for real monorepos: a walk that stops early makes grep miss
+ * matches, and a missed match reads as "not found" — a wrong answer, not a
+ * slow one. Both tools say when the walk stopped.
+ */
+export const WALK_MAX_FILES = 20_000;
 
-export const TERMINAL_WINDOW = { maxChars: 8_000, timeoutMs: 120_000 } as const;
+/**
+ * run_terminal output and time. Output keeps the first `headChars` and the
+ * last of `maxChars` (errors and summaries come last). The default timeout
+ * covers a typical build or test run; a call can ask for up to
+ * `maxTimeoutMs` (long monorepo suites), and servers or watch modes still
+ * end instead of hanging the run.
+ */
+export const TERMINAL_WINDOW = {
+  maxChars: 8_000,
+  headChars: 2_000,
+  timeoutMs: 300_000,
+  maxTimeoutMs: 1_800_000,
+} as const;
 export const DIFF_MAX_CHARS = 12_000;
 
 /** Header and note slack a tool adds around its own window. */

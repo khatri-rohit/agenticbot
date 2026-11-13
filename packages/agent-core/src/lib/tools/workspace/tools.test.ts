@@ -7,7 +7,9 @@ import { globMatch } from './path';
 import {
   formatFileRead,
   stripReadNumbers,
+  createOutputCapture,
   terminalShellNote,
+  terminalTimeoutMs,
   WORKSPACE_READ_MAX_CHARS,
   WORKSPACE_READ_MIN_LINES,
   WORKSPACE_TOOLS,
@@ -229,5 +231,49 @@ describe('read_file unit', () => {
     expect(last).toBeLessThan(1_900);
     expect(out).toMatch(new RegExp(`continue with offset=${last + 1}`));
     expect(out.length).toBeLessThanOrEqual(liveResultCapChars('read_file', 0));
+  });
+});
+
+describe('run_terminal output and time', () => {
+  it('passes short output through whole', () => {
+    const capture = createOutputCapture(100, 20);
+    capture.append('hello ');
+    capture.append('world');
+    expect(capture.text()).toBe('hello world');
+  });
+
+  it('keeps the start and the end of long output, in chunks, within the bound', () => {
+    const capture = createOutputCapture(100, 20);
+    for (let i = 0; i < 50; i++) capture.append(`line ${i} `);
+    capture.append('FINAL ERROR');
+    const text = capture.text();
+    expect(text.startsWith('line 0 line 1 line 2')).toBe(true);
+    expect(text.endsWith('FINAL ERROR')).toBe(true);
+    expect(text).toMatch(/… \(\d+ characters of output cut here; the start and the end are kept\) …/);
+    // Head + tail stay within the bound; only the marker is added.
+    const marker = text.match(/\n… .* …\n/)?.[0] ?? '';
+    expect(text.length - marker.length).toBeLessThanOrEqual(100);
+  });
+
+  it('defaults the timeout, honours timeoutSec within bounds', () => {
+    expect(terminalTimeoutMs(undefined)).toBe(300_000);
+    expect(terminalTimeoutMs(900)).toBe(900_000);
+    expect(terminalTimeoutMs(999_999)).toBe(1_800_000);
+    expect(terminalTimeoutMs(0)).toBe(300_000);
+    expect(terminalTimeoutMs('600')).toBe(300_000);
+  });
+
+  it('a real command whose error comes last still shows it', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'term-'));
+    const terminal = WORKSPACE_TOOLS.find((tool) => tool.definition.function.name === 'run_terminal');
+    const out = String(
+      await terminal?.execute(
+        { command: `node -e "console.log('a'.repeat(20000)); console.log('FINAL ERROR LINE')"` },
+        ctx(root),
+      ),
+    );
+    expect(out.split('\n')[1]).toBe('exit 0');
+    expect(out).toContain('FINAL ERROR LINE');
+    expect(out).toMatch(/characters of output cut here/);
   });
 });
