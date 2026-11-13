@@ -6,6 +6,51 @@
     "toolCalls": 3,
     "status": "incomplete",
     "limitReason": "limit.tokens: prompt token budget spent (12000 of 10000)",
+    "task": {
+      "phase": "blocked",
+      "iteration": 3,
+      "taskClass": "small",
+      "shape": "unknown",
+      "workingSet": [
+        {
+          "path": "f1.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 1
+        },
+        {
+          "path": "f2.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 2
+        },
+        {
+          "path": "f3.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 3
+        }
+      ],
+      "evidence": {
+        "edits": 0,
+        "failedEdits": 0,
+        "commands": [],
+        "toolErrors": 0,
+        "unverifiedSince": null,
+        "uncheckedFiles": [],
+        "lastCheck": null,
+        "reviewed": false,
+        "findings": []
+      },
+      "phaseIterations": {
+        "orient": 1,
+        "locate": 2
+      },
+      "childGaps": []
+    },
     "usage": {
       "own": {
         "promptTokens": 16000,
@@ -53,7 +98,8 @@
       "promptTokens": 3,
       "residentToolTokens": 0,
       "residueTokens": 0,
-      "prefixStableMessages": 0
+      "prefixStableMessages": 0,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -110,7 +156,8 @@
       "promptTokens": 14,
       "residentToolTokens": 5,
       "residueTokens": 7,
-      "prefixStableMessages": 1
+      "prefixStableMessages": 1,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -173,10 +220,11 @@
       "runId": "replay-run",
       "iteration": 3,
       "messages": 6,
-      "promptTokens": 113,
+      "promptTokens": 114,
       "residentToolTokens": 9,
       "residueTokens": 13,
-      "prefixStableMessages": 3
+      "prefixStableMessages": 3,
+      "cardTokens": 90
     },
     {
       "type": "llm_request",
@@ -239,7 +287,8 @@
       "promptTokens": 113,
       "residentToolTokens": 13,
       "residueTokens": 19,
-      "prefixStableMessages": 5
+      "prefixStableMessages": 5,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -307,7 +356,8 @@
         "phaseIterations": {
           "orient": 1,
           "locate": 2
-        }
+        },
+        "childGaps": []
       }
     },
     {
@@ -715,7 +765,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small unknown · ~121 tokens per call · 8k of 10k run budget used\nWorking set: f2.ts, f1.ts\nAdvice:\n- Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small unknown · ~121 tokens per call · run budget: 8k own of 10k used\nWorking set: f2.ts, f1.ts\nAdvice:\n- Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work."
       }
     ],
     [

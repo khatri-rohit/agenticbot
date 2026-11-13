@@ -5,6 +5,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import { CHARS_PER_TOKEN } from '@agent/agent-models';
 
 import { CARD_PREFIX } from '../context/residency';
+import { CARD_HEADER } from './state-card';
 
 export type ContextShape = {
   messages: number;
@@ -12,6 +13,8 @@ export type ContextShape = {
   residentToolTokens: number;
   residueTokens: number;
   prefixStableMessages: number;
+  /** The harness card on this call: the last user message, when it starts with CARD_HEADER; else 0. */
+  cardTokens: number;
 };
 
 function text(content: ChatCompletionMessageParam['content']): string {
@@ -66,6 +69,14 @@ export function measureContextShape(
       residue += args.length;
     }
   });
+  let card = 0;
+  for (let i = sent.length - 1; i >= 0; i--) {
+    const message = sent[i]!;
+    if (message.role !== 'user') continue;
+    const body = text(message.content);
+    if (body.startsWith(CARD_HEADER)) card = body.length;
+    break;
+  }
   let stable = 0;
   while (stable < keys.length && stable < previousKeys.length && keys[stable] === previousKeys[stable]) {
     stable += 1;
@@ -77,6 +88,7 @@ export function measureContextShape(
       residentToolTokens: tokens(resident),
       residueTokens: tokens(residue),
       prefixStableMessages: stable,
+      cardTokens: tokens(card),
     },
     keys,
   };

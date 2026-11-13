@@ -8,8 +8,10 @@ import {
   type InRunCompactionResult,
 } from '../context/residency';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { sha256Text } from '../tools/web/source';
 import { pathFromToolArgs } from './call-identity';
 import type { RunState } from './run-state';
+import { recordOverflowText } from './state-card';
 
 /**
  * Prompt-only residency after a tool turn, in this order:
@@ -45,6 +47,10 @@ export async function manageResidency(s: RunState): Promise<void> {
 
   const putBlob = (text: string) => s.webSources.putBlob(text);
 
+  await storeRecordOverflow(s, putBlob);
+  // Recap lines carry the step each folded call ran in.
+  const stepOf = (toolCallId: string) => s.task.callIteration(toolCallId);
+
   const milestone = atVerifiedMilestone(s);
   if (milestone) {
     const compacted = await compactCurrentRun(
@@ -53,7 +59,7 @@ export async function manageResidency(s: RunState): Promise<void> {
       s.contextBudget,
       s.tools.definitions,
       putBlob,
-      { milestone: true },
+      { milestone: true, stepOf },
     );
     if (compacted) traceFold(s, compacted, 'milestone');
   }
@@ -91,7 +97,12 @@ export async function manageResidency(s: RunState): Promise<void> {
     }
   }
 
-  const folded = await foldResidue(s.messages, s.runStart, s.contextBudget, s.tools.definitions);
+  // Without the card, the record_finding calls' arguments are the only copy
+  // of the findings: steps holding them do not fold.
+  const folded = await foldResidue(s.messages, s.runStart, s.contextBudget, s.tools.definitions, {
+    keepFindingCalls: !s.flags.stateCard,
+    stepOf,
+  });
   if (folded) traceFold(s, folded, 'residue');
 
   if (milestone || s.prefixHeavy) return;
@@ -101,6 +112,7 @@ export async function manageResidency(s: RunState): Promise<void> {
     s.contextBudget,
     s.tools.definitions,
     putBlob,
+    { stepOf },
   );
   if (!compacted) return;
   traceFold(s, compacted, undefined);
@@ -116,6 +128,23 @@ export async function manageResidency(s: RunState): Promise<void> {
       promptTokens: compacted.afterTokens,
     });
   }
+}
+
+/**
+ * Keep the whole task record recallable once it outgrows the card's record
+ * budget: store it as a blob (again only when it changed) and keep the sha
+ * on the run state for the card. Findings are never dropped from task
+ * state; this makes the ones the card cannot show reachable at 0 calls'
+ * search cost (one recall).
+ */
+async function storeRecordOverflow(s: RunState, putBlob: (text: string) => Promise<string>): Promise<void> {
+  if (!s.flags.stateCard) return;
+  const full = recordOverflowText(s.task.snapshot().evidence.findings, s.contextBudget.recordCardTokens);
+  if (full === null) return;
+  const key = sha256Text(full);
+  if (key === s.recordBlobKey) return;
+  s.recordBlobSha = await putBlob(full);
+  s.recordBlobKey = key;
 }
 
 /** Forget what a fold removed and trace it. `reason` undefined = the size mark. */

@@ -5,6 +5,28 @@
     "iterations": 1,
     "toolCalls": 2,
     "status": "completed",
+    "task": {
+      "phase": "report",
+      "iteration": 1,
+      "taskClass": "small",
+      "shape": "unknown",
+      "workingSet": [],
+      "evidence": {
+        "edits": 0,
+        "failedEdits": 0,
+        "commands": [],
+        "toolErrors": 0,
+        "unverifiedSince": null,
+        "uncheckedFiles": [],
+        "lastCheck": null,
+        "reviewed": false,
+        "findings": []
+      },
+      "phaseIterations": {
+        "orient": 1
+      },
+      "childGaps": []
+    },
     "usage": {
       "own": {
         "promptTokens": 2000,
@@ -52,7 +74,8 @@
       "promptTokens": 3,
       "residentToolTokens": 0,
       "residueTokens": 0,
-      "prefixStableMessages": 0
+      "prefixStableMessages": 0,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -101,7 +124,8 @@
       "promptTokens": 203,
       "residentToolTokens": 34,
       "residueTokens": 32,
-      "prefixStableMessages": 1
+      "prefixStableMessages": 1,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -154,7 +178,8 @@
         },
         "phaseIterations": {
           "orient": 1
-        }
+        },
+        "childGaps": []
       }
     },
     {

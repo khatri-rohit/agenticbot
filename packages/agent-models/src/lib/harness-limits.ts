@@ -58,19 +58,17 @@ export function liveResultCapChars(toolName: string | undefined, fallback: numbe
 }
 
 /**
- * Findings a run keeps (record_finding), and the size of each part. The cap
- * is high on purpose: a dropped finding is research the model must redo (a
- * 12-section fact sheet records ~100 facts).
+ * Findings a run keeps (record_finding), and the size of each part. A
+ * finding is the one item in context that cannot be recovered (P4: it is
+ * derived, not read), so the cap is a safety bound on memory, not a working
+ * limit: a 12-section fact sheet records ~100 facts, and at the part caps
+ * 1,000 findings are under 1 MB. What the card cannot show is stored whole
+ * as a blob (see ContextBudget.recordCardTokens), so the card's size never
+ * limits the record.
  */
-export const FINDINGS_MAX = 200;
+export const FINDINGS_MAX = 1_000;
 export const FINDING_CLAIM_MAX_CHARS = 400;
 export const FINDING_EVIDENCE_MAX_CHARS = 200;
-/**
- * Characters of findings the harness card shows (~6k tokens), newest first.
- * Typical findings are ~120 characters, so ~200 fit; past it, the oldest
- * are counted, not shown.
- */
-export const RECORD_CARD_MAX_CHARS = 24_000;
 
 /**
  * Sub-agent report: the child writes at most this much and the parent's

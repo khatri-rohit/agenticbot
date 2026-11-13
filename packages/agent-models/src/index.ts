@@ -172,6 +172,7 @@ export type {
   SubagentReport,
   SubagentResult,
   SubagentSpec,
+  SubagentReportStatus,
   SubagentStatus,
   SubagentThoroughness,
 } from './lib/subagent.js';
@@ -303,7 +304,6 @@ export {
   FINDING_CLAIM_MAX_CHARS,
   FINDING_EVIDENCE_MAX_CHARS,
   FINDINGS_MAX,
-  RECORD_CARD_MAX_CHARS,
   GLOB_MAX_RESULTS,
   GREP_WINDOW,
   MAX_CONCURRENT_SUBAGENTS,

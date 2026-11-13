@@ -92,6 +92,26 @@ describe('harness health', () => {
     expect(computeHealth(ignored, 2_000).advice.byKind['open:unrecorded']).toEqual({ shown: 1, followed: 0 });
   });
 
+  it('scores the re-read item by whether the named files are restored again or recorded', () => {
+    const restored = (iteration: number, path: string) =>
+      ({ type: 'context_restored', runId, iteration, toolCallId: `x${++id}`, path }) as TraceLine;
+    const card = { type: 'policy_decision', runId, iteration: 3, kind: 'card', ids: ['open:reread'] } as TraceLine;
+    const base = [...step(1, [read('a.ts')]), ...step(2, [read('a.ts')]), restored(2, 'a.ts'), card];
+
+    // Restored again in the window, nothing recorded: not followed.
+    const again = [...base, ...step(3, [read('a.ts')]), restored(3, 'a.ts')];
+    expect(computeHealth(again, 3_000).advice.byKind['open:reread']).toEqual({ shown: 1, followed: 0 });
+
+    // A finding cites it (even with another restore): followed.
+    const finding = { name: 'record_finding', args: { claim: 'c', evidence: 'a.ts:1' }, preview: 'Recorded (verified) — evidence: a.ts:1' };
+    const cited = [...base, ...step(3, [read('a.ts'), finding]), restored(3, 'a.ts')];
+    expect(computeHealth(cited, 3_000).advice.byKind['open:reread']).toEqual({ shown: 1, followed: 1 });
+
+    // No further restore of it: followed.
+    const quiet = [...base, ...step(3, [read('b.ts')])];
+    expect(computeHealth(quiet, 3_000).advice.byKind['open:reread']).toEqual({ shown: 1, followed: 1 });
+  });
+
   it('flags low-effort steps that make no progress; searches alone are not progress', () => {
     const lines = [
       ...step(1, [read('a.ts')], 'none'),

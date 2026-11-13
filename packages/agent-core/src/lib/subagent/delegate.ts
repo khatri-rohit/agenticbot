@@ -22,7 +22,9 @@ ${profiles.map((profile) => `- ${profile.name}: ${profile.description}`).join('\
 Rules:
 - Delegate wide reading (more than ~5 files, several searches, or web research) to explore. Answer it yourself when a couple of reads will do.
 - One explore per question. Start several only for clearly separate areas (different folders or files), and split them by area, never by sections of your answer: children with overlapping scope read the same files and cost the run several times over.
-- Effort is a budget: ${EFFORT_TEXT}. The child stops at it. Pick the smallest that fits; explore defaults to medium.
+- Effort is a budget: ${EFFORT_TEXT}. The child stops at it. A new brief gets at most medium (explore's default); thorough is granted when you resume a sub-agent whose report came back partial.
+- Name the files or folders a brief covers in paths: a brief whose paths overlap a running sub-agent's is refused.
+- The child's findings join your record; its report lists open questions. Check those gaps, not its findings.
 - Trust the report: it cites path:line for each finding. Check only what it marks uncertain or lists as open; do not repeat its search.
 - For a change beyond a file or two, run review once after your edits pass the check; skip it for a small change. Fix findings inside the user's request; list the rest instead of acting on them.
 - Use advisor when stuck, with one specific question.
@@ -62,7 +64,12 @@ export function createDelegateTool(profiles: SubagentProfile[]): Tool {
             thoroughness: {
               type: 'string',
               enum: [...THOROUGHNESS],
-              description: `Optional effort budget: ${EFFORT_TEXT}. The child stops at it. Explore defaults to medium.`,
+              description: `Optional effort budget: ${EFFORT_TEXT}. The child stops at it. A new brief gets at most medium; thorough applies when resuming a partial sub-agent.`,
+            },
+            paths: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional: workspace files or folders this brief covers. Overlap with a running sub-agent is refused.',
             },
             resume: {
               type: 'string',
@@ -110,6 +117,9 @@ export function createDelegateTool(profiles: SubagentProfile[]): Tool {
           ? { thoroughness: thoroughness as SubagentSpec['thoroughness'] }
           : {}),
         ...(text('resume') ? { resume: text('resume') } : {}),
+        ...(Array.isArray(args.paths)
+          ? { paths: (args.paths as unknown[]).filter((entry): entry is string => typeof entry === 'string') }
+          : {}),
       };
       const result = await ctx.spawnSubagent(spec);
       return `${encodeSubagentHeader(result)}\n\n${result.digest}`;

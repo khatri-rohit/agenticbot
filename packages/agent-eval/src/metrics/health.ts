@@ -22,6 +22,8 @@ export type HealthMetrics = {
   restores: number;
   /** Findings recorded with record_finding (research evidence). */
   findings: number;
+  /** Findings merged in from sub-agents (`child_findings`), counted apart from this run's own. */
+  childFindings: number;
   /** Identical searches (grep/glob, same arguments) with no edit between. */
   repeatSearches: { searches: number; repeats: number; rate: number | null };
   /** Repeated reads/fetches the guard answered instead of running or ending the run. */
@@ -119,12 +121,49 @@ function followed(id: string, window: StepTool[][], answered: boolean): boolean 
     return !all.some((tool) => tool.name === 'read_file' && pathOf(tool.args) === path && isPartialRead(tool));
   }
   if (id === 'advice:stall') return answered || all.some((tool) => isEdit(tool) || isFinding(tool));
+  // Retired card item (now `open:reread`); still scored for older traces.
   if (id === 'open:unrecorded') return all.some(isFinding);
   if (id === 'advice:budget') return answered;
   if (id === 'advice:one_shot' || id === 'open:review') return all.some((tool) => tool.name === 'delegate');
   if (id === 'open:unchecked') return all.some(isCheck);
   if (id === 'open:check_failed') return all.some((tool) => isEdit(tool) || isCheck(tool));
   return false;
+}
+
+const normalPath = (path: string) => path.replace(/\\/g, '/').replace(/^\.\//, '');
+
+/** Does this record_finding call cite `path` (its evidence argument or the evidence its result recorded)? */
+function citesPath(tool: StepTool, path: string): boolean {
+  if (!isFinding(tool)) return false;
+  const evidence = `${typeof tool.args.evidence === 'string' ? tool.args.evidence : ''}\n${tool.preview}`;
+  return normalPath(evidence).includes(path);
+}
+
+/**
+ * `open:reread` (files read again after removal that no finding cites): the
+ * paths it named are rebuilt from the trace (restores before the card's step,
+ * minus paths a finding cited before it). Followed when none of them is
+ * restored again in the window, or a finding in the window cites one.
+ */
+function rereadFollowed(
+  lines: TraceLine[],
+  byStep: Map<number, StepTool[]>,
+  iterations: number[],
+  cardIteration: number,
+): boolean {
+  const restores = linesOf(lines, 'context_restored').map((line) => ({ iteration: line.iteration, path: normalPath(line.path) }));
+  const before = iterations.filter((iteration) => iteration < cardIteration).flatMap((iteration) => byStep.get(iteration) ?? []);
+  const paths = new Set(
+    restores
+      .filter((restore) => restore.iteration < cardIteration)
+      .map((restore) => restore.path)
+      .filter((path) => !before.some((tool) => citesPath(tool, path))),
+  );
+  if (paths.size === 0) return false;
+  const inWindow = (iteration: number) => iteration >= cardIteration && iteration < cardIteration + ADVICE_WINDOW;
+  const window = iterations.filter(inWindow).flatMap((iteration) => byStep.get(iteration) ?? []);
+  if ([...paths].some((path) => window.some((tool) => citesPath(tool, path)))) return true;
+  return !restores.some((restore) => inWindow(restore.iteration) && paths.has(restore.path));
 }
 
 /** `advice:read_creep:src/a.ts` → `advice:read_creep`. */
@@ -236,7 +275,8 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
       const answered = [...answeredAt].some(
         (iteration) => iteration >= card.iteration && iteration < card.iteration + ADVICE_WINDOW,
       );
-      const ok = followed(id, window, answered);
+      const ok =
+        id === 'open:reread' ? rereadFollowed(lines, byStep, iterations, card.iteration) : followed(id, window, answered);
       const kind = (byKind[kindOf(id)] ??= { shown: 0, followed: 0 });
       kind.shown += 1;
       shown += 1;
@@ -265,6 +305,7 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
     reReads: { reads, sameRange, rate: ratio(sameRange, reads) },
     restores: linesOf(lines, 'context_restored').length,
     findings,
+    childFindings: linesOf(lines, 'child_findings').reduce((sum, line) => sum + line.findings.length, 0),
     repeatSearches: { searches, repeats, rate: ratio(repeats, searches) },
     guardAnswered: linesOf(lines, 'policy_decision').filter((line) => line.kind === 'guard').length,
     advice: { shown, followed: followedCount, rate: ratio(followedCount, shown), byKind },

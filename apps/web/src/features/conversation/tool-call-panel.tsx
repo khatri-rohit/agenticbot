@@ -540,13 +540,31 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
     /\n\n(\((?:read_file truncated|continue with)[^\n]*\))$/,
   );
   if (note) body = body.slice(0, note.index);
-  const lines = body.split('\n');
+  const rawLines = body.split('\n');
+  // Newer results number each line "N<TAB>text"; older ones are plain. The
+  // number feeds the gutter and is stripped from the text and from copy.
+  const numbered =
+    rawLines.length > 0 &&
+    /^\s*\d+\t/.test(rawLines[0] ?? '') &&
+    rawLines.every((line) => line === '' || /^\s*\d+\t/.test(line));
+  const lines = numbered
+    ? rawLines.map((line) => {
+        const match = /^\s*(\d+)\t/.exec(line);
+        return match
+          ? { n: Number(match[1]), text: line.slice(match[0].length) }
+          : { n: undefined, text: line };
+      })
+    : rawLines.map((line, i) => ({ n: firstLine + i, text: line }));
+  const lastLine =
+    [...lines].reverse().find((line) => line.n !== undefined)?.n ??
+    firstLine + lines.length - 1;
   const label = header
-    ? `File · lines ${firstLine}–${firstLine + lines.length - 1} of ${header[2]}`
+    ? `File · lines ${firstLine}–${lastLine} of ${header[2]}`
     : `File · ${lines.length} lines`;
+  const copyText = numbered ? lines.map((line) => line.text).join('\n') : content;
   return (
     <div className="min-w-0">
-      <PreviewHeader label={label} onCopy={<CopyButton text={content} />} />
+      <PreviewHeader label={label} onCopy={<CopyButton text={copyText} />} />
       <pre
         className={cn(
           PREVIEW_SCROLL,
@@ -556,9 +574,9 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
         {lines.map((line, i) => (
           <span key={i} className="block">
             <span className="mr-3 inline-block w-8 shrink-0 select-none text-right text-muted-foreground/40 tabular-nums">
-              {firstLine + i}
+              {line.n ?? ''}
             </span>
-            <span>{line}</span>
+            <span>{line.text}</span>
           </span>
         ))}
       </pre>

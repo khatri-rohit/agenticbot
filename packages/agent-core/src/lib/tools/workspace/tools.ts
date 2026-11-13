@@ -99,6 +99,8 @@ function formatEditReport(input: {
   after: string;
   removed?: string;
   added?: string;
+  /** One line on what edit_file corrected in the call (e.g. stripped read numbers). */
+  note?: string;
 }): string {
   const beforeLines = lineCount(input.before);
   const afterLines = lineCount(input.after);
@@ -111,6 +113,7 @@ function formatEditReport(input: {
       : 'uniqueness: ok (1 match)',
     `lines: ${beforeLines} → ${afterLines} (${deltaLabel})`,
     `bytes: ${Buffer.byteLength(input.before)} → ${Buffer.byteLength(input.after)}`,
+    ...(input.note ? [input.note] : []),
   ];
   if (input.action === 'created') {
     return `${header.join('\n')}\n\n--- added ---\n${clipHunk(input.after)}`;
@@ -435,7 +438,7 @@ export const readFileTool: Tool = {
     type: 'function',
     function: {
       name: 'read_file',
-      description: `Read a text file inside the open workspace. Returns the whole file when it fits (up to ${WORKSPACE_READ_MAX_LINES} lines / ${WORKSPACE_READ_MAX_CHARS} chars); larger files return a window from offset.`,
+      description: `Read a text file inside the open workspace. Returns the whole file when it fits (up to ${WORKSPACE_READ_MAX_LINES} lines / ${WORKSPACE_READ_MAX_CHARS} chars); larger files return a window from offset. Each line starts with its line number and a tab; the number and tab are not part of the file.`,
       parameters: {
         type: 'object',
         properties: {
@@ -466,6 +469,7 @@ export const readFileTool: Tool = {
       'Pass a relative path from glob/grep.',
       'Read before edit_file so oldText is a unique span from this file.',
       'Output starts with [lines a–b of N]; it is not file content. A cut read names the offset to continue from.',
+      'Each line is numbered (`12<tab>text`, like cat -n): cite path:line from that number. The number and tab are not part of the file; leave them out of edit_file oldText/newText.',
       'Read the whole file: omit offset and limit. A file that fits is returned whole anyway, so slices only add calls.',
       'Only for a file larger than the window: grep for the anchor line (grep returns path:line), then read from that offset.',
     ],
@@ -498,10 +502,21 @@ export const readFileTool: Tool = {
  */
 export const WORKSPACE_READ_MIN_LINES = READ_WINDOW.minLines;
 
+/** Chars the `${n}\t` prefixes add to lines 1..total. */
+function numberingChars(total: number): number {
+  let chars = 0;
+  for (let n = 1; n <= total; n++) chars += String(n).length + 1;
+  return chars;
+}
+
 /**
- * read_file result: a `[lines a–b of N]` header, then the raw lines (no
- * per-line numbers, so spans copy cleanly into edit_file oldText). Cuts on a
- * line boundary and names the offset to continue from.
+ * read_file result: a `[lines a–b of N]` header, then the lines, each with
+ * its absolute line number and a tab (`12\tconst x = 1;`, like `cat -n`).
+ * Models cite `path:line` from what they read; counting lines by hand in an
+ * unnumbered window put citations off by tens to hundreds of lines. edit_file
+ * strips pasted prefixes (see stripReadNumbers). Cuts on a line boundary and
+ * names the offset to continue from. WORKSPACE_READ_MAX_CHARS bounds the
+ * numbered text, so the live cap (liveResultCapChars) never cuts it again.
  *
  * The unit of a read is the file: when the whole file fits the read window
  * (WORKSPACE_READ_MAX_LINES lines and WORKSPACE_READ_MAX_CHARS chars) it is
@@ -523,7 +538,7 @@ export function formatFileRead(
   const fitsWhole =
     !partial &&
     total <= WORKSPACE_READ_MAX_LINES &&
-    text.length <= WORKSPACE_READ_MAX_CHARS;
+    text.length + numberingChars(total) <= WORKSPACE_READ_MAX_CHARS;
   const askedOffset =
     typeof offsetRaw === 'number' && offsetRaw > 1 ? Math.floor(offsetRaw) : 1;
   const offset = fitsWhole ? 1 : askedOffset;
@@ -541,7 +556,7 @@ export function formatFileRead(
   const start = offset - 1;
   const end = Math.min(total, start + limit);
 
-  const first = all[start] ?? '';
+  const first = `${offset}\t${all[start] ?? ''}`;
   if (first.length > WORKSPACE_READ_MAX_CHARS) {
     const next = offset < total ? `\n\n(continue with offset=${offset + 1})` : '';
     return `[line ${offset} of ${of}; line cut at ${WORKSPACE_READ_MAX_CHARS} chars]\n${first.slice(0, WORKSPACE_READ_MAX_CHARS)}${next}`;
@@ -550,7 +565,7 @@ export function formatFileRead(
   const kept: string[] = [];
   let chars = 0;
   for (let i = start; i < end; i++) {
-    const line = all[i] ?? '';
+    const line = `${i + 1}\t${all[i] ?? ''}`;
     if (kept.length > 0 && chars + line.length + 1 > WORKSPACE_READ_MAX_CHARS) break;
     kept.push(line);
     chars += line.length + 1;
@@ -564,6 +579,46 @@ export function formatFileRead(
         ? `\n\n(window ends at line ${last} of ${of} — continue with offset=${last + 1})`
         : '';
   return `${header}\n${kept.join('\n')}${footer}`;
+}
+
+/** The `12\t` prefix read_file puts on each line. */
+const READ_NUMBER_RE = /^\s*\d+\t/;
+
+/**
+ * `text` without read_file's line-number prefixes, when every non-empty line
+ * carries one (a span pasted from a numbered read); otherwise null.
+ */
+export function stripReadNumbers(text: string): string | null {
+  const lines = text.split('\n');
+  const body = lines.filter((line) => line.trim().length > 0);
+  if (body.length === 0 || !body.every((line) => READ_NUMBER_RE.test(line))) return null;
+  return lines.map((line) => line.replace(READ_NUMBER_RE, '')).join('\n');
+}
+
+/**
+ * The span edit_file matches: oldText as given when it is in the file;
+ * otherwise, when oldText was pasted with read_file's line numbers and the
+ * span without them is in the file, the stripped span (and newText stripped
+ * too when all its lines carry numbers). The raw span wins, so a file whose
+ * own lines look like `12\t…` (TSV) is matched as written.
+ */
+function spanWithoutReadNumbers(
+  oldText: string,
+  newText: string,
+  count: (span: string) => number,
+): { oldText: string; newText: string; note?: string } {
+  if (count(oldText) > 0) return { oldText, newText };
+  const old = stripReadNumbers(oldText);
+  if (old === null || count(old) === 0) return { oldText, newText };
+  const replacement = stripReadNumbers(newText);
+  return {
+    oldText: old,
+    newText: replacement ?? newText,
+    note:
+      replacement === null
+        ? 'note: removed read_file line numbers from oldText'
+        : 'note: removed read_file line numbers from oldText and newText',
+  };
 }
 
 /** edit_file results start with "Created" or "Patched" on success (see the change report above). */
@@ -607,7 +662,7 @@ export const editFileTool: Tool = {
       'The path is not in the working set from glob, grep, or a prior read.',
     ],
     usage: [
-      'For existing files, oldText must match exactly once.',
+      'For existing files, oldText must match exactly once. Copy it from read_file without the line-number prefixes.',
       'For a new file, omit oldText and pass newText as the full contents.',
       'The result is a change report (path, created or patched, line/byte delta, hunk). Read it before the next step.',
     ],
@@ -664,28 +719,39 @@ export const editFileTool: Tool = {
     // Mixed-EOL file: normalizing then re-expanding would rewrite every line
     // to one style. Fall back to exact match on the original string.
     if (hasCrlf && hasBareLf) {
-      const exactCount = existing.split(oldText).length - 1;
+      const span = spanWithoutReadNumbers(
+        oldText,
+        newText,
+        (text) => existing.split(text).length - 1,
+      );
+      const exactCount = existing.split(span.oldText).length - 1;
       if (exactCount === 0) {
         return `oldText span not found in ${relPath}. Re-read the file and copy an exact unique span.`;
       }
       if (exactCount > 1) {
         return `oldText span matches ${exactCount} times in ${relPath}. Re-read the file and use a longer unique span.`;
       }
-      const next = replaceOnce(existing, oldText, newText);
+      const next = replaceOnce(existing, span.oldText, span.newText);
       await writeFile(resolved.abs, next, 'utf8');
       return formatEditReport({
         action: 'patched',
         relPath,
         before: existing,
         after: next,
-        removed: oldText,
-        added: newText,
+        removed: span.oldText,
+        added: span.newText,
+        note: span.note,
       });
     }
     const fileEol = hasCrlf ? '\r\n' : '\n';
     const normalized = existing.replace(/\r\n/g, '\n');
-    const normalizedOld = oldText.replace(/\r\n/g, '\n');
-    const normalizedNew = newText.replace(/\r\n/g, '\n');
+    const span = spanWithoutReadNumbers(
+      oldText.replace(/\r\n/g, '\n'),
+      newText.replace(/\r\n/g, '\n'),
+      (text) => normalized.split(text).length - 1,
+    );
+    const normalizedOld = span.oldText;
+    const normalizedNew = span.newText;
     const count = normalized.split(normalizedOld).length - 1;
     if (count === 0) {
       return `oldText span not found in ${relPath}. Re-read the file and copy an exact unique span.`;
@@ -704,8 +770,9 @@ export const editFileTool: Tool = {
       relPath,
       before: existing,
       after: next,
-      removed: oldText,
-      added: newText,
+      removed: normalizedOld,
+      added: normalizedNew,
+      note: span.note,
     });
   },
 };

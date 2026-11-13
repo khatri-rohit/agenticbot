@@ -162,16 +162,34 @@ describe('manageWorkingSet', () => {
     expect(contentOf(messages, 'r')).toMatch(/^rest of report/);
   });
 
-  it('removes reads of a file a finding cites, in a batched pass', async () => {
+  it('a cited read is not stale on its own: under the cap it stays', async () => {
     const calls: Call[] = [
       { id: 'a', name: 'read_file', args: { path: 'a.ts' }, result: read(1, 50, 50, 3_000), iteration: 1 },
       { id: 'b', name: 'read_file', args: { path: 'b.ts' }, result: read(1, 50, 50, 3_000), iteration: 1 },
     ];
     const messages = transcript(calls);
     const cited = { ...view(calls, 2), isCited: (path: string) => path === 'a.ts' };
-    const result = await manageWorkingSet(messages, 1, budget(), [], blob, pathOf, cited);
-    expect(result?.byReason).toEqual({ cited: ['a'] });
-    expect(contentOf(messages, 'b')).toMatch(/^\[lines/);
+    expect(await manageWorkingSet(messages, 1, budget(), [], blob, pathOf, cited)).toBeNull();
+    expect(contentOf(messages, 'a')).toMatch(/^\[lines/);
+  });
+
+  it('past the cap, cited reads leave first (traced cited), then least recently touched', async () => {
+    const calls: Call[] = [
+      { id: 'a', name: 'read_file', args: { path: 'a.ts' }, result: read(1, 50, 50, 8_000), iteration: 1 },
+      { id: 'b', name: 'read_file', args: { path: 'b.ts' }, result: read(1, 50, 50, 8_000), iteration: 2 },
+      { id: 'c', name: 'read_file', args: { path: 'c.ts' }, result: read(1, 50, 50, 8_000), iteration: 2 },
+      { id: 'd', name: 'read_file', args: { path: 'd.ts' }, result: read(1, 50, 50, 8_000), iteration: 3 },
+    ];
+    const messages = transcript(calls);
+    // ~8k tokens resident against a 5k cap (low mark 2.5k): three of four go.
+    // c is cited, so it goes before the older a; then a, then b.
+    const cited = { ...view(calls, 3), isCited: (path: string) => path === 'c.ts' };
+    const result = await manageWorkingSet(
+      messages, 1, budget({ inRunResidentToolTokens: 5_000, inRunClearAtLeastTokens: 100_000 }), [], blob, pathOf, cited,
+    );
+    expect(result?.byReason).toEqual({ cited: ['c'], budget: ['b', 'a'] });
+    expect(contentOf(messages, 'c')).toMatch(/ · cited · /);
+    expect(contentOf(messages, 'd')).toMatch(/^\[lines/);
   });
 
   it('makes no pass under the cap when stale results would free too little', async () => {
@@ -179,8 +197,7 @@ describe('manageWorkingSet', () => {
       { id: 'a', name: 'read_file', args: { path: 'a.ts' }, result: read(1, 50, 50, 1_000), iteration: 1 },
     ];
     const messages = transcript(calls);
-    const cited = { ...view(calls, 2), isCited: () => true };
-    expect(await manageWorkingSet(messages, 1, budget({ inRunClearAtLeastTokens: 5_000 }), [], blob, pathOf, cited)).toBeNull();
+    expect(await manageWorkingSet(messages, 1, budget({ inRunClearAtLeastTokens: 5_000 }), [], blob, pathOf, view(calls, 9))).toBeNull();
   });
 });
 
@@ -274,6 +291,34 @@ describe('foldResidue', () => {
     expect(two).toBeLessThan(c0);
     expect(c0).toBeLessThan(c9);
     expect(pairingValid(messages)).toBe(true);
+  });
+
+  it('prefixes each recap line with its step, so steps kept in place stay in order', async () => {
+    const messages = steps(12, [3]);
+    // Steps ran at iterations 10 + index (task state's record), not their position.
+    await foldResidue(messages, 1, small, [], { stepOf: (id) => 10 + Number(id.slice(1)) });
+    const recap = String(messages[1]?.content);
+    expect(recap).toMatch(/^\[step 10\] read_file .*f0\.ts/m);
+    expect(recap).toMatch(/^\[step 14\] read_file .*f4\.ts/m);
+    expect(recap).not.toMatch(/\[step 13\]/);
+    // Without a step source, the step's position among the run's steps.
+    const plain = steps(12);
+    await foldResidue(plain, 1, small, []);
+    expect(String(plain[1]?.content)).toMatch(/^\[step 1\] read_file .*f0\.ts/m);
+  });
+
+  it('keeps steps with record_finding calls when asked (no card: their arguments are the only copy)', async () => {
+    const messages = steps(12);
+    messages[5] = {
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id: 'f', type: 'function', function: { name: 'record_finding', arguments: '{"claim":"c","evidence":"a.ts:1"}' } }],
+    };
+    messages[6] = { role: 'tool', tool_call_id: 'f', content: 'Recorded (verified) — evidence: a.ts:1' };
+    const kept = await foldResidue(structuredClone(messages), 1, small, [], { keepFindingCalls: true });
+    expect(kept?.toolCallIds).not.toContain('f');
+    const folded = await foldResidue(messages, 1, small, []);
+    expect(folded?.toolCallIds).toContain('f');
   });
 
   it('never folds the newest keep-N steps', async () => {

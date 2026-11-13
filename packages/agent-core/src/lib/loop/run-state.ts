@@ -106,6 +106,13 @@ export type RunState = {
   readonly advisories: string[];
   /** Fingerprints of the previous call's messages, for the prefix-stability measure. */
   promptKeys: string[];
+  /**
+   * Blob of the whole task record, stored by the residency pass when the
+   * record outgrows the card's budget; the card names it for recall.
+   */
+  recordBlobSha: string | undefined;
+  /** Local hash of the record text that blob holds, so it is stored again only when the record changed. */
+  recordBlobKey: string | undefined;
 };
 
 export function createRunState(
@@ -210,6 +217,8 @@ export function createRunState(
     reportOnlyTurns: 0,
     advisories: [],
     promptKeys: [],
+    recordBlobSha: undefined,
+    recordBlobKey: undefined,
   };
   return state;
 }

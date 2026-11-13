@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { TraceEvent } from '@agent/agent-models';
 
-import { citedPath, inferTaskShape, isCheckCommand, TaskStateTracker } from './task-state';
+import {
+  citedPath,
+  evidenceParts,
+  inferTaskShape,
+  isCheckCommand,
+  parseCitation,
+  TaskStateTracker,
+} from './task-state';
 
 const runId = 'r1';
 const request = (iteration: number): TraceEvent => ({ type: 'llm_request', runId, iteration });
@@ -21,6 +28,16 @@ const complete = (
   resultPreview: string,
   extra: Partial<Extract<TraceEvent, { type: 'tool_complete' }>> = {},
 ): TraceEvent => ({ type: 'tool_complete', runId, iteration, toolName, toolCallId: id, durationMs: 0, resultPreview, ...extra });
+
+/** A record_finding call and its result (the tool's own wording by default). */
+const finding = (
+  iteration: number,
+  id: string,
+  args: { claim: string; evidence: string; topic?: string },
+  result = args.claim && args.evidence
+    ? `Recorded (verified) — evidence: ${args.evidence}`
+    : 'Error: record_finding needs both "claim" and "evidence".',
+): TraceEvent[] => [start(iteration, id, 'record_finding', args), complete(iteration, id, 'record_finding', result)];
 
 function feed(tracker: TaskStateTracker, events: TraceEvent[]) {
   return events.map((event) => tracker.apply(event)).filter((change) => change !== null);
@@ -245,9 +262,12 @@ describe('task shape and findings', () => {
     const tracker = new TaskStateTracker();
     feed(tracker, [{ type: 'run_start', runId, model: 'm', taskShape: 'unknown' }, request(1)]);
     // An incomplete finding is no evidence.
-    feed(tracker, [start(1, 'f0', 'record_finding', { claim: 'x', evidence: '' })]);
+    feed(tracker, finding(1, 'f0', { claim: 'x', evidence: '' }));
     expect(tracker.shape).toBe('unknown');
+    // Recorded when the result comes back, not when the call starts.
     feed(tracker, [start(1, 'f1', 'record_finding', { claim: 'Port is 3000', evidence: 'src/main.ts:12' })]);
+    expect(tracker.shape).toBe('unknown');
+    feed(tracker, [complete(1, 'f1', 'record_finding', 'Recorded (verified) — evidence: src/main.ts:12')]);
     expect(tracker.shape).toBe('research');
     feed(tracker, [
       request(2),
@@ -256,7 +276,7 @@ describe('task shape and findings', () => {
     ]);
     expect(tracker.shape).toBe('change');
     // A later finding does not take the change back.
-    feed(tracker, [request(3), start(3, 'f2', 'record_finding', { claim: 'Port is now 4000', evidence: 'src/main.ts:12' })]);
+    feed(tracker, [request(3), ...finding(3, 'f2', { claim: 'Port is now 4000', evidence: 'src/main.ts:12' })]);
     expect(tracker.shape).toBe('change');
   });
 
@@ -264,14 +284,15 @@ describe('task shape and findings', () => {
     const tracker = new TaskStateTracker();
     feed(tracker, [
       request(3),
-      start(3, 'f1', 'record_finding', { claim: 'Max 20 tiles', evidence: 'src/TileRibbon.tsx:104; src/IndividualTile.tsx:370-371' }),
-      start(3, 'f2', 'record_finding', { claim: 'Max 20 tiles', evidence: 'src/TileRibbon.tsx:104' }),
-      start(3, 'f3', 'record_finding', { claim: 'No evidence given', evidence: '' }),
-      start(3, 'f4', 'record_finding', { claim: 'Docs say so', evidence: 'https://example.com/page' }),
+      ...finding(3, 'f1', { claim: 'Max 20 tiles', evidence: 'src/TileRibbon.tsx:104; src/IndividualTile.tsx:370-371' }),
+      ...finding(3, 'f2', { claim: 'Max 20 tiles', evidence: 'src/TileRibbon.tsx:104' }),
+      ...finding(3, 'f3', { claim: 'No evidence given', evidence: '' }),
+      ...finding(3, 'f4', { claim: 'Docs say so', evidence: 'https://example.com/page' }, 'Recorded (verification skipped) — evidence: https://example.com/page'),
     ]);
     const findings = tracker.snapshot().evidence.findings;
     expect(findings.map((finding) => finding.claim)).toEqual(['Max 20 tiles', 'Docs say so']);
-    expect(findings[0]).toMatchObject({ iteration: 3 });
+    expect(findings[0]).toMatchObject({ iteration: 3, verification: 'verified' });
+    expect(findings[1]).toMatchObject({ verification: 'skipped' });
     expect(tracker.findingCount).toBe(2);
     expect(tracker.isCited('src/TileRibbon.tsx')).toBe(true);
     expect(tracker.isCited('src/IndividualTile.tsx')).toBe(true);
@@ -285,5 +306,54 @@ describe('task shape and findings', () => {
     expect(citedPath('https://x.dev/a')).toBeNull();
     expect(citedPath('"Maximum tile limit"')).toBeNull();
     expect(citedPath('somewhere')).toBeNull();
+  });
+
+  it('parses citations with ranges in either dash', () => {
+    expect(parseCitation('src/a.ts:490–498')).toEqual({ path: 'src/a.ts', from: 490, to: 498 });
+    expect(parseCitation('src/a.ts:30-12 (the cap)')).toEqual({ path: 'src/a.ts', from: 12, to: 30 });
+    expect(parseCitation('src/a.ts')).toEqual({ path: 'src/a.ts' });
+    expect(parseCitation('https://x.dev/a:3')).toBeNull();
+    expect(evidenceParts('a.ts:1; b.ts:2, c.ts')).toEqual(['a.ts:1', 'b.ts:2', 'c.ts']);
+  });
+
+  it('records the evidence the tool checked and corrected, with claim and topic from the call', () => {
+    const tracker = new TaskStateTracker();
+    feed(tracker, [
+      request(2),
+      ...finding(
+        2,
+        'f1',
+        { claim: 'The cap is "Maximum tile limit"', evidence: 'src/a.ts:490-498', topic: 'Limits' },
+        'Recorded (evidence corrected: "Maximum tile limit" is at src/a.ts:516, not 490-498) — evidence: src/a.ts:516\nThe record cites the corrected lines; cite those in the answer.',
+      ),
+    ]);
+    expect(tracker.snapshot().evidence.findings).toEqual([
+      { claim: 'The cap is "Maximum tile limit"', evidence: 'src/a.ts:516', topic: 'Limits', iteration: 2, verification: 'corrected' },
+    ]);
+    expect(tracker.isCited('src/a.ts')).toBe(true);
+  });
+
+  it('falls back to the call evidence when the result preview was cut, and lets checked evidence replace unverified', () => {
+    const tracker = new TaskStateTracker();
+    const cut = `Recorded (unverified: ${'x'.repeat(300)}`.slice(0, 300) + '...';
+    feed(tracker, finding(1, 'f1', { claim: 'C', evidence: 'src/b.ts:4' }, cut));
+    expect(tracker.snapshot().evidence.findings[0]).toMatchObject({ evidence: 'src/b.ts:4', verification: 'unverified' });
+    // The same claim again with checked evidence replaces it; an unverified repeat would not.
+    feed(tracker, finding(2, 'f2', { claim: 'C', evidence: 'src/b.ts:9' }, 'Recorded (verified) — evidence: src/b.ts:9'));
+    feed(tracker, finding(3, 'f3', { claim: 'C', evidence: 'src/b.ts:1' }, 'Recorded (unverified: x) — evidence: src/b.ts:1'));
+    expect(tracker.snapshot().evidence.findings).toEqual([
+      expect.objectContaining({ claim: 'C', evidence: 'src/b.ts:9', verification: 'verified' }),
+    ]);
+  });
+
+  it('lists restored files no finding cites, until one does', () => {
+    const tracker = new TaskStateTracker();
+    feed(tracker, [
+      { type: 'context_restored', runId, iteration: 4, toolCallId: 'r1', path: 'src/a.ts' },
+      { type: 'context_restored', runId, iteration: 5, toolCallId: 'r2', path: 'src/b.ts' },
+    ]);
+    expect(tracker.uncitedRestoredPaths()).toEqual(['src/a.ts', 'src/b.ts']);
+    feed(tracker, finding(6, 'f1', { claim: 'A sets it', evidence: './src/a.ts:3' }));
+    expect(tracker.uncitedRestoredPaths()).toEqual(['src/b.ts']);
   });
 });

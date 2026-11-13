@@ -1,6 +1,6 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import { RECORD_CARD_MAX_CHARS, type TaskFinding } from '@agent/agent-models';
+import { CHARS_PER_TOKEN, type TaskFinding } from '@agent/agent-models';
 
 import { residentReadPaths } from '../context/residency';
 import { pathFromToolArgs } from './call-identity';
@@ -27,8 +27,14 @@ export const SERIAL_READ_ADVICE_AFTER = 4;
 /** The card is skipped on the first steps of a run unless it has something to say. */
 const QUIET_STEPS = 2;
 const WORKING_SET_MAX = 6;
-/** Files read that no finding cites before the card asks for findings. */
-export const UNRECORDED_READS_OPEN_AT = 4;
+/** Re-read paths the `open:reread` item names. */
+const REREAD_PATHS_MAX = 3;
+/** Newest sub-agent gaps the card names; the rest are counted. */
+const CHILD_GAPS_SHOWN = 3;
+/** Room kept in the record budget for its header, the hidden-findings count line and the sha line. */
+const RECORD_RESERVE_CHARS = 700;
+const TOPIC_COUNTS_MAX_CHARS = 400;
+const TOPIC_MAX_CHARS = 60;
 
 function tokensK(tokens: number): string {
   if (tokens < 1_000) return `${Math.round(tokens)}`;
@@ -36,8 +42,82 @@ function tokensK(tokens: number): string {
 }
 
 function findingLine(finding: TaskFinding): string {
-  const topic = finding.topic ? `[${finding.topic}] ` : '';
-  return `- ${topic}${finding.claim} — ${finding.evidence}`;
+  const topic = finding.topic ? `[${finding.topic.slice(0, TOPIC_MAX_CHARS)}] ` : '';
+  const mark = finding.verification === 'unverified' ? ' (unverified)' : '';
+  return `- ${topic}${finding.claim} — ${finding.evidence}${mark}`;
+}
+
+/** The record section's size bound on the card, from the window-scaled budget. */
+export function recordCardChars(recordCardTokens: number): number {
+  return recordCardTokens * CHARS_PER_TOKEN;
+}
+
+/** Newest findings that fit `chars`, shown oldest first (at least one). */
+function newestWithin(findings: TaskFinding[], chars: number): string[] {
+  const shown: string[] = [];
+  let used = 0;
+  for (let i = findings.length - 1; i >= 0; i--) {
+    const line = findingLine(findings[i]!);
+    if (used + line.length + 1 > chars && shown.length > 0) break;
+    shown.unshift(line);
+    used += line.length + 1;
+  }
+  return shown;
+}
+
+function recordHeader(count: number): string {
+  return `Record (${count} finding(s); answer from these and cite their evidence):`;
+}
+
+/**
+ * The whole task record as one text, when it does not fit the card's record
+ * budget; null when the card shows all of it. The residency pass stores this
+ * as a blob, so findings the card cannot show stay recallable (P4: a
+ * finding is the one item that cannot be got back any other way).
+ */
+export function recordOverflowText(findings: TaskFinding[], recordCardTokens: number): string | null {
+  if (findings.length === 0) return null;
+  const all = findings.map(findingLine);
+  const size = recordHeader(findings.length).length + all.reduce((sum, line) => sum + line.length + 1, 0);
+  if (size <= recordCardChars(recordCardTokens)) return null;
+  return [`Task record: ${findings.length} finding(s), oldest first.`, ...all].join('\n');
+}
+
+/**
+ * The record lines the card shows, within `recordCardTokens`: all findings
+ * when they fit; otherwise the newest that fit, a per-topic count of the
+ * rest, and the sha of the full record (`blobSha`, stored by the residency
+ * pass) so nothing recorded is out of reach.
+ */
+export function recordSection(findings: TaskFinding[], recordCardTokens: number, blobSha?: string): string[] {
+  if (findings.length === 0) return [];
+  const budget = recordCardChars(recordCardTokens);
+  if (recordOverflowText(findings, recordCardTokens) === null) {
+    return [recordHeader(findings.length), ...findings.map(findingLine)];
+  }
+  const shown = newestWithin(findings, Math.max(1, budget - RECORD_RESERVE_CHARS));
+  const hidden = findings.slice(0, findings.length - shown.length);
+  const counts = new Map<string, number>();
+  for (const finding of hidden) {
+    const topic = finding.topic ? finding.topic.slice(0, TOPIC_MAX_CHARS) : '(no topic)';
+    counts.set(topic, (counts.get(topic) ?? 0) + 1);
+  }
+  const parts = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([topic, n]) => `${topic} ${n}`);
+  let byTopic = '';
+  for (let i = 0; i < parts.length; i++) {
+    const next = byTopic ? `${byTopic}, ${parts[i]}` : parts[i]!;
+    if (next.length > TOPIC_COUNTS_MAX_CHARS) {
+      byTopic = `${byTopic}, +${parts.length - i} more topic(s)`;
+      break;
+    }
+    byTopic = next;
+  }
+  return [
+    recordHeader(findings.length),
+    `- (${hidden.length} older finding(s) not shown, by topic: ${byTopic})`,
+    ...(blobSha ? [`- (full record: recall sha256:${blobSha})`] : []),
+    ...shown,
+  ];
 }
 
 /** Text of the card for this call, or null when it has nothing to say. */
@@ -101,14 +181,26 @@ export function composeStateCard(
     ids.push('open:review');
   }
   if (!changing && canRecord) {
-    // Reads no finding stands for must stay in the prompt or be read again.
-    const unrecorded = task.workingSet.filter((entry) => entry.reads > 0 && !s.task.isCited(entry.path)).length;
-    if (unrecorded >= UNRECORDED_READS_OPEN_AT) {
+    // Measured waste only (P5): files the model already paid a step to read
+    // again after their read left the prompt, that no finding stands for.
+    const reread = s.task.uncitedRestoredPaths();
+    if (reread.length > 0) {
+      const more = reread.length > REREAD_PATHS_MAX ? `, +${reread.length - REREAD_PATHS_MAX} more` : '';
       open.push(
-        `${unrecorded} file(s) read are not cited by any finding: record each confirmed fact with record_finding (claim + path:line), so those reads can leave the context without being read again.`,
+        `Re-read after removal: ${reread.slice(0, REREAD_PATHS_MAX).join(', ')}${more}. Record the facts you need from them with record_finding so they need not be read again.`,
       );
-      ids.push('open:unrecorded');
+      ids.push('open:reread');
     }
+  }
+  // Sub-agent findings are already in the record; what is left to check is
+  // their gaps, not their findings.
+  if (task.childGaps.length > 0) {
+    const shown = task.childGaps.slice(-CHILD_GAPS_SHOWN);
+    const more = task.childGaps.length > shown.length ? ` (+${task.childGaps.length - shown.length} more)` : '';
+    open.push(
+      `Sub-agent gaps to check (their findings are in the record; do not re-verify those): ${shown.join('; ')}${more}`,
+    );
+    ids.push('open:child_gaps');
   }
 
   const advice: string[] = [];
@@ -157,11 +249,18 @@ export function composeStateCard(
   if (!hasNews && (step <= QUIET_STEPS || task.workingSet.length === 0)) return null;
 
   const budget = s.limits.maxPromptTokens;
+  let spend = '';
+  if (budget !== undefined) {
+    // Own calls and sub-agents apart: they are different levers (P7).
+    const usage = s.budget.snapshot();
+    const children = usage.children.promptTokens;
+    spend = ` · run budget: ${tokensK(usage.own.promptTokens)} own${
+      children > 0 ? ` + ${tokensK(children)} sub-agents` : ''
+    } of ${tokensK(budget)} used`;
+  }
   const lines = [
     CARD_HEADER,
-    `Phase: ${task.phase} · step ${step} · task ${task.taskClass} ${task.shape} · ~${tokensK(perCallTokens)} tokens per call${
-      budget !== undefined ? ` · ${tokensK(s.budget.spent())} of ${tokensK(budget)} run budget used` : ''
-    }`,
+    `Phase: ${task.phase} · step ${step} · task ${task.taskClass} ${task.shape} · ~${tokensK(perCallTokens)} tokens per call${spend}`,
   ];
   if (hot.length > 0 || cold > 0) {
     const files = hot.slice(0, WORKING_SET_MAX).map(({ entry }) => {
@@ -175,23 +274,7 @@ export function composeStateCard(
         : '';
     lines.push(`Working set: ${files.join(', ')}${more}${older}`);
   }
-  if (findings.length > 0) {
-    // Newest first within the size bound, shown oldest first.
-    const shown: string[] = [];
-    let chars = 0;
-    for (let i = findings.length - 1; i >= 0; i--) {
-      const line = findingLine(findings[i]!);
-      if (chars + line.length > RECORD_CARD_MAX_CHARS && shown.length > 0) break;
-      shown.unshift(line);
-      chars += line.length + 1;
-    }
-    const hidden = findings.length - shown.length;
-    lines.push(
-      `Record (${findings.length} finding(s); answer from these and cite their evidence):`,
-      ...(hidden > 0 ? [`- (${hidden} older finding(s) not shown; they are in your earlier record_finding calls)`] : []),
-      ...shown,
-    );
-  }
+  lines.push(...recordSection(findings, s.contextBudget.recordCardTokens, s.recordBlobSha));
   if (open.length > 0) lines.push(...open.map((line) => `Open: ${line}`));
   if (advice.length > 0) lines.push('Advice:', ...advice.map((line) => `- ${line}`));
   return { text: lines.join('\n'), ids };

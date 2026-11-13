@@ -2,8 +2,8 @@ import type { ContextReportLayer, ContextWindowSource } from './context.js';
 import type { HarnessFlags } from './flags.js';
 import type { RunUsage, TokenUsage } from './run.js';
 import type { System1EffortTrace, System1RunReport } from './system1.js';
-import type { SubagentThoroughness } from './subagent.js';
-import type { TaskPhase, TaskShape, TaskStateSnapshot } from './task-state.js';
+import type { SubagentReportStatus, SubagentStatus, SubagentThoroughness } from './subagent.js';
+import type { TaskFinding, TaskPhase, TaskShape, TaskStateSnapshot } from './task-state.js';
 import type { ToolStage } from './tool-context.js';
 
 /**
@@ -330,6 +330,8 @@ export type TraceEvent =
       residueTokens: number;
       /** Leading messages identical to the previous call's (a cache-stable prefix). */
       prefixStableMessages: number;
+      /** The harness card on this call (0 when none was sent). Absent in traces that predate it. */
+      cardTokens?: number;
     }
   | {
       /**
@@ -342,6 +344,32 @@ export type TraceEvent =
       iteration: number;
       kind: 'card' | 'guard';
       ids: string[];
+    }
+  | {
+      /**
+       * A sub-agent's findings and gaps, merged into this (parent) run's task
+       * state when the delegate call returns, so the parent's record holds
+       * them and it checks the gaps instead of re-verifying the findings.
+       */
+      type: 'child_findings';
+      runId: string;
+      iteration: number;
+      subRunId: string;
+      findings: TaskFinding[];
+      openQuestions: string[];
+    }
+  | {
+      /** A sub-agent's end, written to the child's trace: what it spent against its budget and delivered. */
+      type: 'child_finish';
+      runId: string;
+      parentRunId: string;
+      profile: string;
+      status: SubagentStatus;
+      reportStatus?: SubagentReportStatus;
+      toolCalls: number;
+      /** Own + its children, as charged to the parent. */
+      promptTokens: number;
+      findings: number;
     }
   | {
       /** A sub-agent's budget, written to the child's trace before it starts. */

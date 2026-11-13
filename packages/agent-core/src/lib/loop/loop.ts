@@ -95,7 +95,8 @@ export async function runLoop(
     task,
   }, usage, startedAt);
   await reportSystem1(config, runId, trace);
-  sink({ type: 'task_state', runId, state: task.snapshot() });
+  const finalTask = task.snapshot();
+  sink({ type: 'task_state', runId, state: finalTask });
   trace({
     type: 'run_finish',
     runId,
@@ -109,6 +110,7 @@ export async function runLoop(
   });
   return {
     ...result,
+    task: finalTask,
     usage,
     ...(config.contextReport
       ? { contextReport: refreshContextReport(config.contextReport, messages, tools) }

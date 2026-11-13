@@ -33,7 +33,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     modelRole: 'fast',
     // Search and report: routine steps, no design calls.
     thinking: 'off',
-    tools: ['glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
+    tools: ['glob', 'grep', 'read_file', 'recall', 'record_finding', 'web_search', 'web_fetch'],
     limits: RESEARCH_LIMITS,
     // A brief that names no effort gets a bounded one, not 450 calls.
     defaultThoroughness: 'medium',
@@ -55,7 +55,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     modelRole: 'strong',
     // Finding real defects is the hard part; give it the model's full depth.
     thinking: 'max',
-    tools: ['diff', 'glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
+    tools: ['diff', 'glob', 'grep', 'read_file', 'recall', 'record_finding', 'web_search', 'web_fetch'],
     limits: RESEARCH_LIMITS,
     context: 'diff',
     rules: true,

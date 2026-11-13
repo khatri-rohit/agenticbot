@@ -5,7 +5,7 @@ import { DEFAULT_CONTEXT_BUDGET, DEFAULT_HARNESS_FLAGS, type TraceEvent } from '
 
 import { TaskStateTracker } from '../state/task-state';
 import type { RunState } from './run-state';
-import { buildStateCard, CARD_HEADER, withStateCard } from './state-card';
+import { buildStateCard, CARD_HEADER, recordOverflowText, recordSection, withStateCard } from './state-card';
 
 const runId = 'r1';
 
@@ -19,6 +19,9 @@ function state(over: {
   advisories?: string[];
   stateCard?: boolean;
   messages?: ChatCompletionMessageParam[];
+  childTokens?: number;
+  recordCardTokens?: number;
+  recordBlobSha?: string;
 }): RunState {
   const task = new TaskStateTracker();
   for (const event of over.events ?? []) task.apply(event);
@@ -28,12 +31,20 @@ function state(over: {
     trace: () => undefined,
     iterations: over.iterations ?? 5,
     posture: 'agent',
-    contextBudget: DEFAULT_CONTEXT_BUDGET,
+    contextBudget: { ...DEFAULT_CONTEXT_BUDGET, recordCardTokens: over.recordCardTokens ?? DEFAULT_CONTEXT_BUDGET.recordCardTokens },
     flags: { ...DEFAULT_HARNESS_FLAGS, stateCard: over.stateCard ?? true },
     tools: { byName: new Map((over.tools ?? ['read_file', 'edit_file', 'run_terminal', 'record_finding']).map((name) => [name, {}])) },
     serialReadTurns: over.serialReadTurns ?? 0,
     steering: { stalled: () => over.stalled },
-    budget: { spent: () => 120_000, nearLimit: () => (over.nearLimit ? { spent: 1, limit: 1 } : undefined) },
+    budget: {
+      spent: () => 120_000 + (over.childTokens ?? 0),
+      snapshot: () => ({
+        own: { promptTokens: 120_000, completionTokens: 0, calls: 1, estimatedCalls: 0 },
+        children: { promptTokens: over.childTokens ?? 0, completionTokens: 0, calls: 0, estimatedCalls: 0 },
+      }),
+      nearLimit: () => (over.nearLimit ? { spent: 1, limit: 1 } : undefined),
+    },
+    recordBlobSha: over.recordBlobSha,
     limits: { maxPromptTokens: 1_000_000 },
     advisories: [...(over.advisories ?? [])],
     messages: over.messages ?? [],
@@ -58,9 +69,14 @@ describe('harness card', () => {
     const card = buildStateCard(state({ events: edit(4, 'e', 'src/a.ts'), iterations: 5 }), 36_000);
     expect(card).not.toBeNull();
     expect(card).toContain(CARD_HEADER);
-    expect(card).toMatch(/Phase: change · step 5 · task small change · ~36k tokens per call · 120k of 1\.0M run budget used/);
+    expect(card).toMatch(/Phase: change · step 5 · task small change · ~36k tokens per call · run budget: 120k own of 1\.0M used/);
     expect(card).toMatch(/Working set: src\/a\.ts \(edited, unchecked\)/);
     expect(card).toMatch(/Open: Edits since step 4 have no check yet/);
+  });
+
+  it('shows own and sub-agent spend apart', () => {
+    const card = buildStateCard(state({ events: edit(4, 'e', 'src/a.ts'), childTokens: 700_000 }), 36_000);
+    expect(card).toMatch(/run budget: 120k own \+ 700k sub-agents of 1\.0M used/);
   });
 
   it('asks for a review once a medium change passes its check, and only then', () => {
@@ -134,25 +150,98 @@ describe('harness card working set', () => {
   });
 });
 
-describe('harness card task record', () => {
-  const finding = (iteration: number, id: string, claim: string, evidence: string): TraceEvent => ({
+/** A record_finding call as the tracker sees it: recorded when its result comes back. */
+const finding = (
+  iteration: number,
+  id: string,
+  claim: string,
+  evidence: string,
+  extra: { topic?: string; label?: string } = {},
+): TraceEvent[] => [
+  {
     type: 'tool_start',
     runId,
     iteration,
     toolName: 'record_finding',
     toolCallId: id,
-    args: { claim, evidence },
-  });
+    args: { claim, evidence, ...(extra.topic ? { topic: extra.topic } : {}) },
+  },
+  {
+    type: 'tool_complete',
+    runId,
+    iteration,
+    toolName: 'record_finding',
+    toolCallId: id,
+    durationMs: 0,
+    resultPreview: `Recorded (${extra.label ?? 'verified'}) — evidence: ${evidence}`,
+  },
+];
+
+describe('harness card task record', () => {
   const research: TraceEvent = { type: 'run_start', runId, model: 'm', taskShape: 'research' };
 
   it('shows recorded findings with their evidence, even on an early step', () => {
     const card = buildStateCard(
-      state({ events: [research, finding(1, 'f1', 'The cap is 20 tiles per tab', 'src/TileRibbon.tsx:104')], iterations: 2 }),
+      state({ events: [research, ...finding(1, 'f1', 'The cap is 20 tiles per tab', 'src/TileRibbon.tsx:104')], iterations: 2 }),
       5_000,
     ) ?? '';
     expect(card).toMatch(/task small research/);
     expect(card).toMatch(/Record \(1 finding\(s\); answer from these and cite their evidence\):/);
-    expect(card).toMatch(/- The cap is 20 tiles per tab — src\/TileRibbon\.tsx:104/);
+    expect(card).toMatch(/- The cap is 20 tiles per tab — src\/TileRibbon\.tsx:104$/m);
+  });
+
+  it('marks unverified findings', () => {
+    const events = [research, ...finding(1, 'f1', 'Port is 80', 'a.ts:3', { label: 'unverified: quote not found' })];
+    const card = buildStateCard(state({ events, iterations: 2 }), 5_000) ?? '';
+    expect(card).toMatch(/- Port is 80 — a\.ts:3 \(unverified\)$/m);
+  });
+
+  /** `count` findings over a few topics, each ~120 characters. */
+  const many = (count: number): TraceEvent[] =>
+    Array.from({ length: count }, (_, i) =>
+      finding(1 + Math.floor(i / 10), `f${i}`, `Fact number ${i} about the system, padded to a typical length for a finding ${'.'.repeat(20)}`, `src/f${i}.ts:${i + 1}`, {
+        topic: `t${i % 3}`,
+      }),
+    ).flat();
+
+  it('shows the whole record while it fits, with no sha', () => {
+    const findings = many(20);
+    const card = buildStateCard(state({ events: [research, ...findings], recordBlobSha: 'a'.repeat(64) }), 5_000) ?? '';
+    expect(card).toMatch(/Record \(20 finding\(s\)/);
+    expect(card).not.toMatch(/not shown|full record/);
+  });
+
+  it('past its budget shows the newest findings, a per-topic count and the full record sha', () => {
+    const card = buildStateCard(
+      state({ events: [research, ...many(300)], recordCardTokens: 2_000, recordBlobSha: 'a'.repeat(64) }),
+      5_000,
+    ) ?? '';
+    expect(card).toMatch(/Record \(300 finding\(s\)/);
+    expect(card).toMatch(/- \(\d+ older finding\(s\) not shown, by topic: t\d \d+, t\d \d+, t\d \d+\)/);
+    expect(card).toContain(`- (full record: recall sha256:${'a'.repeat(64)})`);
+    expect(card).toContain('Fact number 299 ');
+    expect(card).not.toContain('Fact number 0 ');
+  });
+
+  it('property: the record section never exceeds its budget, and hidden findings are in the overflow text', () => {
+    for (const tokens of [600, 2_000, DEFAULT_CONTEXT_BUDGET.recordCardTokens]) {
+      for (const count of [1, 10, 60, 250, 1_000]) {
+        const tracker = new TaskStateTracker();
+        for (const event of [research, ...many(count)]) tracker.apply(event);
+        const findings = tracker.snapshot().evidence.findings;
+        expect(findings).toHaveLength(count);
+        const section = recordSection(findings, tokens, 'a'.repeat(64));
+        expect(section.join('\n').length).toBeLessThanOrEqual(tokens * 4);
+        const overflow = recordOverflowText(findings, tokens);
+        const shown = section.filter((line) => line.startsWith('- Fact') || line.startsWith('- [t')).length;
+        if (shown < count) {
+          expect(overflow).not.toBeNull();
+          for (const finding of findings) expect(overflow).toContain(finding.claim);
+        } else {
+          expect(overflow).toBeNull();
+        }
+      }
+    }
   });
 
   it('words stall and budget advice for research: answer from the record, do not run a check', () => {
@@ -188,47 +277,54 @@ describe('harness card task record', () => {
   });
 });
 
-describe('harness card unrecorded reads', () => {
-  const readEvents = (iteration: number, id: string, path: string): TraceEvent[] => [
-    { type: 'tool_start', runId, iteration, toolName: 'read_file', toolCallId: id, args: { path } },
-    { type: 'tool_complete', runId, iteration, toolName: 'read_file', toolCallId: id, durationMs: 0, resultPreview: '[lines 1–9 of 9]' },
-  ];
-  const finding = (iteration: number, id: string, claim: string, evidence: string): TraceEvent => ({
-    type: 'tool_start',
+describe('harness card re-read item', () => {
+  const restored = (iteration: number, path: string): TraceEvent => ({
+    type: 'context_restored',
     runId,
     iteration,
-    toolName: 'record_finding',
-    toolCallId: id,
-    args: { claim, evidence },
+    toolCallId: `x-${path}`,
+    path,
   });
-  const reads = (paths: string[]) => paths.flatMap((path, i) => readEvents(i + 1, `r${i}`, path));
-  const item = /Open: (\d+) file\(s\) read are not cited by any finding: record each confirmed fact with record_finding \(claim \+ path:line\), so those reads can leave the context without being read again\./;
+  const item = /Open: Re-read after removal: (.+)\. Record the facts you need from them with record_finding so they need not be read again\./;
 
-  it('appears at 4 uncited files read, not at 3', () => {
-    expect(buildStateCard(state({ events: reads(['a.ts', 'b.ts', 'c.ts']) }), 5_000) ?? '').not.toMatch(item);
+  it('names files read again after removal that no finding cites, at most 3', () => {
+    expect(buildStateCard(state({ events: [] }), 5_000) ?? '').not.toMatch(item);
     const traced: TraceEvent[] = [];
-    const s = state({ events: reads(['a.ts', 'b.ts', 'c.ts', 'd.ts']) });
+    const s = state({ events: ['a.ts', 'b.ts', 'c.ts', 'd.ts'].map((path) => restored(3, path)) });
     (s as unknown as { trace: (event: TraceEvent) => void }).trace = (event) => traced.push(event);
     const sent = withStateCard(s, [], 5_000);
-    expect(String(sent[0]?.content)).toMatch(item);
-    expect(String(sent[0]?.content)).toMatch(/Open: 4 file\(s\) read/);
-    expect(traced).toEqual([expect.objectContaining({ kind: 'card', ids: expect.arrayContaining(['open:unrecorded']) })]);
+    expect(String(sent[0]?.content)).toMatch(/Open: Re-read after removal: a\.ts, b\.ts, c\.ts, \+1 more\./);
+    expect(traced).toEqual([expect.objectContaining({ kind: 'card', ids: expect.arrayContaining(['open:reread']) })]);
   });
 
-  it('disappears once findings cite the files', () => {
-    const events = [
-      ...reads(['a.ts', 'b.ts', 'c.ts', 'd.ts']),
-      finding(5, 'f1', 'A sets the port', 'a.ts:3'),
-      finding(5, 'f2', 'B reads it', 'b.ts:7'),
-    ];
-    const card = buildStateCard(state({ events, iterations: 6 }), 5_000) ?? '';
-    expect(card).not.toMatch(item);
+  it('drops a file once a finding cites it', () => {
+    const events = [restored(3, 'a.ts'), restored(3, 'b.ts'), ...finding(4, 'f1', 'A sets the port', 'a.ts:3')];
+    const card = buildStateCard(state({ events, iterations: 5 }), 5_000) ?? '';
+    expect(card).toMatch(/Open: Re-read after removal: b\.ts\./);
+    const all = [...events, ...finding(4, 'f2', 'B reads it', 'b.ts:7')];
+    expect(buildStateCard(state({ events: all, iterations: 5 }), 5_000) ?? '').not.toMatch(item);
   });
 
   it('is not shown for a change, or without record_finding', () => {
-    const four = reads(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
-    const change = [...four, ...edit(5, 'e', 'a.ts')];
-    expect(buildStateCard(state({ events: change, iterations: 6 }), 5_000) ?? '').not.toMatch(item);
-    expect(buildStateCard(state({ events: four, tools: ['read_file'] }), 5_000) ?? '').not.toMatch(item);
+    const events = [restored(3, 'a.ts')];
+    expect(buildStateCard(state({ events: [...events, ...edit(4, 'e', 'z.ts')], iterations: 6 }), 5_000) ?? '').not.toMatch(item);
+    expect(buildStateCard(state({ events, tools: ['read_file'] }), 5_000) ?? '').not.toMatch(item);
+  });
+});
+
+
+describe('harness card and sub-agent results', () => {
+  it('shows merged child findings in the record and their gaps as what is left to check', () => {
+    const merged: TraceEvent = {
+      type: 'child_findings',
+      runId,
+      iteration: 3,
+      subRunId: 'child-1',
+      findings: [{ claim: 'Max 20 tiles', evidence: 'src/TileRibbon.tsx:105', verification: 'verified', iteration: 0 }],
+      openQuestions: ['where the tile cap toast is shown', 'mobile layout limits', 'TV refresh options', 'export naming'],
+    };
+    const card = buildStateCard(state({ events: [merged], iterations: 4 }), 5_000) ?? '';
+    expect(card).toMatch(/- Max 20 tiles — src\/TileRibbon\.tsx:105/);
+    expect(card).toMatch(/Open: Sub-agent gaps to check \(their findings are in the record; do not re-verify those\): mobile layout limits; TV refresh options; export naming \(\+1 more\)/);
   });
 });

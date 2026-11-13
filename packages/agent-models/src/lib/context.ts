@@ -51,6 +51,13 @@ export type ContextBudget = {
   inRunCompactToRatio: number;
   /** Iterations a loaded skill body stays in full before it becomes a skill card. */
   skillResidentIterations: number;
+  /**
+   * Tokens of findings the harness card shows (newest first). The card is
+   * sent on every call, so it is part of the window like any other item.
+   * A record that does not fit is stored whole as a blob; the card shows
+   * the newest findings, a per-topic count for the rest and the sha.
+   */
+  recordCardTokens: number;
 };
 
 /**
@@ -93,6 +100,8 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   inRunCompactRatio: 0.45,
   inRunCompactToRatio: 0.3,
   skillResidentIterations: 4,
+  /** ~24k chars: about 200 typical (~120-char) findings. */
+  recordCardTokens: 6_000,
 };
 
 export function parseContextWindowMode(value: unknown): ContextWindowMode | undefined {
@@ -145,6 +154,7 @@ export function contextBudgetForWindow(
     windowTokens,
     inRunResidentToolTokens: Math.min(base.inRunResidentToolTokens, Math.floor(input * 0.15)),
     inRunResidueFoldTokens: Math.min(base.inRunResidueFoldTokens, Math.floor(input * 0.05)),
+    recordCardTokens: Math.min(base.recordCardTokens, Math.floor(input * 0.05)),
     inRunClearAtLeastTokens: Math.min(
       base.inRunClearAtLeastTokens,
       Math.floor(input * 0.1),

@@ -9,6 +9,7 @@ import {
   isAskStrippedTool,
   isReadOnlyPosture,
   limitMessage,
+  REPORT_MAX_CHARS,
   type ModelTurn,
   type ToolContext,
   type ToolStage,
@@ -63,7 +64,7 @@ const REPEAT_BLOCKED = limitMessage(
 
 /** Refusal once only the reserved `report` call is left in a sub-agent's budget. */
 const REPORT_ONLY_REFUSAL =
-  'Tool budget used: only `report` is available now. Call report with what you found (path:line evidence) and what is still open.';
+  `Tool budget used: only \`report\` is available now. Call report with what you found (path:line evidence) and what is still open, in under ${REPORT_MAX_CHARS.toLocaleString('en-US')} characters.`;
 
 /** Turns in a row that only drew report-only refusals before the run ends on limit.tools. */
 const MAX_REPORT_ONLY_TURNS = 2;
@@ -270,6 +271,8 @@ function buildToolContext(s: RunState, toolCallId?: string): ToolContext {
               ...(config.recordCalls ? { recordCalls: true } : {}),
               ...(config.capacity ? { capacity: config.capacity } : {}),
               chargeUsage: (child) => s.budget.chargeChild(child),
+              trace: s.trace,
+              iteration: () => s.iterations,
             }),
         }
       : {}),

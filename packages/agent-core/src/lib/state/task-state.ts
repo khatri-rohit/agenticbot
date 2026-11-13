@@ -62,6 +62,9 @@ function argString(args: unknown, key: string): string {
 
 const CLASS_RANK: Record<TaskClass, number> = { small: 0, medium: 1, long: 2 };
 
+/** Sub-agent gaps kept (newest); older ones are still in the child reports. */
+const CHILD_GAPS_MAX = 20;
+
 /**
  * The task's provisional shape from the run's setup, never from the
  * request's words. A home run (no workspace) answers; a read-only posture
@@ -74,12 +77,62 @@ export function inferTaskShape(hasWorkspace: boolean, posture: RunPosture): Task
   return posture === 'agent' ? 'unknown' : 'research';
 }
 
+/** One file citation in finding evidence: a path and, when given, its lines. */
+export type Citation = { path: string; from?: number; to?: number };
+
+/** Finding evidence split into its parts (separated by `;` or `,`). */
+export function evidenceParts(evidence: string): string[] {
+  return evidence
+    .split(/\s*[;,]\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/**
+ * One evidence part as a file citation: `src/a.ts`, `src/a.ts:12`,
+ * `src/a.ts:12-30` or `src/a.ts:12–30` (anything after the first space is
+ * a note). URLs, quoted text and words without a path shape → null.
+ */
+export function parseCitation(part: string): Citation | null {
+  const first = (part.trim().split(/\s+/)[0] ?? '').replace(/[),.:]+$/, '');
+  if (!first || /^[a-z]+:\/\//i.test(first) || /^["'`“]/.test(first)) return null;
+  const lines = /^(.+?):(\d+)(?:[-–](\d+))?$/.exec(first);
+  const path = (lines ? lines[1] : first).replace(/\\/g, '/').replace(/^(\.\/)+/, '');
+  if (!/[./]/.test(path)) return null;
+  if (!lines) return { path };
+  const a = Number(lines[2]);
+  const b = lines[3] ? Number(lines[3]) : a;
+  return { path, from: Math.min(a, b), to: Math.max(a, b) };
+}
+
 /** `src/a.ts:12`, `src/a.ts:12-30` or `src/a.ts` → `src/a.ts`; URLs and quotes → null. */
 export function citedPath(evidence: string): string | null {
   const first = evidence.trim().split(/[\s,;]+/)[0] ?? '';
-  if (!first || /^[a-z]+:\/\//i.test(first) || /^["'`]/.test(first)) return null;
-  const path = first.replace(/:\d+(?:[-–]\d+)?$/, '').replace(/\\/g, '/').replace(/^\.\//, '');
-  return /[./]/.test(path) ? path : null;
+  return parseCitation(first)?.path ?? null;
+}
+
+export type FindingVerification = TaskFinding['verification'];
+
+/**
+ * What record_finding's result says it checked, and the evidence it
+ * recorded (canonical, possibly corrected). The first line reads
+ * `Recorded (<verification…>) — evidence: <evidence>` (see record-finding.ts).
+ * A result cut inside its first line (trace previews) gives no evidence.
+ */
+export function readRecordedResult(result: string): { verification: FindingVerification; evidence?: string } {
+  const [line = ''] = result.split('\n', 1);
+  const label = /^Recorded \((verified|evidence corrected|unverified|verification skipped)/.exec(line)?.[1];
+  const verification: FindingVerification =
+    label === 'verified'
+      ? 'verified'
+      : label === 'evidence corrected'
+        ? 'corrected'
+        : label === 'unverified'
+          ? 'unverified'
+          : 'skipped';
+  const cut = !result.includes('\n') && result.endsWith('...');
+  const evidence = cut ? undefined : /\s—\sevidence: (.+)$/.exec(line)?.[1]?.trim();
+  return evidence ? { verification, evidence } : { verification };
 }
 
 export class TaskStateTracker {
@@ -90,6 +143,10 @@ export class TaskStateTracker {
   private readonly findings: TaskFinding[] = [];
   /** Paths a recorded finding cites (its evidence names them). */
   private readonly cited = new Set<string>();
+  /** Sub-agents' open questions, oldest first (see TaskStateSnapshot.childGaps). */
+  private readonly childGaps: string[] = [];
+  /** Paths whose removed read the model paid a step to get back (path → latest iteration). */
+  private readonly restored = new Map<string, number>();
   private readonly workingSet = new Map<string, WorkingSetEntry>();
   private edits = 0;
   private failedEdits = 0;
@@ -133,6 +190,15 @@ export class TaskStateTracker {
   /** A recorded finding cites this path, so the finding stands for its reads. */
   isCited(path: string): boolean {
     return this.cited.has(path);
+  }
+
+  /**
+   * Files read again after their read had left the prompt, that no finding
+   * cites yet: the model is paying to re-read what it never recorded. A path
+   * drops out once a finding cites it.
+   */
+  uncitedRestoredPaths(): string[] {
+    return [...this.restored.keys()].filter((path) => !this.cited.has(path));
   }
 
   /** A successful edit has no check after it yet. */
@@ -200,6 +266,14 @@ export class TaskStateTracker {
         return null;
       case 'limit':
         return this.move('blocked', 'limit');
+      case 'child_findings':
+        this.mergeChildFindings(event);
+        return null;
+      case 'context_restored': {
+        const path = pathFromToolArgs({ path: event.path });
+        if (path) this.restored.set(path, event.iteration);
+        return null;
+      }
       default:
         return null;
     }
@@ -224,14 +298,14 @@ export class TaskStateTracker {
         findings: this.findings.map((finding) => ({ ...finding })),
       },
       phaseIterations: { ...this.phaseIterations },
+      childGaps: [...this.childGaps],
     };
   }
 
   private onToolStart(name: string, args: unknown): PhaseChange | null {
-    if (name === 'record_finding') {
-      this.recordFinding(args);
-      return null;
-    }
+    // A finding is recorded when its result comes back (onToolComplete): the
+    // tool checks the evidence and the record keeps what it checked.
+    if (name === 'record_finding') return null;
     if (name === 'edit_file') return this.move('change', 'edit_file');
     if (name === 'run_terminal') {
       if (!isCheckCommand(argString(args, 'command'))) return this.move('locate', 'command');
@@ -259,6 +333,10 @@ export class TaskStateTracker {
 
   private onToolComplete(event: Extract<TraceEvent, { type: 'tool_complete' }>): void {
     const call = event.toolCallId ? this.calls.get(event.toolCallId) : undefined;
+    if (event.toolName === 'record_finding') {
+      if (event.resultPreview.startsWith('Recorded')) this.recordFinding(call?.args, event.resultPreview);
+      return;
+    }
     const path = pathFromToolArgs(call?.args) ?? '';
     if (event.toolName === 'read_file' && path) {
       const entry = this.entry(path);
@@ -309,24 +387,64 @@ export class TaskStateTracker {
   }
 
   /**
-   * Record one finding from record_finding's arguments (the tool validates
-   * them for the model; this keeps the state sane on its own). Duplicates of
-   * a claim are ignored; the oldest leave past FINDINGS_MAX.
+   * Record one finding from a record_finding call that came back "Recorded":
+   * claim and topic from the call's arguments, evidence and verification from
+   * the result (the tool may have corrected the evidence; arguments are the
+   * fallback). Sizes are capped here too, so the state stays sane on its own.
+   * A repeated claim is ignored, unless it replaces unverified evidence with
+   * checked evidence; the oldest findings leave past FINDINGS_MAX.
    */
-  private recordFinding(args: unknown): void {
+  private recordFinding(args: unknown, result: string): void {
     const claim = argString(args, 'claim').slice(0, FINDING_CLAIM_MAX_CHARS);
-    const evidence = argString(args, 'evidence').slice(0, FINDING_EVIDENCE_MAX_CHARS);
+    const read = readRecordedResult(result);
+    const evidence = (read.evidence ?? argString(args, 'evidence')).slice(0, FINDING_EVIDENCE_MAX_CHARS);
     if (!claim || !evidence) return;
-    if (this.findings.some((finding) => finding.claim === claim)) return;
-    const topic = argString(args, 'topic');
-    this.findings.push({ claim, evidence, ...(topic ? { topic } : {}), iteration: this.currentIteration });
-    if (this.findings.length > FINDINGS_MAX) this.findings.shift();
-    for (const part of evidence.split(/[;,]\s*/)) {
+    const { verification } = read;
+    const same = this.findings.find((finding) => finding.claim === claim);
+    if (same) {
+      if (same.verification !== 'unverified' || verification === 'unverified') return;
+      same.evidence = evidence;
+      same.verification = verification;
+      same.iteration = this.currentIteration;
+    } else {
+      const topic = argString(args, 'topic');
+      this.findings.push({ claim, evidence, ...(topic ? { topic } : {}), iteration: this.currentIteration, verification });
+      if (this.findings.length > FINDINGS_MAX) this.findings.shift();
+    }
+    for (const part of evidenceParts(evidence)) {
       const path = citedPath(part);
-      if (path) this.cited.add(path);
+      const canonical = path ? pathFromToolArgs({ path }) : null;
+      if (canonical) this.cited.add(canonical);
     }
     // A recorded fact is research evidence; an edit still outranks it.
     if (this.shapeValue !== 'change') this.shapeValue = 'research';
+  }
+
+  /**
+   * A sub-agent's findings join this run's record (source = its subRunId), by
+   * the same rules as the run's own: dedupe by claim, cited files count as
+   * cited here too, research shape unless already a change. Its open
+   * questions become gaps this run still has to check.
+   */
+  private mergeChildFindings(event: Extract<TraceEvent, { type: 'child_findings' }>): void {
+    for (const finding of event.findings) {
+      const claim = finding.claim.slice(0, FINDING_CLAIM_MAX_CHARS);
+      const evidence = finding.evidence.slice(0, FINDING_EVIDENCE_MAX_CHARS);
+      if (!claim || !evidence || this.findings.some((known) => known.claim === claim)) continue;
+      this.findings.push({ ...finding, claim, evidence, iteration: event.iteration, source: event.subRunId });
+      if (this.findings.length > FINDINGS_MAX) this.findings.shift();
+      for (const part of evidenceParts(evidence)) {
+        const path = citedPath(part);
+        const canonical = path ? pathFromToolArgs({ path }) : null;
+        if (canonical) this.cited.add(canonical);
+      }
+    }
+    for (const gap of event.openQuestions) {
+      const text = gap.trim();
+      if (text && !this.childGaps.includes(text)) this.childGaps.push(text);
+    }
+    if (this.childGaps.length > CHILD_GAPS_MAX) this.childGaps.splice(0, this.childGaps.length - CHILD_GAPS_MAX);
+    if (event.findings.length > 0 && this.shapeValue !== 'change') this.shapeValue = 'research';
   }
 
   /** Promote the class as evidence grows; never demote within a run. */

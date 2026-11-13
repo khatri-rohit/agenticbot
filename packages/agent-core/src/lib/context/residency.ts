@@ -181,10 +181,12 @@ function workingSetCard(candidate: Candidate, content: string, sha: string, reas
  * - cold: a file not read or edited for `inRunColdAfterIterations`, or any
  *   other result that old, except the newest `inRunKeepToolResults` non-file
  *   results;
- * - cited: a recorded finding cites the file, so the finding stands for it;
- * - budget: past `inRunResidentToolTokens` of resident results, cited
- *   results first, then least recently touched (larger first on a tie),
- *   down to the low mark (`inRunResidentLowRatio` of the cap) in one pass.
+ * - cited / budget: past `inRunResidentToolTokens` of resident results,
+ *   down to the low mark (`inRunResidentLowRatio` of the cap) in one pass:
+ *   results whose file a recorded finding cites first (traced `cited`: the
+ *   finding stands for them), then least recently touched (larger first on
+ *   a tie, traced `budget`). A cited result is not stale by itself: a
+ *   finding may cite one line of a 2,000-line window still in use.
  * Never removed: a file edited since the last check, this iteration's
  * results, and sub-agent reports (and recalls of them), which would cost a
  * child run to get back. Edits never supersede reads (several edits from
@@ -192,7 +194,7 @@ function workingSetCard(candidate: Candidate, content: string, sha: string, reas
  *
  * Removal happens in passes, because each pass changes the cached prompt:
  * a pass runs when resident results pass the cap, or when stale (superseded,
- * cold, cited) results free at least `inRunClearAtLeastTokens`. A pass that
+ * cold) results free at least `inRunClearAtLeastTokens`. A pass that
  * runs for the cap also takes the stale results. Between passes nothing
  * leaves. Every card keeps a sha for recall. Results from earlier turns are
  * only superseded (assembleContext already stubs them).
@@ -285,17 +287,12 @@ export async function manageWorkingSet(
   }
 
   // Stale results: superseded (even when pinned: the newer copy is
-  // resident), cold, or stood for by a finding.
+  // resident) or cold. A cited result is not stale on its own: a finding may
+  // stand for one line of a long window, so it only goes first under pressure.
   const chosen = new Map<number, EvictionReason>();
   let staleChars = 0;
   for (const candidate of candidates) {
-    const reason: EvictionReason | null = candidate.superseded
-      ? 'superseded'
-      : candidate.cold
-        ? 'cold'
-        : candidate.cited
-          ? 'cited'
-          : null;
+    const reason: EvictionReason | null = candidate.superseded ? 'superseded' : candidate.cold ? 'cold' : null;
     if (!reason) continue;
     chosen.set(candidate.index, reason);
     staleChars += candidate.chars - 250;
@@ -314,13 +311,18 @@ export async function manageWorkingSet(
 
   if (overCap) {
     // Down to the low mark in one pass, so the next results fit without one.
+    // Results a finding cites go first (the finding stands for them), then
+    // the least recently touched.
     let residentChars = residentOf();
     const order = candidates
       .filter((candidate) => candidate.index >= runStart && !candidate.pinned && !chosen.has(candidate.index))
-      .sort((a, b) => a.touch - b.touch || b.chars - a.chars || a.index - b.index);
+      .sort(
+        (a, b) =>
+          Number(b.cited) - Number(a.cited) || a.touch - b.touch || b.chars - a.chars || a.index - b.index,
+      );
     for (const candidate of order) {
       if (residentChars <= lowChars) break;
-      chosen.set(candidate.index, 'budget');
+      chosen.set(candidate.index, candidate.cited ? 'cited' : 'budget');
       residentChars -= candidate.chars;
     }
   }
@@ -417,8 +419,11 @@ function outcomeLine(
     outcome = sha ? `${content.length} chars, sha256:${sha}` : clip(first, 120);
   }
   const recall = storedSha ? ` · sha256:${storedSha}` : '';
-  return `- ${name} ${args} → ${clip(outcome, 200)}${recall}`;
+  return `${name} ${args} → ${clip(outcome, 200)}${recall}`;
 }
+
+/** Iteration (step) a tool call ran in; the loop passes its task state's record. */
+export type StepOf = (toolCallId: string) => number | undefined;
 
 export type InRunCompactionResult = {
   beforeTokens: number;
@@ -454,7 +459,7 @@ export async function compactCurrentRun(
   tools: ChatCompletionTool[],
   /** Stores large resident results folded into the recap, so recall can bring them back. */
   putBlob?: (text: string) => Promise<string>,
-  options: { milestone?: boolean } = {},
+  options: { milestone?: boolean; stepOf?: StepOf } = {},
 ): Promise<InRunCompactionResult | null> {
   const beforeTokens = estimatePromptTokens(messages, tools);
   const inputBudget = budget.windowTokens - budget.outputReserveTokens;
@@ -489,7 +494,15 @@ export async function compactCurrentRun(
   // A milestone folds by design, not to reach a mark: never prefix-heavy.
   const prefixHeavy = !milestone && estimate > lowMark;
 
-  const toolCallIds = await foldIntoRecap(messages, runStart, start, [[start, cutEnd]], priorRecap, putBlob);
+  const toolCallIds = await foldIntoRecap(
+    messages,
+    runStart,
+    start,
+    [[start, cutEnd]],
+    priorRecap,
+    putBlob,
+    options.stepOf,
+  );
   return {
     beforeTokens,
     afterTokens: estimatePromptTokens(messages, tools),
@@ -533,12 +546,17 @@ function residueChars(messages: ChatCompletionMessageParam[], from: number, to =
  * the card-only steps before and after it fold. The newest
  * `inRunKeepToolResults` steps stay. Whole steps only, so tool_call pairing
  * stays valid. Prompt-only.
+ *
+ * `keepFindingCalls`: steps with a record_finding call stay too. Set when
+ * the harness card is off: the calls' arguments are then the only copy of
+ * the findings, and a recap line keeps only a preview of them.
  */
 export async function foldResidue(
   messages: ChatCompletionMessageParam[],
   runStart: number,
   budget: ContextBudget,
   tools: ChatCompletionTool[],
+  options: { keepFindingCalls?: boolean; stepOf?: StepOf } = {},
 ): Promise<InRunCompactionResult | null> {
   if (residueChars(messages, runStart) / CHARS_PER_TOKEN < budget.inRunResidueFoldTokens) return null;
   const { start, priorRecap } = recapStart(messages, runStart);
@@ -557,6 +575,7 @@ export async function foldResidue(
     const holdsLive = messages.slice(from, to).some((message) => {
       if (message.role !== 'tool' || typeof message.content !== 'string') return false;
       const name = calls.get(message.tool_call_id)?.name;
+      if (name === 'record_finding' && options.keepFindingCalls) return true;
       if (name === 'delegate' || (name && NEVER_EVICT.has(name))) return message.content.length >= MIN_EVICT_CHARS;
       return isResident(message.content) && message.content.length >= MIN_EVICT_CHARS;
     });
@@ -569,7 +588,7 @@ export async function foldResidue(
     return null;
   }
   const beforeTokens = estimatePromptTokens(messages, tools);
-  const toolCallIds = await foldIntoRecap(messages, runStart, start, ranges, priorRecap);
+  const toolCallIds = await foldIntoRecap(messages, runStart, start, ranges, priorRecap, undefined, options.stepOf);
   return { beforeTokens, afterTokens: estimatePromptTokens(messages, tools), toolCallIds, prefixHeavy: false };
 }
 
@@ -579,6 +598,12 @@ export async function foldResidue(
  * line per note and tool outcome of the folded steps, in order. Steps between
  * ranges stay in place, in order, after the recap. Large resident results are
  * stored first so their sha stays recallable.
+ *
+ * Each line starts with its step (`[step 7] grep …`): kept steps stay in
+ * place after the recap, so the recap can describe steps that came after
+ * them, and the number keeps the order explicit. The step is the iteration
+ * of the step's first tool call (`stepOf`); without one, the step's position
+ * among this run's steps in the prompt.
  */
 async function foldIntoRecap(
   messages: ChatCompletionMessageParam[],
@@ -587,17 +612,25 @@ async function foldIntoRecap(
   ranges: Array<[number, number]>,
   priorRecap: string,
   putBlob?: (text: string) => Promise<string>,
+  stepOf?: StepOf,
 ): Promise<string[]> {
   const calls = toolCallIndex(messages);
   const lines: string[] = priorRecap ? [priorRecap] : [];
   const toolCallIds: string[] = [];
+  const position = new Map<number, number>();
+  for (let i = start; i < messages.length; i++) {
+    if (messages[i]?.role === 'assistant') position.set(i, position.size + 1);
+  }
+  let step = 0;
   for (const [from, to] of ranges) {
     for (let i = from; i < to; i++) {
       const message = messages[i];
       if (!message) continue;
       if (message.role === 'assistant') {
+        const firstCall = message.tool_calls?.[0]?.id;
+        step = (firstCall !== undefined ? stepOf?.(firstCall) : undefined) ?? position.get(i) ?? step;
         const text = clip(textOf(message.content), 300);
-        if (text) lines.push(`Note: ${text}`);
+        if (text) lines.push(`[step ${step}] Note: ${text}`);
       } else if (message.role === 'tool' && typeof message.content === 'string') {
         const info = calls.get(message.tool_call_id);
         // Edit hunks are not worth keeping (the file is the source of truth);
@@ -608,7 +641,7 @@ async function foldIntoRecap(
           message.content.length >= MIN_EVICT_CHARS &&
           isResident(message.content);
         const storedSha = keepBody ? await putBlob(message.content) : undefined;
-        lines.push(outcomeLine(info, message.content, storedSha));
+        lines.push(`[step ${step}] ${outcomeLine(info, message.content, storedSha)}`);
         toolCallIds.push(message.tool_call_id);
       }
     }

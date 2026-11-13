@@ -5,6 +5,48 @@
     "iterations": 3,
     "toolCalls": 3,
     "status": "completed",
+    "task": {
+      "phase": "report",
+      "iteration": 3,
+      "taskClass": "small",
+      "shape": "change",
+      "workingSet": [
+        {
+          "path": "a.ts",
+          "reads": 1,
+          "edits": 1,
+          "failedEdits": 0,
+          "lastReadIteration": 1,
+          "lastEditIteration": 2
+        },
+        {
+          "path": "b.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 1
+        }
+      ],
+      "evidence": {
+        "edits": 1,
+        "failedEdits": 0,
+        "commands": [],
+        "toolErrors": 0,
+        "unverifiedSince": 2,
+        "uncheckedFiles": [
+          "a.ts"
+        ],
+        "lastCheck": null,
+        "reviewed": false,
+        "findings": []
+      },
+      "phaseIterations": {
+        "orient": 1,
+        "locate": 1,
+        "change": 1
+      },
+      "childGaps": []
+    },
     "usage": {
       "own": {
         "promptTokens": 3000,
@@ -52,7 +94,8 @@
       "promptTokens": 3,
       "residentToolTokens": 0,
       "residueTokens": 0,
-      "prefixStableMessages": 0
+      "prefixStableMessages": 0,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -130,7 +173,8 @@
       "promptTokens": 23,
       "residentToolTokens": 8,
       "residueTokens": 12,
-      "prefixStableMessages": 1
+      "prefixStableMessages": 1,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -196,7 +240,8 @@
       "promptTokens": 100,
       "residentToolTokens": 11,
       "residueTokens": 18,
-      "prefixStableMessages": 4
+      "prefixStableMessages": 4,
+      "cardTokens": 69
     },
     {
       "type": "llm_request",
@@ -267,7 +312,8 @@
           "orient": 1,
           "locate": 1,
           "change": 1
-        }
+        },
+        "childGaps": []
       }
     },
     {

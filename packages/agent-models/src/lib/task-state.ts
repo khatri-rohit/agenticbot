@@ -49,7 +49,7 @@ export type TaskEvidence = {
   lastCheck: TaskCommand | null;
   /** A delegate(review) was started this run. */
   reviewed: boolean;
-  /** Facts recorded this run, oldest first (capped; see FINDINGS_MAX). */
+  /** Facts recorded this run, oldest first (bounded by FINDINGS_MAX, a memory safety cap, not a working limit). */
   findings: TaskFinding[];
 };
 
@@ -75,10 +75,20 @@ export type TaskShape = 'change' | 'research' | 'answer' | 'unknown';
 /** One fact the model recorded with record_finding. */
 export type TaskFinding = {
   claim: string;
-  /** path:line, a URL, or a quoted string. */
+  /** path:line, a URL, or a quoted string (as the tool recorded it, corrected when it was off). */
   evidence: string;
   topic?: string;
   iteration: number;
+  /**
+   * What record_finding checked against the workspace: `verified` (quoted
+   * text at the cited lines, or the cited lines exist), `corrected` (the
+   * quote was elsewhere in the cited file; the evidence now names where),
+   * `unverified` (quote not found, file missing or lines past its end),
+   * `skipped` (URL or no workspace). Every finding is recorded either way.
+   */
+  verification: 'verified' | 'corrected' | 'unverified' | 'skipped';
+  /** Set when the finding came from a sub-agent: its subRunId. Absent = recorded by this run. */
+  source?: string;
 };
 
 export type TaskStateSnapshot = {
@@ -91,6 +101,11 @@ export type TaskStateSnapshot = {
   evidence: TaskEvidence;
   /** Model calls made while in each phase. */
   phaseIterations: Partial<Record<TaskPhase, number>>;
+  /**
+   * Open questions sub-agents reported (their gaps), newest last: what this
+   * run still has to check, instead of re-verifying what they found.
+   */
+  childGaps: string[];
 };
 
 export const TASK_STATE_COMMANDS_MAX = 20;

@@ -5,6 +5,68 @@
     "iterations": 6,
     "toolCalls": 5,
     "status": "completed",
+    "task": {
+      "phase": "report",
+      "iteration": 6,
+      "taskClass": "small",
+      "shape": "change",
+      "workingSet": [
+        {
+          "path": "f1.ts",
+          "reads": 1,
+          "edits": 1,
+          "failedEdits": 0,
+          "lastReadIteration": 1,
+          "lastEditIteration": 4
+        },
+        {
+          "path": "f2.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 2
+        },
+        {
+          "path": "f3.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 3
+        }
+      ],
+      "evidence": {
+        "edits": 1,
+        "failedEdits": 0,
+        "commands": [
+          {
+            "command": "npm test",
+            "exitCode": 0,
+            "iteration": 5,
+            "afterEdit": true,
+            "check": true
+          }
+        ],
+        "toolErrors": 0,
+        "unverifiedSince": null,
+        "uncheckedFiles": [],
+        "lastCheck": {
+          "command": "npm test",
+          "exitCode": 0,
+          "iteration": 5,
+          "afterEdit": true,
+          "check": true
+        },
+        "reviewed": false,
+        "findings": []
+      },
+      "phaseIterations": {
+        "orient": 1,
+        "locate": 3,
+        "change": 1,
+        "verify": 1
+      },
+      "childGaps": []
+    },
     "usage": {
       "own": {
         "promptTokens": 6000,
@@ -52,7 +114,8 @@
       "promptTokens": 3,
       "residentToolTokens": 0,
       "residueTokens": 0,
-      "prefixStableMessages": 0
+      "prefixStableMessages": 0,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -109,7 +172,8 @@
       "promptTokens": 1011,
       "residentToolTokens": 1002,
       "residueTokens": 7,
-      "prefixStableMessages": 1
+      "prefixStableMessages": 1,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -158,7 +222,8 @@
       "promptTokens": 2064,
       "residentToolTokens": 2004,
       "residueTokens": 13,
-      "prefixStableMessages": 3
+      "prefixStableMessages": 3,
+      "cardTokens": 45
     },
     {
       "type": "llm_request",
@@ -207,7 +272,8 @@
       "promptTokens": 3073,
       "residentToolTokens": 3006,
       "residueTokens": 19,
-      "prefixStableMessages": 5
+      "prefixStableMessages": 5,
+      "cardTokens": 47
     },
     {
       "type": "llm_request",
@@ -273,7 +339,8 @@
       "promptTokens": 3107,
       "residentToolTokens": 3009,
       "residueTokens": 25,
-      "prefixStableMessages": 7
+      "prefixStableMessages": 7,
+      "cardTokens": 71
     },
     {
       "type": "llm_request",
@@ -329,7 +396,7 @@
       "runId": "replay-run",
       "iteration": 5,
       "beforeTokens": 3297,
-      "afterTokens": 288,
+      "afterTokens": 295,
       "toolCallIds": [
         "r1",
         "r2",
@@ -343,16 +410,17 @@
       "runId": "replay-run",
       "iteration": 6,
       "messages": 5,
-      "promptTokens": 213,
+      "promptTokens": 220,
       "residentToolTokens": 8,
       "residueTokens": 9,
-      "prefixStableMessages": 1
+      "prefixStableMessages": 1,
+      "cardTokens": 61
     },
     {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 6,
-      "estimatedPromptTokens": 288
+      "estimatedPromptTokens": 295
     },
     {
       "type": "llm_response",
@@ -437,7 +505,8 @@
           "locate": 3,
           "change": 1,
           "verify": 1
-        }
+        },
+        "childGaps": []
       }
     },
     {
@@ -1154,7 +1223,7 @@
       },
       {
         "role": "assistant",
-        "content": "(compacted progress)\nEarlier steps of this run, condensed. Re-read files before relying on old contents; recall a sha256 for an exact earlier result.\n- read_file {\"path\":\"f1.ts\"} → f1.ts: · sha256:7b96478e58f02063fd2d4939e7734c5db84a9346f184489ceeb8876096a42e45\n- read_file {\"path\":\"f2.ts\"} → f2.ts: · sha256:5cfff9d8fb6ac2c5e952daa9e48a67a4109a1b07e579fdb0ac32688b575793b9\n- read_file {\"path\":\"f3.ts\"} → f3.ts: · sha256:56b243b307d4234ca9e25e78bc7289c3ed304af6fa7990b740b652d60d6856bf\n- edit_file {\"path\":\"f1.ts\"} → Patched f1.ts"
+        "content": "(compacted progress)\nEarlier steps of this run, condensed. Re-read files before relying on old contents; recall a sha256 for an exact earlier result.\n[step 1] read_file {\"path\":\"f1.ts\"} → f1.ts: · sha256:7b96478e58f02063fd2d4939e7734c5db84a9346f184489ceeb8876096a42e45\n[step 2] read_file {\"path\":\"f2.ts\"} → f2.ts: · sha256:5cfff9d8fb6ac2c5e952daa9e48a67a4109a1b07e579fdb0ac32688b575793b9\n[step 3] read_file {\"path\":\"f3.ts\"} → f3.ts: · sha256:56b243b307d4234ca9e25e78bc7289c3ed304af6fa7990b740b652d60d6856bf\n[step 4] edit_file {\"path\":\"f1.ts\"} → Patched f1.ts"
       },
       {
         "role": "assistant",
@@ -1177,7 +1246,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: verify · step 6 · task small change · ~288 tokens per call\nWorking set: 3 file(s) read earlier are no longer in full view (read_file again if needed)"
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: verify · step 6 · task small change · ~295 tokens per call\nWorking set: 3 file(s) read earlier are no longer in full view (read_file again if needed)"
       }
     ]
   ]

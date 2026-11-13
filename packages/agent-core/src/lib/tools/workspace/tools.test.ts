@@ -6,10 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { globMatch } from './path';
 import {
   formatFileRead,
+  stripReadNumbers,
   terminalShellNote,
   WORKSPACE_READ_MAX_CHARS,
   WORKSPACE_READ_MIN_LINES,
   WORKSPACE_TOOLS,
+  liveResultCapChars,
 } from './tools';
 
 function ctx(workspaceRoot: string) {
@@ -50,6 +52,53 @@ describe('edit_file unique span', () => {
       ctx(root),
     );
     expect(result).toMatch(/not found/);
+  });
+
+  it('strips read_file line numbers pasted into oldText and newText', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'agent-edit-'));
+    await writeFile(path.join(root, 'a.ts'), 'one\n\ntwo\nthree\n', 'utf8');
+    const result = await editFile?.execute(
+      { path: 'a.ts', oldText: '1\tone\n2\t\n3\ttwo', newText: '1\tONE\n2\t\n3\tTWO' },
+      ctx(root),
+    );
+    expect(result).toMatch(/^Patched a\.ts/);
+    expect(result).toMatch(/removed read_file line numbers from oldText and newText/);
+    expect(await readFile(path.join(root, 'a.ts'), 'utf8')).toBe('ONE\n\nTWO\nthree\n');
+  });
+
+  it('strips numbers from oldText only when newText carries none', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'agent-edit-'));
+    await writeFile(path.join(root, 'a.ts'), 'alpha\nbeta\n', 'utf8');
+    const result = await editFile?.execute(
+      { path: 'a.ts', oldText: '  12\talpha\n  13\tbeta', newText: 'gamma' },
+      ctx(root),
+    );
+    expect(result).toMatch(/removed read_file line numbers from oldText$/m);
+    expect(await readFile(path.join(root, 'a.ts'), 'utf8')).toBe('gamma\n');
+  });
+
+  it('does not strip when only some lines carry a number', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'agent-edit-'));
+    await writeFile(path.join(root, 'a.ts'), 'alpha\nbeta\n', 'utf8');
+    const result = await editFile?.execute(
+      { path: 'a.ts', oldText: '1\talpha\nbeta', newText: 'x' },
+      ctx(root),
+    );
+    expect(result).toMatch(/not found/);
+    expect(await readFile(path.join(root, 'a.ts'), 'utf8')).toBe('alpha\nbeta\n');
+    expect(stripReadNumbers('1\talpha\nbeta')).toBeNull();
+    expect(stripReadNumbers('1\talpha\n\n2\tbeta')).toBe('alpha\n\nbeta');
+  });
+
+  it('matches a file whose own lines look numbered as written', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'agent-edit-'));
+    await writeFile(path.join(root, 'data.tsv'), '1\tfoo\n2\tbar\n', 'utf8');
+    const result = await editFile?.execute(
+      { path: 'data.tsv', oldText: '1\tfoo', newText: '1\tFOO' },
+      ctx(root),
+    );
+    expect(result).not.toMatch(/removed read_file line numbers/);
+    expect(await readFile(path.join(root, 'data.tsv'), 'utf8')).toBe('1\tFOO\n2\tbar\n');
   });
 });
 
@@ -158,5 +207,27 @@ describe('read_file unit', () => {
     const out = formatFileRead(big, undefined, undefined);
     expect(out.length).toBeLessThanOrEqual(WORKSPACE_READ_MAX_CHARS + 200);
     expect(out).toMatch(/read_file truncated at line \d+ of 4000 — continue with offset=\d+/);
+  });
+
+  it('numbers each line with its absolute line number and a tab', () => {
+    const out = formatFileRead('alpha\n\nbeta\n', undefined, undefined);
+    expect(out).toBe('[lines 1–3 of 3]\n1\talpha\n2\t\n3\tbeta');
+    const windowed = formatFileRead(lines(4_000, 20), 1_000, 5).split('\n');
+    expect(windowed[1]).toBe(`1000\t${'l1000'.padEnd(20, '.')}`);
+    expect(windowed[WORKSPACE_READ_MIN_LINES]).toMatch(/^1199\tl1199/);
+  });
+
+  it('bounds the numbered body by the char window, so the live cap never cuts it', () => {
+    // Fits the window raw, but not with numbers: windowed, not returned whole.
+    const raw = lines(1_900, 20);
+    expect(raw.length).toBeLessThanOrEqual(WORKSPACE_READ_MAX_CHARS);
+    const out = formatFileRead(raw, undefined, undefined);
+    const [header, ...rest] = out.split('\n\n')[0]!.split('\n');
+    const body = rest.join('\n');
+    expect(body.length).toBeLessThanOrEqual(WORKSPACE_READ_MAX_CHARS);
+    const last = Number(/^\[lines 1–(\d+) of 1900\]$/.exec(header ?? '')?.[1]);
+    expect(last).toBeLessThan(1_900);
+    expect(out).toMatch(new RegExp(`continue with offset=${last + 1}`));
+    expect(out.length).toBeLessThanOrEqual(liveResultCapChars('read_file', 0));
   });
 });

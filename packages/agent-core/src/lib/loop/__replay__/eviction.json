@@ -5,6 +5,58 @@
     "iterations": 5,
     "toolCalls": 4,
     "status": "completed",
+    "task": {
+      "phase": "report",
+      "iteration": 5,
+      "taskClass": "small",
+      "shape": "unknown",
+      "workingSet": [
+        {
+          "path": "big1.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 1
+        },
+        {
+          "path": "big2.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 2
+        },
+        {
+          "path": "big3.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 3
+        },
+        {
+          "path": "big4.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 4
+        }
+      ],
+      "evidence": {
+        "edits": 0,
+        "failedEdits": 0,
+        "commands": [],
+        "toolErrors": 0,
+        "unverifiedSince": null,
+        "uncheckedFiles": [],
+        "lastCheck": null,
+        "reviewed": false,
+        "findings": []
+      },
+      "phaseIterations": {
+        "orient": 1,
+        "locate": 4
+      },
+      "childGaps": []
+    },
     "usage": {
       "own": {
         "promptTokens": 5000,
@@ -52,7 +104,8 @@
       "promptTokens": 3,
       "residentToolTokens": 0,
       "residueTokens": 0,
-      "prefixStableMessages": 0
+      "prefixStableMessages": 0,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -109,7 +162,8 @@
       "promptTokens": 1012,
       "residentToolTokens": 1003,
       "residueTokens": 7,
-      "prefixStableMessages": 1
+      "prefixStableMessages": 1,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -170,7 +224,8 @@
       "promptTokens": 1115,
       "residentToolTokens": 1003,
       "residueTokens": 47,
-      "prefixStableMessages": 2
+      "prefixStableMessages": 2,
+      "cardTokens": 63
     },
     {
       "type": "llm_request",
@@ -231,7 +286,8 @@
       "promptTokens": 1156,
       "residentToolTokens": 1003,
       "residueTokens": 88,
-      "prefixStableMessages": 4
+      "prefixStableMessages": 4,
+      "cardTokens": 63
     },
     {
       "type": "llm_request",
@@ -309,7 +365,8 @@
       "promptTokens": 1234,
       "residentToolTokens": 1003,
       "residueTokens": 128,
-      "prefixStableMessages": 6
+      "prefixStableMessages": 6,
+      "cardTokens": 101
     },
     {
       "type": "llm_request",
@@ -390,7 +447,8 @@
         "phaseIterations": {
           "orient": 1,
           "locate": 4
-        }
+        },
+        "childGaps": []
       }
     },
     {

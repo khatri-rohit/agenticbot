@@ -10,20 +10,24 @@ import {
   CHARS_PER_TOKEN,
   CHILD_BUDGET_SHARE,
   childAllocation,
+  contextBudgetForWindow,
   DEFAULT_CONTEXT_BUDGET,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
   FINDING_CLAIM_MAX_CHARS,
   FINDING_EVIDENCE_MAX_CHARS,
   FINDINGS_MAX,
   GREP_WINDOW,
   liveResultCapChars,
   MAX_CONCURRENT_SUBAGENTS,
+  MIN_CONTEXT_WINDOW_TOKENS,
   READ_WINDOW,
-  RECORD_CARD_MAX_CHARS,
   REPORT_MAX_CHARS,
   THOROUGHNESS_TOOL_CALLS,
   type SubagentThoroughness,
+  type TaskFinding,
 } from '@agent/agent-models';
 
+import { recordOverflowText, recordSection } from './loop/state-card';
 import { createDelegateTool } from './subagent/delegate';
 import { getSubagentProfile, listSubagentProfiles } from './subagent/profiles';
 import { buildBrief, createReportTool } from './subagent/prompt';
@@ -87,12 +91,40 @@ describe('I8: one value per quantity', () => {
     expect(text).toContain(`at most ${MAX_CONCURRENT_SUBAGENTS} at a time`);
   });
 
-  it('record_finding states the same size limits the task state applies, and the card can show a full record', () => {
+  it('record_finding states the same size limits the task state applies', () => {
     const text = JSON.stringify(record_finding.definition);
     expect(text).toContain(`max ${FINDING_CLAIM_MAX_CHARS} chars`);
     expect(text).toContain(`max ${FINDING_EVIDENCE_MAX_CHARS} chars`);
-    // A typical finding (~120 chars) fits the card for the whole record.
-    expect(FINDINGS_MAX * 120).toBeLessThanOrEqual(RECORD_CARD_MAX_CHARS);
+  });
+
+  it('the card record stays inside its window-scaled budget for any record, and loses nothing', () => {
+    // Largest findings the task state allows, a full record, on the smallest
+    // and the default window: the card section fits its budget, and every
+    // finding it does not show is in the stored full record.
+    const claim = 'c'.repeat(FINDING_CLAIM_MAX_CHARS);
+    const evidence = 'e'.repeat(FINDING_EVIDENCE_MAX_CHARS);
+    for (const window of [MIN_CONTEXT_WINDOW_TOKENS, DEFAULT_CONTEXT_WINDOW_TOKENS, 1_000_000]) {
+      const { recordCardTokens } = contextBudgetForWindow(window);
+      expect(recordCardTokens).toBeGreaterThan(0);
+      expect(recordCardTokens).toBeLessThanOrEqual(DEFAULT_CONTEXT_BUDGET.recordCardTokens);
+      for (const count of [1, 50, FINDINGS_MAX]) {
+        const findings: TaskFinding[] = Array.from({ length: count }, (_, i) => ({
+          claim: `${i} ${claim}`.slice(0, FINDING_CLAIM_MAX_CHARS),
+          evidence,
+          topic: `topic-${i % 40}`,
+          iteration: i,
+          verification: 'unverified',
+        }));
+        const section = recordSection(findings, recordCardTokens, 'a'.repeat(64));
+        expect(section.join('\n').length).toBeLessThanOrEqual(recordCardTokens * CHARS_PER_TOKEN);
+        const shown = section.filter((line) => line.startsWith('- [topic-')).length;
+        if (shown < count) {
+          expect(section.some((line) => line.includes('recall sha256:'))).toBe(true);
+          const full = recordOverflowText(findings, recordCardTokens) ?? '';
+          for (const finding of findings) expect(full).toContain(finding.claim);
+        }
+      }
+    }
   });
 
   it('the residue fold and the resident low mark sit inside their caps', () => {

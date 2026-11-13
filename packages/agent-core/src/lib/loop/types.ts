@@ -14,6 +14,7 @@ import type {
   RunUsage,
   SubagentSpec,
   SubagentResult,
+  TaskStateSnapshot,
   ToolOrigin,
   TraceEvent,
   WebTrust,
@@ -179,6 +180,10 @@ export type SubagentParent = {
   capacity?: CapacityGate;
   /** The parent records its model calls; children record theirs too. */
   recordCalls?: boolean;
+  /** The parent's trace (through its task state): child findings merge into the parent's record. */
+  trace?: (event: TraceEvent) => void;
+  /** The parent's current step, for events it traces about the child. */
+  iteration?: () => number;
 };
 
 export type SubagentSpawner = (
@@ -198,4 +203,6 @@ export type RunLoopResult = {
   usage: RunUsage;
   /** The context after the final answer, when the host passed a starting report. */
   contextReport?: ContextReport;
+  /** Task state at the end of the run (findings, evidence); a sub-agent's report is built from it. */
+  task?: TaskStateSnapshot;
 };

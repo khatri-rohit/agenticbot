@@ -332,7 +332,8 @@ describe('harness invariants over a reacting model', () => {
     for (const name of ['research', 'unrecorded', 'change'] as ShapeName[]) {
       const sim = await run(name);
       const shapes = of(sim, 'context_shape');
-      const passes = of(sim, 'context_evicted').filter((event) => event.reason === 'budget');
+      // A cap pass traces cited results apart from the rest ('cited' then 'budget').
+      const passes = of(sim, 'context_evicted').filter((event) => event.reason === 'budget' || event.reason === 'cited');
       checked += passes.length;
       for (const pass of passes) {
         const next = shapes.find((shape) => shape.iteration === pass.iteration + 1);
@@ -429,12 +430,17 @@ describe('harness invariants over a reacting model', () => {
     expect(sameRangeReReads(sim)).toBe(0);
   });
 
-  /** Mechanisms that must each fire on at least one shape. */
+  /**
+   * Mechanisms that must each fire on at least one shape.
+   * `context_evicted:cited` is not listed: a cited result now leaves only in
+   * a pass for the resident cap (first in its order), and no shape here
+   * passes the cap while it holds cited reads (the recording shapes stay
+   * under it; cold passes clear first). residency.test.ts covers that order.
+   */
   const REACHABLE = [
     'context_evicted:budget',
     'context_evicted:cold',
     'context_evicted:superseded',
-    'context_evicted:cited',
     'context_compacted_inrun:milestone',
     'context_compacted_inrun:residue',
     'policy_decision:guard',
