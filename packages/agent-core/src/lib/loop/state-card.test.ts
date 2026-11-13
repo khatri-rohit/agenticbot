@@ -107,7 +107,7 @@ describe('harness card', () => {
     const card = buildStateCard(s, 40_000) ?? '';
     expect(card).toMatch(/- 4 turns in a row made one read call, and each turn re-sends ~40k tokens/);
     expect(card).not.toMatch(/slices of/);
-    expect(card).toMatch(/- 300k tokens \(30% of the run budget\) since the last evidence \(an edit, a passing check or a recorded finding\); about 22 calls left/);
+    expect(card).toMatch(/- 300k tokens \(30% of the run budget\) since the last evidence \(an edit, a passing check, a recorded finding or a sub-agent report\); about 22 calls left/);
     expect(card).toMatch(/- Run budget nearly spent/);
     expect(card).toMatch(/- Try the advisor\./);
     expect(buildStateCard(s, 40_000) ?? '').not.toMatch(/Try the advisor/);

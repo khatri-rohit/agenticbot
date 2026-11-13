@@ -19,7 +19,9 @@ import {
   type CoreResult,
   type RunState,
 } from './run-state';
+import { changeGate, planGate } from '../policy';
 import { measureContextShape } from './context-shape';
+import { tracePolicyDecision } from './policy-trace';
 import { OPEN_PLAN_WORK_NUDGE } from './steering-notes';
 import { preview } from './tool-call-record';
 
@@ -41,25 +43,16 @@ const DEFERRED_CHOICE_INSTRUCTION =
 const STOP_CHECK_NOTE =
   'Your answer reports success, but no check (build, typecheck, test or lint) has run since your last edit. Run the project check now, or say plainly what is not verified.';
 
-const CLAIMS_SUCCESS = /\b(works|working now|passes|passing|fixed|verified|succeeds|all tests pass)\b/i;
-const ADMITS_UNVERIFIED = /\b(not verified|unverified|could not verify|couldn't verify|did not verify|didn't verify|not tested|untested)\b/i;
-
-/**
- * Once per run: an Agent run that edited files and then claims success with
- * no check (task state: build/typecheck/test/lint that ran) since its last
- * edit goes back to verify. Never fires twice, and never when the answer
- * admits it is unverified.
- */
+/** The change done gate (policy/finish changeGate) over this run's state. */
 function needsStopCheck(s: RunState, answer: string): boolean {
-  return (
-    s.flags.stopCheck &&
-    !s.stopChecked &&
-    s.posture === 'agent' &&
-    s.task.unchecked &&
-    s.tools.byName.has('run_terminal') &&
-    CLAIMS_SUCCESS.test(answer) &&
-    !ADMITS_UNVERIFIED.test(answer)
-  );
+  return changeGate({
+    enabled: s.flags.stopCheck,
+    alreadySent: s.stopChecked,
+    posture: s.posture,
+    unchecked: s.task.unchecked,
+    canRunChecks: s.tools.byName.has('run_terminal'),
+    answer,
+  });
 }
 
 /** Tools-off final answer with a fresh message lifecycle (never reuse the tool-turn id). */
@@ -276,6 +269,7 @@ export async function settleFinalAnswer(
       s.stopChecked = true;
       pushHarnessNote(s, STOP_CHECK_NOTE);
       s.trace({ type: 'stop_check', runId, iteration: s.iterations });
+      tracePolicyDecision(s, 'finish', ['done_gate:unchecked'], 'claims success with edits not followed by a check');
       emitTurnCompleted(s, s.iterations, turn.usage);
       return null;
     }
@@ -283,14 +277,16 @@ export async function settleFinalAnswer(
       ? await s.config.hasOpenPlanWork()
       : false;
 
-    if (openPlanWork && s.planWorkNudges < 1) {
+    const plan = planGate({ openPlanWork, nudges: s.planWorkNudges });
+    if (plan === 'nudge') {
       s.planWorkNudges += 1;
       pushHarnessNote(s, OPEN_PLAN_WORK_NUDGE);
+      tracePolicyDecision(s, 'finish', ['done_gate:open_plan'], 'open todos remain on the plan');
       emitTurnCompleted(s, s.iterations, turn.usage);
       return null;
     }
 
-    if (openPlanWork) {
+    if (plan === 'stop') {
       noteLimit(s, limitMessage('limit.plan', 'Open plan todos remain'));
       emitTurnCompleted(s, s.iterations, turn.usage);
       emit?.({

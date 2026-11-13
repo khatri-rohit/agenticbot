@@ -264,7 +264,7 @@ describe('sub-agent runner budgets', () => {
     const parentEvents: TraceEvent[] = [];
     const result = await run({ thoroughness: 'thorough' }, undefined, parentEvents);
     expect(budgetOf(traces.get(result.subThreadId))).toMatchObject({ thoroughness: 'medium' });
-    expect(parentEvents).toContainEqual(expect.objectContaining({ type: 'policy_decision', kind: 'guard', ids: ['effort_capped:thorough'] }));
+    expect(parentEvents).toContainEqual(expect.objectContaining({ type: 'policy_decision', kind: 'delegation', ids: ['effort_capped:thorough'] }));
   });
 
   it('refuses a brief whose paths overlap a running sub-agent, and lets a disjoint one start', async () => {
@@ -275,7 +275,7 @@ describe('sub-agent runner budgets', () => {
     const disjoint = run({ objective: 'menu facts', paths: ['src/Components/DataViewer'] }, undefined, parentEvents);
     expect(overlapping.status).toBe('error');
     expect(overlapping.digest).toMatch(/Not started: src\/Components\/DashBoard\/DashBoard\.tsx is already covered by a running sub-agent \("dashboard facts"\)/);
-    expect(parentEvents).toContainEqual(expect.objectContaining({ kind: 'guard', ids: ['delegate_overlap:src/Components/DashBoard/DashBoard.tsx'] }));
+    expect(parentEvents).toContainEqual(expect.objectContaining({ kind: 'delegation', ids: ['delegate_overlap:src/Components/DashBoard/DashBoard.tsx'] }));
     expect((await disjoint).status).not.toBe('error');
     await first;
     // Once the first has settled, its paths are free again.

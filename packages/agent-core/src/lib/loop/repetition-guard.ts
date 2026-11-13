@@ -1,13 +1,9 @@
-import { limitMessage } from '@agent/agent-models';
+import { GUARD_LIMITS, limitMessage } from '@agent/agent-models';
 
-/** Invented tool names in one run before hard halt (I1 + I6). */
-const MAX_UNKNOWN_TOOL_STREAK = 2;
-/** Distinct read_file admits per path per run (stops offset paging storms). */
-const MAX_READ_FILE_PER_PATH = 30;
-/** run_terminal admits per run (stops shell flood; migrations run 40+ builds). */
-const MAX_TERMINAL_CALLS = 60;
-/** Identical mutate call+result before stuck halt. */
-const MAX_IDENTICAL_OUTCOMES = 3;
+const MAX_UNKNOWN_TOOL_STREAK = GUARD_LIMITS.unknownToolStreak;
+const MAX_READ_FILE_PER_PATH = GUARD_LIMITS.readsPerPath;
+const MAX_TERMINAL_CALLS = GUARD_LIMITS.terminalCalls;
+const MAX_IDENTICAL_OUTCOMES = GUARD_LIMITS.identicalOutcomes;
 /** Call keys of tools whose result depends on workspace contents (see toolCallKey). */
 const WORKSPACE_READ_PREFIXES = ['read_file:', 'grep:', 'glob:'];
 

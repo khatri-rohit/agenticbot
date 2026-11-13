@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import {
+  CHILD_RUN,
   childAllocation,
   emptyRunUsage,
   totalRunUsage,
@@ -39,7 +40,7 @@ import {
   mergeReportFindings,
   renderReport,
 } from './prompt';
-import { earnedThoroughness, normalizeScopePaths, overlappingPath, usageDelta } from './delegation-policy';
+import { earnedThoroughness, normalizeScopePaths, overlappingPath, usageDelta } from '../policy';
 import { getSubagentProfile } from './profiles';
 import {
   CHILD_STRIPPED_TOOLS,
@@ -248,8 +249,10 @@ export function createSubagentRunner(deps: {
         type: 'policy_decision',
         runId: parent.runId,
         iteration: parent.iteration?.() ?? 0,
-        kind: 'guard',
+        kind: 'delegation',
         ids: ['effort_capped:thorough'],
+        reason: 'thorough is granted only when resuming a sub-agent',
+        inputs: { requested: spec.thoroughness ?? profile.defaultThoroughness ?? 'none', granted: 'medium' },
       });
     }
     const allocate = () =>
@@ -455,8 +458,8 @@ export function createSubagentRunner(deps: {
           limits: {
             maxIterations: granted.maxIterations,
             maxToolCalls: granted.maxToolCalls,
-            maxRepeatedToolCalls: 3,
-            toolTimeoutMs: 60_000,
+            maxRepeatedToolCalls: CHILD_RUN.maxRepeatedToolCalls,
+            toolTimeoutMs: CHILD_RUN.toolTimeoutMs,
             maxWallMs: profile.limits.maxWallMs,
             maxPromptTokens: carve,
           },
@@ -686,8 +689,10 @@ export function createSubagentRunner(deps: {
         type: 'policy_decision',
         runId: parent.runId,
         iteration: parent.iteration?.() ?? 0,
-        kind: 'guard',
+        kind: 'delegation',
         ids: [`delegate_overlap:${hit}`],
+        reason: 'brief overlaps a running sub-agent',
+        inputs: { path: hit },
       });
       return failure(
         spec,

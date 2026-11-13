@@ -7,11 +7,13 @@
  * - orient  — before the first workspace step (reading the request, planning)
  * - locate  — finding and reading the code or sources the change needs
  * - change  — editing; reads in between stay here while edits are unverified
+ * - record  — recording findings (research evidence; reads in between
+ *             go back to locate)
  * - verify  — a command or review after an edit
  * - report  — the model answered without tool calls
  * - blocked — a limit stopped the run
  */
-export type TaskPhase = 'orient' | 'locate' | 'change' | 'verify' | 'report' | 'blocked';
+export type TaskPhase = 'orient' | 'locate' | 'change' | 'record' | 'verify' | 'report' | 'blocked';
 
 export type WorkingSetEntry = {
   path: string;
@@ -51,12 +53,20 @@ export type TaskEvidence = {
   reviewed: boolean;
   /** Facts recorded this run, oldest first (bounded by FINDINGS_MAX, a memory safety cap, not a working limit). */
   findings: TaskFinding[];
+  /**
+   * Iteration of the latest evidence of any type (a successful edit, a
+   * check that passes after edits or after a failure, a new or upgraded
+   * finding, a sub-agent report); 0 before any. Stall and the effort floor
+   * count from here.
+   */
+  lastEvidenceIteration: number;
 };
 
 /**
  * Size of the task, from evidence as it grows (never guessed up front):
- * small ≤2 edited files, ≤3 edits, <12 steps; long ≥40 steps or ≥8 edited
- * files; medium between. Only ever promoted within a run.
+ * steps for every shape, edits and edited files for a change, recorded
+ * findings for research (marks in harness-limits TASK_CLASS_MARKS). Only
+ * ever promoted within a run.
  */
 export type TaskClass = 'small' | 'medium' | 'long';
 

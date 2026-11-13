@@ -43,7 +43,8 @@
         "uncheckedFiles": [],
         "lastCheck": null,
         "reviewed": false,
-        "findings": []
+        "findings": [],
+        "lastEvidenceIteration": 0
       },
       "phaseIterations": {
         "orient": 1,
@@ -149,15 +150,39 @@
       "resultChars": 17
     },
     {
+      "type": "stall_nudge",
+      "runId": "replay-run",
+      "iteration": 1,
+      "idleTokens": 4000,
+      "promptTokens": 4000,
+      "limitPromptTokens": 10000
+    },
+    {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 2,
+      "kind": "card",
+      "ids": [
+        "advice:stall"
+      ],
+      "reason": "open items and advice shown on this call",
+      "inputs": {
+        "shape": "unknown",
+        "phase": "locate",
+        "stepsSinceEvidence": 1,
+        "findings": 0
+      }
+    },
+    {
       "type": "context_shape",
       "runId": "replay-run",
       "iteration": 2,
-      "messages": 3,
-      "promptTokens": 14,
+      "messages": 4,
+      "promptTokens": 133,
       "residentToolTokens": 5,
       "residueTokens": 7,
       "prefixStableMessages": 1,
-      "cardTokens": 0
+      "cardTokens": 120
     },
     {
       "type": "llm_request",
@@ -212,19 +237,27 @@
       "iteration": 3,
       "kind": "card",
       "ids": [
+        "advice:stall",
         "advice:budget"
-      ]
+      ],
+      "reason": "open items and advice shown on this call",
+      "inputs": {
+        "shape": "unknown",
+        "phase": "locate",
+        "stepsSinceEvidence": 2,
+        "findings": 0
+      }
     },
     {
       "type": "context_shape",
       "runId": "replay-run",
       "iteration": 3,
       "messages": 6,
-      "promptTokens": 114,
+      "promptTokens": 181,
       "residentToolTokens": 9,
       "residueTokens": 13,
       "prefixStableMessages": 3,
-      "cardTokens": 90
+      "cardTokens": 157
     },
     {
       "type": "llm_request",
@@ -351,7 +384,8 @@
           "uncheckedFiles": [],
           "lastCheck": null,
           "reviewed": false,
-          "findings": []
+          "findings": [],
+          "lastEvidenceIteration": 0
         },
         "phaseIterations": {
           "orient": 1,
@@ -718,6 +752,10 @@
         "role": "tool",
         "tool_call_id": "r1",
         "content": "contents of f1.ts"
+      },
+      {
+        "role": "user",
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 2 · task small unknown · ~82 tokens per call · run budget: 4k own of 10k used\nWorking set: f1.ts\nAdvice:\n- 4k tokens (40% of the run budget) since the last evidence (an edit, a passing check, a recorded finding or a sub-agent report); about 73 calls left at this size. Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed."
       }
     ],
     [
@@ -765,7 +803,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small unknown · ~121 tokens per call · run budget: 8k own of 10k used\nWorking set: f2.ts, f1.ts\nAdvice:\n- Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small unknown · ~121 tokens per call · run budget: 8k own of 10k used\nWorking set: f2.ts, f1.ts\nAdvice:\n- 8k tokens (80% of the run budget) since the last evidence (an edit, a passing check, a recorded finding or a sub-agent report); about 16 calls left at this size. Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed.\n- Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work."
       }
     ],
     [

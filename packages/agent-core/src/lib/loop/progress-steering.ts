@@ -1,33 +1,20 @@
+import { PROGRESS_MARKS } from '@agent/agent-models';
+
+import { progressMarks } from '../policy';
 import type { RunBudget } from './run-budget';
 
-/** Share of maxPromptTokens spent with no progress before the loop steers once. */
-const STALL_NUDGE_RATIO = 0.3;
-/** Past this share with no progress, the parent's own web tools close until progress. */
-const RESEARCH_GATE_RATIO = 0.5;
-/** Tighter marks while the host says account capacity is behind pace. */
-const STALL_NUDGE_RATIO_CONSERVE = 0.2;
-const RESEARCH_GATE_RATIO_CONSERVE = 0.35;
 /**
- * Idle spend is waste at any run size, so a bigger cap does not buy a longer
- * stall: the marks stop growing here (the ratios of a 2.5M cap).
- */
-const STALL_NUDGE_MAX_TOKENS = 750_000;
-const RESEARCH_GATE_MAX_TOKENS = 1_250_000;
-const STALL_NUDGE_MAX_TOKENS_CONSERVE = 500_000;
-const RESEARCH_GATE_MAX_TOKENS_CONSERVE = 875_000;
-/** Turns in a row whose every call hit the research gate before the run ends with a handoff. */
-const MAX_GATED_TURNS = 2;
-
-/**
- * Spend since the last progress (a successful edit, or a finished sub-agent)
- * steers a run that can edit: one nudge to act, then its own web research
- * closes until it makes progress, and a run that only retries closed web
- * tools ends. Only a capped parent run in Agent posture with edit_file is
- * steered; `enabled` is false for every other run.
+ * Spend since the last evidence steers a run: stall advice on the card,
+ * then, for a run that can act on the workspace, its own web research closes
+ * until the next evidence, and a run that only retries closed web tools
+ * ends. Which runs get which is policy/progress `progressScope`; the marks
+ * are policy/progress `progressMarks`. What counts as evidence is the task
+ * state's one definition (TaskStateTracker.noteEvidence), read through
+ * `evidence()`; this class only prices the idle stretch in tokens.
  */
 export class ProgressSteering {
   private spentAtProgress = 0;
-  private childCallsAtProgress = 0;
+  private evidenceAtProgress = 0;
   private stallNudged = false;
   private gateTraced = false;
   private gatedThisTurn = 0;
@@ -35,29 +22,29 @@ export class ProgressSteering {
 
   constructor(
     private readonly budget: RunBudget,
-    private readonly enabled: boolean,
+    private readonly scope: { stall: boolean; gate: boolean },
     private readonly conserving: () => boolean,
+    /** Evidence moments so far (task state); idle spend restarts when it moves. */
+    private readonly evidence: () => number,
   ) {}
 
-  markProgress(): void {
+  private markProgress(): void {
     this.spentAtProgress = this.budget.spent();
-    this.childCallsAtProgress = this.budget.childCalls();
+    this.evidenceAtProgress = this.evidence();
     this.stallNudged = false;
     this.gateTraced = false;
   }
 
-  /** Prompt tokens spent since the last progress. A finished sub-agent counts as progress. */
+  /** Prompt tokens spent since the last evidence. */
   idleTokens(): number {
-    if (this.budget.childCalls() > this.childCallsAtProgress) this.markProgress();
+    if (this.evidence() > this.evidenceAtProgress) this.markProgress();
     return this.budget.spent() - this.spentAtProgress;
   }
 
-  /** The parent's own web tools are closed until the next progress. */
+  /** The run's own web tools are closed until the next evidence. */
   researchGated(): boolean {
-    const conserving = this.conserving();
-    const ratio = conserving ? RESEARCH_GATE_RATIO_CONSERVE : RESEARCH_GATE_RATIO;
-    const ceiling = conserving ? RESEARCH_GATE_MAX_TOKENS_CONSERVE : RESEARCH_GATE_MAX_TOKENS;
-    return this.enabled && this.idleTokens() >= Math.min(this.budget.maxPromptTokens! * ratio, ceiling);
+    if (!this.scope.gate) return false;
+    return this.idleTokens() >= progressMarks(this.budget.maxPromptTokens!, this.conserving()).gate;
   }
 
   /** Count one refused web call; true for the first refusal since progress. */
@@ -73,7 +60,7 @@ export class ProgressSteering {
   }
 
   /**
-   * Close a turn. Returns the streak once every call of MAX_GATED_TURNS turns
+   * Close a turn. Returns the streak once every call of `maxGatedTurns` turns
    * in a row was refused by the gate (time to end the run), else null.
    */
   endTurn(halted: boolean, toolCallCount: number): number | null {
@@ -81,18 +68,15 @@ export class ProgressSteering {
       !halted && this.gatedThisTurn > 0 && this.gatedThisTurn === toolCallCount
         ? this.gatedTurnStreak + 1
         : 0;
-    return this.gatedTurnStreak >= MAX_GATED_TURNS ? this.gatedTurnStreak : null;
+    return this.gatedTurnStreak >= PROGRESS_MARKS.maxGatedTurns ? this.gatedTurnStreak : null;
   }
 
-  /** Idle spend while it is past the nudge mark (not consumed: the harness card reads it every call). */
+  /** Idle spend while it is past the stall mark (not consumed: the harness card reads it every call). */
   stalled(): { idle: number; max: number } | undefined {
-    if (!this.enabled) return undefined;
+    if (!this.scope.stall) return undefined;
     const max = this.budget.maxPromptTokens!;
     const idle = this.idleTokens();
-    const conserving = this.conserving();
-    const ratio = conserving ? STALL_NUDGE_RATIO_CONSERVE : STALL_NUDGE_RATIO;
-    const ceiling = conserving ? STALL_NUDGE_MAX_TOKENS_CONSERVE : STALL_NUDGE_MAX_TOKENS;
-    return idle >= Math.min(max * ratio, ceiling) ? { idle, max } : undefined;
+    return idle >= progressMarks(max, this.conserving()).stall ? { idle, max } : undefined;
   }
 
   /** Idle spend, once per stretch without progress when it crosses the nudge mark. */

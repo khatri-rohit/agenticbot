@@ -37,8 +37,15 @@ function describeHealth(h: RunMetrics['health']): string {
     `findings ${h.findings}`,
     `repeat searches ${h.repeatSearches.repeats}/${h.repeatSearches.searches}`,
     `repeats answered ${h.guardAnswered}`,
+    Object.keys(h.decisions).length > 0
+      ? `decisions ${Object.entries(h.decisions)
+          .sort((a, b) => b[1] - a[1])
+          .map(([key, n]) => `${key} ${n}`)
+          .join(', ')}`
+      : '',
     `advice followed ${h.advice.followed}/${h.advice.shown}${advice ? ` (${advice})` : ''}`,
     `low effort without progress ${h.effortVsProgress.lowEffortWithoutProgress}/${h.effortVsProgress.stepsWithoutProgress} idle steps`,
+    `low effort past the idle floor ${h.effortVsProgress.lowEffortWhileIdle}/${h.effortVsProgress.idleSteps}`,
     h.childBudget
       ? `child budget ${tokens(h.childBudget.spentPromptTokens)}/${tokens(h.childBudget.maxPromptTokens)}, calls ${h.childBudget.toolCalls}/${h.childBudget.maxToolCalls}${h.childBudget.within ? '' : ' OVER'}`
       : '',

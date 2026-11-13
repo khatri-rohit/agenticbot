@@ -2,6 +2,7 @@ import {
   FINDING_CLAIM_MAX_CHARS,
   FINDING_EVIDENCE_MAX_CHARS,
   FINDINGS_MAX,
+  parseSubagentHeader,
   TASK_STATE_COMMANDS_MAX,
   type RunPosture,
   type TaskClass,
@@ -15,6 +16,7 @@ import {
 } from '@agent/agent-models';
 
 import { pathFromToolArgs } from '../loop/call-identity';
+import { taskClassFor } from '../policy';
 
 /**
  * Reduces loop trace events into the run's task state (phase, working set,
@@ -62,7 +64,10 @@ function argString(args: unknown, key: string): string {
 
 const CLASS_RANK: Record<TaskClass, number> = { small: 0, medium: 1, long: 2 };
 
-/** Sub-agent gaps kept (newest); older ones are still in the child reports. */
+/**
+ * Sub-agent gaps kept (newest); older ones are still in the child reports.
+ * A memory bound on the state, not a decision mark.
+ */
 const CHILD_GAPS_MAX = 20;
 
 /**
@@ -154,6 +159,10 @@ export class TaskStateTracker {
   private unverifiedSince: number | null = null;
   private lastCheck: TaskCommand | null = null;
   private reviewed = false;
+  /** Iteration of the latest evidence of any type; 0 before any. */
+  private lastEvidence = 0;
+  /** Evidence moments so far (monotonic): steering resets its idle count when this moves. */
+  private evidenceMoments = 0;
   private readonly commands: TaskCommand[] = [];
   private readonly phaseIterations: Partial<Record<TaskPhase, number>> = {};
   private readonly calls = new Map<string, { name: string; args: unknown; iteration: number }>();
@@ -175,6 +184,20 @@ export class TaskStateTracker {
 
   get shape(): TaskShape {
     return this.shapeValue;
+  }
+
+  /**
+   * Model steps since the latest evidence (an edit, a passing check, a
+   * recorded finding, merged sub-agent findings), counted from the run's
+   * start before any. Stall and the effort floor read it.
+   */
+  get stepsSinceEvidence(): number {
+    return Math.max(0, this.currentIteration - this.lastEvidence);
+  }
+
+  /** Evidence moments so far; grows by one per piece of evidence (see `noteEvidence`). */
+  get evidenceCount(): number {
+    return this.evidenceMoments;
   }
 
   /** Findings recorded so far. */
@@ -296,6 +319,7 @@ export class TaskStateTracker {
         lastCheck: this.lastCheck,
         reviewed: this.reviewed,
         findings: this.findings.map((finding) => ({ ...finding })),
+        lastEvidenceIteration: this.lastEvidence,
       },
       phaseIterations: { ...this.phaseIterations },
       childGaps: [...this.childGaps],
@@ -304,8 +328,9 @@ export class TaskStateTracker {
 
   private onToolStart(name: string, args: unknown): PhaseChange | null {
     // A finding is recorded when its result comes back (onToolComplete): the
-    // tool checks the evidence and the record keeps what it checked.
-    if (name === 'record_finding') return null;
+    // tool checks the evidence and the record keeps what it checked. The
+    // phase says the run is recording, not still locating (F-7).
+    if (name === 'record_finding') return this.move('record', 'record_finding');
     if (name === 'edit_file') return this.move('change', 'edit_file');
     if (name === 'run_terminal') {
       if (!isCheckCommand(argString(args, 'command'))) return this.move('locate', 'command');
@@ -337,6 +362,12 @@ export class TaskStateTracker {
       if (event.resultPreview.startsWith('Recorded')) this.recordFinding(call?.args, event.resultPreview);
       return;
     }
+    // A sub-agent report arrived (its header carries a report status): new
+    // findings or gaps for this run, even when it found nothing.
+    if (event.toolName === 'delegate') {
+      if (parseSubagentHeader(event.resultPreview)?.reportStatus) this.noteEvidence(event.iteration);
+      return;
+    }
     const path = pathFromToolArgs(call?.args) ?? '';
     if (event.toolName === 'read_file' && path) {
       const entry = this.entry(path);
@@ -355,6 +386,7 @@ export class TaskStateTracker {
         return;
       }
       this.edits += 1;
+      this.noteEvidence(event.iteration);
       // An edit is a change, whatever the request looked like.
       this.shapeValue = 'change';
       this.unverifiedSince ??= event.iteration;
@@ -379,6 +411,11 @@ export class TaskStateTracker {
       this.commands.push(record);
       if (this.commands.length > TASK_STATE_COMMANDS_MAX) this.commands.shift();
       if (ran && record.check) {
+        // A passing check is evidence when it tells something new: it
+        // verifies edits, or turns a failing (or never-run) check green. The
+        // same green check again is not progress.
+        const newlyGreen = this.lastCheck === null || this.lastCheck.exitCode !== 0;
+        if (event.exitCode === 0 && (this.unverifiedSince !== null || newlyGreen)) this.noteEvidence(event.iteration);
         this.lastCheck = record;
         this.unverifiedSince = null;
         this.uncheckedFiles.clear();
@@ -406,10 +443,12 @@ export class TaskStateTracker {
       same.evidence = evidence;
       same.verification = verification;
       same.iteration = this.currentIteration;
+      this.noteEvidence(this.currentIteration);
     } else {
       const topic = argString(args, 'topic');
       this.findings.push({ claim, evidence, ...(topic ? { topic } : {}), iteration: this.currentIteration, verification });
       if (this.findings.length > FINDINGS_MAX) this.findings.shift();
+      this.noteEvidence(this.currentIteration);
     }
     for (const part of evidenceParts(evidence)) {
       const path = citedPath(part);
@@ -447,15 +486,25 @@ export class TaskStateTracker {
     if (event.findings.length > 0 && this.shapeValue !== 'change') this.shapeValue = 'research';
   }
 
-  /** Promote the class as evidence grows; never demote within a run. */
+  /**
+   * One piece of evidence, the run's single definition of progress (P2):
+   * a successful edit, a check that passes after edits or after a failure,
+   * a new or upgraded finding, a sub-agent report. Stall (loop steering)
+   * and the effort floor both count from here.
+   */
+  private noteEvidence(iteration: number): void {
+    this.lastEvidence = Math.max(this.lastEvidence, iteration);
+    this.evidenceMoments += 1;
+  }
+
+  /** Promote the class as evidence grows (policy/task-class); never demote within a run. */
   private promote(): void {
-    const editedFiles = [...this.workingSet.values()].filter((entry) => entry.edits > 0).length;
-    const next: TaskClass =
-      this.currentIteration >= 40 || editedFiles >= 8
-        ? 'long'
-        : editedFiles > 2 || this.edits > 3 || this.currentIteration >= 12
-          ? 'medium'
-          : 'small';
+    const next = taskClassFor({
+      steps: this.currentIteration,
+      editedFiles: [...this.workingSet.values()].filter((entry) => entry.edits > 0).length,
+      edits: this.edits,
+      findings: this.findings.length,
+    });
     if (CLASS_RANK[next] > CLASS_RANK[this.klass]) this.klass = next;
   }
 

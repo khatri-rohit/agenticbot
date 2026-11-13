@@ -3,7 +3,9 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import { CHARS_PER_TOKEN, type TaskFinding } from '@agent/agent-models';
 
 import { residentReadPaths } from '../context/residency';
+import { cardDue, cardItems, EVIDENCE_WORDS } from '../policy';
 import { pathFromToolArgs } from './call-identity';
+import { tracePolicyDecision } from './policy-trace';
 import type { RunState } from './run-state';
 
 /**
@@ -22,10 +24,10 @@ import type { RunState } from './run-state';
 
 export const CARD_HEADER = '[Harness card: this run\'s state, rebuilt every step by the harness, not from the user]';
 
-/** Turns in a row whose only call was one read-stage tool before batching advice. */
-export const SERIAL_READ_ADVICE_AFTER = 4;
-/** The card is skipped on the first steps of a run unless it has something to say. */
-const QUIET_STEPS = 2;
+/*
+ * Which items show and when the card goes out is policy/card (marks in
+ * harness-limits CARD_MARKS); the numbers below only size what it prints.
+ */
 const WORKING_SET_MAX = 6;
 /** Re-read paths the `open:reread` item names. */
 const REREAD_PATHS_MAX = 3;
@@ -156,97 +158,97 @@ export function composeStateCard(
     ({ entry }) => entry.reads > 0 && !resident.has(entry.path) && !s.task.isUnchecked(entry.path),
   ).length;
 
+  // Which items show is policy (policy/card); this file only words them.
+  const stall = s.steering.stalled();
+  const items = cardItems({
+    shape: task.shape,
+    posture: s.posture,
+    taskClass: task.taskClass,
+    canDelegate: s.tools.byName.has('delegate'),
+    canRecord,
+    edits: task.evidence.edits,
+    unverifiedSince: task.evidence.unverifiedSince,
+    lastCheck: task.evidence.lastCheck,
+    reviewed: task.evidence.reviewed,
+    rereadPaths: canRecord && !changing ? s.task.uncitedRestoredPaths() : [],
+    childGaps: task.childGaps,
+    serialReadTurns: s.serialReadTurns,
+    ...(stall ? { stall } : {}),
+    nearBudget: s.budget.nearLimit() !== undefined,
+  });
+
   const open: string[] = [];
-  if (task.evidence.unverifiedSince !== null) {
-    open.push(
-      `Edits since step ${task.evidence.unverifiedSince} have no check yet (build, typecheck, test or lint).`,
-    );
-    ids.push('open:unchecked');
-  }
-  const lastCheck = task.evidence.lastCheck;
-  if (lastCheck && lastCheck.exitCode !== 0 && task.evidence.unverifiedSince === null) {
-    open.push(`Last check failed: \`${lastCheck.command}\` exited ${lastCheck.exitCode}.`);
-    ids.push('open:check_failed');
-  }
-  if (
-    s.posture === 'agent' &&
-    s.tools.byName.has('delegate') &&
-    task.taskClass !== 'small' &&
-    task.evidence.edits > 0 &&
-    task.evidence.unverifiedSince === null &&
-    lastCheck?.exitCode === 0 &&
-    !task.evidence.reviewed
-  ) {
-    open.push('Edits pass the check: run delegate(review) once, then report.');
-    ids.push('open:review');
-  }
-  if (!changing && canRecord) {
-    // Measured waste only (P5): files the model already paid a step to read
-    // again after their read left the prompt, that no finding stands for.
-    const reread = s.task.uncitedRestoredPaths();
-    if (reread.length > 0) {
-      const more = reread.length > REREAD_PATHS_MAX ? `, +${reread.length - REREAD_PATHS_MAX} more` : '';
-      open.push(
-        `Re-read after removal: ${reread.slice(0, REREAD_PATHS_MAX).join(', ')}${more}. Record the facts you need from them with record_finding so they need not be read again.`,
-      );
-      ids.push('open:reread');
+  const advice: string[] = [];
+  for (const item of items) {
+    ids.push(item.id);
+    switch (item.id) {
+      case 'open:unchecked':
+        open.push(`Edits since step ${item.since} have no check yet (build, typecheck, test or lint).`);
+        break;
+      case 'open:check_failed':
+        open.push(`Last check failed: \`${item.command}\` exited ${item.exitCode}.`);
+        break;
+      case 'open:review':
+        open.push('Edits pass the check: run delegate(review) once, then report.');
+        break;
+      case 'open:reread': {
+        const more = item.paths.length > REREAD_PATHS_MAX ? `, +${item.paths.length - REREAD_PATHS_MAX} more` : '';
+        open.push(
+          `Re-read after removal: ${item.paths.slice(0, REREAD_PATHS_MAX).join(', ')}${more}. Record the facts you need from them with record_finding so they need not be read again.`,
+        );
+        break;
+      }
+      case 'open:child_gaps': {
+        const shown = item.gaps.slice(-CHILD_GAPS_SHOWN);
+        const more = item.gaps.length > shown.length ? ` (+${item.gaps.length - shown.length} more)` : '';
+        open.push(
+          `Sub-agent gaps to check (their findings are in the record; do not re-verify those): ${shown.join('; ')}${more}`,
+        );
+        break;
+      }
+      case 'advice:serial_reads':
+        advice.push(
+          `${item.turns} turns in a row made one read call, and each turn re-sends ~${tokensK(perCallTokens)} tokens. Put independent reads and searches in one turn; they run in parallel.`,
+        );
+        break;
+      case 'advice:stall': {
+        const callsLeft = Math.floor(Math.max(0, item.max - s.budget.spent()) / Math.max(1, perCallTokens));
+        const delegate = s.tools.byName.has('delegate')
+          ? ' If one specific fact is missing, delegate(explore) with that question instead of searching more.'
+          : '';
+        const act = changing
+          ? 'Act on what you have: make the change.'
+          : unknown
+            ? canRecord
+              ? 'Act on what you have: make the change if one was asked; otherwise record what you confirmed with record_finding and answer from the record.'
+              : 'Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed.'
+            : canRecord
+              ? 'Record what you have confirmed with record_finding and answer from the record; say what was not found.'
+              : 'Answer from what you have confirmed; say what was not found.';
+        advice.push(
+          `${tokensK(item.idle)} tokens (${Math.round((item.idle / item.max) * 100)}% of the run budget) since the last evidence (${EVIDENCE_WORDS}); about ${callsLeft} calls left at this size. ${act}${delegate}`,
+        );
+        break;
+      }
+      case 'advice:budget':
+        advice.push(
+          changing
+            ? 'Run budget nearly spent: finish the current step, run the check once, and report what is done and what is left. Do not start new work.'
+            : unknown
+              ? 'Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work.'
+              : 'Run budget nearly spent: stop searching. Answer now from what is recorded and say what is still open.',
+        );
+        break;
     }
   }
-  // Sub-agent findings are already in the record; what is left to check is
-  // their gaps, not their findings.
-  if (task.childGaps.length > 0) {
-    const shown = task.childGaps.slice(-CHILD_GAPS_SHOWN);
-    const more = task.childGaps.length > shown.length ? ` (+${task.childGaps.length - shown.length} more)` : '';
-    open.push(
-      `Sub-agent gaps to check (their findings are in the record; do not re-verify those): ${shown.join('; ')}${more}`,
-    );
-    ids.push('open:child_gaps');
-  }
-
-  const advice: string[] = [];
-  if (s.serialReadTurns >= SERIAL_READ_ADVICE_AFTER) {
-    advice.push(
-      `${s.serialReadTurns} turns in a row made one read call, and each turn re-sends ~${tokensK(perCallTokens)} tokens. Put independent reads and searches in one turn; they run in parallel.`,
-    );
-    ids.push('advice:serial_reads');
-  }
-  const stall = s.steering.stalled();
-  if (stall) {
-    const spent = s.budget.spent();
-    const callsLeft = Math.floor(Math.max(0, stall.max - spent) / Math.max(1, perCallTokens));
-    const delegate = s.tools.byName.has('delegate')
-      ? ' If one specific fact is missing, delegate(explore) with that question instead of searching more.'
-      : '';
-    const act = changing
-      ? 'Act on what you have: make the change.'
-      : unknown
-        ? canRecord
-          ? 'Act on what you have: make the change if one was asked; otherwise record what you confirmed with record_finding and answer from the record.'
-          : 'Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed.'
-        : canRecord
-        ? 'Record what you have confirmed with record_finding and answer from the record; say what was not found.'
-        : 'Answer from what you have confirmed; say what was not found.';
-    advice.push(
-      `${tokensK(stall.idle)} tokens (${Math.round((stall.idle / stall.max) * 100)}% of the run budget) since the last evidence (an edit, a passing check or a recorded finding); about ${callsLeft} calls left at this size. ${act}${delegate}`,
-    );
-    ids.push('advice:stall');
-  }
-  if (s.budget.nearLimit()) {
-    advice.push(
-      changing
-        ? 'Run budget nearly spent: finish the current step, run the check once, and report what is done and what is left. Do not start new work.'
-        : unknown
-          ? 'Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work.'
-          : 'Run budget nearly spent: stop searching. Answer now from what is recorded and say what is still open.',
-    );
-    ids.push('advice:budget');
-  }
+  // One-shot advice raised by an event the harness could not act on itself
+  // (the advisor hint after a repeated identical outcome).
   const oneShot = s.advisories.splice(0);
   advice.push(...oneShot);
   if (oneShot.length > 0) ids.push('advice:one_shot');
 
   const hasNews = open.length > 0 || advice.length > 0 || findings.length > 0;
-  if (!hasNews && (step <= QUIET_STEPS || task.workingSet.length === 0)) return null;
+  if (!cardDue({ hasNews, step, workingSetSize: task.workingSet.length })) return null;
 
   const budget = s.limits.maxPromptTokens;
   let spend = '';
@@ -290,7 +292,13 @@ export function withStateCard(
   const card = composeStateCard(s, perCallTokens);
   if (!card) return messages;
   if (card.ids.length > 0) {
-    s.trace({ type: 'policy_decision', runId: s.runId, iteration: s.iterations, kind: 'card', ids: card.ids });
+    const task = s.task;
+    tracePolicyDecision(s, 'card', card.ids, 'open items and advice shown on this call', {
+      shape: task.shape,
+      phase: task.current,
+      stepsSinceEvidence: task.stepsSinceEvidence,
+      findings: task.findingCount,
+    });
   }
   return [...messages, { role: 'user', content: card.text }];
 }

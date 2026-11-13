@@ -1,3 +1,5 @@
+import { EFFORT_IDLE_FLOOR_STEPS, parseSubagentHeader } from '@agent/agent-models';
+
 import { linesOf, type TraceLine } from '../read/trace.js';
 
 /**
@@ -26,8 +28,15 @@ export type HealthMetrics = {
   childFindings: number;
   /** Identical searches (grep/glob, same arguments) with no edit between. */
   repeatSearches: { searches: number; repeats: number; rate: number | null };
-  /** Repeated reads/fetches the guard answered instead of running or ending the run. */
+  /** Calls a guard answered instead of running them (repeats past the limit, identical reads and searches answered with a pointer). */
   guardAnswered: number;
+  /**
+   * Every traced harness decision, counted by `kind:id` with the id's own
+   * detail dropped (`guard:dedupe_answered`, `effort:effort_floor`,
+   * `delegation:effort_capped`, `card:advice`), so a run's control activity
+   * reads at a glance.
+   */
+  decisions: Record<string, number>;
   /**
    * Card items (open items and advice): each first showing, and whether the
    * behaviour it asks for followed within ADVICE_WINDOW steps.
@@ -43,7 +52,18 @@ export type HealthMetrics = {
    * low effort). Progress: a first read of a file, an edit, a command, a
    * delegate, or an answer; searches alone are not.
    */
-  effortVsProgress: { lowEffortSteps: number; stepsWithoutProgress: number; lowEffortWithoutProgress: number };
+  effortVsProgress: {
+    lowEffortSteps: number;
+    stepsWithoutProgress: number;
+    lowEffortWithoutProgress: number;
+    /**
+     * Steps sent after EFFORT_IDLE_FLOOR_STEPS steps without evidence (the
+     * harness's own definition, as `evidence` below), and how many of them
+     * went out at low effort. The phase-5 effort floor promises zero.
+     */
+    idleSteps: number;
+    lowEffortWhileIdle: number;
+  };
   /** Child runs: the budget it was given and what it spent; null for a run with no `child_budget`. */
   childBudget: {
     maxPromptTokens: number;
@@ -52,7 +72,10 @@ export type HealthMetrics = {
     toolCalls: number;
     within: boolean;
   } | null;
-  /** Evidence units (successful edits, passing checks after edits, recorded findings) and total prompt tokens per unit. */
+  /**
+   * Evidence units, by the harness's own definition (TaskStateTracker): successful edits, checks that pass after
+   * edits or after a failure, recorded findings, sub-agent reports; and total prompt tokens per unit.
+   */
   evidence: number;
   costPerEvidence: number | null;
 };
@@ -172,6 +195,17 @@ function kindOf(id: string): string {
   return parts.slice(0, 2).join(':');
 }
 
+function countDecisions(decisions: Array<{ kind: string; ids: string[] }>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const decision of decisions) {
+    for (const id of decision.ids) {
+      const key = `${decision.kind}:${id.split(':')[0]}`;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
 export function computeHealth(lines: TraceLine[], totalPromptTokens: number): HealthMetrics {
   const responses = linesOf(lines, 'llm_response');
   const steps = responses.length;
@@ -204,6 +238,13 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
   let evidence = 0;
   let findings = 0;
   let editedSinceCheck = false;
+  /** null before any check ran. */
+  let lastCheckPassed: boolean | null = null;
+  /** Iteration of the latest evidence (0 before any). */
+  let lastEvidenceAt = 0;
+  let idleSteps = 0;
+  let lowEffortWhileIdle = 0;
+  const claims = new Set<string>();
   const effort = new Map(linesOf(lines, 'llm_request').map((line) => [line.iteration, String(line.reasoningEffort ?? 'default')]));
   const touched = new Set<string>();
   let lowEffortSteps = 0;
@@ -212,18 +253,30 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
   for (const iteration of iterations) {
     const tools = byStep.get(iteration) ?? [];
     let progress = answeredAt.has(iteration);
+    // Steps since evidence as the harness saw them when it sent this step.
+    const idleBefore = Math.max(0, iteration - 1 - lastEvidenceAt);
     for (const tool of tools) {
       const path = pathOf(tool.args);
       if (isEdit(tool)) {
         evidence += 1;
+        lastEvidenceAt = iteration;
         editedSinceCheck = true;
         progress = true;
         if (path) seenRanges.delete(path);
         seenSearches.clear();
       } else if (isCheck(tool)) {
         progress = true;
-        if (tool.exitCode === 0 && editedSinceCheck) evidence += 1;
-        editedSinceCheck = false;
+        // Same rule as the harness: a pass that verifies edits or turns a
+        // failing (or never-run) check green.
+        if (tool.exitCode === 0 && (editedSinceCheck || lastCheckPassed !== true)) {
+          evidence += 1;
+          lastEvidenceAt = iteration;
+        }
+        // Only a check that ran settles the edits before it (as the harness).
+        if (tool.exitCode !== undefined) {
+          lastCheckPassed = tool.exitCode === 0;
+          editedSinceCheck = false;
+        }
       } else if (tool.name === 'read_file' && path) {
         const range = RANGE.exec(tool.preview);
         if (!range) continue;
@@ -245,8 +298,20 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
         seenSearches.add(key);
       } else if (tool.name === 'delegate') {
         progress = true;
+        // A sub-agent report arrived (its header carries a report status).
+        if (parseSubagentHeader(tool.preview)?.reportStatus) {
+          evidence += 1;
+          lastEvidenceAt = iteration;
+        }
       } else if (tool.name === 'record_finding' && tool.preview.startsWith('Recorded')) {
-        evidence += 1;
+        // A repeated claim is not new evidence (the harness ignores it too;
+        // its rarer unverified → verified upgrade is not told apart here).
+        const claim = typeof tool.args.claim === 'string' ? tool.args.claim : '';
+        if (!claims.has(claim)) {
+          claims.add(claim);
+          evidence += 1;
+          lastEvidenceAt = iteration;
+        }
         findings += 1;
         progress = true;
       }
@@ -254,6 +319,10 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
     if (!responses.some((line) => line.iteration === iteration)) continue;
     const low = LOW_EFFORT.has(effort.get(iteration) ?? 'default');
     if (low) lowEffortSteps += 1;
+    if (idleBefore >= EFFORT_IDLE_FLOOR_STEPS) {
+      idleSteps += 1;
+      if (low) lowEffortWhileIdle += 1;
+    }
     if (!progress) {
       stepsWithoutProgress += 1;
       if (low) lowEffortWithoutProgress += 1;
@@ -308,8 +377,9 @@ export function computeHealth(lines: TraceLine[], totalPromptTokens: number): He
     childFindings: linesOf(lines, 'child_findings').reduce((sum, line) => sum + line.findings.length, 0),
     repeatSearches: { searches, repeats, rate: ratio(repeats, searches) },
     guardAnswered: linesOf(lines, 'policy_decision').filter((line) => line.kind === 'guard').length,
+    decisions: countDecisions(linesOf(lines, 'policy_decision')),
     advice: { shown, followed: followedCount, rate: ratio(followedCount, shown), byKind },
-    effortVsProgress: { lowEffortSteps, stepsWithoutProgress, lowEffortWithoutProgress },
+    effortVsProgress: { lowEffortSteps, stepsWithoutProgress, lowEffortWithoutProgress, idleSteps, lowEffortWhileIdle },
     childBudget: budget
       ? {
           maxPromptTokens: budget.maxPromptTokens,

@@ -25,6 +25,7 @@ import type { TaskStateTracker } from '../state/task-state';
 import type { Tool, ToolRegistry } from '../tools/types';
 import { createCallRecorder, type CallRecorder } from './call-record';
 import { resolveLimits, type AgentLimits } from './limits';
+import { progressScope } from '../policy';
 import { ProgressSteering } from './progress-steering';
 import { RepetitionGuard } from './repetition-guard';
 import { RunBudget } from './run-budget';
@@ -93,7 +94,8 @@ export type RunState = {
   /** Set when a tool (sub-agent `report`) asks to end the run with this answer. */
   stopContent: string | undefined;
   /** Effort escalation fired: later calls use one rung above the baseline. */
-  escalated: boolean;
+  /** Evidence count when effort was escalated (policy/effort escalationStep); null while not raised. */
+  escalatedAt: number | null;
   /** The stop check already sent the run back once. */
   stopChecked: boolean;
   /** Consecutive turns whose only call was one read-stage tool. */
@@ -152,15 +154,18 @@ export function createRunState(
     : undefined;
   const posture = config.posture ?? 'agent';
   const budget = new RunBudget(usage, limits, runStartedAt);
-  // Progress steering applies to a capped parent run that can edit. Ask runs
-  // cannot edit, Home has no edit_file, and sub-agents never edit.
+  // Stall advice for every capped top-level run; the research gate only for
+  // one that can edit instead (policy/progress progressScope).
   const steering = new ProgressSteering(
     budget,
-    limits.maxPromptTokens !== undefined &&
-      (config.depth ?? 0) === 0 &&
-      posture === 'agent' &&
-      tools.byName.has('edit_file'),
+    progressScope({
+      capped: limits.maxPromptTokens !== undefined,
+      depth: config.depth ?? 0,
+      posture,
+      canEdit: tools.byName.has('edit_file'),
+    }),
     () => config.capacity?.conserve() === true,
+    () => config.task.evidenceCount,
   );
   const webSources = new WebSourceStore({
     ...(config.putBlob ? { putBlob: config.putBlob } : {}),
@@ -210,7 +215,7 @@ export function createRunState(
     advisorHinted: false,
     prefixHeavy: false,
     stopContent: undefined,
-    escalated: false,
+    escalatedAt: null,
     stopChecked: false,
     serialReadTurns: 0,
     serialReadNoteDue: false,

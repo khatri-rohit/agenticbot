@@ -29,8 +29,9 @@ export type HarnessFlags = {
    */
   situationCard: boolean;
   /**
-   * After a tool error or a harness steering note, the rest of the run uses
-   * one reasoning rung above the baseline. It never steps back down.
+   * After a tool error or a harness steering note, the run uses one
+   * reasoning rung above the baseline until its next evidence (an edit, a
+   * passing check, a finding, a sub-agent report), then steps back down.
    */
   effortEscalation: boolean;
   /**

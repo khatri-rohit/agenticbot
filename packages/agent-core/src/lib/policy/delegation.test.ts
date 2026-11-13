@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { earnedThoroughness, normalizeScopePaths, overlappingPath, usageDelta } from './delegation-policy';
+import { earnedThoroughness, normalizeScopePaths, overlappingPath, usageDelta } from './delegation';
 
 describe('delegation policy', () => {
   it('caps a first-pass thorough brief to medium and grants thorough on resume', () => {

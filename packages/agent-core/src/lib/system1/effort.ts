@@ -8,6 +8,7 @@ import {
 } from '@agent/agent-models';
 
 import { resolveReasoningEffort } from '../model/ollama-model-config';
+import { effortFloor, isSteadyFloor, type EffortSignals } from '../policy';
 import type { System1Port } from './port';
 
 /** One thinking choice the model itself offers, lowest first. */
@@ -117,16 +118,6 @@ export function resolveProfileThinking(
   return ladder ? ladder[ladder.length - 1]!.value : undefined;
 }
 
-/** Loop facts the rules read; reset after every decision. */
-export type EffortSignals = {
-  iteration: number;
-  /** Newest message is role user: the user's prompt or a loop nudge. */
-  steering: boolean;
-  toolError: boolean;
-  /** edit_file, run_terminal or delegate ran since the last call. */
-  wrote: boolean;
-};
-
 export type EffortThresholds = {
   /** Raise to a rung when P(needs ≥ rung) is at least this. */
   raise: number;
@@ -144,18 +135,6 @@ export const DEFAULT_EFFORT_THRESHOLDS: EffortThresholds = {
   keep: 0.5,
   monotoneTolerance: 0.1,
 };
-
-/** Lowest rung the rules allow this iteration, and why. */
-export function ruleFloor(
-  signals: EffortSignals,
-  baselineIndex: number,
-): { index: number; reason: string } {
-  if (signals.iteration <= 1) return { index: baselineIndex, reason: 'first_turn' };
-  if (signals.toolError) return { index: baselineIndex, reason: 'tool_error' };
-  if (signals.wrote) return { index: baselineIndex, reason: 'write_or_exec' };
-  if (signals.steering) return { index: baselineIndex, reason: 'steering' };
-  return { index: 0, reason: 'none' };
-}
 
 function questionKey(rung: EffortRung): string {
   return `needs_at_least_${rung.key}`;
@@ -242,6 +221,8 @@ export type EffortDecision = {
   trace?: System1EffortTrace;
 };
 
+export type { EffortSignals };
+
 export type EffortRouterInput = {
   policy: EffortPolicy | undefined;
   system1: System1Port | undefined;
@@ -284,7 +265,7 @@ export function createEffortRouter() {
       const enforce = policy.kind === 'auto' && system1.mode === 'enforce';
       if (!enforce && system1.mode !== 'shadow') return keepBaseline();
 
-      const floor = ruleFloor(signals, baselineIndex);
+      const floor = effortFloor(signals, baselineIndex);
       // Already at the top and the rules forbid lowering: nothing can change.
       if (baselineIndex === ladder.length - 1 && floor.index >= baselineIndex) return keepBaseline();
 
@@ -333,11 +314,11 @@ export function createEffortRouter() {
       }
 
       // Cadence: ask at events, not every iteration. A quiet iteration (no
-      // first turn, error, write, or instruction) right after a quiet,
-      // settled answer holds that answer without a call; the budget then
-      // lasts the whole run. lower_pending is never settled: its confirming
-      // ask must come next.
-      const quiet = floor.reason === 'none';
+      // first turn, error, write, or instruction; a steady no-progress floor
+      // is quiet too) right after a quiet, settled answer holds that answer,
+      // floored, without a call; the budget then lasts the whole run.
+      // lower_pending is never settled: its confirming ask must come next.
+      const quiet = isSteadyFloor(floor.reason);
       if (
         lastScoredIndex !== null &&
         lastAsk !== null &&

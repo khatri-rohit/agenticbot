@@ -20,7 +20,8 @@
         "uncheckedFiles": [],
         "lastCheck": null,
         "reviewed": false,
-        "findings": []
+        "findings": [],
+        "lastEvidenceIteration": 0
       },
       "phaseIterations": {
         "orient": 1
@@ -122,7 +123,8 @@
           "uncheckedFiles": [],
           "lastCheck": null,
           "reviewed": false,
-          "findings": []
+          "findings": [],
+          "lastEvidenceIteration": 0
         },
         "phaseIterations": {
           "orient": 1

@@ -1,4 +1,5 @@
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
+import { EVIDENCE_WORDS } from '../policy';
 import { pushHarnessNote, type RunState } from './run-state';
 
 /**
@@ -45,7 +46,7 @@ export function maybeSteerProgress(s: RunState): void {
       : '';
     pushHarnessNote(
       s,
-      `${Math.round(idle / 1000)}k prompt tokens (${Math.round((idle / max) * 100)}% of this run's budget) went to steps with no edit. About ${callsLeft} model calls remain at the current context size. Act on what you have: make the change, or answer if no change was asked.${delegate}`,
+      `${Math.round(idle / 1000)}k prompt tokens (${Math.round((idle / max) * 100)}% of this run's budget) went to steps with no new evidence (${EVIDENCE_WORDS}). About ${callsLeft} model calls remain at the current context size. Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed.${delegate}`,
     );
   }
   s.trace({

@@ -44,6 +44,73 @@ function feed(tracker: TaskStateTracker, events: TraceEvent[]) {
 }
 
 describe('TaskStateTracker', () => {
+  it('moves to record while findings are recorded and back to locate on the next read (F-7)', () => {
+    const tracker = new TaskStateTracker();
+    const changes = feed(tracker, [
+      request(1),
+      start(1, 'a', 'read_file', { path: 'src/a.ts' }),
+      complete(1, 'a', 'read_file', '[lines 1–10 of 10]\n…'),
+      request(2),
+      ...finding(2, 'f', { claim: 'A exports run', evidence: 'src/a.ts:3' }),
+      request(3),
+      start(3, 'b', 'grep', { pattern: 'run' }),
+    ]);
+    expect(changes.map((change) => change.to)).toEqual(['locate', 'record', 'locate']);
+  });
+
+  it('counts steps since the latest evidence of any type', () => {
+    const tracker = new TaskStateTracker();
+    feed(tracker, [request(1), request(2), request(3)]);
+    expect(tracker.stepsSinceEvidence).toBe(3);
+    feed(tracker, [...finding(3, 'f', { claim: 'Port is 3000', evidence: 'src/main.ts:12' }), request(4)]);
+    expect(tracker.stepsSinceEvidence).toBe(1);
+    feed(tracker, [
+      start(4, 'c', 'run_terminal', { command: 'npm test' }),
+      complete(4, 'c', 'run_terminal', 'exit 1', { exitCode: 1 }),
+      request(5),
+      request(6),
+    ]);
+    // A failing check is not evidence.
+    expect(tracker.stepsSinceEvidence).toBe(3);
+    feed(tracker, [
+      start(6, 'd', 'run_terminal', { command: 'npm test' }),
+      complete(6, 'd', 'run_terminal', 'exit 0', { exitCode: 0 }),
+    ]);
+    expect(tracker.stepsSinceEvidence).toBe(0);
+    expect(tracker.snapshot().evidence.lastEvidenceIteration).toBe(6);
+  });
+
+  it('counts a green check only when it says something new, and a sub-agent report as evidence', () => {
+    const tracker = new TaskStateTracker();
+    const check = (iteration: number, id: string, exitCode: number): TraceEvent[] => [
+      start(iteration, id, 'run_terminal', { command: 'npm test' }),
+      complete(iteration, id, 'run_terminal', `exit ${exitCode}`, { exitCode }),
+    ];
+    feed(tracker, [request(1), ...check(1, 'a', 0)]);
+    expect(tracker.evidenceCount).toBe(1); // first green check
+    feed(tracker, [request(2), ...check(2, 'b', 0)]);
+    expect(tracker.evidenceCount).toBe(1); // the same green check again
+    feed(tracker, [request(3), ...check(3, 'c', 1), request(4), ...check(4, 'd', 0)]);
+    expect(tracker.evidenceCount).toBe(2); // failing → green
+    feed(tracker, [
+      request(5),
+      start(5, 'e', 'delegate', { profile: 'explore', objective: 'x' }),
+      complete(5, 'e', 'delegate', 'subagent:profile=explore subThreadId=t subRunId=s status=completed iterations=2 toolCalls=3 report=done\nSummary'),
+      start(5, 'f', 'delegate', { profile: 'explore', objective: 'y' }),
+      complete(5, 'f', 'delegate', 'Not started: src is already covered by a running sub-agent.'),
+    ]);
+    expect(tracker.evidenceCount).toBe(3); // one report arrived; the refusal is not one
+    expect(tracker.snapshot().evidence.lastEvidenceIteration).toBe(5);
+  });
+
+  it('promotes a research task by its findings', () => {
+    const tracker = new TaskStateTracker();
+    const events: TraceEvent[] = [request(1)];
+    for (let i = 0; i < 20; i++) events.push(...finding(1, `f${i}`, { claim: `fact ${i}`, evidence: `src/a.ts:${i + 1}` }));
+    feed(tracker, [...events, request(2)]);
+    expect(tracker.taskClass).toBe('medium');
+  });
+
   it('walks orient → locate → change → verify → report, and records evidence', () => {
     const tracker = new TaskStateTracker();
     const changes = feed(tracker, [

@@ -352,9 +352,9 @@ describe('ReadDedupe', () => {
   it('flags a re-read of text that was removed as a restore', () => {
     const dedupe = new ReadDedupe();
     const text = read(1, 50, 50);
-    expect(dedupe.apply('a.ts', {}, text, 1, 'r1')).toEqual({ text, restored: false });
+    expect(dedupe.apply('a.ts', {}, text, 1, 'r1')).toEqual({ text, restored: false, deduped: false });
     dedupe.forget(['r1']);
-    expect(dedupe.apply('a.ts', {}, text, 5, 'r2')).toEqual({ text, restored: true });
+    expect(dedupe.apply('a.ts', {}, text, 5, 'r2')).toEqual({ text, restored: true, deduped: false });
     // Changed text after an edit is a new read, not a restore.
     dedupe.forget(['r2']);
     dedupe.invalidatePath('a.ts');

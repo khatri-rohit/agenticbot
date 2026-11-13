@@ -6,6 +6,7 @@ import type {
 
 import {
   CHARS_PER_TOKEN,
+  EFFORT_IDLE_FLOOR_STEPS,
   emptyRunUsage,
   limitMessage,
   type RunUsage,
@@ -16,7 +17,9 @@ import { refreshContextReport } from '../context/assemble-context';
 import { consoleTrace } from '../events/trace';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { inferTaskShape, TaskStateTracker } from '../state/task-state';
+import { escalationStep } from '../policy';
 import { measureContextShape } from './context-shape';
+import { tracePolicyDecision } from './policy-trace';
 import { withStateCard } from './state-card';
 import {
   createEffortRouter,
@@ -146,8 +149,9 @@ async function reportSystem1(
 /**
  * reasoning_effort to override for this call, or undefined to send the
  * baseline. System 1's routed rung applies as before; with escalation on, a
- * tool error or a steering note raises the rest of the run to one rung above
- * the baseline (a routed rung higher than that still wins). Never lowers.
+ * tool error or a steering note raises effort to one rung above the baseline
+ * until the next evidence (policy/effort escalationStep; a routed rung higher
+ * than that still wins).
  */
 function escalateEffort(
   s: RunState,
@@ -161,8 +165,18 @@ function escalateEffort(
   const from = ladder[base];
   const up = ladder[base + 1];
   if (!from || !up) return routed;
-  if (!s.escalated && (cause.toolError || cause.nudged)) {
-    s.escalated = true;
+  const step = escalationStep({
+    escalatedAt: s.escalatedAt,
+    evidenceCount: s.task.evidenceCount,
+    trouble: cause.toolError || cause.nudged,
+  });
+  s.escalatedAt = step.escalatedAt;
+  if (step.change === 'release') {
+    tracePolicyDecision(s, 'effort', ['escalation:released'], 'new evidence after the escalation: back to the routed effort', {
+      evidence: s.task.evidenceCount,
+    });
+  }
+  if (step.change === 'escalate') {
     s.trace({
       type: 'effort_escalated',
       runId: s.runId,
@@ -172,7 +186,7 @@ function escalateEffort(
       reason: cause.toolError ? 'tool_error' : 'steering',
     });
   }
-  if (!s.escalated) return routed;
+  if (s.escalatedAt === null) return routed;
   const routedIndex = routed === undefined ? -1 : ladder.findIndex((rung) => rung.wire === routed);
   return routedIndex > base + 1 ? routed : up.wire;
 }
@@ -188,6 +202,8 @@ async function runLoopCore(
   const s = createRunState(modelCall, messages, tools, config, usage, runStartedAt);
   const { runId, threadId, signal, limits, budget, trace, emit, recorder, turnSignals } = s;
   const effortRouter = createEffortRouter();
+  /** The effort floor is holding the baseline for lack of evidence (traced on change). */
+  let idleFloor = false;
 
   trace({
     type: 'run_start',
@@ -274,7 +290,24 @@ async function runLoopCore(
         steering: nudged || messages[messages.length - 1]?.role === 'user',
         toolError: turnSignals.toolError,
         wrote: turnSignals.wrote,
+        idleSteps: s.task.stepsSinceEvidence,
       };
+      // F-4: effort may not drop below the baseline while no evidence comes
+      // in. Traced when the floor starts and when evidence lifts it, only for
+      // runs whose effort System 1 can move.
+      if (config.system1 && config.effortPolicy?.ladder) {
+        const holding = effortSignals.idleSteps >= EFFORT_IDLE_FLOOR_STEPS;
+        if (holding !== idleFloor) {
+          idleFloor = holding;
+          tracePolicyDecision(
+            s,
+            'effort',
+            [holding ? 'effort_floor:no_progress' : 'effort_floor:released'],
+            holding ? 'no new evidence for several steps: effort held at the baseline' : 'new evidence: effort may follow System 1 again',
+            { idleSteps: effortSignals.idleSteps },
+          );
+        }
+      }
       turnSignals.toolError = false;
       turnSignals.wrote = false;
       turnSignals.nudged = false;

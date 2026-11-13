@@ -58,6 +58,23 @@ describe('harness health', () => {
     expect(health.prefixStability).toBe(0.5);
   });
 
+  it('counts every harness decision by kind and id', () => {
+    const lines = [
+      ...step(1, [read('a.ts')]),
+      { type: 'policy_decision', runId, iteration: 1, kind: 'guard', ids: ['dedupe_answered:read_file'] } as TraceLine,
+      { type: 'policy_decision', runId, iteration: 2, kind: 'effort', ids: ['effort_floor:no_progress'] } as TraceLine,
+      { type: 'policy_decision', runId, iteration: 2, kind: 'delegation', ids: ['effort_capped:thorough'] } as TraceLine,
+      { type: 'policy_decision', runId, iteration: 3, kind: 'guard', ids: ['dedupe_answered:grep'] } as TraceLine,
+    ];
+    const health = computeHealth(lines, 1_000);
+    expect(health.decisions).toEqual({
+      'guard:dedupe_answered': 2,
+      'effort:effort_floor': 1,
+      'delegation:effort_capped': 1,
+    });
+    expect(health.guardAnswered).toBe(2);
+  });
+
   it('scores advice by whether its behaviour followed, once per first showing', () => {
     const lines = [
       ...step(1, [read('a.ts')]),
@@ -121,7 +138,30 @@ describe('harness health', () => {
     ];
     const health = computeHealth(lines, 4_000);
     expect(health.repeatSearches).toEqual({ searches: 3, repeats: 1, rate: 1 / 3 });
-    expect(health.effortVsProgress).toEqual({ lowEffortSteps: 3, stepsWithoutProgress: 3, lowEffortWithoutProgress: 2 });
+    // Step 4 went out after three steps with no evidence, at low effort.
+    expect(health.effortVsProgress).toEqual({
+      lowEffortSteps: 3,
+      stepsWithoutProgress: 3,
+      lowEffortWithoutProgress: 2,
+      idleSteps: 1,
+      lowEffortWhileIdle: 1,
+    });
+  });
+
+  it('counts evidence by the harness rule: new green checks, new claims, sub-agent reports', () => {
+    const check = (exitCode: number) => ({ name: 'run_terminal', args: { command: 'npm test' }, exitCode });
+    const claim = { name: 'record_finding', args: { claim: 'c', evidence: 'a.ts:1' }, preview: 'Recorded (verified) — evidence: a.ts:1' };
+    const report = { name: 'delegate', args: { profile: 'explore' }, preview: 'subagent:profile=explore subThreadId=t subRunId=s status=completed iterations=3 toolCalls=4 report=partial' };
+    const refused = { name: 'delegate', args: { profile: 'explore' }, preview: 'Not started: src is already covered.' };
+    const lines = [
+      ...step(1, [check(0)]), // first check, green: evidence
+      ...step(2, [check(0)]), // the same green check again: not
+      ...step(3, [check(1)]),
+      ...step(4, [check(0)]), // failing → green: evidence
+      ...step(5, [claim, claim]), // one new claim
+      ...step(6, [report, refused]), // one report arrived
+    ];
+    expect(computeHealth(lines, 6_000).evidence).toBe(4);
   });
 
   it('counts evidence (edits, passing checks after edits) and checks a child against its budget', () => {

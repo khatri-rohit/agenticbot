@@ -9,7 +9,6 @@ import {
   chooseRung,
   createEffortRouter,
   resolveProfileThinking,
-  ruleFloor,
   type EffortSignals,
 } from './effort';
 import type { System1Port } from './port';
@@ -31,7 +30,7 @@ const MIXED = model([false, 'low', 'high'], 'high', 'mixed');
 const NONE = model([], null, 'none');
 const UNKNOWN = model(['low', 'turbo'], 'low', 'levels');
 
-const QUIET: EffortSignals = { iteration: 4, steering: false, toolError: false, wrote: false };
+const QUIET: EffortSignals = { iteration: 4, steering: false, toolError: false, wrote: false, idleSteps: 0 };
 
 describe('buildEffortLadder', () => {
   it('orders the model’s own levels, lowest first', () => {
@@ -89,15 +88,6 @@ describe('resolveProfileThinking', () => {
   });
 });
 
-describe('ruleFloor', () => {
-  it('forbids lowering on the first turn, after errors, writes and new instructions', () => {
-    expect(ruleFloor({ ...QUIET, iteration: 1 }, 2).reason).toBe('first_turn');
-    expect(ruleFloor({ ...QUIET, toolError: true }, 2).index).toBe(2);
-    expect(ruleFloor({ ...QUIET, wrote: true }, 2).index).toBe(2);
-    expect(ruleFloor({ ...QUIET, steering: true }, 2).index).toBe(2);
-    expect(ruleFloor(QUIET, 2)).toEqual({ index: 0, reason: 'none' });
-  });
-});
 
 describe('chooseRung', () => {
   const ladder = buildEffortLadder(LEVELS)!;
@@ -195,6 +185,30 @@ describe('createEffortRouter', () => {
     // …then the held rung comes back.
     expect((await decide({ ...QUIET, iteration: 10 })).wire).toBe('low');
     expect(answers).toEqual([]);
+  });
+
+  it('holds the baseline while no evidence arrives, without asking System 1 more often (F-4)', async () => {
+    const router = createEffortRouter();
+    const easy = { needs_at_least_medium: 0.05, needs_at_least_high: 0.01 };
+    let asks = 0;
+    const port = fakePort('enforce', async () => {
+      asks += 1;
+      return easy;
+    });
+    const policy = buildEffortPolicy(LEVELS, 'auto', true);
+    const decide = (signals: EffortSignals) =>
+      router.decide({ policy, system1: port, signals, state: () => 'state', onTrace: () => undefined });
+
+    await decide({ ...QUIET, iteration: 4, idleSteps: 0 }); // lower_pending
+    expect((await decide({ ...QUIET, iteration: 5, idleSteps: 1 })).wire).toBe('low'); // evidence flowing: lower
+    // Three steps without evidence: back to the baseline, held without an ask.
+    expect(await decide({ ...QUIET, iteration: 6, idleSteps: 3 })).toMatchObject({
+      wire: 'medium',
+      trace: expect.objectContaining({ reason: 'cadence_hold', floor: 'medium' }),
+    });
+    expect(asks).toBe(2);
+    // Evidence again: System 1's lower rung comes back.
+    expect((await decide({ ...QUIET, iteration: 7, idleSteps: 0 })).wire).toBe('low');
   });
 
   it('asks at events and every few quiet iterations, holding in between', async () => {

@@ -121,6 +121,82 @@ export const CHILD_TOKENS_PER_TOOL_CALL = 15_000;
 /** Calls beyond the effort budget kept for the closing `report` call. */
 const REPORT_CALL_RESERVE = 1;
 
+/**
+ * Limits a sub-agent run adds over its profile: a child repeats an identical
+ * call at most this often, and one tool call may take this long.
+ */
+export const CHILD_RUN = {
+  maxRepeatedToolCalls: 3,
+  toolTimeoutMs: 60_000,
+} as const;
+
+/**
+ * Policy marks (phase 5): the thresholds the decisions in agent-core's
+ * `policy/` read. Each is a property of the task, not of one result.
+ */
+
+/**
+ * Spend since the last evidence (an edit, a passing check, a recorded
+ * finding, a sub-agent report) before the harness steps in. `stall` puts
+ * advice on the card; `gate` closes the run's own web research until the
+ * next evidence. Each mark is a share of the run's prompt budget, capped in
+ * absolute tokens: idle spend is waste at any run size. The `conserve`
+ * marks apply while the host says account capacity is behind pace.
+ */
+export const PROGRESS_MARKS = {
+  stallRatio: 0.3,
+  gateRatio: 0.5,
+  stallMaxTokens: 750_000,
+  gateMaxTokens: 1_250_000,
+  conserve: {
+    stallRatio: 0.2,
+    gateRatio: 0.35,
+    stallMaxTokens: 500_000,
+    gateMaxTokens: 875_000,
+  },
+  /** Turns in a row whose every call hit the gate before the run ends with a handoff. */
+  maxGatedTurns: 2,
+} as const;
+
+/**
+ * Model steps without new evidence after which reasoning effort may not go
+ * below the run's baseline (F-4: a run that is not progressing is the run
+ * that most needs to think, not the one to save on).
+ */
+export const EFFORT_IDLE_FLOOR_STEPS = 3;
+
+/** Loop guards: what ends or refuses a run that is going in circles. */
+export const GUARD_LIMITS = {
+  /** Invented tool names in a row before the run halts. */
+  unknownToolStreak: 2,
+  /** read_file admits per path per run (stops offset-paging storms). */
+  readsPerPath: 30,
+  /** run_terminal admits per run (migrations run 40+ builds). */
+  terminalCalls: 60,
+  /** Identical edit or command outcome (call + result) before the run halts. */
+  identicalOutcomes: 3,
+  /** Turns of only-refused calls in a report-only child before it ends. */
+  reportOnlyTurns: 2,
+} as const;
+
+/**
+ * Task class marks: a run is promoted (never demoted) as its evidence grows.
+ * Steps count for every shape; edits and edited files for a change;
+ * recorded findings for research.
+ */
+export const TASK_CLASS_MARKS = {
+  medium: { steps: 12, editedFiles: 3, edits: 4, findings: 20 },
+  long: { steps: 40, editedFiles: 8, edits: Number.POSITIVE_INFINITY, findings: 80 },
+} as const;
+
+/** Harness card timing: quiet first steps, and serial-read advice. */
+export const CARD_MARKS = {
+  /** The card is skipped on the first steps of a run unless it has something to say. */
+  quietSteps: 2,
+  /** Turns in a row whose only call was one read before batching advice. */
+  serialReadAdviceAfter: 4,
+} as const;
+
 export type ChildLimits = {
   maxToolCalls: number;
   maxIterations: number;

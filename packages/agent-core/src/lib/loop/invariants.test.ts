@@ -444,6 +444,12 @@ describe('harness invariants over a reacting model', () => {
     'context_compacted_inrun:milestone',
     'context_compacted_inrun:residue',
     'policy_decision:guard',
+    'policy_decision:card',
+    // Phase 5: each decision id, not only its kind.
+    'decision:dedupe_answered',
+    'decision:repeat_answered',
+    'decision:advice',
+    'decision:open',
   ];
 
   it('I7: every mechanism fires on at least one shape', async () => {
@@ -452,7 +458,10 @@ describe('harness invariants over a reacting model', () => {
       for (const event of (await run(name)).trace) {
         if (event.type === 'context_evicted') fired.add(`context_evicted:${event.reason ?? 'none'}`);
         if (event.type === 'context_compacted_inrun') fired.add(`context_compacted_inrun:${event.reason ?? 'size'}`);
-        if (event.type === 'policy_decision') fired.add(`policy_decision:${event.kind}`);
+        if (event.type === 'policy_decision') {
+          fired.add(`policy_decision:${event.kind}`);
+          for (const id of event.ids) fired.add(`decision:${id.split(':')[0]}`);
+        }
       }
     }
     expect(REACHABLE.filter((mechanism) => !fired.has(mechanism))).toEqual([]);

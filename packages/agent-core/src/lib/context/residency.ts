@@ -698,8 +698,8 @@ export class ReadDedupe {
     result: string,
     iteration: number,
     toolCallId: string,
-  ): { text: string; restored: boolean } {
-    if (!path || result.startsWith('Error')) return { text: result, restored: false };
+  ): { text: string; restored: boolean; deduped: boolean } {
+    if (!path || result.startsWith('Error')) return { text: result, restored: false, deduped: false };
     // Key on the lines actually returned: a file that fits comes back whole
     // whatever offset/limit asked, so two differently-sliced asks can be
     // the same read. Args are the fallback for results without a header.
@@ -713,12 +713,13 @@ export class ReadDedupe {
       return {
         text: `${UNCHANGED_PREFIX} since iteration ${prior.iteration}) ${path}: identical to the earlier read_file result above.`,
         restored: false,
+        deduped: true,
       };
     }
     const restored = this.removed.get(key) === sha;
     this.removed.delete(key);
     this.seen.set(key, { sha, iteration, toolCallId });
-    return { text: result, restored };
+    return { text: result, restored, deduped: false };
   }
 
   /** Same idea for grep and glob: an identical search with nothing edited since answers with a pointer. */

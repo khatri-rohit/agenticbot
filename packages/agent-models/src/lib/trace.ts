@@ -338,12 +338,19 @@ export type TraceEvent =
        * A harness decision with its reasons. `card`: the open items and
        * advice the harness card showed on this call. `guard`: a guard acted
        * instead of running a call (e.g. a repeat answered from earlier).
+       * `effort`: the effort floor changed (e.g. held at the baseline while
+       * no evidence arrives). `delegation`: a sub-agent brief was capped or
+       * refused. `finish`: a done gate sent the answer back.
        */
       type: 'policy_decision';
       runId: string;
       iteration: number;
-      kind: 'card' | 'guard';
+      kind: 'card' | 'guard' | 'effort' | 'delegation' | 'finish';
       ids: string[];
+      /** Why, in one line (absent in traces that predate phase 5). */
+      reason?: string;
+      /** The task-state values the decision read. */
+      inputs?: Record<string, string | number | boolean>;
     }
   | {
       /**

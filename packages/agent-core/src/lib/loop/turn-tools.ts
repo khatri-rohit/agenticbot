@@ -8,6 +8,8 @@ import {
   ChoiceSkipped,
   isAskStrippedTool,
   isReadOnlyPosture,
+  CARD_MARKS,
+  GUARD_LIMITS,
   limitMessage,
   REPORT_MAX_CHARS,
   type ModelTurn,
@@ -20,8 +22,8 @@ import type { Tool } from '../tools/types';
 import { isEditSuccess } from '../tools/workspace/tools';
 import { outcomeKey, pathFromToolArgs, toolCallKey } from './call-identity';
 import { manageResidency } from './residency-pass';
-import { isCheckCommand } from '../state/task-state';
-import { SERIAL_READ_ADVICE_AFTER } from './state-card';
+import { EVIDENCE_WORDS, repeatAction, reportOnlyCall } from '../policy';
+import { tracePolicyDecision } from './policy-trace';
 import {
   emitTurnCompleted,
   noteLimit,
@@ -51,7 +53,7 @@ const USER_SKIPPED_CHOICE =
 const RESULT_PREVIEW_MAX = 20_000;
 
 /** Consecutive single-read turns between batching hints. */
-const SERIAL_READ_NOTE_EVERY = SERIAL_READ_ADVICE_AFTER;
+const SERIAL_READ_NOTE_EVERY = CARD_MARKS.serialReadAdviceAfter;
 
 const SKIP_LIMIT_REACHED = limitMessage(
   'limit.tools',
@@ -67,21 +69,16 @@ const REPORT_ONLY_REFUSAL =
   `Tool budget used: only \`report\` is available now. Call report with what you found (path:line evidence) and what is still open, in under ${REPORT_MAX_CHARS.toLocaleString('en-US')} characters.`;
 
 /** Turns in a row that only drew report-only refusals before the run ends on limit.tools. */
-const MAX_REPORT_ONLY_TURNS = 2;
+const MAX_REPORT_ONLY_TURNS = GUARD_LIMITS.reportOnlyTurns;
 
-/**
- * A run with a `report` tool keeps its last budgeted call for `report`:
- * once only that reserve is left, every other call is refused (a row, not
- * a halt), so the model gets another turn to report.
- */
+/** policy/guards reportOnlyCall over this run's state. */
 function reportOnly(s: RunState, toolName: string): boolean {
-  const max = s.limits.maxToolCalls;
-  return (
-    max !== undefined &&
-    toolName !== 'report' &&
-    s.tools.byName.has('report') &&
-    s.totalToolCalls >= max - 1
-  );
+  return reportOnlyCall({
+    toolName,
+    hasReport: s.tools.byName.has('report'),
+    maxToolCalls: s.limits.maxToolCalls,
+    used: s.totalToolCalls,
+  });
 }
 
 /** Answer to a repeated read or fetch: points at the result already made. */
@@ -184,10 +181,21 @@ function shapeBareResult(
     if (shaped.restored) {
       s.trace({ type: 'context_restored', runId: s.runId, iteration: s.iterations, toolCallId, path: readPath });
     }
+    // The harness answered an identical read with a pointer (F-5): traced, so
+    // the guard's action on identical calls is measured, not silent.
+    if (shaped.deduped) {
+      tracePolicyDecision(s, 'guard', ['dedupe_answered:read_file'], 'identical result still in context', {
+        path: readPath,
+      });
+    }
     return shaped.text;
   }
   if (toolName === 'grep' || toolName === 'glob') {
-    return s.readDedupe.applySearch(toolName, args, result, s.iterations, toolCallId);
+    const answered = s.readDedupe.applySearch(toolName, args, result, s.iterations, toolCallId);
+    if (answered !== result) {
+      tracePolicyDecision(s, 'guard', [`dedupe_answered:${toolName}`], 'identical result still in context');
+    }
+    return answered;
   }
   if (toolName === 'web_fetch') {
     return withWebSliceNote(s, args, result);
@@ -331,12 +339,8 @@ async function admitToolCall(
 
   if (reportOnly(s, toolName)) {
     await record.refuse(toolCall, REPORT_ONLY_REFUSAL);
-    s.trace({
-      type: 'policy_decision',
-      runId: s.runId,
-      iteration: s.iterations,
-      kind: 'guard',
-      ids: [`report_only:${toolName}`],
+    tracePolicyDecision(s, 'guard', [`report_only:${toolName}`], 'only the reserved report call is left', {
+      toolCalls: s.totalToolCalls,
     });
     return { kind: 'filled', reportOnly: true };
   }
@@ -365,9 +369,9 @@ async function admitToolCall(
     return { kind: 'filled' };
   }
 
-  // Research gate: after half the budget with no edit or sub-agent report,
-  // the parent's own web tools close until progress. A refusal row, not a
-  // halt: reads, edits and delegate(explore) still work.
+  // Research gate (policy/progress): past the gate mark with no new
+  // evidence, the run's own web tools close until the next evidence. A
+  // refusal row, not a halt: reads, edits and delegate(explore) still work.
   if (tool.research && steering.researchGated()) {
     const idle = steering.idleTokens();
     const delegate = tools.byName.has('delegate')
@@ -386,7 +390,7 @@ async function admitToolCall(
       toolCall,
       limitMessage(
         'limit.research',
-        `Web research is paused for this run: ${Math.round((idle / limits.maxPromptTokens!) * 100)}% of the budget went to steps with no edit. It reopens after your next edit or sub-agent report. Use what you have.${delegate}`,
+        `Web research is paused for this run: ${Math.round((idle / limits.maxPromptTokens!) * 100)}% of the budget went to steps with no new evidence (${EVIDENCE_WORDS}). It reopens after the next one. Use what you have.${delegate}`,
       ),
     );
     return { kind: 'filled' };
@@ -418,34 +422,17 @@ async function admitToolCall(
 
   const repeatCount = guard.countCall(toolCallKey(toolName, args));
 
-  // Exec tools (run_terminal) are exempt from the arg-repeat guard: re-running
-  // the same build after an edit is legitimate verification, and outcome dedup
-  // (MAX_IDENTICAL_OUTCOMES) catches true stuck-ness. The arg-repeat guard
-  // stays for mutate/read/network/skill.
-  const stage = toolStage(tool);
-  // Reads and web fetches change nothing, so a repeat is answered instead of
-  // ending the run: the earlier result is still in context or restorable
-  // from its card's sha. Only a call that keeps coming back past twice the
-  // limit stops the run (a model in a loop).
-  if (
-    repeatCount > limits.maxRepeatedToolCalls &&
-    repeatCount <= limits.maxRepeatedToolCalls * 2 &&
-    (stage === 'read' || stage === 'network')
-  ) {
+  // Exact repeats: policy/guards repeatAction (run, answer from earlier, or halt).
+  const repeat = repeatAction({ count: repeatCount, limit: limits.maxRepeatedToolCalls, stage: toolStage(tool) });
+  if (repeat === 'answer') {
     await record.refuse(toolCall, repeatAnswered(repeatCount - 1));
-    s.trace({
-      type: 'policy_decision',
-      runId: s.runId,
-      iteration: s.iterations,
-      kind: 'guard',
-      ids: [`repeat_answered:${toolName}`],
+    tracePolicyDecision(s, 'guard', [`repeat_answered:${toolName}`], 'identical call past the repeat limit', {
+      repeats: repeatCount - 1,
+      limit: limits.maxRepeatedToolCalls,
     });
     return { kind: 'filled' };
   }
-  if (
-    repeatCount > limits.maxRepeatedToolCalls &&
-    stage !== 'exec'
-  ) {
+  if (repeat === 'halt') {
     noteLimit(
       s,
       limitMessage('limit.repeat', `repeated tool call blocked: ${toolName}`),
@@ -563,18 +550,10 @@ async function settleReturned(
   // A successful edit_file is progress: prior exec outcomes (build/lint
   // exits) are now stale. Clear them so the next verification cycle starts
   // fresh instead of accumulating toward a false stuck-ness halt.
+  // Progress itself (stall, effort floor) is the task state's evidence,
+  // which the trace above already fed; steering reads it from there.
   if (toolName === 'edit_file' && isEditSuccess(result)) {
     s.guard.editSucceeded();
-    s.steering.markProgress();
-  }
-  // Other evidence is progress too: a recorded finding (research), and a
-  // project check that passed. Stall advice counts from the last evidence.
-  const passingCheck =
-    toolName === 'run_terminal' &&
-    classified?.exitCode === 0 &&
-    isCheckCommand(typeof args.command === 'string' ? args.command : '');
-  if ((toolName === 'record_finding' && result.startsWith('Recorded')) || passingCheck) {
-    s.steering.markProgress();
   }
   return 'ok';
 }

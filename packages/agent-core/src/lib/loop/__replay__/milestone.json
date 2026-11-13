@@ -57,7 +57,8 @@
           "check": true
         },
         "reviewed": false,
-        "findings": []
+        "findings": [],
+        "lastEvidenceIteration": 5
       },
       "phaseIterations": {
         "orient": 1,
@@ -329,7 +330,14 @@
       "kind": "card",
       "ids": [
         "open:unchecked"
-      ]
+      ],
+      "reason": "open items and advice shown on this call",
+      "inputs": {
+        "shape": "change",
+        "phase": "change",
+        "stepsSinceEvidence": 0,
+        "findings": 0
+      }
     },
     {
       "type": "context_shape",
@@ -498,7 +506,8 @@
             "check": true
           },
           "reviewed": false,
-          "findings": []
+          "findings": [],
+          "lastEvidenceIteration": 5
         },
         "phaseIterations": {
           "orient": 1,
