@@ -84,6 +84,7 @@ export {
 
 // Context
 export { assembleContext } from './lib/context/assemble-context';
+export { prepareCarriedRecord, taskRecordFromRun } from './lib/context/carried-record';
 export type {
   AssembleContextInput,
   AssembleContextResult,

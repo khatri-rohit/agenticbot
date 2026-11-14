@@ -19,6 +19,7 @@ import {
   getOllamaModelConfig,
   modelOwnsAuto,
   peekOllamaModelConfig,
+  taskRecordFromRun,
 } from '@agent/agent-core';
 
 import {
@@ -381,6 +382,16 @@ async function startClaimedRun(
           'writeLastRun failed:',
           error instanceof Error ? error.message : error,
         );
+      }
+      // The run's findings outlive it: later runs of the thread see them in
+      // their prompt prefix (a rewind that cuts this run drops them).
+      const record = taskRecordFromRun(runId, result.task);
+      if (record) {
+        try {
+          await store.appendTaskRecord(threadId, record);
+        } catch (error) {
+          console.error('appendTaskRecord failed:', error instanceof Error ? error.message : error);
+        }
       }
       // Restarts the idle timer; the review runs once the thread goes quiet.
       scheduleLearningReview({

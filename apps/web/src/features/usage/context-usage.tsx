@@ -41,6 +41,7 @@ const BUCKETS: {
       'plan',
       'mentions',
       'brief',
+      'record',
       'last_run',
       'situation',
     ],

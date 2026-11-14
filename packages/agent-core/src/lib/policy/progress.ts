@@ -1,4 +1,4 @@
-import { PROGRESS_MARKS, type RunPosture } from '@agent/agent-models';
+import { CLASS_PACE_TOKENS, PROGRESS_MARKS, type RunPosture, type TaskClass } from '@agent/agent-models';
 
 /**
  * Which progress decisions apply to a run. Stall advice applies to every
@@ -19,15 +19,26 @@ export function progressScope(input: {
   return { stall, gate: stall && input.posture === 'agent' && input.canEdit };
 }
 
-/** Idle-spend marks (prompt tokens) for a run with this budget. */
+/** The spend a task of this class is paced against, never above the run's ceiling. */
+export function classPace(taskClass: TaskClass, ceiling: number): number {
+  return Math.min(ceiling, CLASS_PACE_TOKENS[taskClass]);
+}
+
+/**
+ * Idle-spend marks (prompt tokens). Stall is advice, so it scales from the
+ * task's pace (a small task hears it sooner); the gate refuses tools, so it
+ * scales from the run's ceiling (the hard budget) and never tightens as a
+ * task is classed small.
+ */
 export function progressMarks(
-  maxPromptTokens: number,
+  pace: number,
+  ceiling: number,
   conserving: boolean,
 ): { stall: number; gate: number } {
   const marks = conserving ? PROGRESS_MARKS.conserve : PROGRESS_MARKS;
   return {
-    stall: Math.min(maxPromptTokens * marks.stallRatio, marks.stallMaxTokens),
-    gate: Math.min(maxPromptTokens * marks.gateRatio, marks.gateMaxTokens),
+    stall: Math.min(pace * marks.stallRatio, marks.stallMaxTokens),
+    gate: Math.min(ceiling * marks.gateRatio, marks.gateMaxTokens),
   };
 }
 

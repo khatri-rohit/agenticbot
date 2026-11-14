@@ -54,7 +54,7 @@ describe('cardItems', () => {
       ids({
         childGaps: ['where is X set?'],
         serialReadTurns: CARD_MARKS.serialReadAdviceAfter,
-        stall: { idle: 300_000, max: 1_000_000 },
+        stall: { idle: 300_000, max: 1_000_000, pace: 600_000, taskClass: 'small' },
         nearBudget: true,
       }),
     ).toEqual(['open:child_gaps', 'advice:serial_reads', 'advice:stall', 'advice:budget']);

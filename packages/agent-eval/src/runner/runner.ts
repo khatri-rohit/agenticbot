@@ -253,47 +253,53 @@ export async function runTrial(
 
     // A hard stop well past the task's own budget, so a stuck run cannot hold the suite.
     const deadline = startedAt.getTime() + task.budget.maxMinutes * 2 * 60_000 + 10 * 60_000;
-    let message = task.prompt;
+    // One user turn after another (followUps), each with its own Continues.
+    const turns = [task.prompt, ...(task.followUps ?? [])];
     let limitReason: string | undefined;
-    for (;;) {
-      const { runId } = await api.startRun({
-        threadId: thread.id,
-        content: message,
-        model: opts.model,
-        posture: task.posture,
-        ...(thinking !== undefined ? { thinking } : {}),
-      });
-      result.runIds.push(runId);
-      const budgetStop = task.budget.maxPromptTokens * OVER_BUDGET_FACTOR;
-      let lastRun: ThreadLastRun | null = null;
-      let stopped: { ended: TrialEnd; reason: string } | undefined;
-      while (!lastRun && !stopped) {
-        lastRun = await api.settledLastRun(thread.id, runId, Math.max(0, Math.min(BUDGET_CHECK_MS, deadline - Date.now())));
-        if (lastRun) break;
-        if (Date.now() >= deadline) {
-          stopped = { ended: 'timeout', reason: 'eval.timeout: trial passed its hard deadline' };
-        } else if ((await trialPromptTokens(opts.evalHome, thread.id)) > budgetStop) {
-          stopped = { ended: 'over-budget', reason: `eval.budget: trial passed ${budgetStop} prompt tokens` };
+    for (const [turnIndex, turnPrompt] of turns.entries()) {
+      // The next turn goes only to a thread whose last turn settled with no stop.
+      if (turnIndex > 0 && (result.ended !== 'settled' || limitReason)) break;
+      let message = turnPrompt;
+      for (;;) {
+        const { runId } = await api.startRun({
+          threadId: thread.id,
+          content: message,
+          model: opts.model,
+          posture: task.posture,
+          ...(thinking !== undefined ? { thinking } : {}),
+        });
+        result.runIds.push(runId);
+        const budgetStop = task.budget.maxPromptTokens * OVER_BUDGET_FACTOR;
+        let lastRun: ThreadLastRun | null = null;
+        let stopped: { ended: TrialEnd; reason: string } | undefined;
+        while (!lastRun && !stopped) {
+          lastRun = await api.settledLastRun(thread.id, runId, Math.max(0, Math.min(BUDGET_CHECK_MS, deadline - Date.now())));
+          if (lastRun) break;
+          if (Date.now() >= deadline) {
+            stopped = { ended: 'timeout', reason: 'eval.timeout: trial passed its hard deadline' };
+          } else if ((await trialPromptTokens(opts.evalHome, thread.id)) > budgetStop) {
+            stopped = { ended: 'over-budget', reason: `eval.budget: trial passed ${budgetStop} prompt tokens` };
+          }
         }
-      }
-      if (!lastRun) {
-        await api.cancelRun(runId);
-        // Grade only a settled workspace: a cancelled run can still be finishing a write.
-        if (!(await api.settledLastRun(thread.id, runId, CANCEL_SETTLE_MS))) {
-          throw new Error(`run ${runId} did not settle within ${CANCEL_SETTLE_MS / 1000}s of its cancel; workspace not graded`);
+        if (!lastRun) {
+          await api.cancelRun(runId);
+          // Grade only a settled workspace: a cancelled run can still be finishing a write.
+          if (!(await api.settledLastRun(thread.id, runId, CANCEL_SETTLE_MS))) {
+            throw new Error(`run ${runId} did not settle within ${CANCEL_SETTLE_MS / 1000}s of its cancel; workspace not graded`);
+          }
+          result.ended = stopped!.ended;
+          limitReason = stopped!.reason;
+          break;
         }
-        result.ended = stopped!.ended;
-        limitReason = stopped!.reason;
-        break;
+        limitReason = lastRun.limitReason;
+        // lastRun.status 'error' also covers a server that stopped mid-run (the interrupted marker).
+        result.ended = limitReason === RUN_CANCELLED_REASON ? 'cancelled' : lastRun.status === 'error' ? 'error' : 'settled';
+        // A pause (account ran out) is resumable for a person, not for a trial.
+        if (!limitReason || !isResumableStop(limitReason) || isPauseStop(limitReason)) break;
+        if (result.continues >= opts.continues) break;
+        result.continues += 1;
+        message = CONTINUE_MESSAGE;
       }
-      limitReason = lastRun.limitReason;
-      // lastRun.status 'error' also covers a server that stopped mid-run (the interrupted marker).
-      result.ended = limitReason === RUN_CANCELLED_REASON ? 'cancelled' : lastRun.status === 'error' ? 'error' : 'settled';
-      // A pause (account ran out) is resumable for a person, not for a trial.
-      if (!limitReason || !isResumableStop(limitReason) || isPauseStop(limitReason)) break;
-      if (result.continues >= opts.continues) break;
-      result.continues += 1;
-      message = CONTINUE_MESSAGE;
     }
     if (limitReason) result.limitReason = limitReason;
 

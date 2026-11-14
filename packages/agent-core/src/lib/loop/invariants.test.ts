@@ -219,12 +219,14 @@ async function simulate(
   behaviour: Behaviour,
   ws: Workspace,
   config: Partial<RunLoopConfig> = {},
+  /** Earlier turns of the thread, before this run's user message. */
+  prior: ChatCompletionMessageParam[] = [],
 ): Promise<Sim> {
   const trace: TraceEvent[] = [];
   const report = Array.from({ length: behaviour.delegated ?? 0 }, (_, i) => `- FACT-${i + 1} in src/f${i + 1}.ts:7`)
     .join('\n')
     .padEnd(6_000, ' ');
-  await runLoop(reactiveModel(behaviour), [{ role: 'user', content: 'collect the facts' }], createToolRegistry(tools(ws, report)), {
+  await runLoop(reactiveModel(behaviour), [...prior, { role: 'user', content: 'collect the facts' }], createToolRegistry(tools(ws, report)), {
     model: 'sim',
     mode: 'workspace',
     runId: 'sim-run',
@@ -234,6 +236,15 @@ async function simulate(
     ...config,
   });
   return { trace, steps: trace.filter((event) => event.type === 'llm_response').length };
+}
+
+/** An earlier turn of about `share` of the default input budget (a heavy conversation). */
+function priorConversation(share: number): ChatCompletionMessageParam[] {
+  const input = DEFAULT_CONTEXT_BUDGET.windowTokens - DEFAULT_CONTEXT_BUDGET.outputReserveTokens;
+  return [
+    { role: 'user', content: 'an earlier question' },
+    { role: 'assistant', content: 'earlier answer. '.repeat(Math.floor((input * share * 4) / 16)) },
+  ];
 }
 
 const of = <T extends TraceEvent['type']>(sim: Sim, type: T) =>
@@ -260,6 +271,13 @@ const SHAPES = {
       { facts: 4, batch: 2, edit: ['src/f1.ts', 'src/f2.ts', 'src/f3.ts', 'src/f4.ts'] },
       workspace(4, 30_000),
     ),
+  /**
+   * The research run on a thread whose earlier turns fill 60% of the window
+   * (under the ceiling a run may start at, compactAtRatio): the run must
+   * behave as on a fresh thread, with no per-step folding.
+   */
+  conversation: () =>
+    simulate({ facts: 16, batch: 2, record: true }, workspace(16, 20_000), {}, priorConversation(0.6)),
   /** Two large files still in view, both edited and re-read: the old reads are superseded. */
   rework: () => simulate({ facts: 2, batch: 2, edit: ['src/f1.ts', 'src/f2.ts'] }, workspace(2, 30_000)),
 };
@@ -318,7 +336,7 @@ describe('harness invariants over a reacting model', () => {
   });
 
   it('I1: removals happen at boundaries, not every step', async () => {
-    for (const name of ['research', 'unrecorded', 'long'] as ShapeName[]) {
+    for (const name of ['research', 'unrecorded', 'long', 'conversation'] as ShapeName[]) {
       const sim = await run(name);
       const removalSteps = new Set(of(sim, 'context_evicted').map((event) => event.iteration)).size;
       expect(removalSteps, name).toBeLessThanOrEqual(Math.ceil(sim.steps / REMOVAL_EVERY_STEPS));
@@ -467,18 +485,19 @@ describe('harness invariants over a reacting model', () => {
     expect(REACHABLE.filter((mechanism) => !fired.has(mechanism))).toEqual([]);
   });
 
-  // Phase 6 (conversation): the size-mark compaction (45% of the window)
-  // sits above where the resident cap and the residue fold keep a run's own
-  // context, so only a heavy prior conversation can reach it. These shapes
-  // start from one user message; a multi-turn shape arrives with phase 6.
-  it.fails('I7: size-mark in-run compaction is reachable', async () => {
-    const fired = new Set<string>();
-    for (const name of Object.keys(SHAPES) as ShapeName[]) {
-      for (const event of (await run(name)).trace) {
-        if (event.type === 'context_compacted_inrun' && event.reason === undefined) fired.add('size');
-      }
-    }
-    expect(fired.has('size')).toBe(true);
+  // Phase 6: the size mark is the overflow guard at the window's edge. A
+  // conversation under the ceiling never trips it; one over the ceiling (the
+  // host's pre-run compaction did not run) trips it, and folding down to the
+  // ceiling leaves real room, so it does not fire again every step.
+  it('I1/I7: the overflow guard never fires under the ceiling, and fires sparingly over it', async () => {
+    const sizeFolds = (sim: Sim) =>
+      of(sim, 'context_compacted_inrun').filter((event) => event.reason === undefined).length;
+    expect(sizeFolds(await run('conversation'))).toBe(0);
+    const over = await simulate({ facts: 16, batch: 2, record: true }, workspace(16, 20_000), {}, priorConversation(0.88));
+    expect(of(over, 'run_finish')[0]?.status).toBe('completed');
+    const folds = sizeFolds(over);
+    expect(folds).toBeGreaterThan(0);
+    expect(folds).toBeLessThanOrEqual(Math.ceil(over.steps / REMOVAL_EVERY_STEPS));
   });
 
   it('uses the real context budget (results here are the shipped behaviour)', () => {

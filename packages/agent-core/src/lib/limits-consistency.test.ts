@@ -135,6 +135,14 @@ describe('I8: one value per quantity', () => {
     expect(DEFAULT_CONTEXT_BUDGET.inRunResidueFoldTokens).toBeLessThan(input * DEFAULT_CONTEXT_BUDGET.inRunCompactRatio);
   });
 
+  it('the overflow guard sits above the ceiling a run may start at (no per-step trimming on a heavy conversation)', () => {
+    // A run may start with its conversation up to compactAtRatio (the host
+    // compacts above it); the guard folds down to that same mark, so the gap
+    // between them is real growth the run itself has to add.
+    expect(DEFAULT_CONTEXT_BUDGET.compactAtRatio).toBeLessThan(DEFAULT_CONTEXT_BUDGET.inRunCompactRatio);
+    expect(DEFAULT_CONTEXT_BUDGET.inRunCompactRatio).toBeLessThan(1);
+  });
+
   it('parallel children can never be promised more than the parent has left', () => {
     const parentRemaining = 1_000_000;
     let promised = 0;

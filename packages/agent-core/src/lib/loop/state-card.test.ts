@@ -14,7 +14,7 @@ function state(over: {
   iterations?: number;
   tools?: string[];
   serialReadTurns?: number;
-  stalled?: { idle: number; max: number };
+  stalled?: { idle: number; max: number; pace: number; taskClass: 'small' | 'medium' | 'long' };
   nearLimit?: boolean;
   advisories?: string[];
   stateCard?: boolean;
@@ -100,14 +100,16 @@ describe('harness card', () => {
   it('turns repeated-pattern conditions into advice while they hold, and one-shot advice once', () => {
     const s = state({
       serialReadTurns: 4,
-      stalled: { idle: 300_000, max: 1_000_000 },
+      stalled: { idle: 300_000, max: 1_000_000, pace: 600_000, taskClass: 'small' },
       nearLimit: true,
       advisories: ['Try the advisor.'],
     });
     const card = buildStateCard(s, 40_000) ?? '';
     expect(card).toMatch(/- 4 turns in a row made one read call, and each turn re-sends ~40k tokens/);
     expect(card).not.toMatch(/slices of/);
-    expect(card).toMatch(/- 300k tokens \(30% of the run budget\) since the last evidence \(an edit, a passing check, a recorded finding or a sub-agent report\); about 22 calls left/);
+    expect(card).toContain(
+      '- 300k tokens since the last evidence (an edit, a passing check, a recorded finding or a sub-agent report): 50% of the 600k a small task is paced for; about 22 calls left before the run cap',
+    );
     expect(card).toMatch(/- Run budget nearly spent/);
     expect(card).toMatch(/- Try the advisor\./);
     expect(buildStateCard(s, 40_000) ?? '').not.toMatch(/Try the advisor/);
@@ -246,7 +248,7 @@ describe('harness card task record', () => {
 
   it('words stall and budget advice for research: answer from the record, do not run a check', () => {
     const card = buildStateCard(
-      state({ events: [research], stalled: { idle: 300_000, max: 1_000_000 }, nearLimit: true }),
+      state({ events: [research], stalled: { idle: 300_000, max: 1_000_000, pace: 1_000_000, taskClass: 'long' }, nearLimit: true }),
       40_000,
     ) ?? '';
     expect(card).toMatch(/Record what you have confirmed with record_finding and answer from the record/);
@@ -257,7 +259,7 @@ describe('harness card task record', () => {
   it('words stall and budget advice neutrally while the shape is unknown', () => {
     const unknown: TraceEvent = { type: 'run_start', runId, model: 'm', taskShape: 'unknown' };
     const card = buildStateCard(
-      state({ events: [unknown], stalled: { idle: 300_000, max: 1_000_000 }, nearLimit: true }),
+      state({ events: [unknown], stalled: { idle: 300_000, max: 1_000_000, pace: 1_000_000, taskClass: 'long' }, nearLimit: true }),
       40_000,
     ) ?? '';
     expect(card).toMatch(/task small unknown/);
@@ -269,7 +271,7 @@ describe('harness card task record', () => {
     expect(card).not.toMatch(/run the check/);
 
     const noRecord = buildStateCard(
-      state({ events: [unknown], stalled: { idle: 300_000, max: 1_000_000 }, tools: ['read_file', 'edit_file'] }),
+      state({ events: [unknown], stalled: { idle: 300_000, max: 1_000_000, pace: 1_000_000, taskClass: 'long' }, tools: ['read_file', 'edit_file'] }),
       40_000,
     ) ?? '';
     expect(noRecord).toMatch(/make the change if one was asked; otherwise answer from what you have confirmed\./);

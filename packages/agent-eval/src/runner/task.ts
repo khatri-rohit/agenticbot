@@ -20,6 +20,12 @@ export type EvalTask = {
   suite: TaskSuite;
   repo: { source: string; commit: string };
   prompt: string;
+  /**
+   * Later turns of the same thread, each sent as a new run once the one
+   * before settled (multi-turn shapes: what carries from turn to turn). The
+   * answer checks grade the last turn's answer.
+   */
+  followUps?: string[];
   posture: 'agent' | 'ask' | 'plan';
   /** `home`: a chat thread with no workspace (no checkout, no file grading). Default `workspace`. */
   mode?: 'workspace' | 'home';
@@ -66,6 +72,7 @@ export function parseTask(file: string, raw: unknown): EvalTask {
   const mode = t.mode ?? 'workspace';
   if (mode !== 'workspace' && mode !== 'home') fail(file, '"mode" must be workspace or home');
   if (t.answer !== undefined && !Array.isArray(t.answer)) fail(file, '"answer" must be an array');
+  if (t.followUps !== undefined && !Array.isArray(t.followUps)) fail(file, '"followUps" must be an array');
   const thinking = t.thinking;
   if (thinking !== undefined && typeof thinking !== 'boolean' && typeof thinking !== 'string') {
     fail(file, '"thinking" must be a boolean or a string');
@@ -76,6 +83,9 @@ export function parseTask(file: string, raw: unknown): EvalTask {
     ...(mode === 'home' ? { mode } : {}),
     repo: { source: str(file, repo.source, 'repo.source'), commit: str(file, repo.commit, 'repo.commit') },
     prompt: str(file, t.prompt, 'prompt'),
+    ...(Array.isArray(t.followUps) && t.followUps.length > 0
+      ? { followUps: (t.followUps as unknown[]).map((entry, i) => str(file, entry, `followUps[${i}]`)) }
+      : {}),
     posture,
     ...(thinking !== undefined ? { thinking } : {}),
     checks: (t.checks as Record<string, unknown>[]).map((check, i) => ({

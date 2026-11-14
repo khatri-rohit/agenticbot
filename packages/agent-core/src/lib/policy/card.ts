@@ -22,8 +22,8 @@ export type CardFacts = {
   childGaps: string[];
   /** Turns in a row whose only call was one read. */
   serialReadTurns: number;
-  /** Idle spend past the stall mark (policy/progress), when stalled. */
-  stall?: { idle: number; max: number };
+  /** Idle spend past the stall mark (policy/progress), when stalled: against the task's pace and the run's ceiling. */
+  stall?: { idle: number; max: number; pace: number; taskClass: TaskClass };
   /** The run budget is nearly spent. */
   nearBudget: boolean;
 };
@@ -36,7 +36,7 @@ export type CardItem =
   | { id: 'open:reread'; paths: string[] }
   | { id: 'open:child_gaps'; gaps: string[] }
   | { id: 'advice:serial_reads'; turns: number }
-  | { id: 'advice:stall'; idle: number; max: number }
+  | { id: 'advice:stall'; idle: number; max: number; pace: number; taskClass: TaskClass }
   | { id: 'advice:budget' };
 
 /**
@@ -75,7 +75,7 @@ export function cardItems(f: CardFacts): CardItem[] {
   if (f.serialReadTurns >= CARD_MARKS.serialReadAdviceAfter) {
     items.push({ id: 'advice:serial_reads', turns: f.serialReadTurns });
   }
-  if (f.stall) items.push({ id: 'advice:stall', idle: f.stall.idle, max: f.stall.max });
+  if (f.stall) items.push({ id: 'advice:stall', ...f.stall });
   if (f.nearBudget) items.push({ id: 'advice:budget' });
   return items;
 }

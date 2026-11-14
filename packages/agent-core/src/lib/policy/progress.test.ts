@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { PROGRESS_MARKS } from '@agent/agent-models';
 
-import { progressMarks, progressScope } from './progress';
+import { classPace, progressMarks, progressScope } from './progress';
 import { taskClassFor } from './task-class';
 
 describe('progressScope', () => {
@@ -15,13 +15,23 @@ describe('progressScope', () => {
 });
 
 describe('progressMarks', () => {
-  it('scales with the budget and stops at the absolute caps', () => {
-    expect(progressMarks(1_000_000, false)).toEqual({ stall: 300_000, gate: 500_000 });
-    expect(progressMarks(10_000_000, false)).toEqual({
+  it('scales stall from the pace and the gate from the ceiling, both stopping at the absolute caps', () => {
+    expect(progressMarks(1_000_000, 1_000_000, false)).toEqual({ stall: 300_000, gate: 500_000 });
+    expect(progressMarks(600_000, 10_000_000, false)).toEqual({ stall: 180_000, gate: PROGRESS_MARKS.gateMaxTokens });
+    expect(progressMarks(10_000_000, 10_000_000, false)).toEqual({
       stall: PROGRESS_MARKS.stallMaxTokens,
       gate: PROGRESS_MARKS.gateMaxTokens,
     });
-    expect(progressMarks(1_000_000, true)).toEqual({ stall: 200_000, gate: 350_000 });
+    expect(progressMarks(1_000_000, 1_000_000, true)).toEqual({ stall: 200_000, gate: 350_000 });
+  });
+});
+
+describe('classPace', () => {
+  it('paces by class, never above the run ceiling', () => {
+    expect(classPace('small', 10_000_000)).toBe(600_000);
+    expect(classPace('medium', 10_000_000)).toBe(2_000_000);
+    expect(classPace('long', 10_000_000)).toBe(6_000_000);
+    expect(classPace('medium', 400_000)).toBe(400_000);
   });
 });
 

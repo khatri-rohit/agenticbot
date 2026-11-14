@@ -178,11 +178,11 @@
       "runId": "replay-run",
       "iteration": 2,
       "messages": 4,
-      "promptTokens": 133,
+      "promptTokens": 143,
       "residentToolTokens": 5,
       "residueTokens": 7,
       "prefixStableMessages": 1,
-      "cardTokens": 120
+      "cardTokens": 129
     },
     {
       "type": "llm_request",
@@ -253,11 +253,11 @@
       "runId": "replay-run",
       "iteration": 3,
       "messages": 6,
-      "promptTokens": 181,
+      "promptTokens": 190,
       "residentToolTokens": 9,
       "residueTokens": 13,
       "prefixStableMessages": 3,
-      "cardTokens": 157
+      "cardTokens": 166
     },
     {
       "type": "llm_request",
@@ -755,7 +755,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 2 · task small unknown · ~82 tokens per call · run budget: 4k own of 10k used\nWorking set: f1.ts\nAdvice:\n- 4k tokens (40% of the run budget) since the last evidence (an edit, a passing check, a recorded finding or a sub-agent report); about 73 calls left at this size. Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 2 · task small unknown · ~82 tokens per call · run budget: 4k own of 10k used\nWorking set: f1.ts\nAdvice:\n- 4k tokens since the last evidence (an edit, a passing check, a recorded finding or a sub-agent report): 40% of the 10k a small task is paced for; about 73 calls left before the run cap at this size. Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed."
       }
     ],
     [
@@ -803,7 +803,7 @@
       },
       {
         "role": "user",
-        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small unknown · ~121 tokens per call · run budget: 8k own of 10k used\nWorking set: f2.ts, f1.ts\nAdvice:\n- 8k tokens (80% of the run budget) since the last evidence (an edit, a passing check, a recorded finding or a sub-agent report); about 16 calls left at this size. Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed.\n- Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work."
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: locate · step 3 · task small unknown · ~121 tokens per call · run budget: 8k own of 10k used\nWorking set: f2.ts, f1.ts\nAdvice:\n- 8k tokens since the last evidence (an edit, a passing check, a recorded finding or a sub-agent report): 80% of the 10k a small task is paced for; about 16 calls left before the run cap at this size. Act on what you have: make the change if one was asked; otherwise answer from what you have confirmed.\n- Run budget nearly spent: finish the current step, verify any edits once, and report what is done and what is left. Do not start new work."
       }
     ],
     [

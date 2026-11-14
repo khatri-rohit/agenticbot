@@ -440,10 +440,11 @@ export type InRunCompactionResult = {
 
 /**
  * Collapse the oldest iterations of the current run into one extractive
- * recap once the prompt passes `inRunCompactRatio` (high mark) of the input
- * budget, folding as many iterations as it takes to get under
- * `inRunCompactToRatio` (low mark) in one pass, so the next trigger needs
- * real growth. Whole iterations (assistant + its tool rows) are removed, so
+ * recap once the prompt passes `inRunCompactRatio` (the overflow mark, at
+ * the window's edge) of the input budget, folding as many iterations as it
+ * takes to get under `compactAtRatio` (the ceiling a run may start at) in
+ * one pass, so the next trigger needs real growth: the gap between the two
+ * marks is the hysteresis (D3). Whole iterations (assistant + its tool rows) are removed, so
  * tool_call pairing stays valid. Prompt-only; the ledger is untouched.
  * `runStart` is the index of the first message this run appended.
  *
@@ -465,7 +466,7 @@ export async function compactCurrentRun(
   const inputBudget = budget.windowTokens - budget.outputReserveTokens;
   const milestone = options.milestone === true;
   if (!milestone && beforeTokens < inputBudget * budget.inRunCompactRatio) return null;
-  const lowMark = milestone ? 0 : inputBudget * budget.inRunCompactToRatio;
+  const lowMark = milestone ? 0 : inputBudget * budget.compactAtRatio;
 
   // An existing recap sits at runStart; fold it into the new one.
   const { start, priorRecap } = recapStart(messages, runStart);

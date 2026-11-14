@@ -31,12 +31,14 @@ describe('task matrix', () => {
       'm5-delegation-research',
       'm6-large-file',
       'm7-shell-commands',
+      'm8-multi-turn-extraction',
     ]);
     for (const { task } of tasks) {
       // Every task grades something: a command, a file or the answer.
       expect(task.checks.length + task.files.length + (task.answer?.length ?? 0), task.id).toBeGreaterThan(0);
     }
     expect(tasks.find((loaded) => loaded.task.id === 'm4-plain-question')?.task.mode).toBe('home');
+    expect(tasks.find((loaded) => loaded.task.id === 'm8-multi-turn-extraction')?.task.followUps).toHaveLength(1);
   });
 
   it('finds a matrix task by id without naming the suite', async () => {
@@ -47,6 +49,7 @@ describe('task matrix', () => {
     const base = { id: 'x', suite: 'matrix', repo: { source: '.', commit: 'abc' }, prompt: 'p', checks: [], files: [], scope: { allow: [] }, budget: { maxPromptTokens: 1, maxMinutes: 1 } };
     expect(() => parseTask('x.json', { ...base, mode: 'web' })).toThrow(/mode/);
     expect(() => parseTask('x.json', { ...base, answer: 'yes' })).toThrow(/answer/);
+    expect(() => parseTask('x.json', { ...base, followUps: 'next' })).toThrow(/followUps/);
   });
 });
 

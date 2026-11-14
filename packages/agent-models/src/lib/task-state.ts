@@ -119,3 +119,57 @@ export type TaskStateSnapshot = {
 };
 
 export const TASK_STATE_COMMANDS_MAX = 20;
+
+/**
+ * What one finished run leaves for the next runs of its thread: its findings
+ * (its own and those merged from sub-agents) and the gaps it left open. The
+ * host stores one per run; the next run gets them in its stable prompt
+ * prefix (phase 6), so research is not redone on the next turn and
+ * compaction of the conversation never loses a recorded fact. A rewind that
+ * cuts a run drops its record.
+ */
+export type RunTaskRecord = {
+  runId: string;
+  finishedAt: string;
+  findings: TaskFinding[];
+  /** Open questions (sub-agent gaps) the run did not close. */
+  openQuestions: string[];
+};
+
+const VERIFICATIONS: ReadonlyArray<TaskFinding['verification']> = ['verified', 'corrected', 'unverified', 'skipped'];
+
+function parseFinding(raw: unknown): TaskFinding | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  if (typeof value.claim !== 'string' || typeof value.evidence !== 'string') return null;
+  const verification = VERIFICATIONS.includes(value.verification as TaskFinding['verification'])
+    ? (value.verification as TaskFinding['verification'])
+    : 'skipped';
+  return {
+    claim: value.claim,
+    evidence: value.evidence,
+    ...(typeof value.topic === 'string' ? { topic: value.topic } : {}),
+    iteration: typeof value.iteration === 'number' ? value.iteration : 0,
+    verification,
+    ...(typeof value.source === 'string' ? { source: value.source } : {}),
+  };
+}
+
+/** Stored run records, oldest first; malformed entries are dropped. */
+export function parseRunTaskRecords(raw: unknown): RunTaskRecord[] {
+  if (!Array.isArray(raw)) return [];
+  const records: RunTaskRecord[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const value = item as Record<string, unknown>;
+    if (typeof value.runId !== 'string' || typeof value.finishedAt !== 'string') continue;
+    const findings = Array.isArray(value.findings)
+      ? value.findings.map(parseFinding).filter((finding): finding is TaskFinding => finding !== null)
+      : [];
+    const openQuestions = Array.isArray(value.openQuestions)
+      ? value.openQuestions.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    records.push({ runId: value.runId, finishedAt: value.finishedAt, findings, openQuestions });
+  }
+  return records;
+}

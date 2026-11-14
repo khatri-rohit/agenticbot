@@ -229,6 +229,13 @@ If two reasonable paths would change what you do next, offer_choice with labeled
 If the user wants you to change a repo, tell them to open a folder (start a workspace chat).
 `.trim();
 
+/** Home's line for record_finding, only when the tool is in the run. */
+function homeRecordLine(registry: ToolRegistry): string {
+  return registry.byName.has('record_finding')
+    ? '\nWhen you research across several pages, record each fact you will use with record_finding (claim plus its URL). Recorded facts stay with the thread, so a later turn does not search again; write the answer from them.'
+    : '';
+}
+
 /**
  * Home with a short identity: how to read the turn and how to answer, with
  * compact tool guidance. The long house style lives in the
@@ -246,7 +253,7 @@ ${toolProtocol(registry, false)}
 
 ${buildToolGuardrails(registry, true)}
 
-${HOME_BEHAVIOR}
+${HOME_BEHAVIOR}${homeRecordLine(registry)}
 
 Today's date is ${today()}.
 `
@@ -279,7 +286,7 @@ ${toolProtocol(registry, false)}
 
 ${buildToolGuardrails(registry, false)}
 
-${HOME_BEHAVIOR}
+${HOME_BEHAVIOR}${homeRecordLine(registry)}
 
 ${ANTI_SLOP_CODE_LAW}
 

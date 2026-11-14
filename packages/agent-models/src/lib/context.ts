@@ -45,10 +45,15 @@ export type ContextBudget = {
   inRunKeepToolResults: number;
   /** Skip a cold/superseded pass that frees less than this (each pass breaks the cached prefix). */
   inRunClearAtLeastTokens: number;
-  /** In-run extractive compaction of the current turn starts at this share of the input budget. */
+  /**
+   * Overflow guard: when the prompt passes this share of the input budget,
+   * the run's oldest steps fold into the recap down to `compactAtRatio`
+   * (the ceiling a run may start at), in one pass. It sits at the window's
+   * edge, not inside the working range: the working-set cap and the residue
+   * fold keep a run well below it, and a run that starts near the ceiling
+   * (a heavy conversation) does not trip it every step.
+   */
   inRunCompactRatio: number;
-  /** In-run compaction folds iterations until the prompt is under this share (low mark). */
-  inRunCompactToRatio: number;
   /** Iterations a loaded skill body stays in full before it becomes a skill card. */
   skillResidentIterations: number;
   /**
@@ -97,8 +102,7 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   inRunColdAfterIterations: 4,
   inRunKeepToolResults: 4,
   inRunClearAtLeastTokens: 10_000,
-  inRunCompactRatio: 0.45,
-  inRunCompactToRatio: 0.3,
+  inRunCompactRatio: 0.9,
   skillResidentIterations: 4,
   /** ~24k chars: about 200 typical (~120-char) findings. */
   recordCardTokens: 6_000,

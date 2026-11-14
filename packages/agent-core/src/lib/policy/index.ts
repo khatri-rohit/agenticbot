@@ -8,5 +8,5 @@ export { earnedThoroughness, normalizeScopePaths, overlappingPath, usageDelta } 
 export { effortFloor, escalationStep, isSteadyFloor, type EffortFloorReason, type EffortSignals } from './effort';
 export { changeGate, planGate } from './finish';
 export { repeatAction, reportOnlyCall } from './guards';
-export { EVIDENCE_WORDS, progressMarks, progressScope } from './progress';
+export { classPace, EVIDENCE_WORDS, progressMarks, progressScope } from './progress';
 export { taskClassFor, type TaskSize } from './task-class';

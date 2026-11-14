@@ -166,6 +166,7 @@ export function createRunState(
     }),
     () => config.capacity?.conserve() === true,
     () => config.task.evidenceCount,
+    () => config.task.taskClass,
   );
   const webSources = new WebSourceStore({
     ...(config.putBlob ? { putBlob: config.putBlob } : {}),

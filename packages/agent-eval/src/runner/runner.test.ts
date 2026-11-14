@@ -166,6 +166,23 @@ describe('runTrial', () => {
     expect(result.runIds).toHaveLength(2);
   }, 60_000);
 
+  it('sends each follow-up as a new run once the turn before settled, and grades the end state', async () => {
+    const { result } = await trial(
+      [{}, { edit: glossary }],
+      task({ followUps: ['Now add the glossary heading.'] }),
+    );
+    expect(result).toMatchObject({ status: 'passed', ended: 'settled', continues: 0 });
+    expect(result.runIds).toEqual(['run-1', 'run-2']);
+  }, 60_000);
+
+  it('does not send a follow-up to a turn that stopped short', async () => {
+    const { result } = await trial(
+      [{ outcome: 'incomplete', limitReason: 'limit.plan: Open plan todos remain' }, { edit: glossary }],
+      task({ followUps: ['Next turn.'] }),
+    );
+    expect(result.runIds).toEqual(['run-1']);
+  }, 60_000);
+
   it('skips the trial when the account runs out', async () => {
     const { result } = await trial([{ outcome: 'incomplete', limitReason: 'limit.capacity: weekly allowance spent' }]);
     expect(result).toMatchObject({ status: 'skipped', ended: 'capacity', continues: 0 });

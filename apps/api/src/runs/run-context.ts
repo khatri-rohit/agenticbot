@@ -27,6 +27,7 @@ import {
   createSessionSearchTool,
   loadWorkspaceRules,
   packMentionedThread,
+  prepareCarriedRecord,
   getSkill,
   type MentionedThreadContext,
   type ToolRegistry,
@@ -232,6 +233,18 @@ export async function prepareRun(input: {
     input.threadId,
   );
 
+  // Findings earlier runs recorded (v2 phase 6): carried in the stable
+  // prefix, bounded like the card's record, the rest behind a blob sha.
+  const carriedRecord =
+    input.threadId === 'draft'
+      ? null
+      : await prepareCarriedRecord({
+          records: await store.readTaskRecords(input.threadId),
+          envelopes: input.envelopes,
+          tokens: window.budget.recordCardTokens,
+          putBlob: (text) => store.putBlob(input.threadId, text),
+        });
+
   const skillNames = input.skillNames ?? [];
   const lastRun =
     input.threadId === 'draft' ? null : await readSettledLastRun(store, input.threadId);
@@ -247,6 +260,7 @@ export async function prepareRun(input: {
       skillNames,
       ...(plan ? { plan } : {}),
       ...(lastRun ? { lastRun } : {}),
+      ...(carriedRecord ? { carriedRecord } : {}),
       flags,
     },
     window.budget,

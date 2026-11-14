@@ -21,6 +21,7 @@ import {
   parseSnapshot,
   sameWorkspaceRoot,
   selectPlanForRewind,
+  parseRunTaskRecords,
   parseThreadLastRun,
   type ChatMessage,
   type ContextWindowMode,
@@ -32,12 +33,15 @@ import {
   type Snapshot,
   type Thread,
   type ThreadKind,
+  type RunTaskRecord,
   type ThreadLastRun,
   type ThreadPlan,
 } from '@agent/agent-models';
 import { looksLikeSecret, type SessionSearchHit } from '@agent/agent-core';
 
 const BLOB_INLINE_MAX = 8 * 1024;
+/** Run task records a thread file keeps (oldest leave first); the prompt bounds what it shows. */
+const TASK_RECORDS_MAX = 200;
 
 export type AppendInput = {
   threadId: string;
@@ -595,6 +599,8 @@ export class ThreadStore {
     if (lastRun && touchedRuns.has(lastRun.runId)) {
       await rm(this.lastRunPath(threadId), { force: true });
     }
+    // A cut run's findings describe work the thread no longer has.
+    await this.dropTaskRecords(threadId, touchedRuns);
   }
 
   private async readJsonFile<T>(
@@ -638,6 +644,34 @@ export class ThreadStore {
       `${JSON.stringify(lastRun, null, 2)}\n`,
       'utf8',
     );
+  }
+
+  /** Task records of this thread's runs, oldest first (see RunTaskRecord). */
+  async readTaskRecords(threadId: string): Promise<RunTaskRecord[]> {
+    return this.readJsonFile(this.taskRecordsPath(threadId), parseRunTaskRecords, []);
+  }
+
+  /**
+   * Store one run's task record (a re-run of the same id replaces it). The
+   * oldest records leave past TASK_RECORDS_MAX runs; the prompt bounds what
+   * it shows anyway, this only bounds the file.
+   */
+  async appendTaskRecord(threadId: string, record: RunTaskRecord): Promise<void> {
+    const records = (await this.readTaskRecords(threadId)).filter((entry) => entry.runId !== record.runId);
+    records.push(record);
+    await writeFile(
+      this.taskRecordsPath(threadId),
+      `${JSON.stringify(records.slice(-TASK_RECORDS_MAX), null, 2)}\n`,
+      'utf8',
+    );
+  }
+
+  private async dropTaskRecords(threadId: string, runIds: Set<string>): Promise<void> {
+    if (runIds.size === 0) return;
+    const records = await this.readTaskRecords(threadId);
+    const kept = records.filter((record) => !runIds.has(record.runId));
+    if (kept.length === records.length) return;
+    await writeFile(this.taskRecordsPath(threadId), `${JSON.stringify(kept, null, 2)}\n`, 'utf8');
   }
 
   async readPlan(threadId: string): Promise<ThreadPlan> {
@@ -779,6 +813,10 @@ export class ThreadStore {
 
   private lastRunPath(threadId: string): string {
     return path.join(this.threadDir(threadId), 'last-run.json');
+  }
+
+  private taskRecordsPath(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'task-records.json');
   }
 }
 

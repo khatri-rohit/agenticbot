@@ -73,6 +73,12 @@ export type AssembleContextInput = {
   lastRun?: ThreadLastRun | null;
   /** Harness switches for this run. Defaults to DEFAULT_HARNESS_FLAGS. */
   flags?: HarnessFlags;
+  /**
+   * The task record earlier runs of this thread left (findings, open
+   * questions), rendered by the host with prepareCarriedRecord. Goes in the
+   * stable prefix after the conversation summary.
+   */
+  carriedRecord?: string | null;
 };
 
 /** Prompt-only fill for ledger orphans (pre-I1 / crash). Does not rewrite disk. */
@@ -257,6 +263,7 @@ const PREFIX_LAYER_IDS = new Set([
   'plan',
   'mentions',
   'brief',
+  'record',
   'last_run',
   'situation',
 ]);
@@ -615,6 +622,9 @@ export function assembleContext(
   if (input.snapshot?.summary) {
     briefParts.push(`# Earlier turns (compacted)\n${input.snapshot.summary}`);
   }
+  // Conversation summary, then the task record (v2 target prompt order).
+  const recordText = input.carriedRecord?.trim() ?? '';
+  if (recordText) briefParts.push(recordText);
   const briefMessage: ChatCompletionMessageParam | null = briefParts.length
     ? { role: 'system', content: briefParts.join('\n\n') }
     : null;
@@ -866,8 +876,13 @@ export function assembleContext(
       id: 'brief',
       label: 'Thread brief',
       tokens: briefMessage
-        ? charsToTokens(String(briefMessage.content).length) + 4
+        ? charsToTokens(String(briefMessage.content).length - (recordText ? recordText.length + 2 : 0)) + 4
         : 0,
+    },
+    {
+      id: 'record',
+      label: 'Task record (earlier runs)',
+      tokens: recordText ? charsToTokens(recordText.length) : 0,
     },
     {
       id: 'situation',

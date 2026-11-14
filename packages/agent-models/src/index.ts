@@ -31,8 +31,9 @@ export type {
   System1Report,
 } from './lib/event.js';
 
-export { TASK_STATE_COMMANDS_MAX } from './lib/task-state.js';
+export { parseRunTaskRecords, TASK_STATE_COMMANDS_MAX } from './lib/task-state.js';
 export type {
+  RunTaskRecord,
   TaskClass,
   TaskCommand,
   TaskFinding,
@@ -299,6 +300,7 @@ export {
 
 export {
   CARD_MARKS,
+  CLASS_PACE_TOKENS,
   CHILD_BUDGET_SHARE,
   CHILD_RUN,
   CHILD_TOKENS_PER_TOOL_CALL,

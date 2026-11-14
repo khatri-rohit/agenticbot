@@ -1,9 +1,9 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
-import { CHARS_PER_TOKEN, type TaskFinding } from '@agent/agent-models';
 
 import { residentReadPaths } from '../context/residency';
-import { cardDue, cardItems, EVIDENCE_WORDS } from '../policy';
+import { cardDue, cardItems, classPace, EVIDENCE_WORDS } from '../policy';
+import { recordSection } from '../state/record-view';
 import { pathFromToolArgs } from './call-identity';
 import { tracePolicyDecision } from './policy-trace';
 import type { RunState } from './run-state';
@@ -33,94 +33,12 @@ const WORKING_SET_MAX = 6;
 const REREAD_PATHS_MAX = 3;
 /** Newest sub-agent gaps the card names; the rest are counted. */
 const CHILD_GAPS_SHOWN = 3;
-/** Room kept in the record budget for its header, the hidden-findings count line and the sha line. */
-const RECORD_RESERVE_CHARS = 700;
-const TOPIC_COUNTS_MAX_CHARS = 400;
-const TOPIC_MAX_CHARS = 60;
-
 function tokensK(tokens: number): string {
   if (tokens < 1_000) return `${Math.round(tokens)}`;
   return tokens >= 1_000_000 ? `${(tokens / 1_000_000).toFixed(1)}M` : `${Math.round(tokens / 1000)}k`;
 }
 
-function findingLine(finding: TaskFinding): string {
-  const topic = finding.topic ? `[${finding.topic.slice(0, TOPIC_MAX_CHARS)}] ` : '';
-  const mark = finding.verification === 'unverified' ? ' (unverified)' : '';
-  return `- ${topic}${finding.claim} — ${finding.evidence}${mark}`;
-}
-
-/** The record section's size bound on the card, from the window-scaled budget. */
-export function recordCardChars(recordCardTokens: number): number {
-  return recordCardTokens * CHARS_PER_TOKEN;
-}
-
-/** Newest findings that fit `chars`, shown oldest first (at least one). */
-function newestWithin(findings: TaskFinding[], chars: number): string[] {
-  const shown: string[] = [];
-  let used = 0;
-  for (let i = findings.length - 1; i >= 0; i--) {
-    const line = findingLine(findings[i]!);
-    if (used + line.length + 1 > chars && shown.length > 0) break;
-    shown.unshift(line);
-    used += line.length + 1;
-  }
-  return shown;
-}
-
-function recordHeader(count: number): string {
-  return `Record (${count} finding(s); answer from these and cite their evidence):`;
-}
-
-/**
- * The whole task record as one text, when it does not fit the card's record
- * budget; null when the card shows all of it. The residency pass stores this
- * as a blob, so findings the card cannot show stay recallable (P4: a
- * finding is the one item that cannot be got back any other way).
- */
-export function recordOverflowText(findings: TaskFinding[], recordCardTokens: number): string | null {
-  if (findings.length === 0) return null;
-  const all = findings.map(findingLine);
-  const size = recordHeader(findings.length).length + all.reduce((sum, line) => sum + line.length + 1, 0);
-  if (size <= recordCardChars(recordCardTokens)) return null;
-  return [`Task record: ${findings.length} finding(s), oldest first.`, ...all].join('\n');
-}
-
-/**
- * The record lines the card shows, within `recordCardTokens`: all findings
- * when they fit; otherwise the newest that fit, a per-topic count of the
- * rest, and the sha of the full record (`blobSha`, stored by the residency
- * pass) so nothing recorded is out of reach.
- */
-export function recordSection(findings: TaskFinding[], recordCardTokens: number, blobSha?: string): string[] {
-  if (findings.length === 0) return [];
-  const budget = recordCardChars(recordCardTokens);
-  if (recordOverflowText(findings, recordCardTokens) === null) {
-    return [recordHeader(findings.length), ...findings.map(findingLine)];
-  }
-  const shown = newestWithin(findings, Math.max(1, budget - RECORD_RESERVE_CHARS));
-  const hidden = findings.slice(0, findings.length - shown.length);
-  const counts = new Map<string, number>();
-  for (const finding of hidden) {
-    const topic = finding.topic ? finding.topic.slice(0, TOPIC_MAX_CHARS) : '(no topic)';
-    counts.set(topic, (counts.get(topic) ?? 0) + 1);
-  }
-  const parts = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([topic, n]) => `${topic} ${n}`);
-  let byTopic = '';
-  for (let i = 0; i < parts.length; i++) {
-    const next = byTopic ? `${byTopic}, ${parts[i]}` : parts[i]!;
-    if (next.length > TOPIC_COUNTS_MAX_CHARS) {
-      byTopic = `${byTopic}, +${parts.length - i} more topic(s)`;
-      break;
-    }
-    byTopic = next;
-  }
-  return [
-    recordHeader(findings.length),
-    `- (${hidden.length} older finding(s) not shown, by topic: ${byTopic})`,
-    ...(blobSha ? [`- (full record: recall sha256:${blobSha})`] : []),
-    ...shown,
-  ];
-}
+export { recordCardChars, recordOverflowText, recordSection } from '../state/record-view';
 
 /** Text of the card for this call, or null when it has nothing to say. */
 export function buildStateCard(s: RunState, perCallTokens: number): string | null {
@@ -226,7 +144,7 @@ export function composeStateCard(
               ? 'Record what you have confirmed with record_finding and answer from the record; say what was not found.'
               : 'Answer from what you have confirmed; say what was not found.';
         advice.push(
-          `${tokensK(item.idle)} tokens (${Math.round((item.idle / item.max) * 100)}% of the run budget) since the last evidence (${EVIDENCE_WORDS}); about ${callsLeft} calls left at this size. ${act}${delegate}`,
+          `${tokensK(item.idle)} tokens since the last evidence (${EVIDENCE_WORDS}): ${Math.round((item.idle / item.pace) * 100)}% of the ${tokensK(item.pace)} a ${item.taskClass} task is paced for; about ${callsLeft} calls left before the run cap at this size. ${act}${delegate}`,
         );
         break;
       }
@@ -256,9 +174,12 @@ export function composeStateCard(
     // Own calls and sub-agents apart: they are different levers (P7).
     const usage = s.budget.snapshot();
     const children = usage.children.promptTokens;
+    // The pace is what a task of this class is expected to cost; the cap is
+    // the hard stop (policy/progress classPace).
+    const pace = classPace(task.taskClass, budget);
     spend = ` · run budget: ${tokensK(usage.own.promptTokens)} own${
       children > 0 ? ` + ${tokensK(children)} sub-agents` : ''
-    } of ${tokensK(budget)} used`;
+    } of ${tokensK(budget)} used${pace < budget ? ` (${task.taskClass}-task pace ${tokensK(pace)})` : ''}`;
   }
   const lines = [
     CARD_HEADER,

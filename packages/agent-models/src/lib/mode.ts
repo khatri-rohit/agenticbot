@@ -47,6 +47,9 @@ export const HOME_MODE: ModeConfig = {
     'session_search',
     'plan',
     'todo',
+    // Web facts with their URL: evidence for stall and the effort floor, and
+    // a record later turns of the thread keep (v2 phase 6).
+    'record_finding',
     'offer_choice',
   ],
   limits: {

@@ -1,6 +1,6 @@
-import { PROGRESS_MARKS } from '@agent/agent-models';
+import { PROGRESS_MARKS, type TaskClass } from '@agent/agent-models';
 
-import { progressMarks } from '../policy';
+import { classPace, progressMarks } from '../policy';
 import type { RunBudget } from './run-budget';
 
 /**
@@ -26,7 +26,15 @@ export class ProgressSteering {
     private readonly conserving: () => boolean,
     /** Evidence moments so far (task state); idle spend restarts when it moves. */
     private readonly evidence: () => number,
+    /** The task's class (task state): sets the pace stall is measured against. */
+    private readonly taskClass: () => TaskClass = () => 'long',
   ) {}
+
+  private marks(): { stall: number; gate: number; pace: number; ceiling: number } {
+    const ceiling = this.budget.maxPromptTokens!;
+    const pace = classPace(this.taskClass(), ceiling);
+    return { ...progressMarks(pace, ceiling, this.conserving()), pace, ceiling };
+  }
 
   private markProgress(): void {
     this.spentAtProgress = this.budget.spent();
@@ -44,7 +52,7 @@ export class ProgressSteering {
   /** The run's own web tools are closed until the next evidence. */
   researchGated(): boolean {
     if (!this.scope.gate) return false;
-    return this.idleTokens() >= progressMarks(this.budget.maxPromptTokens!, this.conserving()).gate;
+    return this.idleTokens() >= this.marks().gate;
   }
 
   /** Count one refused web call; true for the first refusal since progress. */
@@ -72,15 +80,15 @@ export class ProgressSteering {
   }
 
   /** Idle spend while it is past the stall mark (not consumed: the harness card reads it every call). */
-  stalled(): { idle: number; max: number } | undefined {
+  stalled(): { idle: number; max: number; pace: number; taskClass: TaskClass } | undefined {
     if (!this.scope.stall) return undefined;
-    const max = this.budget.maxPromptTokens!;
+    const marks = this.marks();
     const idle = this.idleTokens();
-    return idle >= progressMarks(max, this.conserving()).stall ? { idle, max } : undefined;
+    return idle >= marks.stall ? { idle, max: marks.ceiling, pace: marks.pace, taskClass: this.taskClass() } : undefined;
   }
 
   /** Idle spend, once per stretch without progress when it crosses the nudge mark. */
-  takeStallNudge(): { idle: number; max: number } | undefined {
+  takeStallNudge(): { idle: number; max: number; pace: number; taskClass: TaskClass } | undefined {
     if (this.stallNudged) return undefined;
     const stall = this.stalled();
     if (!stall) return undefined;

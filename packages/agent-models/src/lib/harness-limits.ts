@@ -159,6 +159,21 @@ export const PROGRESS_MARKS = {
 } as const;
 
 /**
+ * Expected prompt spend per task class (P1, P7): the pace a run is measured
+ * against, not a stop. Stall advice scales from it, and the card shows it, so
+ * a small task hears "act on what you have" sooner than a long one. The hard
+ * stop stays the mode's `maxPromptTokens` (the ceiling); a run that grows is
+ * promoted by its evidence (TASK_CLASS_MARKS) and gets the larger pace.
+ * Sized from live runs: a small edit or question stays well under 600k; the
+ * best long research run (12-section fact sheet) took 1.33M with a child.
+ */
+export const CLASS_PACE_TOKENS = {
+  small: 600_000,
+  medium: 2_000_000,
+  long: 6_000_000,
+} as const;
+
+/**
  * Model steps without new evidence after which reasoning effort may not go
  * below the run's baseline (F-4: a run that is not progressing is the run
  * that most needs to think, not the one to save on).
