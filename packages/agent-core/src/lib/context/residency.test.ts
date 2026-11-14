@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_CONTEXT_BUDGET, type ContextBudget } from '@agent/agent-models';
 
-import { CARD_PREFIX, foldResidue, manageWorkingSet, ReadDedupe, type WorkingSetView } from './residency';
+import { CARD_PREFIX, compactCurrentRun, foldResidue, manageWorkingSet, ReadDedupe, type WorkingSetView } from './residency';
 
 type Call = { id: string; name: string; args: Record<string, unknown>; result: string; iteration: number };
 
@@ -359,5 +359,51 @@ describe('ReadDedupe', () => {
     dedupe.forget(['r2']);
     dedupe.invalidatePath('a.ts');
     expect(dedupe.apply('a.ts', {}, text, 7, 'r3').restored).toBe(false);
+  });
+});
+
+describe('recap stays lossless (phase 7)', () => {
+  const card = (n: number) => `${CARD_PREFIX} read_file {"path":"f${n}.ts"} [1–50] · cold · 9000 chars · sha256:${String(n).padStart(64, '0')}`;
+  const many = (count: number): ChatCompletionMessageParam[] =>
+    transcript(
+      Array.from({ length: count }, (_, i) => ({
+        id: `c${i}`,
+        name: 'read_file',
+        args: { path: `f${i}.ts`, padding: 'p'.repeat(400) },
+        result: card(i),
+        iteration: i + 1,
+      })),
+    );
+
+  it('stores a recap that outgrows its bound and points at it, instead of dropping its oldest lines', async () => {
+    const stored: string[] = [];
+    const putBlob = async (text: string) => {
+      stored.push(text);
+      return 'e'.repeat(64);
+    };
+    const messages = many(120);
+    await foldResidue(messages, 1, budget({ inRunResidueFoldTokens: 1_000, inRunKeepToolResults: 2 }), [], { putBlob });
+    const recap = String(messages[1]?.content);
+    expect(recap).toContain(`Older steps of this run, in full: recall sha256:${'e'.repeat(64)}`);
+    // The stored text has the oldest step the bounded recap no longer shows.
+    expect(stored.at(-1)).toContain(`sha256:${'0'.repeat(64)}`);
+  });
+
+  it('starts a fresh session at a long task\'s milestone: the recap is one pointer to every earlier step', async () => {
+    const stored: string[] = [];
+    const putBlob = async (text: string) => {
+      stored.push(text);
+      return 'd'.repeat(64);
+    };
+    const messages = many(10);
+    const result = await compactCurrentRun(messages, 1, budget({ inRunKeepToolResults: 2 }), [], putBlob, {
+      milestone: true,
+      session: true,
+    });
+    expect(result?.session).toBe(true);
+    expect(String(messages[1]?.content)).toMatch(/New session at a verified milestone: every earlier step of this run, in full: recall sha256:d{64}/);
+    expect(stored.at(-1)).toContain('f0.ts');
+    // The newest steps stay in view.
+    expect(messages.filter((message) => message.role === 'assistant')).toHaveLength(3);
   });
 });

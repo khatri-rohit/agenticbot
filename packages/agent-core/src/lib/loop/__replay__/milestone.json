@@ -414,6 +414,19 @@
       "reason": "milestone"
     },
     {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 5,
+      "kind": "boundary",
+      "ids": [
+        "boundary:milestone"
+      ],
+      "reason": "prompt reshaped once for all mechanisms",
+      "inputs": {
+        "findingsInHistory": 0
+      }
+    },
+    {
       "type": "context_shape",
       "runId": "replay-run",
       "iteration": 6,

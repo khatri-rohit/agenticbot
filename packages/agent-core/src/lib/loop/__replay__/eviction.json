@@ -218,6 +218,19 @@
       "reason": "budget"
     },
     {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 2,
+      "kind": "boundary",
+      "ids": [
+        "boundary:working_set"
+      ],
+      "reason": "prompt reshaped once for all mechanisms",
+      "inputs": {
+        "findingsInHistory": 0
+      }
+    },
+    {
       "type": "context_shape",
       "runId": "replay-run",
       "iteration": 3,
@@ -278,6 +291,19 @@
         "r2"
       ],
       "reason": "budget"
+    },
+    {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 3,
+      "kind": "boundary",
+      "ids": [
+        "boundary:working_set"
+      ],
+      "reason": "prompt reshaped once for all mechanisms",
+      "inputs": {
+        "findingsInHistory": 0
+      }
     },
     {
       "type": "context_shape",
@@ -348,6 +374,19 @@
         "r3"
       ],
       "reason": "budget"
+    },
+    {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 4,
+      "kind": "boundary",
+      "ids": [
+        "boundary:working_set"
+      ],
+      "reason": "prompt reshaped once for all mechanisms",
+      "inputs": {
+        "findingsInHistory": 0
+      }
     },
     {
       "type": "policy_decision",

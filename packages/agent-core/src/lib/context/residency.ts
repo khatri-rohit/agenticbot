@@ -33,6 +33,9 @@ const SKILL_CARD_PREFIX = '(skill card)';
 const UNCHANGED_PREFIX = '(unchanged';
 const RECAP_PREFIX = '(compacted progress)';
 const RECAP_MAX_CHARS = 8_000;
+/** Size estimates of what a fold writes: the recap's header, and one recap line per folded tool row. */
+const RECAP_HEADER_CHARS = 180;
+const RECAP_LINE_CHARS = 110;
 
 function isResident(content: string): boolean {
   return (
@@ -436,6 +439,8 @@ export type InRunCompactionResult = {
    * would only rewrite the prefix. The loop stops trying for this run.
    */
   prefixHeavy: boolean;
+  /** The fold started a fresh session: the recap is one pointer to every earlier step. */
+  session?: boolean;
 };
 
 /**
@@ -460,7 +465,17 @@ export async function compactCurrentRun(
   tools: ChatCompletionTool[],
   /** Stores large resident results folded into the recap, so recall can bring them back. */
   putBlob?: (text: string) => Promise<string>,
-  options: { milestone?: boolean; stepOf?: StepOf } = {},
+  options: {
+    milestone?: boolean;
+    stepOf?: StepOf;
+    /**
+     * At a milestone of a long task: start a fresh session. The recap
+     * becomes one pointer to every earlier step (stored whole), so the
+     * prompt is the prefix, the task record and the newest steps
+     * (Anthropic's long-running harness pattern, inside the run).
+     */
+    session?: boolean;
+  } = {},
 ): Promise<InRunCompactionResult | null> {
   const beforeTokens = estimatePromptTokens(messages, tools);
   const inputBudget = budget.windowTokens - budget.outputReserveTokens;
@@ -503,12 +518,14 @@ export async function compactCurrentRun(
     priorRecap,
     putBlob,
     options.stepOf,
+    milestone && options.session === true,
   );
   return {
     beforeTokens,
     afterTokens: estimatePromptTokens(messages, tools),
     toolCallIds,
     prefixHeavy,
+    ...(milestone && options.session === true && putBlob ? { session: true } : {}),
   };
 }
 
@@ -557,7 +574,19 @@ export async function foldResidue(
   runStart: number,
   budget: ContextBudget,
   tools: ChatCompletionTool[],
-  options: { keepFindingCalls?: boolean; stepOf?: StepOf } = {},
+  options: {
+    keepFindingCalls?: boolean;
+    stepOf?: StepOf;
+    /** Stores a recap that outgrows its bound, so its oldest lines stay recallable. */
+    putBlob?: (text: string) => Promise<string>;
+    /**
+     * Fold only when it frees more than the recap it writes. Set for the
+     * boundary's ride-along fold (mark 0): a tiny fold there would only grow
+     * the prompt. A fold at the mark goes ahead regardless: the recap is
+     * bounded (its overflow is stored whole), the residue is not.
+     */
+    requireSaving?: boolean;
+  } = {},
 ): Promise<InRunCompactionResult | null> {
   if (residueChars(messages, runStart) / CHARS_PER_TOKEN < budget.inRunResidueFoldTokens) return null;
   const { start, priorRecap } = recapStart(messages, runStart);
@@ -588,8 +617,17 @@ export async function foldResidue(
   if (ranges.length === 0 || foldedResidue / CHARS_PER_TOKEN < budget.inRunResidueFoldTokens / 2) {
     return null;
   }
+  // A ride-along fold must free more than the recap it writes: one recap
+  // line per tool row, plus the recap's header when there is no recap yet.
+  if (options.requireSaving) {
+    const rows = ranges.reduce(
+      (sum, [from, to]) => sum + messages.slice(from, to).filter((message) => message.role === 'tool').length,
+      0,
+    );
+    if (foldedResidue <= (priorRecap ? 0 : RECAP_HEADER_CHARS) + rows * RECAP_LINE_CHARS) return null;
+  }
   const beforeTokens = estimatePromptTokens(messages, tools);
-  const toolCallIds = await foldIntoRecap(messages, runStart, start, ranges, priorRecap, undefined, options.stepOf);
+  const toolCallIds = await foldIntoRecap(messages, runStart, start, ranges, priorRecap, options.putBlob, options.stepOf);
   return { beforeTokens, afterTokens: estimatePromptTokens(messages, tools), toolCallIds, prefixHeavy: false };
 }
 
@@ -614,6 +652,7 @@ async function foldIntoRecap(
   priorRecap: string,
   putBlob?: (text: string) => Promise<string>,
   stepOf?: StepOf,
+  session = false,
 ): Promise<string[]> {
   const calls = toolCallIndex(messages);
   const lines: string[] = priorRecap ? [priorRecap] : [];
@@ -649,8 +688,19 @@ async function foldIntoRecap(
   }
 
   let recap = lines.join('\n');
-  if (recap.length > RECAP_MAX_CHARS) {
-    recap = `…\n${recap.slice(recap.length - RECAP_MAX_CHARS)}`;
+  if (session && putBlob && recap) {
+    // A fresh session (long task, verified milestone): the steps before it
+    // leave the prompt whole, one recall away; the record and the newest
+    // steps carry the work on.
+    const sha = await putBlob(recap);
+    recap = `(New session at a verified milestone: every earlier step of this run, in full: recall sha256:${sha})`;
+  } else if (recap.length > RECAP_MAX_CHARS) {
+    // Over the bound the oldest lines leave, but not out of reach (P4).
+    const full = putBlob ? await putBlob(recap) : undefined;
+    const tail = recap.slice(recap.length - RECAP_MAX_CHARS);
+    recap = full
+      ? `(Older steps of this run, in full: recall sha256:${full})\n…${tail.slice(tail.indexOf('\n') + 1)}`
+      : `…\n${tail}`;
   }
   // Steps before and between folded ranges stay, in order, after the recap.
   const kept: ChatCompletionMessageParam[] = [];

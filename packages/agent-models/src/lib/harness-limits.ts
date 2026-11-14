@@ -210,6 +210,12 @@ export const CARD_MARKS = {
   quietSteps: 2,
   /** Turns in a row whose only call was one read before batching advice. */
   serialReadAdviceAfter: 4,
+  /**
+   * Findings the card carries since the task record was last written into
+   * the prompt history (they are re-sent uncached every call); past this
+   * many tokens the record moves into history at a boundary of its own.
+   */
+  recordDeltaTokens: 1_500,
 } as const;
 
 export type ChildLimits = {

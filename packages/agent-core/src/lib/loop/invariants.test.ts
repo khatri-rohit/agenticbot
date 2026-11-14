@@ -139,8 +139,8 @@ function reactiveModel(behaviour: Behaviour): ModelCallFn {
     calls += 1;
     const visible = new Set<number>();
     for (const message of messages as ChatCompletionMessageParam[]) {
-      // The harness card's record keeps recorded facts in view.
-      if (message.role === 'user' && body(message).startsWith('[Harness card')) {
+      // The harness card and the task record message keep recorded facts in view.
+      if (message.role === 'user' && (body(message).startsWith('[Harness card') || body(message).startsWith('[Task record'))) {
         for (const fact of factsIn(body(message))) visible.add(fact);
         continue;
       }
@@ -378,6 +378,32 @@ describe('harness invariants over a reacting model', () => {
         );
       }
     }
+  });
+
+  // Phase 7: the prompt is reshaped only at boundaries. Between them a call
+  // keeps the previous call's whole prompt (but its ephemeral card) as its
+  // prefix; a shorter stable prefix must come with a boundary decision at
+  // the step before (residency runs at the end of a step).
+  it('I3: the cached prefix breaks only at a traced boundary', async () => {
+    let breaks = 0;
+    for (const name of Object.keys(SHAPES) as ShapeName[]) {
+      const sim = await run(name);
+      const boundaries = new Set(
+        of(sim, 'policy_decision').filter((event) => event.kind === 'boundary').map((event) => event.iteration),
+      );
+      const shapes = of(sim, 'context_shape');
+      const unexplained: number[] = [];
+      for (let i = 1; i < shapes.length; i++) {
+        const prev = shapes[i - 1]!;
+        const kept = prev.messages - ((prev.cardTokens ?? 0) > 0 ? 1 : 0);
+        if (shapes[i]!.prefixStableMessages >= kept) continue;
+        breaks += 1;
+        if (!boundaries.has(prev.iteration)) unexplained.push(shapes[i]!.iteration);
+      }
+      expect(unexplained, name).toEqual([]);
+    }
+    // Not vacuous: the shapes do reshape their prompts.
+    expect(breaks).toBeGreaterThan(0);
   });
 
   it('I3: a step adds no more to the prompt than its new content', async () => {

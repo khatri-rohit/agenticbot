@@ -340,12 +340,14 @@ export type TraceEvent =
        * instead of running a call (e.g. a repeat answered from earlier).
        * `effort`: the effort floor changed (e.g. held at the baseline while
        * no evidence arrives). `delegation`: a sub-agent brief was capped or
-       * refused. `finish`: a done gate sent the answer back.
+       * refused. `finish`: a done gate sent the answer back. `boundary`:
+       * the prompt was reshaped (ids name what triggered it); between
+       * boundaries the prompt only grows (v2 phase 7).
        */
       type: 'policy_decision';
       runId: string;
       iteration: number;
-      kind: 'card' | 'guard' | 'effort' | 'delegation' | 'finish';
+      kind: 'card' | 'guard' | 'effort' | 'delegation' | 'finish' | 'boundary';
       ids: string[];
       /** Why, in one line (absent in traces that predate phase 5). */
       reason?: string;

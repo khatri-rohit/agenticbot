@@ -165,7 +165,7 @@ export function composeStateCard(
   advice.push(...oneShot);
   if (oneShot.length > 0) ids.push('advice:one_shot');
 
-  const hasNews = open.length > 0 || advice.length > 0 || findings.length > 0;
+  const hasNews = open.length > 0 || advice.length > 0 || findings.length > Math.min(s.recordedThrough ?? 0, findings.length);
   if (!cardDue({ hasNews, step, workingSetSize: task.workingSet.length })) return null;
 
   const budget = s.limits.maxPromptTokens;
@@ -197,7 +197,20 @@ export function composeStateCard(
         : '';
     lines.push(`Working set: ${files.join(', ')}${more}${older}`);
   }
-  lines.push(...recordSection(findings, s.contextBudget.recordCardTokens, s.recordBlobSha));
+  // Findings already in the task record message (written at the last
+  // boundary, cached) are not re-sent here; the card carries only newer ones.
+  const inHistory = Math.min(s.recordedThrough ?? 0, findings.length);
+  if (inHistory > 0) {
+    const newer = findings.slice(inHistory);
+    lines.push(
+      newer.length > 0
+        ? `Record: ${inHistory} finding(s) are in the task record above; ${newer.length} newer:`
+        : `Record: all ${inHistory} finding(s) are in the task record above.`,
+    );
+    lines.push(...recordSection(newer, s.contextBudget.recordCardTokens, undefined, () => '').filter(Boolean));
+  } else {
+    lines.push(...recordSection(findings, s.contextBudget.recordCardTokens, s.recordBlobSha));
+  }
   if (open.length > 0) lines.push(...open.map((line) => `Open: ${line}`));
   if (advice.length > 0) lines.push('Advice:', ...advice.map((line) => `- ${line}`));
   return { text: lines.join('\n'), ids };

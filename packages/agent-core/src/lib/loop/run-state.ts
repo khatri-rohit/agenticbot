@@ -113,6 +113,11 @@ export type RunState = {
    * record outgrows the card's budget; the card names it for recall.
    */
   recordBlobSha: string | undefined;
+  /**
+   * Findings already written into the prompt history as the task record
+   * message (phase 7): the card shows only those recorded after it.
+   */
+  recordedThrough: number;
   /** Local hash of the record text that blob holds, so it is stored again only when the record changed. */
   recordBlobKey: string | undefined;
 };
@@ -224,6 +229,7 @@ export function createRunState(
     advisories: [],
     promptKeys: [],
     recordBlobSha: undefined,
+    recordedThrough: 0,
     recordBlobKey: undefined,
   };
   return state;

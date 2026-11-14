@@ -22,6 +22,7 @@ function state(over: {
   childTokens?: number;
   recordCardTokens?: number;
   recordBlobSha?: string;
+  recordedThrough?: number;
 }): RunState {
   const task = new TaskStateTracker();
   for (const event of over.events ?? []) task.apply(event);
@@ -45,6 +46,7 @@ function state(over: {
       nearLimit: () => (over.nearLimit ? { spent: 1, limit: 1 } : undefined),
     },
     recordBlobSha: over.recordBlobSha,
+    recordedThrough: over.recordedThrough ?? 0,
     limits: { maxPromptTokens: 1_000_000 },
     advisories: [...(over.advisories ?? [])],
     messages: over.messages ?? [],
@@ -181,6 +183,20 @@ const finding = (
 
 describe('harness card task record', () => {
   const research: TraceEvent = { type: 'run_start', runId, model: 'm', taskShape: 'research' };
+
+  it('carries only findings recorded after the task record message (F-6)', () => {
+    const events = [research, ...finding(2, 'f1', 'Port is 3000', 'a.ts:1'), ...finding(3, 'f2', 'Host is local', 'a.ts:2')];
+    const card = buildStateCard(state({ events, recordedThrough: 1 }), 30_000) ?? '';
+    expect(card).toMatch(/Record: 1 finding\(s\) are in the task record above; 1 newer:/);
+    expect(card).toContain('- Host is local — a.ts:2');
+    expect(card).not.toContain('Port is 3000');
+    // Everything is in history and nothing else is open: no card at all.
+    expect(buildStateCard(state({ events, recordedThrough: 2 }), 30_000)).toBeNull();
+    // With something else to say, the card points at the record instead of repeating it.
+    const withAdvice = buildStateCard(state({ events, recordedThrough: 2, nearLimit: true }), 30_000) ?? '';
+    expect(withAdvice).toMatch(/all 2 finding\(s\) are in the task record above/);
+    expect(withAdvice).not.toContain('Host is local');
+  });
 
   it('shows recorded findings with their evidence, even on an early step', () => {
     const card = buildStateCard(
