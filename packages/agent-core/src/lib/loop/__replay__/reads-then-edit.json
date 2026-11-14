@@ -5,6 +5,49 @@
     "iterations": 3,
     "toolCalls": 3,
     "status": "completed",
+    "task": {
+      "phase": "report",
+      "iteration": 3,
+      "taskClass": "small",
+      "shape": "change",
+      "workingSet": [
+        {
+          "path": "a.ts",
+          "reads": 1,
+          "edits": 1,
+          "failedEdits": 0,
+          "lastReadIteration": 1,
+          "lastEditIteration": 2
+        },
+        {
+          "path": "b.ts",
+          "reads": 1,
+          "edits": 0,
+          "failedEdits": 0,
+          "lastReadIteration": 1
+        }
+      ],
+      "evidence": {
+        "edits": 1,
+        "failedEdits": 0,
+        "commands": [],
+        "toolErrors": 0,
+        "unverifiedSince": 2,
+        "uncheckedFiles": [
+          "a.ts"
+        ],
+        "lastCheck": null,
+        "reviewed": false,
+        "findings": [],
+        "lastEvidenceIteration": 2
+      },
+      "phaseIterations": {
+        "orient": 1,
+        "locate": 1,
+        "change": 1
+      },
+      "childGaps": []
+    },
     "usage": {
       "own": {
         "promptTokens": 3000,
@@ -29,7 +72,31 @@
       "depth": 0,
       "mode": "workspace",
       "posture": "agent",
-      "windowTokens": 200000
+      "windowTokens": 260000,
+      "flags": {
+        "outcomeCards": true,
+        "promptTiers": true,
+        "harnessNotes": true,
+        "compactHomePrompt": false,
+        "situationCard": true,
+        "effortEscalation": true,
+        "stopCheck": true,
+        "sectionedSummary": true,
+        "learningLoop": true,
+        "stateCard": true
+      },
+      "taskShape": "unknown"
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 1,
+      "promptTokens": 3,
+      "residentToolTokens": 0,
+      "residueTokens": 0,
+      "prefixStableMessages": 0,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -59,6 +126,14 @@
       "args": {
         "path": "a.ts"
       }
+    },
+    {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 1,
+      "from": "orient",
+      "to": "locate",
+      "cause": "read_file"
     },
     {
       "type": "tool_start",
@@ -92,6 +167,17 @@
       "resultChars": 16
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 2,
+      "messages": 4,
+      "promptTokens": 23,
+      "residentToolTokens": 8,
+      "residueTokens": 12,
+      "prefixStableMessages": 1,
+      "cardTokens": 0
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 2,
@@ -121,6 +207,14 @@
       }
     },
     {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 2,
+      "from": "locate",
+      "to": "change",
+      "cause": "edit_file"
+    },
+    {
       "type": "tool_complete",
       "runId": "replay-run",
       "iteration": 2,
@@ -129,6 +223,33 @@
       "durationMs": 0,
       "resultPreview": "Patched a.ts",
       "resultChars": 12
+    },
+    {
+      "type": "policy_decision",
+      "runId": "replay-run",
+      "iteration": 3,
+      "kind": "card",
+      "ids": [
+        "open:unchecked"
+      ],
+      "reason": "open items and advice shown on this call",
+      "inputs": {
+        "shape": "change",
+        "phase": "change",
+        "stepsSinceEvidence": 0,
+        "findings": 0
+      }
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 3,
+      "messages": 7,
+      "promptTokens": 100,
+      "residentToolTokens": 11,
+      "residueTokens": 18,
+      "prefixStableMessages": 4,
+      "cardTokens": 69
     },
     {
       "type": "llm_request",
@@ -148,6 +269,61 @@
         "completionTokens": 20
       },
       "durationMs": 0
+    },
+    {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 3,
+      "from": "change",
+      "to": "report",
+      "cause": "answer"
+    },
+    {
+      "type": "task_state",
+      "runId": "replay-run",
+      "state": {
+        "phase": "report",
+        "iteration": 3,
+        "taskClass": "small",
+        "shape": "change",
+        "workingSet": [
+          {
+            "path": "a.ts",
+            "reads": 1,
+            "edits": 1,
+            "failedEdits": 0,
+            "lastReadIteration": 1,
+            "lastEditIteration": 2
+          },
+          {
+            "path": "b.ts",
+            "reads": 1,
+            "edits": 0,
+            "failedEdits": 0,
+            "lastReadIteration": 1
+          }
+        ],
+        "evidence": {
+          "edits": 1,
+          "failedEdits": 0,
+          "commands": [],
+          "toolErrors": 0,
+          "unverifiedSince": 2,
+          "uncheckedFiles": [
+            "a.ts"
+          ],
+          "lastCheck": null,
+          "reviewed": false,
+          "findings": [],
+          "lastEvidenceIteration": 2
+        },
+        "phaseIterations": {
+          "orient": 1,
+          "locate": 1,
+          "change": 1
+        },
+        "childGaps": []
+      }
     },
     {
       "type": "run_finish",
@@ -426,5 +602,112 @@
       "role": "assistant",
       "content": "Edited a.ts."
     }
+  ],
+  "prompts": [
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "r1",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"a.ts\"}"
+            }
+          },
+          {
+            "id": "r2",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"b.ts\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "r1",
+        "content": "contents of a.ts"
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "r2",
+        "content": "contents of b.ts"
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "r1",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"a.ts\"}"
+            }
+          },
+          {
+            "id": "r2",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"b.ts\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "r1",
+        "content": "contents of a.ts"
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "r2",
+        "content": "contents of b.ts"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "e1",
+            "type": "function",
+            "function": {
+              "name": "edit_file",
+              "arguments": "{\"path\":\"a.ts\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "e1",
+        "content": "Patched a.ts"
+      },
+      {
+        "role": "user",
+        "content": "[Harness card: this run's state, rebuilt every step by the harness, not from the user]\nPhase: change · step 3 · task small change · ~182 tokens per call\nWorking set: a.ts (edited, unchecked), b.ts\nOpen: Edits since step 2 have no check yet (build, typecheck, test or lint)."
+      }
+    ]
   ]
 }

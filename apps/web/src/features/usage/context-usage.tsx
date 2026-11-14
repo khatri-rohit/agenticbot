@@ -41,6 +41,9 @@ const BUCKETS: {
       'plan',
       'mentions',
       'brief',
+      'record',
+      'last_run',
+      'situation',
     ],
     barClass: 'bg-foreground/35',
   },
@@ -111,11 +114,11 @@ export function ContextUsage({
         <button
           type="button"
           role="meter"
-          aria-label={`${showTilde ? 'About ' : ''}${percent}% context used, ${usedLabel} of ${limitLabel} tokens, ${source}${defaultWindow ? ', default window' : ''}`}
+          aria-label={`${showTilde ? 'About ' : ''}${percent}% context used, ${usedLabel} of ${limitLabel} tokens, ${source}${defaultWindow ? ', default window' : ''}${windowSource === 'served' ? ', limited by local Ollama' : ''}`}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="inline-flex h-7 items-center justify-center gap-1 rounded-md px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           <svg
             width={size}
@@ -151,6 +154,10 @@ export function ContextUsage({
               strokeLinecap="round"
             />
           </svg>
+          {/* A bare ring reads as a spinner; the number says what it is. */}
+          <span className="type-caption tabular-nums" aria-hidden>
+            {percent}%
+          </span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" side="top" className="w-64 p-2.5">
@@ -206,7 +213,7 @@ export function ContextUsage({
                 {kids.length > 1
                   ? kids.map((layer) => (
                       <div key={layer.id} className="contents">
-                        <dt className="pl-2 text-muted-foreground/80">
+                        <dt className="pl-2 text-muted-foreground">
                           {layer.label}
                         </dt>
                         <dd className="text-right tabular-nums text-muted-foreground">
@@ -248,7 +255,13 @@ export function ContextUsage({
         ) : null}
         {defaultWindow ? (
           <p className="type-caption mt-2 text-muted-foreground">
-            Using the 200K fallback window: the model's size is unavailable
+            Using the 260K fallback window: the model's size is unavailable
+          </p>
+        ) : null}
+        {windowSource === 'served' ? (
+          <p className="type-caption mt-2 text-muted-foreground">
+            Limited to the context local Ollama loaded this model with. Raise
+            OLLAMA_CONTEXT_LENGTH on the daemon for more.
           </p>
         ) : null}
         <p className="type-caption mt-2 text-muted-foreground tabular-nums">

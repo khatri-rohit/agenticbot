@@ -5,6 +5,7 @@ import { getAgentHome } from '../platform/instances';
 import { asyncRoute } from '../platform/http-errors';
 import {
   SkillImportError,
+  createUserSkill,
   deleteUserSkill,
   installGitHubSkills,
   previewGitHubSkills,
@@ -31,41 +32,66 @@ router.get('/skills', (_req: Request, res: Response) => {
   }
 });
 
-router.post('/skills/preview', asyncRoute(async (req: Request, res: Response) => {
-  try {
-    res.json(await previewGitHubSkills(String(req.body?.repoUrl ?? '')));
-  } catch (error) {
-    fail(res, error);
-  }
-}));
+router.post(
+  '/skills/preview',
+  asyncRoute(async (req: Request, res: Response) => {
+    try {
+      res.json(await previewGitHubSkills(String(req.body?.repoUrl ?? '')));
+    } catch (error) {
+      fail(res, error);
+    }
+  }),
+);
 
-router.post('/skills/install', asyncRoute(async (req: Request, res: Response) => {
-  try {
-    const skills = Array.isArray(req.body?.skills) ? req.body.skills : [];
-    await installGitHubSkills({
-      agentHome: getAgentHome(),
-      repoUrl: String(req.body?.repoUrl ?? ''),
-      commit: String(req.body?.commit ?? ''),
-      skills: skills.map(
-        (skill: { pathInRepo?: string; folderName?: string }) => ({
-          pathInRepo: String(skill.pathInRepo ?? ''),
-          folderName: String(skill.folderName ?? ''),
-        }),
-      ),
-    });
-    res.json(listSkillCatalogs());
-  } catch (error) {
-    fail(res, error);
-  }
-}));
+router.post(
+  '/skills/install',
+  asyncRoute(async (req: Request, res: Response) => {
+    try {
+      const skills = Array.isArray(req.body?.skills) ? req.body.skills : [];
+      await installGitHubSkills({
+        agentHome: getAgentHome(),
+        repoUrl: String(req.body?.repoUrl ?? ''),
+        commit: String(req.body?.commit ?? ''),
+        skills: skills.map(
+          (skill: { pathInRepo?: string; folderName?: string }) => ({
+            pathInRepo: String(skill.pathInRepo ?? ''),
+            folderName: String(skill.folderName ?? ''),
+          }),
+        ),
+      });
+      res.json(listSkillCatalogs());
+    } catch (error) {
+      fail(res, error);
+    }
+  }),
+);
 
-router.delete('/skills/:folder', asyncRoute(async (req: Request, res: Response) => {
-  try {
-    await deleteUserSkill(getAgentHome(), String(req.params.folder ?? ''));
-    res.json(listSkillCatalogs());
-  } catch (error) {
-    fail(res, error);
-  }
-}));
+router.post(
+  '/skills/create',
+  asyncRoute(async (req: Request, res: Response) => {
+    try {
+      await createUserSkill({
+        agentHome: getAgentHome(),
+        name: String(req.body?.name ?? ''),
+        content: String(req.body?.content ?? ''),
+      });
+      res.json(listSkillCatalogs());
+    } catch (error) {
+      fail(res, error);
+    }
+  }),
+);
+
+router.delete(
+  '/skills/:folder',
+  asyncRoute(async (req: Request, res: Response) => {
+    try {
+      await deleteUserSkill(getAgentHome(), String(req.params.folder ?? ''));
+      res.json(listSkillCatalogs());
+    } catch (error) {
+      fail(res, error);
+    }
+  }),
+);
 
 export { router as skillsRouter };

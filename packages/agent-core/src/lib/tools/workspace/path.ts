@@ -75,7 +75,12 @@ export function toPosixRelative(root: string, abs: string): string {
   return path.relative(root, abs).split(path.sep).join('/');
 }
 
-/** Minimal `*`, `**`, `?` matcher on POSIX-relative paths. */
+/**
+ * Glob matcher on POSIX-relative paths: `*`, `**`, `?`, `[abc]` / `[!abc]`
+ * classes and `{a,b}` alternatives (nestable), case-insensitive. Models write
+ * brace lists like `*.{ts,tsx}` and classes like `*[Dd]ashboard*` as a matter
+ * of course; matching them literally returned "no files" for files that exist.
+ */
 export function globMatch(relPath: string, pattern: string): boolean {
   const normalized = relPath.replaceAll('\\', '/');
   const pat = pattern.replaceAll('\\', '/');
@@ -83,8 +88,16 @@ export function globMatch(relPath: string, pattern: string): boolean {
 }
 
 export function globToRegExp(glob: string): RegExp {
+  return new RegExp(`^${globBody(glob)}$`, 'i');
+}
+
+const REGEX_SPECIAL = '\\^$+{}[]()|.';
+
+function globBody(glob: string): string {
   let i = 0;
-  let out = '^';
+  let out = '';
+  // Open `{` groups: a `,` inside one is an alternative.
+  let depth = 0;
   while (i < glob.length) {
     if (glob.startsWith('**/', i)) {
       out += '(?:.*/)?';
@@ -96,7 +109,7 @@ export function globToRegExp(glob: string): RegExp {
       i += 2;
       continue;
     }
-    const ch = glob[i];
+    const ch = glob[i]!;
     if (ch === '*') {
       out += '[^/]*';
       i += 1;
@@ -107,10 +120,47 @@ export function globToRegExp(glob: string): RegExp {
       i += 1;
       continue;
     }
-    if ('\\^$+{}[]()|.'.includes(ch)) out += `\\${ch}`;
-    else out += ch;
+    if (ch === '[') {
+      const close = glob.indexOf(']', i + 2);
+      if (close > i) {
+        let body = glob.slice(i + 1, close);
+        const negate = body.startsWith('!') || body.startsWith('^');
+        if (negate) body = body.slice(1);
+        const escaped = body.replace(/[\\\]^]/g, (c) => `\\${c}`);
+        out += negate ? `[^/${escaped}]` : `[${escaped}]`;
+        i = close + 1;
+        continue;
+      }
+    }
+    if (ch === '{' && hasClosingBrace(glob, i)) {
+      out += '(?:';
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === '}' && depth > 0) {
+      out += ')';
+      depth -= 1;
+      i += 1;
+      continue;
+    }
+    if (ch === ',' && depth > 0) {
+      out += '|';
+      i += 1;
+      continue;
+    }
+    out += REGEX_SPECIAL.includes(ch) ? `\\${ch}` : ch;
     i += 1;
   }
-  out += '$';
-  return new RegExp(out, 'i');
+  return out;
+}
+
+/** A `{` opens a group only when a matching `}` follows; otherwise it is literal. */
+function hasClosingBrace(glob: string, from: number): boolean {
+  let depth = 0;
+  for (let j = from; j < glob.length; j++) {
+    if (glob[j] === '{') depth += 1;
+    else if (glob[j] === '}' && --depth === 0) return true;
+  }
+  return false;
 }

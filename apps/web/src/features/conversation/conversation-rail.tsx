@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/utils';
 
 export type ConversationAnchor = {
@@ -52,6 +52,9 @@ export function ConversationRail({
   // Scroll-spy: highlight the turn most visible in the scroll viewport.
   // Observes each turn section and picks the entry with the highest
   // intersection ratio as the active anchor.
+  const anchorsRef = useRef(anchors);
+  anchorsRef.current = anchors;
+
   useEffect(() => {
     const root = scrollContainerRef.current;
     if (!root || anchors.length < MIN_TURNS) return;
@@ -65,7 +68,7 @@ export function ConversationRail({
         }
         let bestId: string | null = null;
         let bestRatio = 0;
-        for (const anchor of anchors) {
+        for (const anchor of anchorsRef.current) {
           const ratio = ratios.get(anchor.id) ?? 0;
           if (ratio > bestRatio) {
             bestRatio = ratio;
@@ -82,13 +85,18 @@ export function ConversationRail({
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
-  }, [anchors, scrollContainerRef, getAnchorElement]);
+    // Rebuild only when the set of anchor IDs changes, not when tool
+    // activity mutates the last anchor's metadata. The callback reads
+    // anchorsRef.current so it always sees the latest data.
+  }, [anchors.length, scrollContainerRef, getAnchorElement]);
 
   if (anchors.length < MIN_TURNS) return null;
 
   return (
     <div
-      className="pointer-events-none absolute inset-y-0 left-5 z-20 hidden w-20 sm:block cursor-pointer"
+      // Hug the reading column (max-w-4xl = 56rem) instead of the window
+      // edge, so the ticks read as part of the conversation.
+      className="pointer-events-none absolute inset-y-0 left-[max(1.25rem,calc(50%-30.5rem))] z-20 hidden w-20 sm:block cursor-pointer"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -105,8 +113,7 @@ export function ConversationRail({
         <div
           className={cn(
             'relative rounded-md border border-transparent transition-colors',
-            hovered &&
-              'border-border/50 px-2 py-2 bg-card',
+            hovered && 'border-border/50 px-2 py-2 bg-card',
           )}
         >
           {hovered ? (
@@ -131,7 +138,7 @@ export function ConversationRail({
                     <span className="line-clamp-1">
                       {truncateLabel(anchor.label)}
                       {anchor.toolCount && anchor.toolCount > 0 ? (
-                        <span className="text-muted-foreground/70">
+                        <span className="text-subtle-foreground">
                           {' · '}
                           {anchor.toolCount}{' '}
                           {anchor.toolCount === 1 ? 'tool' : 'tools'}

@@ -1,0 +1,395 @@
+import { EFFORT_IDLE_FLOOR_STEPS, parseSubagentHeader } from '@agent/agent-models';
+
+import { linesOf, type TraceLine } from '../read/trace.js';
+
+/**
+ * Harness health for one run: does each mechanism do what it exists for?
+ * Phase 0 of the v2 build plan (docs/plans/harness-v2-build-plan.md). Pure,
+ * from the trace alone; fields are null when the trace predates the event
+ * they need.
+ */
+export type HealthMetrics = {
+  /** Model calls this run made (own). */
+  steps: number;
+  /** Steps on which results were removed from the prompt, and their share of steps. */
+  removalSteps: number;
+  removalStepShare: number | null;
+  /** From `context_shape`: residue (cards + old call arguments) as a share of the prompt. */
+  residueShare: { mean: number; last: number } | null;
+  /** Mean share of each call's messages that equal the previous call's leading messages. */
+  prefixStability: number | null;
+  /** Reads that returned a line range already returned, with no edit of that file between. */
+  reReads: { reads: number; sameRange: number; rate: number | null };
+  /** Re-reads of text that had been removed from the prompt (the model paid a step to get it back). */
+  restores: number;
+  /** Findings recorded with record_finding (research evidence). */
+  findings: number;
+  /** Findings merged in from sub-agents (`child_findings`), counted apart from this run's own. */
+  childFindings: number;
+  /** Identical searches (grep/glob, same arguments) with no edit between. */
+  repeatSearches: { searches: number; repeats: number; rate: number | null };
+  /** Calls a guard answered instead of running them (repeats past the limit, identical reads and searches answered with a pointer). */
+  guardAnswered: number;
+  /**
+   * Every traced harness decision, counted by `kind:id` with the id's own
+   * detail dropped (`guard:dedupe_answered`, `effort:effort_floor`,
+   * `delegation:effort_capped`, `card:advice`), so a run's control activity
+   * reads at a glance.
+   */
+  decisions: Record<string, number>;
+  /**
+   * Card items (open items and advice): each first showing, and whether the
+   * behaviour it asks for followed within ADVICE_WINDOW steps.
+   */
+  advice: {
+    shown: number;
+    followed: number;
+    rate: number | null;
+    byKind: Record<string, { shown: number; followed: number }>;
+  };
+  /**
+   * Steps sent at low reasoning effort while making no progress (thrash at
+   * low effort). Progress: a first read of a file, an edit, a command, a
+   * delegate, or an answer; searches alone are not.
+   */
+  effortVsProgress: {
+    lowEffortSteps: number;
+    stepsWithoutProgress: number;
+    lowEffortWithoutProgress: number;
+    /**
+     * Steps sent after EFFORT_IDLE_FLOOR_STEPS steps without evidence (the
+     * harness's own definition, as `evidence` below), and how many of them
+     * went out at low effort. The phase-5 effort floor promises zero.
+     */
+    idleSteps: number;
+    lowEffortWhileIdle: number;
+  };
+  /** Child runs: the budget it was given and what it spent; null for a run with no `child_budget`. */
+  childBudget: {
+    maxPromptTokens: number;
+    maxToolCalls: number;
+    spentPromptTokens: number;
+    toolCalls: number;
+    within: boolean;
+  } | null;
+  /**
+   * Evidence units, by the harness's own definition (TaskStateTracker): successful edits, checks that pass after
+   * edits or after a failure, recorded findings, sub-agent reports; and total prompt tokens per unit.
+   */
+  evidence: number;
+  costPerEvidence: number | null;
+};
+
+/** Steps after a card item first shows in which its behaviour counts as followed (incl. that step). */
+export const ADVICE_WINDOW = 3;
+
+const LOW_EFFORT = new Set(['none', 'minimal', 'low', 'off', 'false']);
+const SEARCH_TOOLS = new Set(['grep', 'glob']);
+const RANGE = /^\[lines (\d+)–(\d+) of (\d+)/;
+
+type StepTool = { name: string; args: Record<string, unknown>; ok: boolean; exitCode?: number; preview: string };
+
+function args(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function pathOf(value: Record<string, unknown>): string | undefined {
+  return typeof value.path === 'string' ? value.path.replace(/\\/g, '/').replace(/^\.\//, '') : undefined;
+}
+
+function canonical(value: Record<string, unknown>): string {
+  return JSON.stringify(Object.keys(value).sort().map((key) => [key, value[key]]));
+}
+
+const ratio = (part: number, whole: number) => (whole > 0 ? part / whole : null);
+
+/** Tools of each step (by iteration), in order, with their outcome. */
+function toolsByStep(lines: TraceLine[]): Map<number, StepTool[]> {
+  const starts = new Map<string, { iteration: number; name: string; args: Record<string, unknown> }>();
+  for (const start of linesOf(lines, 'tool_start')) {
+    if (!start.toolCallId) continue;
+    starts.set(start.toolCallId, { iteration: start.iteration, name: start.toolName, args: args(start.args) });
+  }
+  const steps = new Map<number, StepTool[]>();
+  for (const done of linesOf(lines, 'tool_complete')) {
+    const start = done.toolCallId ? starts.get(done.toolCallId) : undefined;
+    if (!start) continue;
+    const list = steps.get(start.iteration) ?? [];
+    list.push({
+      name: start.name,
+      args: start.args,
+      ok: done.outcome !== 'error',
+      ...(done.exitCode !== undefined ? { exitCode: done.exitCode } : {}),
+      preview: done.resultPreview ?? '',
+    });
+    steps.set(start.iteration, list);
+  }
+  return steps;
+}
+
+const isEdit = (tool: StepTool) => tool.name === 'edit_file' && tool.ok && !/^(Error|oldText span)/.test(tool.preview);
+const isFinding = (tool: StepTool) => tool.name === 'record_finding' && tool.ok && tool.preview.startsWith('Recorded');
+const isCheck = (tool: StepTool) => tool.name === 'run_terminal' && tool.exitCode !== undefined;
+const isPartialRead = (tool: StepTool) => {
+  const range = RANGE.exec(tool.preview);
+  return range !== null && (Number(range[1]) > 1 || Number(range[2]) < Number(range[3]));
+};
+
+/** Did the behaviour a card item asks for happen in these steps? */
+function followed(id: string, window: StepTool[][], answered: boolean): boolean {
+  const all = window.flat();
+  if (id === 'advice:serial_reads') return window.some((step) => step.length >= 2);
+  if (id.startsWith('advice:read_creep:')) {
+    const path = id.slice('advice:read_creep:'.length);
+    return !all.some((tool) => tool.name === 'read_file' && pathOf(tool.args) === path && isPartialRead(tool));
+  }
+  if (id === 'advice:stall') return answered || all.some((tool) => isEdit(tool) || isFinding(tool));
+  // Retired card item (now `open:reread`); still scored for older traces.
+  if (id === 'open:unrecorded') return all.some(isFinding);
+  if (id === 'advice:budget') return answered;
+  if (id === 'advice:one_shot' || id === 'open:review') return all.some((tool) => tool.name === 'delegate');
+  if (id === 'open:unchecked') return all.some(isCheck);
+  if (id === 'open:check_failed') return all.some((tool) => isEdit(tool) || isCheck(tool));
+  return false;
+}
+
+const normalPath = (path: string) => path.replace(/\\/g, '/').replace(/^\.\//, '');
+
+/** Does this record_finding call cite `path` (its evidence argument or the evidence its result recorded)? */
+function citesPath(tool: StepTool, path: string): boolean {
+  if (!isFinding(tool)) return false;
+  const evidence = `${typeof tool.args.evidence === 'string' ? tool.args.evidence : ''}\n${tool.preview}`;
+  return normalPath(evidence).includes(path);
+}
+
+/**
+ * `open:reread` (files read again after removal that no finding cites): the
+ * paths it named are rebuilt from the trace (restores before the card's step,
+ * minus paths a finding cited before it). Followed when none of them is
+ * restored again in the window, or a finding in the window cites one.
+ */
+function rereadFollowed(
+  lines: TraceLine[],
+  byStep: Map<number, StepTool[]>,
+  iterations: number[],
+  cardIteration: number,
+): boolean {
+  const restores = linesOf(lines, 'context_restored').map((line) => ({ iteration: line.iteration, path: normalPath(line.path) }));
+  const before = iterations.filter((iteration) => iteration < cardIteration).flatMap((iteration) => byStep.get(iteration) ?? []);
+  const paths = new Set(
+    restores
+      .filter((restore) => restore.iteration < cardIteration)
+      .map((restore) => restore.path)
+      .filter((path) => !before.some((tool) => citesPath(tool, path))),
+  );
+  if (paths.size === 0) return false;
+  const inWindow = (iteration: number) => iteration >= cardIteration && iteration < cardIteration + ADVICE_WINDOW;
+  const window = iterations.filter(inWindow).flatMap((iteration) => byStep.get(iteration) ?? []);
+  if ([...paths].some((path) => window.some((tool) => citesPath(tool, path)))) return true;
+  return !restores.some((restore) => inWindow(restore.iteration) && paths.has(restore.path));
+}
+
+/** `advice:read_creep:src/a.ts` → `advice:read_creep`. */
+function kindOf(id: string): string {
+  const parts = id.split(':');
+  return parts.slice(0, 2).join(':');
+}
+
+function countDecisions(decisions: Array<{ kind: string; ids: string[] }>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const decision of decisions) {
+    for (const id of decision.ids) {
+      const key = `${decision.kind}:${id.split(':')[0]}`;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+export function computeHealth(lines: TraceLine[], totalPromptTokens: number): HealthMetrics {
+  const responses = linesOf(lines, 'llm_response');
+  const steps = responses.length;
+  const answeredAt = new Set(
+    responses.filter((line) => !line.hasToolCalls).map((line) => line.iteration),
+  );
+  const byStep = toolsByStep(lines);
+  const iterations = [...new Set([...responses.map((line) => line.iteration), ...byStep.keys()])].sort((a, b) => a - b);
+
+  const removalSteps = new Set(linesOf(lines, 'context_evicted').map((line) => line.iteration)).size;
+
+  const shapes = linesOf(lines, 'context_shape');
+  const residues = shapes.filter((line) => line.promptTokens > 0).map((line) => line.residueTokens / line.promptTokens);
+  let stableSum = 0;
+  let stableCalls = 0;
+  for (let i = 1; i < shapes.length; i++) {
+    const before = shapes[i - 1]!.messages;
+    if (before <= 0) continue;
+    stableSum += Math.min(1, shapes[i]!.prefixStableMessages / before);
+    stableCalls += 1;
+  }
+
+  // Re-reads and repeat searches, reset by an edit (of that file, or any edit for searches).
+  const seenRanges = new Map<string, Set<string>>();
+  const seenSearches = new Set<string>();
+  let reads = 0;
+  let sameRange = 0;
+  let searches = 0;
+  let repeats = 0;
+  let evidence = 0;
+  let findings = 0;
+  let editedSinceCheck = false;
+  /** null before any check ran. */
+  let lastCheckPassed: boolean | null = null;
+  /** Iteration of the latest evidence (0 before any). */
+  let lastEvidenceAt = 0;
+  let idleSteps = 0;
+  let lowEffortWhileIdle = 0;
+  const claims = new Set<string>();
+  const effort = new Map(linesOf(lines, 'llm_request').map((line) => [line.iteration, String(line.reasoningEffort ?? 'default')]));
+  const touched = new Set<string>();
+  let lowEffortSteps = 0;
+  let stepsWithoutProgress = 0;
+  let lowEffortWithoutProgress = 0;
+  for (const iteration of iterations) {
+    const tools = byStep.get(iteration) ?? [];
+    let progress = answeredAt.has(iteration);
+    // Steps since evidence as the harness saw them when it sent this step.
+    const idleBefore = Math.max(0, iteration - 1 - lastEvidenceAt);
+    for (const tool of tools) {
+      const path = pathOf(tool.args);
+      if (isEdit(tool)) {
+        evidence += 1;
+        lastEvidenceAt = iteration;
+        editedSinceCheck = true;
+        progress = true;
+        if (path) seenRanges.delete(path);
+        seenSearches.clear();
+      } else if (isCheck(tool)) {
+        progress = true;
+        // Same rule as the harness: a pass that verifies edits or turns a
+        // failing (or never-run) check green.
+        if (tool.exitCode === 0 && (editedSinceCheck || lastCheckPassed !== true)) {
+          evidence += 1;
+          lastEvidenceAt = iteration;
+        }
+        // Only a check that ran settles the edits before it (as the harness).
+        if (tool.exitCode !== undefined) {
+          lastCheckPassed = tool.exitCode === 0;
+          editedSinceCheck = false;
+        }
+      } else if (tool.name === 'read_file' && path) {
+        const range = RANGE.exec(tool.preview);
+        if (!range) continue;
+        reads += 1;
+        const key = `${range[1]}-${range[2]}`;
+        const seen = seenRanges.get(path) ?? new Set<string>();
+        if (seen.has(key)) sameRange += 1;
+        seen.add(key);
+        seenRanges.set(path, seen);
+        if (!touched.has(path)) progress = true;
+        touched.add(path);
+      } else if (SEARCH_TOOLS.has(tool.name)) {
+        searches += 1;
+        const key = `${tool.name}:${canonical(tool.args)}`;
+        // A search is not progress on its own: rephrased searches for the
+        // same thing are the thrash this measure exists to catch. What it
+        // finds counts when the step reads, edits or answers.
+        if (seenSearches.has(key)) repeats += 1;
+        seenSearches.add(key);
+      } else if (tool.name === 'delegate') {
+        progress = true;
+        // A sub-agent report arrived (its header carries a report status).
+        if (parseSubagentHeader(tool.preview)?.reportStatus) {
+          evidence += 1;
+          lastEvidenceAt = iteration;
+        }
+      } else if (tool.name === 'record_finding' && tool.preview.startsWith('Recorded')) {
+        // A repeated claim is not new evidence (the harness ignores it too;
+        // its rarer unverified → verified upgrade is not told apart here).
+        const claim = typeof tool.args.claim === 'string' ? tool.args.claim : '';
+        if (!claims.has(claim)) {
+          claims.add(claim);
+          evidence += 1;
+          lastEvidenceAt = iteration;
+        }
+        findings += 1;
+        progress = true;
+      }
+    }
+    if (!responses.some((line) => line.iteration === iteration)) continue;
+    const low = LOW_EFFORT.has(effort.get(iteration) ?? 'default');
+    if (low) lowEffortSteps += 1;
+    if (idleBefore >= EFFORT_IDLE_FLOOR_STEPS) {
+      idleSteps += 1;
+      if (low) lowEffortWhileIdle += 1;
+    }
+    if (!progress) {
+      stepsWithoutProgress += 1;
+      if (low) lowEffortWithoutProgress += 1;
+    }
+  }
+
+  // Advice: the first showing of each card item (or again after it went away).
+  const byKind: Record<string, { shown: number; followed: number }> = {};
+  let shown = 0;
+  let followedCount = 0;
+  let previous = new Set<string>();
+  for (const card of linesOf(lines, 'policy_decision').filter((line) => line.kind === 'card')) {
+    const current = new Set(card.ids);
+    for (const id of current) {
+      if (previous.has(id)) continue;
+      const window = iterations
+        .filter((iteration) => iteration >= card.iteration && iteration < card.iteration + ADVICE_WINDOW)
+        .map((iteration) => byStep.get(iteration) ?? []);
+      const answered = [...answeredAt].some(
+        (iteration) => iteration >= card.iteration && iteration < card.iteration + ADVICE_WINDOW,
+      );
+      const ok =
+        id === 'open:reread' ? rereadFollowed(lines, byStep, iterations, card.iteration) : followed(id, window, answered);
+      const kind = (byKind[kindOf(id)] ??= { shown: 0, followed: 0 });
+      kind.shown += 1;
+      shown += 1;
+      if (ok) {
+        kind.followed += 1;
+        followedCount += 1;
+      }
+    }
+    previous = current;
+  }
+
+  const budget = linesOf(lines, 'child_budget')[0];
+  const finish = linesOf(lines, 'run_finish')[0];
+  const spent = finish?.usage?.own.promptTokens ?? responses.reduce((sum, line) => sum + (line.usage?.promptTokens ?? 0), 0);
+  const toolCalls = finish?.toolCalls ?? linesOf(lines, 'tool_start').length;
+
+  return {
+    steps,
+    removalSteps,
+    removalStepShare: ratio(removalSteps, steps),
+    residueShare:
+      residues.length > 0
+        ? { mean: residues.reduce((sum, value) => sum + value, 0) / residues.length, last: residues.at(-1)! }
+        : null,
+    prefixStability: stableCalls > 0 ? stableSum / stableCalls : null,
+    reReads: { reads, sameRange, rate: ratio(sameRange, reads) },
+    restores: linesOf(lines, 'context_restored').length,
+    findings,
+    childFindings: linesOf(lines, 'child_findings').reduce((sum, line) => sum + line.findings.length, 0),
+    repeatSearches: { searches, repeats, rate: ratio(repeats, searches) },
+    guardAnswered: linesOf(lines, 'policy_decision').filter((line) => line.kind === 'guard').length,
+    decisions: countDecisions(linesOf(lines, 'policy_decision')),
+    advice: { shown, followed: followedCount, rate: ratio(followedCount, shown), byKind },
+    effortVsProgress: { lowEffortSteps, stepsWithoutProgress, lowEffortWithoutProgress, idleSteps, lowEffortWhileIdle },
+    childBudget: budget
+      ? {
+          maxPromptTokens: budget.maxPromptTokens,
+          maxToolCalls: budget.maxToolCalls,
+          spentPromptTokens: spent,
+          toolCalls,
+          within: toolCalls <= budget.maxToolCalls && spent <= budget.maxPromptTokens,
+        }
+      : null,
+    evidence,
+    costPerEvidence: evidence > 0 ? totalPromptTokens / evidence : null,
+  };
+}

@@ -1,0 +1,16 @@
+{
+  "id": "m4-plain-question",
+  "suite": "matrix",
+  "mode": "home",
+  "repo": { "source": ".", "commit": "022dc3a" },
+  "prompt": "In two or three sentences: what is the difference between a process and a thread in an operating system?",
+  "posture": "agent",
+  "checks": [],
+  "files": [],
+  "answer": [
+    { "mustMatch": "address space|memory" },
+    { "mustMatch": "thread" }
+  ],
+  "scope": { "allow": [] },
+  "budget": { "maxPromptTokens": 60000, "maxMinutes": 3 }
+}

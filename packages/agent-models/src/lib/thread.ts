@@ -82,6 +82,6 @@ export interface Thread {
   parentThreadId?: string;
   /** Parent run that spawned this sub-agent thread. */
   parentRunId?: string;
-  /** Context window policy. Absent = default (200k cap). */
+  /** Context window policy. Absent = default (260k cap). */
   contextWindowMode?: ContextWindowMode;
 }

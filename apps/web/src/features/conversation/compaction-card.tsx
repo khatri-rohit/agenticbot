@@ -32,7 +32,7 @@ export function CompactionCard({ notice }: { notice: CompactionNotice }) {
         {running ? (
           <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
         ) : (
-          <Check className="size-3.5 shrink-0 text-muted-foreground/70" />
+          <Check className="size-3.5 shrink-0 text-subtle-foreground" />
         )}
         <Layers className="size-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
         <span className="type-ui min-w-0 flex-1 truncate text-foreground/90">

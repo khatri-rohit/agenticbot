@@ -25,6 +25,36 @@ function describeSystem1(s1: RunMetrics['system1']): string {
   ].join('; ');
 }
 
+function describeHealth(h: RunMetrics['health']): string {
+  const advice = Object.entries(h.advice.byKind)
+    .map(([kind, n]) => `${kind} ${n.followed}/${n.shown}`)
+    .join(', ');
+  return [
+    `health: removals on ${h.removalSteps}/${h.steps} steps (${percent(h.removalStepShare)})`,
+    `residue ${h.residueShare ? `${percent(h.residueShare.mean)} mean, ${percent(h.residueShare.last)} last` : '-'}`,
+    `prefix stable ${percent(h.prefixStability)}`,
+    `same-range re-reads ${h.reReads.sameRange}/${h.reReads.reads} (${percent(h.reReads.rate)}), restores ${h.restores}`,
+    `findings ${h.findings}`,
+    `repeat searches ${h.repeatSearches.repeats}/${h.repeatSearches.searches}`,
+    `repeats answered ${h.guardAnswered}`,
+    Object.keys(h.decisions).length > 0
+      ? `decisions ${Object.entries(h.decisions)
+          .sort((a, b) => b[1] - a[1])
+          .map(([key, n]) => `${key} ${n}`)
+          .join(', ')}`
+      : '',
+    `advice followed ${h.advice.followed}/${h.advice.shown}${advice ? ` (${advice})` : ''}`,
+    `low effort without progress ${h.effortVsProgress.lowEffortWithoutProgress}/${h.effortVsProgress.stepsWithoutProgress} idle steps`,
+    `low effort past the idle floor ${h.effortVsProgress.lowEffortWhileIdle}/${h.effortVsProgress.idleSteps}`,
+    h.childBudget
+      ? `child budget ${tokens(h.childBudget.spentPromptTokens)}/${tokens(h.childBudget.maxPromptTokens)}, calls ${h.childBudget.toolCalls}/${h.childBudget.maxToolCalls}${h.childBudget.within ? '' : ' OVER'}`
+      : '',
+    `evidence ${h.evidence}${h.costPerEvidence !== null ? ` (${tokens(h.costPerEvidence)} per unit)` : ''}`,
+  ]
+    .filter(Boolean)
+    .join('; ');
+}
+
 function describe(m: RunMetrics): string {
   const lines = [
     `run ${m.runId} (thread ${m.threadId})  ${m.model ?? ''}`,
@@ -41,6 +71,7 @@ function describe(m: RunMetrics): string {
     `re-reads after eviction: ${m.reReadsAfterEviction ?? 'n/a (trace predates eviction ids)'} (recall ${m.recallCalls})`,
     `steering: stall ${m.steering.stallNudges}, research gate ${m.steering.researchGates}, notes ${m.steering.toolNotes}, budget warnings ${m.steering.budgetWarnings}, evictions ${m.steering.evictions}, in-run compactions ${m.steering.inRunCompactions}, prefix heavy ${m.steering.prefixHeavy}, thread compactions ${m.steering.threadCompactions}`,
     `limits: ${m.steering.limits.join(' | ') || 'none'}`,
+    describeHealth(m.health),
     `tools: ${Object.entries(m.toolsByName).sort((a, b) => b[1] - a[1]).map(([name, n]) => `${name} ${n}`).join(', ')}`,
     `phases: ${m.phases ? `before first edit ${tokens(m.phases.beforeFirstEdit)}, editing ${tokens(m.phases.editing)}, after last edit ${tokens(m.phases.afterLastEdit)}; checked by a command after the last edit: ${m.verifiedAfterEdit ? 'yes' : 'no'}` : 'no edits'}`,
     `calls: ${m.callShape.answer} answers, ${m.callShape.single} one-tool (${m.callShape.planOnly} plan-only), ${m.callShape.multi} multi-tool; prompt growth ${m.promptGrowth?.toFixed(1) ?? '-'}×${m.untracedPromptTokens > 0 ? ` (${tokens(m.untracedPromptTokens)} of prompt in calls this trace does not show: an older trace without its final call)` : ''}`,

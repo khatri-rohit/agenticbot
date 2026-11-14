@@ -62,9 +62,20 @@ export async function installSkills(input: {
   return readJson<SkillCatalogs>(res);
 }
 
-export async function deleteUserSkill(
-  folder: string,
-): Promise<SkillCatalogs> {
+/** Save a hand-written SKILL.md under the home skills folder. */
+export async function createUserSkill(input: {
+  name: string;
+  content: string;
+}): Promise<SkillCatalogs> {
+  const res = await fetch(`${API_BASE}/api/agent/skills/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return readJson<SkillCatalogs>(res);
+}
+
+export async function deleteUserSkill(folder: string): Promise<SkillCatalogs> {
   const res = await fetch(
     `${API_BASE}/api/agent/skills/${encodeURIComponent(folder)}`,
     { method: 'DELETE' },

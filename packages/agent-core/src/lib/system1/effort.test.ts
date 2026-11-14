@@ -9,7 +9,6 @@ import {
   chooseRung,
   createEffortRouter,
   resolveProfileThinking,
-  ruleFloor,
   type EffortSignals,
 } from './effort';
 import type { System1Port } from './port';
@@ -31,7 +30,7 @@ const MIXED = model([false, 'low', 'high'], 'high', 'mixed');
 const NONE = model([], null, 'none');
 const UNKNOWN = model(['low', 'turbo'], 'low', 'levels');
 
-const QUIET: EffortSignals = { iteration: 4, steering: false, toolError: false, wrote: false };
+const QUIET: EffortSignals = { iteration: 4, steering: false, toolError: false, wrote: false, idleSteps: 0 };
 
 describe('buildEffortLadder', () => {
   it('orders the model’s own levels, lowest first', () => {
@@ -87,17 +86,21 @@ describe('resolveProfileThinking', () => {
     expect(resolveProfileThinking(NONE, 'max')).toBeUndefined();
     expect(resolveProfileThinking(LEVELS, 'default')).toBeUndefined();
   });
-});
 
-describe('ruleFloor', () => {
-  it('forbids lowering on the first turn, after errors, writes and new instructions', () => {
-    expect(ruleFloor({ ...QUIET, iteration: 1 }, 2).reason).toBe('first_turn');
-    expect(ruleFloor({ ...QUIET, toolError: true }, 2).index).toBe(2);
-    expect(ruleFloor({ ...QUIET, wrote: true }, 2).index).toBe(2);
-    expect(ruleFloor({ ...QUIET, steering: true }, 2).index).toBe(2);
-    expect(ruleFloor(QUIET, 2)).toEqual({ index: 0, reason: 'none' });
+  it('resolves high to the highest level at or below high, never above it', () => {
+    const WITH_MAX = model(['low', 'high', 'max'], 'high', 'levels');
+    const NO_HIGH = model(['low', 'medium', 'xhigh', 'max'], 'medium', 'levels');
+    const ABOVE_HIGH = model(['xhigh', 'max'], 'xhigh', 'levels');
+    expect(resolveProfileThinking(WITH_MAX, 'high')).toBe('high');
+    expect(resolveProfileThinking(WITH_MAX, 'max')).toBe('max');
+    expect(resolveProfileThinking(NO_HIGH, 'high')).toBe('medium');
+    expect(resolveProfileThinking(ABOVE_HIGH, 'high')).toBe('xhigh');
+    expect(resolveProfileThinking(MIXED, 'high')).toBe('high');
+    expect(resolveProfileThinking(BOOLEAN, 'high')).toBe(true);
+    expect(resolveProfileThinking(NONE, 'high')).toBeUndefined();
   });
 });
+
 
 describe('chooseRung', () => {
   const ladder = buildEffortLadder(LEVELS)!;
@@ -167,7 +170,90 @@ describe('createEffortRouter', () => {
     expect(decision).toMatchObject({ wire: 'high', applied: true });
   });
 
-  it('falls back to the baseline when System 1 has no opinion', async () => {
+  it('holds the last answer when System 1 goes quiet, but the floor still wins', async () => {
+    const router = createEffortRouter();
+    const answers: Array<Record<string, number> | null> = [
+      { needs_at_least_medium: 0.05, needs_at_least_high: 0.01 },
+      { needs_at_least_medium: 0.05, needs_at_least_high: 0.01 },
+      null,
+      null,
+      null,
+    ];
+    const port = fakePort('enforce', async () => answers.shift() ?? null);
+    const policy = buildEffortPolicy(LEVELS, 'auto', true);
+    const decide = (signals: EffortSignals) =>
+      router.decide({ policy, system1: port, signals, state: () => 'state', onTrace: () => undefined });
+
+    expect((await decide({ ...QUIET, iteration: 4 })).wire).toBe('medium'); // lower_pending
+    expect((await decide({ ...QUIET, iteration: 5 })).wire).toBe('low'); // lower
+    // Next ask is due (cadence), but the budget is spent: keep System 1's
+    // last rung, not the baseline.
+    expect(await decide({ ...QUIET, iteration: 8 })).toMatchObject({
+      wire: 'low',
+      applied: true,
+      trace: expect.objectContaining({ reason: 'held', chosen: 'low' }),
+    });
+    // A write raises the floor to the baseline for this iteration only…
+    expect((await decide({ ...QUIET, iteration: 9, wrote: true })).wire).toBe('medium');
+    // …then the held rung comes back.
+    expect((await decide({ ...QUIET, iteration: 10 })).wire).toBe('low');
+    expect(answers).toEqual([]);
+  });
+
+  it('holds the baseline while no evidence arrives, without asking System 1 more often (F-4)', async () => {
+    const router = createEffortRouter();
+    const easy = { needs_at_least_medium: 0.05, needs_at_least_high: 0.01 };
+    let asks = 0;
+    const port = fakePort('enforce', async () => {
+      asks += 1;
+      return easy;
+    });
+    const policy = buildEffortPolicy(LEVELS, 'auto', true);
+    const decide = (signals: EffortSignals) =>
+      router.decide({ policy, system1: port, signals, state: () => 'state', onTrace: () => undefined });
+
+    await decide({ ...QUIET, iteration: 4, idleSteps: 0 }); // lower_pending
+    expect((await decide({ ...QUIET, iteration: 5, idleSteps: 1 })).wire).toBe('low'); // evidence flowing: lower
+    // Three steps without evidence: back to the baseline, held without an ask.
+    expect(await decide({ ...QUIET, iteration: 6, idleSteps: 3 })).toMatchObject({
+      wire: 'medium',
+      trace: expect.objectContaining({ reason: 'cadence_hold', floor: 'medium' }),
+    });
+    expect(asks).toBe(2);
+    // Evidence again: System 1's lower rung comes back.
+    expect((await decide({ ...QUIET, iteration: 7, idleSteps: 0 })).wire).toBe('low');
+  });
+
+  it('asks at events and every few quiet iterations, holding in between', async () => {
+    const router = createEffortRouter();
+    const easy = { needs_at_least_medium: 0.05, needs_at_least_high: 0.01 };
+    const hard = { needs_at_least_medium: 0.95, needs_at_least_high: 0.8 };
+    const answers = [easy, easy, hard, hard];
+    let asks = 0;
+    const port = fakePort('enforce', async () => {
+      asks += 1;
+      return answers.shift() ?? null;
+    });
+    const policy = buildEffortPolicy(LEVELS, 'auto', true);
+    const decide = (signals: EffortSignals) =>
+      router.decide({ policy, system1: port, signals, state: () => 'state', onTrace: () => undefined });
+
+    await decide({ ...QUIET, iteration: 4 }); // lower_pending
+    expect((await decide({ ...QUIET, iteration: 5 })).wire).toBe('low'); // confirming ask is never skipped
+    expect(await decide({ ...QUIET, iteration: 6 })).toMatchObject({
+      wire: 'low',
+      trace: expect.objectContaining({ reason: 'cadence_hold' }),
+    });
+    await decide({ ...QUIET, iteration: 7 });
+    expect(asks).toBe(2);
+    // Three quiet iterations after the last ask: ask again (and raise).
+    expect((await decide({ ...QUIET, iteration: 8 })).wire).toBe('high');
+    // An event (tool error) always asks, even right after an ask.
+    await decide({ ...QUIET, iteration: 9, toolError: true });
+    expect(asks).toBe(4);
+  });
+
+  it('falls back to the baseline when System 1 has never answered', async () => {
     const router = createEffortRouter();
     const decision = await router.decide({
       policy: buildEffortPolicy(LEVELS, 'auto', true),

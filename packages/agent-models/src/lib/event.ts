@@ -1,6 +1,7 @@
 import type { ChoiceOption } from './choice.js';
 import type { ContextReport } from './context.js';
 import type { MemoryTarget } from './memory.js';
+import type { ResolvedModelSettings } from './model-settings.js';
 import type { ThreadPlan } from './plan.js';
 import type { RunPosture, RunUsage, TokenUsage } from './run.js';
 import type { SubagentStatus } from './subagent.js';
@@ -64,6 +65,11 @@ export interface RunStarted {
   maxPromptTokens?: number;
   /** ISO time the run started (server clock), for the live total-elapsed clock. */
   startedAt?: string;
+  /**
+   * Model-role picks resolved at run start (file > env > run's model), for
+   * eval attribution. Omitted when the host did not resolve settings.
+   */
+  modelSettings?: ResolvedModelSettings;
 }
 
 export interface TurnStarted {

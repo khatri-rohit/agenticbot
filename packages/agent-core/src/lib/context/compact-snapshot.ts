@@ -1,5 +1,6 @@
 import {
   CHARS_PER_TOKEN,
+  compactionMarks,
   type ContextReport,
   type LedgerEnvelope,
   type Snapshot,
@@ -8,6 +9,7 @@ import {
 const BRIEF_MAX = 1_200;
 const SUMMARY_MAX = 8_000;
 const TURN_MAX = 400;
+const OMITTED_MARKER_MAX = 40;
 
 function clip(text: string, max: number): string {
   const trimmed = text.trim();
@@ -68,9 +70,11 @@ export function chooseCompactThroughSeqForTarget(
 }
 
 /**
- * The compaction decision (no LLM): when the report is over compactAtRatio,
- * the last seq to fold into the snapshot so the remaining history fits
- * compactToRatio next to the fixed layers. Null when nothing should be cut.
+ * The compaction decision (no LLM): when the report is over the compaction
+ * mark, the last seq to fold into the snapshot so the remaining history
+ * fits the target next to the fixed layers (both from `compactionMarks`:
+ * the lower of a window share and an absolute figure). Null when nothing
+ * should be cut.
  */
 export function planCompaction(
   envelopes: LedgerEnvelope[],
@@ -81,11 +85,7 @@ export function planCompaction(
   const historyTokens =
     layers.find((layer) => layer.id === 'conversation')?.tokens ?? 0;
   const fixedTokens = Math.max(0, occupiedTokens - historyTokens);
-  const targetTokens = Math.max(
-    1,
-    (budget.windowTokens - budget.outputReserveTokens) * budget.compactToRatio -
-      fixedTokens,
-  );
+  const targetTokens = Math.max(1, compactionMarks(budget).to - fixedTokens);
   return chooseCompactThroughSeqForTarget(
     envelopes,
     budget.keepToolResultsForTurns,
@@ -150,9 +150,33 @@ export function buildExtractiveSnapshot(input: {
     throughSeq: input.throughSeq,
     model: input.model,
     brief,
-    summary: clip(summaryLines.join('\n\n'), SUMMARY_MAX),
+    summary: keepFirstAndNewest(summaryLines, SUMMARY_MAX),
     createdAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Fit turn lines in `max` chars keeping the first line (the request that
+ * started the thread) and as many of the newest as fit. The turns right
+ * before the cut are the ones a follow-up depends on; a head clip dropped
+ * exactly those.
+ */
+function keepFirstAndNewest(lines: string[], max: number): string {
+  const all = lines.join('\n\n');
+  if (all.length <= max) return all;
+  const first = lines[0] ?? '';
+  const newest: string[] = [];
+  let used = first.length;
+  for (let i = lines.length - 1; i > 0; i--) {
+    const line = lines[i] ?? '';
+    // Each kept line costs its text plus a separator; reserve room for the marker.
+    if (used + line.length + 2 + OMITTED_MARKER_MAX > max) break;
+    newest.unshift(line);
+    used += line.length + 2;
+  }
+  const omitted = lines.length - 1 - newest.length;
+  const marker = omitted > 0 ? [`(${omitted} earlier turns omitted)`] : [];
+  return clip([first, ...marker, ...newest].join('\n\n'), max);
 }
 
 const MENTION_MAX_CHARS = 4_000;
@@ -240,4 +264,36 @@ export function packMentionedThread(input: {
     liveLines.length > 0 ? `Recent:\n${liveLines.join('\n')}` : '',
   ].filter(Boolean);
   return clip(parts.join('\n\n'), MENTION_MAX_CHARS);
+}
+
+/**
+ * The full text of the turns a snapshot folds (seq <= throughSeq), for the
+ * host to store as a blob: every user and assistant message, each tool call
+ * with its arguments, and each tool result in full, or its own blob's sha
+ * when it was offloaded. The summary is lossy by design; this keeps the
+ * folded turns restorable (`recall`), so compaction removes text from the
+ * prompt without removing it from reach (P4).
+ */
+export function foldedTranscript(envelopes: LedgerEnvelope[], throughSeq: number): string {
+  const lines: string[] = [`Earlier turns of this thread, through ledger seq ${throughSeq}, oldest first.`];
+  for (const envelope of envelopes) {
+    if (envelope.seq > throughSeq) continue;
+    const { record } = envelope;
+    if (record.role === 'user') {
+      lines.push('', `## User (seq ${envelope.seq})`, record.content);
+    } else if (record.role === 'assistant') {
+      lines.push('', `## Assistant (seq ${envelope.seq})`);
+      if (record.content) lines.push(record.content);
+      for (const call of record.tool_calls ?? []) {
+        if (call.type === 'function') lines.push(`[call ${call.id}] ${call.function.name} ${call.function.arguments}`);
+      }
+    } else if (record.role === 'tool') {
+      lines.push(
+        '',
+        `## Tool result ${record.tool_call_id} (seq ${envelope.seq})`,
+        envelope.contentBlob ? `(stored: recall sha256:${envelope.contentBlob})` : record.content,
+      );
+    }
+  }
+  return lines.join('\n');
 }

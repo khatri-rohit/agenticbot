@@ -2,16 +2,23 @@ import { randomUUID } from 'node:crypto';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import {
+  BRIEF_USER_REQUEST_MAX_CHARS,
+  CHILD_RUN,
+  childAllocation,
   emptyRunUsage,
+  totalRunUsage,
   lastRunFrom,
   type ContextBudget,
   type LedgerAppendMeta,
   type LedgerRecord,
   type ModelRole,
+  type RunUsage,
   type SubagentReport,
   type SubagentResult,
   type SubagentSpec,
+  type SubagentReportStatus,
   type SubagentStatus,
+  type TaskFinding,
   type ThreadLastRun,
   type TraceEvent,
 } from '@agent/agent-models';
@@ -31,11 +38,12 @@ import {
   childSkills,
   createReportTool,
   renderDigest,
+  mergeReportFindings,
   renderReport,
 } from './prompt';
+import { earnedThoroughness, normalizeScopePaths, overlappingPath, usageDelta } from '../policy';
 import { getSubagentProfile } from './profiles';
 import {
-  CHILD_BUDGET_SHARE,
   CHILD_STRIPPED_TOOLS,
   MAX_CONCURRENT_SUBAGENTS,
   type SubagentProfile,
@@ -87,24 +95,28 @@ export type SubagentHost = {
 
 const PROGRESS_INTERVAL_MS = 1_000;
 
+/** Last text of a child that ended without `report`, used as its summary. */
+const FALLBACK_SUMMARY_MAX_CHARS = 1_500;
+
+/**
+ * What a child's work amounts to, from evidence: stopped early (limit,
+ * cancel, error), no report at all, reported partial, or open questions
+ * left → partial; reported blocked → blocked; else done.
+ */
+export function reportStatusOf(
+  status: SubagentStatus,
+  limitReason: string | undefined,
+  report: SubagentReport | undefined,
+): SubagentReportStatus {
+  if (status !== 'completed' || limitReason || !report) return 'partial';
+  if (report.status === 'blocked') return 'blocked';
+  if (report.status === 'partial' || (report.openQuestions?.length ?? 0) > 0) return 'partial';
+  return 'done';
+}
+
 function clampTitle(text: string): string {
   const words = text.trim().split(/\s+/).filter(Boolean).slice(0, 7);
   return words.length ? words.join(' ') : 'Sub-agent';
-}
-
-/** Last user-authored message before the parent's current tool turn. */
-function lastUserRequest(
-  messages: ChatCompletionMessageParam[],
-): string | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role !== 'user') continue;
-    if (typeof message.content === 'string') return message.content;
-    return message.content
-      .map((part) => (part.type === 'text' ? part.text : ''))
-      .join('\n');
-  }
-  return undefined;
 }
 
 /** Bounded wait queue: at most `max` children run at once per parent run. */
@@ -160,6 +172,8 @@ export function createSubagentRunner(deps: {
 }): SubagentSpawner {
   const slots = new Map<string, Slots>();
   const inflight = new Map<string, Promise<SubagentResult>>();
+  // Paths each running child covers, per parent run (objective → paths).
+  const activePaths = new Map<string, Map<string, string[]>>();
   // Prompt tokens promised to running children, per parent run. A child's
   // cap comes out of what is left after these, so parallel children can
   // never be promised more than the parent has.
@@ -211,14 +225,32 @@ export function createSubagentRunner(deps: {
       parent.posture,
     );
 
-    // Refuse before creating a thread when the parent has nothing left to share.
-    if (
-      parent.remainingPromptTokens !== undefined &&
-      Math.floor(
-        Math.max(0, parent.remainingPromptTokens - (reserved.get(parent.runId) ?? 0)) *
-          CHILD_BUDGET_SHARE,
-      ) <= 0
-    ) {
+    // The child's limits: the brief's effort (or the profile's default) as
+    // a budget, under the profile ceiling and a share of what the parent has
+    // left. Refuse before creating a thread when nothing is left to share.
+    const earned = earnedThoroughness(spec.thoroughness, profile.defaultThoroughness, Boolean(spec.resume));
+    const thoroughness = earned.thoroughness;
+    if (earned.capped) {
+      parent.trace?.({
+        type: 'policy_decision',
+        runId: parent.runId,
+        iteration: parent.iteration?.() ?? 0,
+        kind: 'delegation',
+        ids: ['effort_capped:thorough'],
+        reason: 'thorough is granted only when resuming a sub-agent',
+        inputs: { requested: spec.thoroughness ?? profile.defaultThoroughness ?? 'none', granted: 'medium' },
+      });
+    }
+    const allocate = () =>
+      childAllocation({
+        profile: profile.limits,
+        ...(thoroughness ? { thoroughness } : {}),
+        ...(parent.remainingPromptTokens !== undefined
+          ? { parentRemaining: parent.remainingPromptTokens }
+          : {}),
+        promised: reserved.get(parent.runId) ?? 0,
+      });
+    if (!allocate()) {
       return failure(spec, 'error', 'No run budget left for a sub-agent. Finish the work yourself.');
     }
 
@@ -231,13 +263,7 @@ export function createSubagentRunner(deps: {
     // bigger than its share, the child could only spend its cap on a forced
     // final answer, so refuse before creating a thread.
     if (profile.context === 'fork' && parent.remainingPromptTokens !== undefined) {
-      const available = Math.min(
-        profile.limits.maxPromptTokens,
-        Math.floor(
-          Math.max(0, parent.remainingPromptTokens - (reserved.get(parent.runId) ?? 0)) *
-            CHILD_BUDGET_SHARE,
-        ),
-      );
+      const available = allocate()?.maxPromptTokens ?? 0;
       const needed = estimatePromptTokens(parent.forkMessages());
       if (needed > available) {
         return failure(
@@ -328,12 +354,17 @@ export function createSubagentRunner(deps: {
         agentsMd,
         skills: bound,
       });
-      const brief = buildBrief(
-        spec,
-        profile.context === 'diff'
-          ? lastUserRequest(parentMessages)
-          : undefined,
-      );
+      // The parent hands over the user's own words. Its prompt also holds
+      // user-role text the harness wrote (the context header, notes, the
+      // task record), so the request is never read back out of the messages.
+      const userRequest = profile.context === 'diff' ? parent.userRequest : undefined;
+      // A request past the brief's limit is stored whole on the child's
+      // thread, so the cut in the brief can name the full text.
+      const fullRequestSha =
+        userRequest && userRequest.length > BRIEF_USER_REQUEST_MAX_CHARS && tools.byName.has('recall')
+          ? await host.putBlob(threadId, userRequest)
+          : undefined;
+      const brief = buildBrief(thoroughness ? { ...spec, thoroughness } : spec, userRequest, fullRequestSha);
       messages = [
         { role: 'system', content: system },
         ...history,
@@ -343,17 +374,8 @@ export function createSubagentRunner(deps: {
     }
 
     const promised = reserved.get(parent.runId) ?? 0;
-    const carve =
-      parent.remainingPromptTokens === undefined
-        ? profile.limits.maxPromptTokens
-        : Math.min(
-            profile.limits.maxPromptTokens,
-            Math.floor(
-              Math.max(0, parent.remainingPromptTokens - promised) *
-                CHILD_BUDGET_SHARE,
-            ),
-          );
-    if (carve <= 0) {
+    const allocation = allocate();
+    if (!allocation) {
       return failure(
         spec,
         'error',
@@ -361,6 +383,20 @@ export function createSubagentRunner(deps: {
         threadId,
       );
     }
+    // Narrowed copy for the closure below.
+    const granted = allocation;
+    const carve = granted.maxPromptTokens;
+    host.trace(threadId)?.({
+      type: 'child_budget',
+      runId: subRunId,
+      parentRunId: parent.runId,
+      profile: profile.name,
+      ...(thoroughness ? { thoroughness } : {}),
+      ...allocation,
+      ...(parent.remainingPromptTokens !== undefined
+        ? { parentRemaining: Math.max(0, parent.remainingPromptTokens - promised) }
+        : {}),
+    });
     reserved.set(parent.runId, promised + carve);
     try {
       return await startAndSettle(carve);
@@ -411,14 +447,15 @@ export function createSubagentRunner(deps: {
           tools,
           modelCall,
           limits: {
-            maxIterations: profile.limits.maxIterations,
-            maxToolCalls: profile.limits.maxToolCalls,
-            maxRepeatedToolCalls: 3,
-            toolTimeoutMs: 60_000,
+            maxIterations: granted.maxIterations,
+            maxToolCalls: granted.maxToolCalls,
+            maxRepeatedToolCalls: CHILD_RUN.maxRepeatedToolCalls,
+            toolTimeoutMs: CHILD_RUN.toolTimeoutMs,
             maxWallMs: profile.limits.maxWallMs,
             maxPromptTokens: carve,
           },
           contextBudget,
+          flags: parent.flags,
           ...(parent.workspaceRoot
             ? { workspaceRoot: parent.workspaceRoot }
             : {}),
@@ -464,7 +501,24 @@ export function createSubagentRunner(deps: {
       let toolCalls = 0;
       let lastTool: string | undefined;
       let lastSent = 0;
+      // Live roll-up: the parent's budget sees the child's spend as it
+      // happens (each turn's running total), not only when the child ends;
+      // the rest is charged at settle. Never charged twice.
+      const charged = emptyRunUsage().own;
+      const chargeUpTo = (usage: RunUsage) => {
+        const delta = usageDelta(totalRunUsage(usage), charged);
+        if (delta.promptTokens + delta.completionTokens + delta.calls + delta.estimatedCalls === 0) return;
+        parent.chargeUsage({ own: delta, children: emptyRunUsage().children });
+        charged.promptTokens += delta.promptTokens;
+        charged.completionTokens += delta.completionTokens;
+        charged.calls += delta.calls;
+        charged.estimatedCalls += delta.estimatedCalls;
+      };
       const progress = runManager.subscribe(subRunId, 0, (event) => {
+        if (event.type === 'turn.completed') {
+          if (event.runUsage) chargeUpTo(event.runUsage);
+          return;
+        }
         if (event.type !== 'tool.completed') return;
         toolCalls += 1;
         lastTool = event.toolName;
@@ -485,26 +539,63 @@ export function createSubagentRunner(deps: {
       const status: SubagentStatus =
         parent.signal.aborted || outcome === 'cancelled' ? 'cancelled' : result.status;
 
-      const body = report
-        ? renderReport(report)
-        : result.content.trim() || '(no answer)';
+      // The report is built from what the child recorded (checked against
+      // the workspace) plus what its `report` call added; without a report
+      // call, the record alone still reaches the parent.
+      const recorded = result.task?.evidence.findings ?? [];
+      const merged = profile.report
+        ? mergeReportFindings(report, recorded, result.content.trim().slice(0, FALLBACK_SUMMARY_MAX_CHARS))
+        : undefined;
+      const body = merged ? renderReport(merged) : result.content.trim() || '(no answer)';
       // Full body lives with the parent so the parent's `recall` can read it.
       let reportSha: string | undefined;
       try {
         reportSha = await host.putBlob(
           parent.threadId,
-          report ? `${body}\n\n${JSON.stringify(report, null, 2)}` : body,
+          merged ? `${body}\n\n${JSON.stringify(merged, null, 2)}` : body,
         );
       } catch {
         // The digest still carries the bounded body.
+      }
+      const reportStatus = profile.report ? reportStatusOf(status, result.limitReason, merged) : undefined;
+      const findings: TaskFinding[] = (merged?.findings ?? [])
+        .filter((finding) => finding.evidence)
+        .map((finding) => ({
+          claim: finding.claim,
+          evidence: finding.evidence!,
+          verification: finding.verification ?? 'skipped',
+          iteration: 0,
+        }));
+      const openQuestions = merged?.openQuestions ?? [];
+      if (findings.length > 0 || openQuestions.length > 0) {
+        parent.trace?.({
+          type: 'child_findings',
+          runId: parent.runId,
+          iteration: parent.iteration?.() ?? 0,
+          subRunId,
+          findings,
+          openQuestions,
+        });
       }
       const prefix =
         status === 'completed'
           ? ''
           : `Run ${status}${result.limitReason ? ` (${result.limitReason})` : ''}.\n`;
-      const digest = renderDigest(`${prefix}${body}`, reportSha);
+      // The status prefix counts inside the digest bound.
+      const digest = renderDigest(merged ?? body, reportSha, prefix);
 
-      parent.chargeUsage(result.usage);
+      chargeUpTo(result.usage);
+      host.trace(threadId)?.({
+        type: 'child_finish',
+        runId: subRunId,
+        parentRunId: parent.runId,
+        profile: profile.name,
+        status,
+        ...(reportStatus ? { reportStatus } : {}),
+        toolCalls: result.toolCalls,
+        promptTokens: totalRunUsage(result.usage).promptTokens,
+        findings: findings.length,
+      });
       try {
         await host.writeLastRun(
           threadId,
@@ -544,6 +635,9 @@ export function createSubagentRunner(deps: {
         usage: result.usage,
         ...(reportSha ? { reportSha } : {}),
         ...(result.limitReason ? { limitReason: result.limitReason } : {}),
+        ...(reportStatus ? { reportStatus } : {}),
+        ...(findings.length ? { findings } : {}),
+        ...(openQuestions.length ? { openQuestions } : {}),
       };
     }
   }
@@ -573,6 +667,35 @@ export function createSubagentRunner(deps: {
     const existing = inflight.get(key);
     if (existing) return existing;
 
+    // Overlap is refused, not merged: two children reading the same files
+    // cost the run twice for one answer. Only briefs that name paths are
+    // checked; the refusal says which child covers it, so the parent waits
+    // for that report or narrows the scope.
+    const paths = normalizeScopePaths(spec.paths);
+    const running = activePaths.get(parent.runId) ?? new Map<string, string[]>();
+    for (const [objective, covered] of running) {
+      const hit = overlappingPath(paths, covered);
+      if (!hit) continue;
+      parent.trace?.({
+        type: 'policy_decision',
+        runId: parent.runId,
+        iteration: parent.iteration?.() ?? 0,
+        kind: 'delegation',
+        ids: [`delegate_overlap:${hit}`],
+        reason: 'brief overlaps a running sub-agent',
+        inputs: { path: hit },
+      });
+      return failure(
+        spec,
+        'error',
+        `Not started: ${hit} is already covered by a running sub-agent ("${objective.slice(0, 80)}"). Wait for its report, or delegate a scope it does not cover.`,
+      );
+    }
+    if (paths.length > 0) {
+      running.set(spec.objective, paths);
+      activePaths.set(parent.runId, running);
+    }
+
     let parentSlots = slots.get(parent.runId);
     if (!parentSlots) {
       parentSlots = new Slots(deps.maxConcurrent ?? MAX_CONCURRENT_SUBAGENTS);
@@ -601,6 +724,10 @@ export function createSubagentRunner(deps: {
       return await promise;
     } finally {
       inflight.delete(key);
+      if (paths.length > 0) {
+        running.delete(spec.objective);
+        if (running.size === 0) activePaths.delete(parent.runId);
+      }
     }
   };
 }

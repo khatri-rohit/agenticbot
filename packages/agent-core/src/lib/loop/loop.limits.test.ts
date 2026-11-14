@@ -113,6 +113,26 @@ describe('runLoop limits', () => {
     expect(result.limitReason).toMatch(/^limit\.plan:/);
   });
 
+  it.each(['plan', 'ask'] as const)('does not hold a read-only %s run to open plan todos it cannot work on', async (posture) => {
+    const tools = createToolRegistry([]);
+    let calls = 0;
+    const modelCall: ModelCallFn = async () => {
+      calls += 1;
+      return { content: 'Phase 1 is done; phases 2 to 4 are still open.', toolCalls: [], finishReason: 'stop' };
+    };
+    const result = await runLoop(modelCall, [{ role: 'user', content: 'is phase 1 done?' }], tools, {
+      model: 'test',
+      mode: 'workspace',
+      posture,
+      hasOpenPlanWork: () => true,
+      limits: { maxIterations: 8, toolTimeoutMs: 5_000 },
+    });
+    expect(result.status).toBe('completed');
+    expect(result.limitReason).toBeUndefined();
+    // No nudge call: the answer stands.
+    expect(calls).toBe(1);
+  });
+
   it('halts edit_file stuck on same path with identical results despite varied args', async () => {
     const editFile: Tool = {
       definition: {
@@ -366,5 +386,101 @@ describe('runLoop limits', () => {
       },
     );
     expect(result.status).toBe('completed');
+  });
+});
+
+describe('repeated reads are answered, not fatal', () => {
+  const read: Tool = { ...noop, definition: { ...noop.definition, function: { ...noop.definition.function, name: 'read_file' } }, stage: 'read', execute: async () => '[lines 1–1 of 1]\nx' };
+  const edit: Tool = { ...noop, definition: { ...noop.definition, function: { ...noop.definition.function, name: 'edit_file' } }, stage: 'mutate', execute: async () => 'Patched a.ts' };
+  const call = (name: string): Awaited<ReturnType<ModelCallFn>> => ({
+    content: '',
+    toolCalls: [{ id: crypto.randomUUID(), type: 'function', function: { name, arguments: '{"path":"a.ts"}' } }],
+    finishReason: 'tool_calls',
+  });
+
+  async function run(script: string[]) {
+    const results: string[] = [];
+    const trace: { type: string; kind?: string; reason?: string }[] = [];
+    let n = 0;
+    const result = await runLoop(
+      async () => (n < script.length ? call(script[n++]!) : { content: 'done', toolCalls: [], finishReason: 'stop' }),
+      [{ role: 'user', content: 'go' }],
+      createToolRegistry([read, edit]),
+      {
+        model: 'test',
+        mode: 'workspace',
+        limits: { maxIterations: 20, maxToolCalls: 20, maxRepeatedToolCalls: 2, toolTimeoutMs: 5_000 },
+        trace: (event) => trace.push(event as never),
+        onMessage: (record) => {
+          if (record.role === 'tool') results.push(String(record.content));
+        },
+      },
+    );
+    return { result, results, trace };
+  }
+
+  it('answers a repeat past the limit and lets the run finish', async () => {
+    const { result, results, trace } = await run(['read_file', 'read_file', 'read_file']);
+    expect(result.status).toBe('completed');
+    expect(results.at(-1)).toMatch(/^Not run again: this exact call already ran 2 time\(s\)/);
+    expect(trace.some((event) => event.type === 'policy_decision' && event.kind === 'guard')).toBe(true);
+  });
+
+  it('still stops a model that keeps repeating past twice the limit', async () => {
+    const { result } = await run(['read_file', 'read_file', 'read_file', 'read_file', 'read_file']);
+    expect(result.status).toBe('incomplete');
+    expect(result.limitReason).toMatch(/^limit\.repeat/);
+  });
+
+  it('a successful edit makes the next read a fresh call, not a repeat', async () => {
+    const { result, results } = await run(['read_file', 'read_file', 'edit_file', 'read_file', 'read_file']);
+    expect(result.status).toBe('completed');
+    expect(results.filter((text) => text.startsWith('Not run again'))).toHaveLength(0);
+  });
+});
+
+describe('runLoop tool-call cap without a report tool', () => {
+  it('a parent run halts at maxToolCalls mid-batch, with no report-only refusals', async () => {
+    const tools = createToolRegistry([noop]);
+    const results: string[] = [];
+    const trace: { type: string; ids?: string[] }[] = [];
+    const lastMessages: ChatCompletionMessageParam[][] = [];
+    let n = 0;
+    const modelCall: ModelCallFn = async (_model, messages, registry) => {
+      lastMessages.push([...messages]);
+      if (registry.definitions.length === 0) {
+        return { content: 'handoff', toolCalls: [], finishReason: 'stop' };
+      }
+      n += 1;
+      return {
+        content: '',
+        toolCalls: [0, 1, 2].map((i) => ({
+          id: `c${n}-${i}`,
+          type: 'function' as const,
+          function: { name: 'noop', arguments: JSON.stringify({ n, i }) },
+        })),
+        finishReason: 'tool_calls',
+      };
+    };
+    const result = await runLoop(modelCall, [{ role: 'user', content: 'go' }], tools, {
+      model: 'test',
+      mode: 'home',
+      limits: { maxIterations: 20, maxToolCalls: 5, maxRepeatedToolCalls: 2, toolTimeoutMs: 5_000 },
+      trace: (event) => trace.push(event as never),
+      onMessage: (record) => {
+        if (record.role === 'tool') results.push(String(record.content));
+      },
+    });
+    expect(result.status).toBe('incomplete');
+    expect(result.limitReason).toMatch(/^limit\.tools: max tool calls exceeded \(5\)/);
+    expect(result.toolCalls).toBe(5);
+    // Second turn: two calls run, the third trips the cap and is skipped.
+    expect(n).toBe(2);
+    expect(results.filter((text) => text.includes('Skipped: tool call limit reached'))).toHaveLength(1);
+    expect(results.some((text) => text.includes('only `report` is available'))).toBe(false);
+    expect(trace.some((event) => event.ids?.some((id) => id.startsWith('report_only:')))).toBe(false);
+    // The parent keeps the plain handoff instruction.
+    const instruction = String(lastMessages.at(-1)?.at(-1)?.content ?? '');
+    expect(instruction).toContain('This run stopped at a limit; tools are off. If the request can be answered');
   });
 });

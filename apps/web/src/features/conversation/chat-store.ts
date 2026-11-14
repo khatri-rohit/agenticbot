@@ -1,4 +1,5 @@
 import {
+  normalizeRunPosture,
   occupiedFromUsage,
   type AgentEvent,
   type ChoiceOption,
@@ -196,7 +197,7 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
           runId: event.runId,
           status: 'running',
           model: event.model,
-          posture: event.posture === 'ask' ? 'ask' : 'agent',
+          posture: normalizeRunPosture(event.posture),
           streamingMessage: null,
           toolActivity: [],
           subagentActivity: [],
@@ -405,7 +406,6 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
         activeRun: {
           ...state.activeRun,
           status: incomplete ? 'incomplete' : 'completed',
-          streamingMessage: null,
           lastSeq,
         },
       };
@@ -418,21 +418,11 @@ export function applyChatEvent(state: ChatState, event: AgentEvent): ChatState {
     }
 
     case 'run.settled': {
-      // Keep snippets/tools alive until the ledger refetch lands — otherwise
-      // the response flashes off→on between activeRun nulling and messages update.
-      // After a cancel, run.error already moved the turn into the bridge.
-      return {
-        activeRun: null,
-        settledSnippets:
-          state.activeRun?.assistantSnippets ?? state.settledSnippets,
-        settledToolActivity:
-          state.activeRun?.toolActivity ?? state.settledToolActivity,
-        compactionNotice: state.compactionNotice,
-        limitNotice: state.limitNotice,
-        system1Notice: state.system1Notice,
-        plan: state.plan,
-        pendingChoices: [],
-      };
+      // Don't null activeRun yet — the ledger refetch in settle() is async,
+      // and nulling here would flash the streaming content off before the
+      // committed messages land. Keep activeRun alive until settle() swaps
+      // in the ledger. On the cancel path, run.error already nulled it.
+      return { ...state, pendingChoices: [] };
     }
 
     case 'run.error': {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { Message } from '@agent/agent-models';
 import { imageAttachments, threadMentions } from '@agent/agent-models';
 import { ThreadMentionChip } from '@/features/composer/thread-mention-picker';
@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { formatMessageTime } from '@/lib/format-relative-time';
 
-export function UserMessage({
+export const UserMessage = memo(function UserMessage({
   message,
   canEdit,
   hasResponseBelow,
@@ -244,7 +244,7 @@ export function UserMessage({
             {sentAt ? (
               <time
                 dateTime={message.createdAt}
-                className="type-caption text-muted-foreground/70 tabular-nums"
+                className="type-caption text-subtle-foreground tabular-nums"
               >
                 {sentAt}
               </time>
@@ -262,4 +262,4 @@ export function UserMessage({
       )}
     </div>
   );
-}
+});

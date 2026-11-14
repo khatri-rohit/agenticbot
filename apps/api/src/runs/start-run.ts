@@ -4,6 +4,7 @@ import {
   imageAttachments,
   isWorkspaceKind,
   lastRunFrom,
+  MIN_CONTEXT_WINDOW_TOKENS,
   normalizeRunPosture,
   parseContextWindowMode,
   planHasOpenWork,
@@ -18,6 +19,7 @@ import {
   getOllamaModelConfig,
   modelOwnsAuto,
   peekOllamaModelConfig,
+  taskRecordFromRun,
 } from '@agent/agent-core';
 
 import {
@@ -26,7 +28,8 @@ import {
   capacitySnapshot,
   createCapacityGate,
 } from '../models/capacity';
-import { resolveCallOptions } from '../models/model-runtime';
+import { resolveCallOptions, resolveContextBudget } from '../models/model-runtime';
+import { resolveModelSettings } from '../models/model-settings-store';
 import {
   getAgentHome,
   getThreadStore,
@@ -34,6 +37,7 @@ import {
 } from '../platform/instances';
 import { threadTraceSink } from '../platform/trace-sink.js';
 import { compactThread, emitCompacted, maybeCompactThread } from './compaction';
+import { rewindLearningCursor, scheduleLearningReview } from '../memory/learning-loop';
 import {
   endpointFromLocal,
   lastUserEnvelope,
@@ -148,6 +152,7 @@ async function startClaimedRun(
 
   if (rewindThroughSeq !== undefined) {
     await store.rewind(threadId, rewindThroughSeq);
+    await rewindLearningCursor(threadId, rewindThroughSeq);
   }
 
   const ledgerBefore = await store.readLedger(threadId, 0);
@@ -160,6 +165,9 @@ async function startClaimedRun(
 
   const useModel = model ?? thread.model ?? HOME_MODE.model;
   const endpoint = endpointFromLocal(local);
+  // Resolved once per run (file > env > run's model) and recorded on
+  // run.started; consumers below read this snapshot, never env directly.
+  const modelSettings = await resolveModelSettings(useModel, endpoint);
 
   // Before the user row is written, so a refusal leaves the ledger as it was.
   if (
@@ -177,6 +185,22 @@ async function startClaimedRun(
     } catch {
       // If /api/show is unavailable, let the model provider reject instead.
     }
+  }
+
+  // Also before the user row: a window this small cannot hold the prompt and
+  // a real conversation (local Ollama may serve less than the model's size).
+  const servedWindow = await resolveContextBudget(
+    useModel,
+    endpoint,
+    thread.contextWindowMode,
+  );
+  if (servedWindow.budget.windowTokens < MIN_CONTEXT_WINDOW_TOKENS) {
+    return reject(
+      'invalid',
+      servedWindow.source === 'served'
+        ? `Local Ollama is serving ${useModel} with a ${servedWindow.budget.windowTokens.toLocaleString()}-token context; the agent needs at least ${MIN_CONTEXT_WINDOW_TOKENS.toLocaleString()}. Raise OLLAMA_CONTEXT_LENGTH on the daemon and restart it.`
+        : `${useModel} has a ${servedWindow.budget.windowTokens.toLocaleString()}-token context; the agent needs at least ${MIN_CONTEXT_WINDOW_TOKENS.toLocaleString()}. Pick a model with a larger window.`,
+    );
   }
 
   if (message) {
@@ -223,8 +247,11 @@ async function startClaimedRun(
     store,
     threadId,
     model: useModel,
+    endpoint,
+    flags: prepared.flags,
     envelopes,
     report: prepared.report,
+    modelSettings,
   });
   if (preRunSnapshot) prepared = await prepareRun(prepareInput);
 
@@ -290,6 +317,8 @@ async function startClaimedRun(
     estimatedPromptTokens: prepared.report.occupiedTokens,
     contextReport: prepared.report,
     contextBudget: prepared.report.budget,
+    flags: prepared.flags,
+    modelSettings,
     ...(thread.workspaceRoot ? { workspaceRoot: thread.workspaceRoot } : {}),
     putBlob: (text) => store.putBlob(threadId, text),
     // Every model call's exact input/output, for the eval viewer. Off: AGENT_RECORD_MODEL_CALLS=0.
@@ -312,7 +341,7 @@ async function startClaimedRun(
       ? {
           subagents: createSubagentRunner({
             runManager,
-            host: createSubagentHost({ store, endpoint }),
+            host: createSubagentHost({ store, endpoint, modelSettings }),
           }),
         }
       : {}),
@@ -354,6 +383,24 @@ async function startClaimedRun(
           error instanceof Error ? error.message : error,
         );
       }
+      // The run's findings outlive it: later runs of the thread see them in
+      // their prompt prefix (a rewind that cuts this run drops them).
+      const record = taskRecordFromRun(runId, result.task);
+      if (record) {
+        try {
+          await store.appendTaskRecord(threadId, record);
+        } catch (error) {
+          console.error('appendTaskRecord failed:', error instanceof Error ? error.message : error);
+        }
+      }
+      // Restarts the idle timer; the review runs once the thread goes quiet.
+      scheduleLearningReview({
+        threadId,
+        model: useModel,
+        endpoint,
+        enabled: prepared.flags.learningLoop,
+        modelSettings,
+      });
       // A cancelled run leaves compaction to the next run's pre-run pass, so
       // nothing it writes can race that run's rewind.
       if (outcome === 'cancelled' || !result.contextReport) return;
@@ -362,7 +409,10 @@ async function startClaimedRun(
         threadId,
         runId,
         model: useModel,
+        endpoint,
+        flags: prepared.flags,
         report: result.contextReport,
+        modelSettings,
       });
     },
   });
@@ -376,7 +426,7 @@ async function startClaimedRun(
   if (preRunSnapshot) emitCompacted(store, runId, threadId, preRunSnapshot);
 
   if (isFirstUserTurn && message) {
-    titleNewThread(store, threadId, message.content || 'Image chat', useModel, endpoint);
+    titleNewThread(store, threadId, message.content || 'Image chat', useModel, endpoint, modelSettings);
   }
 
   return { ok: true, runId };

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
-import { DEFAULT_MEMORY_CAPS, revertedOpId } from '@agent/agent-models';
-import { getMemoryStore } from '../platform/instances';
+import { DEFAULT_MEMORY_CAPS, isWorkspaceKind, revertedOpId } from '@agent/agent-models';
+import { getMemoryStore, getThreadStore } from '../platform/instances';
 import { asyncRoute } from '../platform/http-errors';
 
 const router = Router();
@@ -49,6 +49,34 @@ router.post('/memory/revert', asyncRoute(async (req: Request, res: Response) => 
   try {
     const op = await getMemoryStore().revert(opId);
     return res.json({ op });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return res.status(400).json({ error: msg });
+  }
+}));
+
+/** Suggestions waiting for the user (learning loop, staged foreground writes). */
+router.get('/memory/pending', asyncRoute(async (_req: Request, res: Response) => {
+  return res.json({ ops: await getMemoryStore().listPending() });
+}));
+
+/** Approve or reject one pending suggestion. Notes go to the folder of the thread that proposed them. */
+router.post('/memory/pending/:opId', asyncRoute(async (req: Request, res: Response) => {
+  const decision = req.body?.decision;
+  if (decision !== 'approve' && decision !== 'reject') {
+    return res.status(400).json({ error: 'decision must be approve or reject' });
+  }
+  const memory = getMemoryStore();
+  const op = (await memory.listPending()).find((item) => item.id === req.params.opId);
+  if (!op) return res.status(404).json({ error: 'Pending suggestion not found' });
+  const thread = (await getThreadStore()).getThread(op.source.threadId);
+  const workspaceRoot =
+    op.target === 'notes' && thread && isWorkspaceKind(thread.kind)
+      ? thread.workspaceRoot
+      : undefined;
+  try {
+    const resolved = await memory.resolveStaged(op.id, decision, workspaceRoot);
+    return res.json({ op: resolved });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return res.status(400).json({ error: msg });

@@ -113,6 +113,14 @@ export class RunBudget {
     return null;
   }
 
+  /** Spend and cap while spend is past the wrap-up mark (not consumed: the harness card reads it every call). */
+  nearLimit(): { spent: number; limit: number } | undefined {
+    const limit = this.limits.maxPromptTokens;
+    if (limit === undefined) return undefined;
+    const spent = this.spent();
+    return spent >= limit * BUDGET_WARN_RATIO ? { spent, limit } : undefined;
+  }
+
   /** Spend and cap, the first time spend crosses the wrap-up mark; afterwards undefined. */
   takeWarning(): { spent: number; limit: number } | undefined {
     const limit = this.limits.maxPromptTokens;

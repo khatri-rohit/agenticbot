@@ -9,7 +9,11 @@ import {
   type OllamaEndpoint,
   type ThinkingValue,
 } from '@agent/agent-models';
-import { getOllamaModelConfig, resolveReasoningEffort } from '@agent/agent-core';
+import {
+  getOllamaModelConfig,
+  getServedContextLength,
+  resolveReasoningEffort,
+} from '@agent/agent-core';
 
 /** Per-model call knobs: thinking effort from /api/show, endpoint, temperature. */
 export async function resolveCallOptions(
@@ -43,9 +47,12 @@ export async function resolveCallOptions(
 }
 
 /**
- * Context budget for a model under a window mode: 200k by default (or the
- * model's size when smaller), the model's full size in `model` mode, 200k
- * when /api/show fails.
+ * Context budget for a model under a window mode: 260k by default (or the
+ * model's size when smaller), the model's full size in `model` mode, 260k
+ * when /api/show fails. On the local daemon the window is also capped by the
+ * context the model is loaded with (/api/ps): chat goes through /v1, which
+ * cannot request a size, so a longer prompt would be cut from the front.
+ * A model that is not loaded yet reports nothing; the next run sees it.
  */
 export async function resolveContextBudget(
   model: string,
@@ -59,7 +66,13 @@ export async function resolveContextBudget(
   } catch {
     // Keep the fallback window when /api/show is unavailable.
   }
-  const window = resolveContextWindow({ ...(mode ? { mode } : {}), modelMax });
+  const servedMax =
+    endpoint === 'local' ? await getServedContextLength(model, endpoint) : null;
+  const window = resolveContextWindow({
+    ...(mode ? { mode } : {}),
+    modelMax,
+    servedMax,
+  });
   return { budget: contextBudgetForWindow(window.windowTokens), source: window.source, modelMax };
 }
 

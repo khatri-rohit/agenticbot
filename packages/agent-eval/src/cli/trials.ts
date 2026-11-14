@@ -6,7 +6,7 @@ import { capacityRates } from '../metrics/thread-metrics.js';
 import { readUsage } from '../read/usage.js';
 import { runSuite, type SuiteRun } from '../runner/runner.js';
 import { seedEvalHome } from '../runner/seed.js';
-import { loadTasks, type TaskSuite } from '../runner/task.js';
+import { loadTasks, TASK_SUITES, type TaskSuite } from '../runner/task.js';
 import { agentHome, evalHome, flag, intFlag, type Args } from './args.js';
 
 export const SEED_HELP = `seed [--home <personal home>] [--eval-home <dir>]
@@ -27,8 +27,8 @@ export async function seedCommand(args: Args): Promise<number> {
 export function suiteFlag(args: Args): TaskSuite | undefined {
   const suite = flag(args, 'suite');
   if (suite === undefined) return undefined;
-  if (suite !== 'regression' && suite !== 'capability') throw new Error('--suite must be regression or capability');
-  return suite;
+  if (!TASK_SUITES.includes(suite as TaskSuite)) throw new Error(`--suite must be one of ${TASK_SUITES.join(', ')}`);
+  return suite as TaskSuite;
 }
 
 /** Load the selected tasks, print the cost estimate, run the suite. */

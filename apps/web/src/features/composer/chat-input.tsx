@@ -67,7 +67,11 @@ import {
   loadComposerDraft,
   saveComposerDraft,
 } from '@/features/composer/composer-draft';
-import { PostureToggle } from '@/features/composer/posture-toggle';
+import {
+  POSTURE_LABEL,
+  PostureToggle,
+  nextPosture,
+} from '@/features/composer/posture-toggle';
 import { VoiceButton } from '@/features/composer/voice-button';
 import { Button } from '@/components/ui/button';
 import {
@@ -111,10 +115,7 @@ import {
   skillQueryAtCaret,
   skillTokensInText,
 } from '@/features/composer/skill-slash-picker';
-import {
-  fetchSkillCatalogs,
-  type SkillCatalogItem,
-} from '@/api/skills-client';
+import { fetchSkillCatalogs, type SkillCatalogItem } from '@/api/skills-client';
 
 function composerPlaceholder(opts: {
   voiceActive: boolean;
@@ -215,7 +216,8 @@ export function ChatInput({
   const [localModels, setLocalModels] = useState<OllamaModel[]>([]);
   const [localModelsLoading, setLocalModelsLoading] = useState(false);
   const [localModelsError, setLocalModelsError] = useState<string | null>(null);
-  const [cloudModels, setCloudModels] = useState<OllamaModel[]>(CLOUD_OLLAMA_MODELS);
+  const [cloudModels, setCloudModels] =
+    useState<OllamaModel[]>(CLOUD_OLLAMA_MODELS);
 
   // Discover cloud models from Ollama Cloud on mount; fall back to the
   // static catalog on error so cloud chat still works with known models.
@@ -231,7 +233,10 @@ export function ChatInput({
       })
       .catch((err) => {
         // Keep the static catalog — cloud chat still works with known models.
-        console.warn('[chat-input] live cloud models fetch failed, using catalog fallback', err);
+        console.warn(
+          '[chat-input] live cloud models fetch failed, using catalog fallback',
+          err,
+        );
       });
     return () => {
       cancelled = true;
@@ -769,7 +774,8 @@ export function ChatInput({
     if (
       options.thinking !== undefined &&
       (allowed.some((v) => Object.is(v, options.thinking)) ||
-        (modelConfig.system1Auto === true && options.thinking === SYSTEM1_AUTO_THINKING))
+        (modelConfig.system1Auto === true &&
+          options.thinking === SYSTEM1_AUTO_THINKING))
     ) {
       return;
     }
@@ -801,7 +807,7 @@ export function ChatInput({
         const current = composerOptionsRef.current.posture ?? 'agent';
         onComposerOptionsChangeRef.current({
           ...composerOptionsRef.current,
-          posture: current === 'agent' ? 'ask' : 'agent',
+          posture: nextPosture(current),
         });
       } else if (e.key === '.') {
         if (!thinkingSupportedRef.current) return;
@@ -956,47 +962,50 @@ export function ChatInput({
         open={modelPickerOpen}
         onOpenChange={setModelPickerOpen}
       />
-      {modelConfig?.thinking.supported ? (
-        <ThinkingPicker
-          thinking={modelConfig.thinking}
-          value={composerOptions.thinking}
-          onChange={(thinking) =>
-            onComposerOptionsChange({ ...composerOptions, thinking })
-          }
+      {/* Run settings read as one group, quieter than mode/model. */}
+      <span className="ml-0.5 flex items-center gap-0.5 border-l border-border pl-1.5">
+        {modelConfig?.thinking.supported ? (
+          <ThinkingPicker
+            thinking={modelConfig.thinking}
+            value={composerOptions.thinking}
+            onChange={(thinking) =>
+              onComposerOptionsChange({ ...composerOptions, thinking })
+            }
+            disabled={isRunning}
+            autoAvailable={modelConfig.system1Auto === true}
+            open={thinkingPickerOpen}
+            onOpenChange={setThinkingPickerOpen}
+          />
+        ) : null}
+        <ContextWindowPicker
+          modelMax={modelConfig?.contextLength}
+          value={composerOptions.contextWindowMode}
+          onChange={(contextWindowMode) => {
+            writeStoredContextWindowMode(contextWindowMode);
+            onComposerOptionsChange({ ...composerOptions, contextWindowMode });
+          }}
           disabled={isRunning}
-          autoAvailable={modelConfig.system1Auto === true}
-          open={thinkingPickerOpen}
-          onOpenChange={setThinkingPickerOpen}
         />
-      ) : null}
-      <ContextWindowPicker
-        modelMax={modelConfig?.contextLength}
-        value={composerOptions.contextWindowMode}
-        onChange={(contextWindowMode) => {
-          writeStoredContextWindowMode(contextWindowMode);
-          onComposerOptionsChange({ ...composerOptions, contextWindowMode });
-        }}
-        disabled={isRunning}
-      />
-      <ContextUsage
-        used={contextMeter.used}
-        limit={contextMeter.limit}
-        source={contextMeter.source}
-        approximate={contextMeter.approximate}
-        layers={contextMeter.layers}
-        reserve={contextMeter.reserve}
-        windowSource={contextMeter.windowSource}
-        {...(activeRun?.runPromptTokens !== undefined
-          ? { runPromptTokens: activeRun.runPromptTokens }
-          : {})}
-        {...(activeRun?.runPromptCap !== undefined
-          ? { runPromptCap: activeRun.runPromptCap }
-          : {})}
-        {...(activeRun?.runUsageEstimated ? { runUsageEstimated: true } : {})}
-        {...(activeRun?.contextReport?.trimmedSkills?.length
-          ? { trimmedSkills: activeRun.contextReport.trimmedSkills }
-          : {})}
-      />
+        <ContextUsage
+          used={contextMeter.used}
+          limit={contextMeter.limit}
+          source={contextMeter.source}
+          approximate={contextMeter.approximate}
+          layers={contextMeter.layers}
+          reserve={contextMeter.reserve}
+          windowSource={contextMeter.windowSource}
+          {...(activeRun?.runPromptTokens !== undefined
+            ? { runPromptTokens: activeRun.runPromptTokens }
+            : {})}
+          {...(activeRun?.runPromptCap !== undefined
+            ? { runPromptCap: activeRun.runPromptCap }
+            : {})}
+          {...(activeRun?.runUsageEstimated ? { runUsageEstimated: true } : {})}
+          {...(activeRun?.contextReport?.trimmedSkills?.length
+            ? { trimmedSkills: activeRun.contextReport.trimmedSkills }
+            : {})}
+        />
+      </span>
     </>
   );
 
@@ -1091,7 +1100,10 @@ export function ChatInput({
         })}
         rows={1}
         className={cn(
-          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0',
+          // Gutter must match SkillHighlightMirror: once text overflows,
+          // a scrollbar would narrow only the textarea, rewrap its lines and
+          // put the caret away from the visible (mirror) text.
+          'type-composer max-h-40 min-h-9 w-full min-w-0 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1 py-2 text-transparent caret-foreground shadow-none [scrollbar-gutter:stable] placeholder:text-subtle-foreground focus-visible:ring-0',
           isHero && 'min-h-10',
           voiceLocked && 'caret-transparent',
         )}
@@ -1103,9 +1115,7 @@ export function ChatInput({
     <div
       className={cn(
         'min-w-0 shrink-0',
-        isHero
-          ? 'w-full px-0 py-0'
-          : 'bg-background px-4 pb-4 pt-2 sm:px-6',
+        isHero ? 'w-full px-0 py-0' : 'bg-background px-4 pb-4 pt-2 sm:px-6',
       )}
     >
       <div
@@ -1123,7 +1133,7 @@ export function ChatInput({
           >
             <CardHeader className="border-b border-border/40 pb-2">
               <Badge variant="secondary" className="font-normal">
-                1 queued as {posture === 'ask' ? 'Ask' : 'Agent'}
+                1 queued as {POSTURE_LABEL[posture ?? 'agent']}
               </Badge>
               <CardAction className="flex gap-1">
                 <Button
@@ -1208,100 +1218,102 @@ export function ChatInput({
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
-          <CardContent className="relative min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
-            {pendingAttachments.length > 0 ? (
-              <div className="mb-1.5 flex flex-wrap items-center gap-2 px-1 pt-0.5">
-                {threadMentions(pendingAttachments).map((mention) => (
-                  <ThreadMentionChip
-                    key={mention.id}
-                    mention={mention}
-                    selected={selectedMentionId === mention.id}
-                    onSelect={() =>
-                      setSelectedMentionId((current) =>
-                        current === mention.id ? null : mention.id,
-                      )
-                    }
-                    onRemove={
-                      voiceLocked
-                        ? undefined
-                        : () => removeAttachment(mention.id)
-                    }
-                  />
-                ))}
-                {imageAttachments(pendingAttachments).map((attachment) => (
-                  <div
-                    key={attachment.id}
-                    className="group relative size-16 overflow-hidden rounded-md ring-1 ring-border/50"
-                  >
-                    <img
-                      src={attachment.dataUrl}
-                      alt={attachment.name ?? 'Attachment'}
-                      className="size-full object-cover"
+            <CardContent className="relative min-w-0 px-2 py-1.5 sm:px-2.5 sm:py-2">
+              {pendingAttachments.length > 0 ? (
+                <div className="mb-1.5 flex flex-wrap items-center gap-2 px-1 pt-0.5">
+                  {threadMentions(pendingAttachments).map((mention) => (
+                    <ThreadMentionChip
+                      key={mention.id}
+                      mention={mention}
+                      selected={selectedMentionId === mention.id}
+                      onSelect={() =>
+                        setSelectedMentionId((current) =>
+                          current === mention.id ? null : mention.id,
+                        )
+                      }
+                      onRemove={
+                        voiceLocked
+                          ? undefined
+                          : () => removeAttachment(mention.id)
+                      }
                     />
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="secondary"
-                      disabled={voiceLocked}
-                      className="absolute top-0.5 right-0.5 size-5 rounded-full opacity-90 shadow-sm"
-                      aria-label="Remove image"
-                      onClick={() => removeAttachment(attachment.id)}
+                  ))}
+                  {imageAttachments(pendingAttachments).map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="group relative size-16 overflow-hidden rounded-md ring-1 ring-border/50"
                     >
-                      <X className="size-3" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
+                      <img
+                        src={attachment.dataUrl}
+                        alt={attachment.name ?? 'Attachment'}
+                        className="size-full object-cover"
+                      />
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="secondary"
+                        disabled={voiceLocked}
+                        className="absolute top-0.5 right-0.5 size-5 rounded-full opacity-90 shadow-sm"
+                        aria-label="Remove image"
+                        onClick={() => removeAttachment(attachment.id)}
+                      >
+                        <X className="size-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
 
-            {mentionOpen ? (
-              <ThreadMentionPicker
-                threads={mentionCandidates}
-                query={mentionQuery}
-                activeIndex={mentionActive}
-                onActiveIndexChange={setMentionActive}
-                selectedIds={
-                  new Set(
-                    threadMentions(pendingAttachments).map(
-                      (mention) => mention.threadId,
-                    ),
-                  )
-                }
-                onPick={(thread) => pickMention(thread.id)}
-              />
-            ) : null}
+              {mentionOpen ? (
+                <ThreadMentionPicker
+                  threads={mentionCandidates}
+                  query={mentionQuery}
+                  activeIndex={mentionActive}
+                  onActiveIndexChange={setMentionActive}
+                  selectedIds={
+                    new Set(
+                      threadMentions(pendingAttachments).map(
+                        (mention) => mention.threadId,
+                      ),
+                    )
+                  }
+                  onPick={(thread) => pickMention(thread.id)}
+                />
+              ) : null}
 
-            <div className="grid min-w-0 gap-1 [grid-template-areas:'text_text'_'left_right'] grid-cols-[minmax(0,1fr)_auto]">
-              <div className="flex min-w-0 flex-wrap items-center gap-1 [grid-area:left]">
-                {attachMenu}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-                      aria-label="Skills"
-                      aria-haspopup="dialog"
-                      aria-expanded={skillsOpen}
-                      onClick={() => setSkillsOpen(true)}
-                    >
-                      <BookMarked className="size-4" strokeWidth={2.25} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Skills</TooltipContent>
-                </Tooltip>
-                {showWorkspacePicker ? (
-                  <WorkspacePicker disabled={isRunning} />
-                ) : null}
-                {modelControls}
+              <div className="grid min-w-0 gap-1 [grid-template-areas:'text_text'_'left_right'] grid-cols-[minmax(0,1fr)_auto]">
+                <div className="flex min-w-0 flex-wrap items-center gap-1 [grid-area:left]">
+                  {attachMenu}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                        aria-label="Skills"
+                        aria-haspopup="dialog"
+                        aria-expanded={skillsOpen}
+                        onClick={() => setSkillsOpen(true)}
+                      >
+                        <BookMarked className="size-4" strokeWidth={2.25} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Skills</TooltipContent>
+                  </Tooltip>
+                  {showWorkspacePicker ? (
+                    <WorkspacePicker disabled={isRunning} />
+                  ) : null}
+                  {modelControls}
+                </div>
+                <div className="min-w-0 [grid-area:text]">
+                  {composerTextarea}
+                </div>
+                <div className="flex shrink-0 items-center gap-0.5 self-end [grid-area:right]">
+                  {actionControls}
+                </div>
               </div>
-              <div className="min-w-0 [grid-area:text]">{composerTextarea}</div>
-              <div className="flex shrink-0 items-center gap-0.5 self-end [grid-area:right]">
-                {actionControls}
-              </div>
-            </div>
-          </CardContent>
+            </CardContent>
           </Card>
         </div>
 
@@ -1312,7 +1324,7 @@ export function ChatInput({
         ) : null}
 
         {isHero && (
-          <p className="type-caption text-center text-muted-foreground/75">
+          <p className="type-caption text-center text-subtle-foreground">
             Threads are saved locally when you send your first message.
             {voice.enabled ? ' Voice: Alt+A.' : null}
           </p>

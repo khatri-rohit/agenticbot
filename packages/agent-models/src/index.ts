@@ -31,6 +31,19 @@ export type {
   System1Report,
 } from './lib/event.js';
 
+export { parseRunTaskRecords, TASK_STATE_COMMANDS_MAX } from './lib/task-state.js';
+export type {
+  RunTaskRecord,
+  TaskClass,
+  TaskCommand,
+  TaskFinding,
+  TaskShape,
+  TaskEvidence,
+  TaskPhase,
+  TaskStateSnapshot,
+  WorkingSetEntry,
+} from './lib/task-state.js';
+
 export { SYSTEM1_AUTO_THINKING } from './lib/system1.js';
 export type {
   System1EffortTrace,
@@ -99,6 +112,7 @@ export {
   parseStartRunRequest,
   applyPostureToTools,
   isAskStrippedTool,
+  isReadOnlyPosture,
 } from './lib/run.js';
 
 export {
@@ -159,6 +173,7 @@ export type {
   SubagentReport,
   SubagentResult,
   SubagentSpec,
+  SubagentReportStatus,
   SubagentStatus,
   SubagentThoroughness,
 } from './lib/subagent.js';
@@ -181,6 +196,26 @@ export {
 
 export type { TraceCallInput, TraceEvent, TraceMessageRef } from './lib/trace.js';
 export { TRACE_SCHEMA_VERSION } from './lib/trace.js';
+
+export type { HarnessFlags } from './lib/flags.js';
+export { DEFAULT_HARNESS_FLAGS, parseHarnessFlags } from './lib/flags.js';
+
+export type {
+  ModelSettingRole,
+  SideCallThinking,
+  ModelRoleSetting,
+  ModelSettings,
+  ModelSettingSource,
+  ResolvedModelSetting,
+  ResolvedModelSettings,
+} from './lib/model-settings.js';
+export {
+  MODEL_SETTING_ROLES,
+  SIDE_CALL_THINKING_LEVELS,
+  emptyModelSettings,
+  isModelSettingRole,
+  isSideCallThinking,
+} from './lib/model-settings.js';
 
 export type {
   MemoryTarget,
@@ -256,11 +291,41 @@ export type { ContextWindowMode } from './lib/context.js';
 export {
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  MIN_CONTEXT_WINDOW_TOKENS,
+  compactionMarks,
   contextBudgetForWindow,
   parseContextWindowMode,
   parseSnapshot,
   resolveContextWindow,
 } from './lib/context.js';
+
+export {
+  BRIEF_USER_REQUEST_MAX_CHARS,
+  CARD_MARKS,
+  CLASS_PACE_TOKENS,
+  CHILD_BUDGET_SHARE,
+  CHILD_RUN,
+  CHILD_TOKENS_PER_TOOL_CALL,
+  DIFF_MAX_CHARS,
+  EFFORT_IDLE_FLOOR_STEPS,
+  FINDING_CLAIM_MAX_CHARS,
+  FINDING_EVIDENCE_MAX_CHARS,
+  FINDINGS_MAX,
+  GLOB_MAX_RESULTS,
+  GREP_WINDOW,
+  GUARD_LIMITS,
+  MAX_CONCURRENT_SUBAGENTS,
+  PROGRESS_MARKS,
+  READ_WINDOW,
+  REPORT_MAX_CHARS,
+  TASK_CLASS_MARKS,
+  TERMINAL_WINDOW,
+  THOROUGHNESS_TOOL_CALLS,
+  WALK_MAX_FILES,
+  childAllocation,
+  liveResultCapChars,
+} from './lib/harness-limits.js';
+export type { ChildLimits } from './lib/harness-limits.js';
 
 export { REVIEW_FINDING_KINDS } from './lib/review.js';
 export type {
@@ -273,6 +338,7 @@ export type {
   ReviewNarrative,
   ReviewNumbers,
   ReviewRunGlance,
+  ReviewRunHealth,
   ThreadReview,
 } from './lib/review.js';
 export {

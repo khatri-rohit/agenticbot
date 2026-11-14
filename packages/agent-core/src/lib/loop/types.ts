@@ -6,12 +6,15 @@ import type {
   ChoiceResult,
   ContextBudget,
   ContextReport,
+  HarnessFlags,
   LedgerAppendMeta,
   LedgerRecord,
+  ResolvedModelSettings,
   RunPosture,
   RunUsage,
   SubagentSpec,
   SubagentResult,
+  TaskStateSnapshot,
   ToolOrigin,
   TraceEvent,
   WebTrust,
@@ -109,6 +112,13 @@ export type RunLoopConfig = {
   hasOpenPlanWork?: () => boolean | Promise<boolean>;
   /** Budget for mid-turn tool-result stubbing. Defaults to DEFAULT_CONTEXT_BUDGET. */
   contextBudget?: ContextBudget;
+  /** Harness switches resolved by the host at run start. Defaults to DEFAULT_HARNESS_FLAGS. */
+  flags?: HarnessFlags;
+  /**
+   * Model-role picks resolved by the host at run start (file > env > run's
+   * model), recorded on run.started / run_start for eval attribution.
+   */
+  modelSettings?: ResolvedModelSettings;
   /**
    * Sub-agent runner. The loop binds it to this run (signal, budget,
    * capabilities) when the registry has `delegate`.
@@ -152,10 +162,14 @@ export type SubagentParent = {
   /** Parent registry names; a child's tools are a subset. */
   toolNames: string[];
   contextBudget: ContextBudget;
+  /** Children run with the parent's switches. */
+  flags: HarnessFlags;
   /** Parent's unspent prompt-token budget, when capped. */
   remainingPromptTokens?: number;
   /** Parent conversation for an advisor fork. */
   forkMessages: () => ChatCompletionMessageParam[];
+  /** What the user asked the parent in this turn, in their own words (a review brief quotes it). */
+  userRequest?: string;
   /** What the parent may fetch; an advisor reading its conversation inherits it. */
   webTrust: () => WebTrust;
   /** Parent stream, for subrun.* markers. */
@@ -168,6 +182,10 @@ export type SubagentParent = {
   capacity?: CapacityGate;
   /** The parent records its model calls; children record theirs too. */
   recordCalls?: boolean;
+  /** The parent's trace (through its task state): child findings merge into the parent's record. */
+  trace?: (event: TraceEvent) => void;
+  /** The parent's current step, for events it traces about the child. */
+  iteration?: () => number;
 };
 
 export type SubagentSpawner = (
@@ -187,4 +205,6 @@ export type RunLoopResult = {
   usage: RunUsage;
   /** The context after the final answer, when the host passed a starting report. */
   contextReport?: ContextReport;
+  /** Task state at the end of the run (findings, evidence); a sub-agent's report is built from it. */
+  task?: TaskStateSnapshot;
 };

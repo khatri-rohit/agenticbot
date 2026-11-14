@@ -33,11 +33,7 @@ import {
 import { clampChatTitle } from '@/features/threads/thread-title';
 import { useThreads } from '../conversation/use-agent-run';
 import { pickWorkspaceFolder } from '../../api/thread-client';
-import {
-  areThreadsLoaded,
-  removeThread,
-  updateThread,
-} from './thread-cache';
+import { areThreadsLoaded, removeThread, updateThread } from './thread-cache';
 import { formatRelativeTime } from '../../lib/format-relative-time';
 import { toastError } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -352,7 +348,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                 }}
                 placeholder="Search conversations…"
                 aria-label="Search conversations"
-                className="mb-2 w-full rounded-md border border-border/45 bg-background/40 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring/60"
+                className="mb-2 w-full rounded-md border border-border/45 bg-background/40 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-subtle-foreground focus-visible:border-ring/60"
               />
             ) : null}
           </div>
@@ -361,7 +357,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
             <div className="space-y-4 pb-2">
               <section>
                 <div className="mb-1.5 flex items-center justify-between gap-1 px-2">
-                  <p className="type-ui font-medium text-muted-foreground/80">
+                  <p className="type-ui font-medium text-muted-foreground">
                     Home
                   </p>
                   <button
@@ -374,7 +370,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                   </button>
                 </div>
                 {visibleHomeThreads.length === 0 ? (
-                  <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
+                  <p className="type-ui px-2 py-3 text-center text-muted-foreground">
                     {query ? 'No matches' : 'No conversations yet'}
                   </p>
                 ) : (
@@ -391,7 +387,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
 
               <section>
                 <div className="mb-1.5 flex items-center justify-between gap-1 px-2">
-                  <p className="type-ui font-medium text-muted-foreground/80">
+                  <p className="type-ui font-medium text-muted-foreground">
                     Workspaces
                   </p>
                   <button
@@ -404,7 +400,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                   </button>
                 </div>
                 {visibleWorkspaceGroups.length === 0 ? (
-                  <p className="type-ui px-2 py-3 text-center text-muted-foreground/85">
+                  <p className="type-ui px-2 py-3 text-center text-muted-foreground">
                     {query
                       ? 'No matches'
                       : 'Open a folder to start project chats'}
@@ -471,8 +467,10 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                               const related = event.relatedTarget;
                               if (
                                 sameWorkspaceRoot(group.root, dropTargetRoot) &&
-                                !(related instanceof Node &&
-                                  event.currentTarget.contains(related))
+                                !(
+                                  related instanceof Node &&
+                                  event.currentTarget.contains(related)
+                                )
                               ) {
                                 setDropTargetRoot(null);
                               }
@@ -515,7 +513,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                             </button>
                             <button
                               type="button"
-                              className="type-ui flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md px-1 text-left text-base! font-medium"
+                              className="type-ui flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md px-1 text-left text-sm! font-medium"
                               title={group.root}
                               onClick={() => {
                                 setWorkspaceRoot(group.root);
@@ -545,7 +543,7 @@ export function Sidebar({ collapsed, onCollapse, onExpand }: SidebarProps) {
                               <DropdownMenuTrigger asChild>
                                 <button
                                   type="button"
-                                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100 data-[state=open]:opacity-100"
+                                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-subtle-foreground opacity-0 hover:bg-accent/80 hover:text-foreground group-hover/folder:opacity-100 data-[state=open]:opacity-100"
                                   aria-label={`${group.name} options`}
                                 >
                                   <MoreHorizontal className="size-3.5" />
@@ -639,7 +637,8 @@ function PagedThreadList({
       {remaining > 0 ? (
         <button
           type="button"
-          className="type-caption mt-1 flex w-full items-center justify-center rounded-md bg-muted/35 px-2 py-1.5 text-muted-foreground/85 transition-colors hover:bg-muted/55 hover:text-foreground"
+          // A quiet text action: a filled bar outweighed the rows it expands.
+          className="type-caption mt-0.5 flex w-full items-center rounded-md px-2.5 py-1 text-subtle-foreground transition-colors hover:bg-accent/45 hover:text-foreground"
           onClick={() => setPages((current) => current + 1)}
         >
           Show {Math.min(remaining, SIDEBAR_THREAD_PAGE)} more
@@ -786,16 +785,16 @@ function ThreadItem({
           'group relative flex w-full min-w-0 items-stretch rounded-md transition-colors',
           active
             ? 'bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--primary)]'
-            : 'text-muted-foreground/80 hover:bg-accent/45 hover:text-foreground',
+            : 'text-muted-foreground hover:bg-accent/45 hover:text-foreground',
         )}
       >
         <Link
           href={`/chat/${thread.id}`}
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-            dense
-              ? 'py-1 pl-2 pr-9 text-sm'
-              : 'py-1.5 pl-2.5 pr-9 text-sm',
+            // pr-12 reserves the shared timestamp/menu slot so the title
+            // never runs underneath it.
+            dense ? 'py-1 pl-2 pr-12 text-sm' : 'py-1.5 pl-2.5 pr-12 text-sm',
             active && 'font-medium text-foreground',
           )}
           title={displayTitle || undefined}
@@ -807,23 +806,24 @@ function ThreadItem({
         >
           {isPinned ? (
             <Pin
-              className="size-3 shrink-0 rotate-45 text-muted-foreground/80"
+              className="size-3 shrink-0 rotate-45 text-muted-foreground"
               aria-hidden
             />
           ) : null}
           {isPending ? (
             <span className="h-4 min-w-0 flex-1 animate-pulse rounded bg-muted" />
           ) : (
-            <span className="min-w-0 max-w-[80%] flex-1 truncate leading-snug">
+            <span className="min-w-0 flex-1 truncate leading-snug">
               {displayTitle}
             </span>
           )}
         </Link>
         <span
           className={cn(
-            'type-caption pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 tabular-nums text-muted-foreground/70 transition-opacity',
-            'group-focus-within:opacity-100',
-            active && 'opacity-100',
+            // Timestamp and menu share one slot: time at rest, menu on
+            // hover/focus/open.
+            'type-caption pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 tabular-nums text-muted-foreground transition-opacity',
+            'group-hover:opacity-0 group-focus-within:opacity-0',
             'group-has-[[data-state=open]]:opacity-0',
           )}
         >
@@ -833,7 +833,7 @@ function ThreadItem({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="absolute top-1/2 right-0.5 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/80 hover:bg-accent/90 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent/90 data-[state=open]:text-foreground"
+              className="absolute top-1/2 right-0.5 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 hover:bg-accent/90 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent/90 data-[state=open]:text-foreground"
               aria-label="Chat options"
               onClick={(e) => {
                 e.preventDefault();
@@ -848,10 +848,7 @@ function ThreadItem({
               <Pin className="size-4" />
               {isPinned ? 'Unpin' : 'Pin'}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={startRename}
-              disabled={isPending}
-            >
+            <DropdownMenuItem onSelect={startRename} disabled={isPending}>
               <Pencil className="size-4" />
               Rename
             </DropdownMenuItem>

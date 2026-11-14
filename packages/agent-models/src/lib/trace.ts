@@ -1,6 +1,9 @@
 import type { ContextReportLayer, ContextWindowSource } from './context.js';
+import type { HarnessFlags } from './flags.js';
 import type { RunUsage, TokenUsage } from './run.js';
 import type { System1EffortTrace, System1RunReport } from './system1.js';
+import type { SubagentReportStatus, SubagentStatus, SubagentThoroughness } from './subagent.js';
+import type { TaskFinding, TaskPhase, TaskShape, TaskStateSnapshot } from './task-state.js';
 import type { ToolStage } from './tool-context.js';
 
 /**
@@ -57,6 +60,25 @@ export type TraceEvent =
       /** Prompt size of the first call, split by context layer. */
       occupiedTokens?: number;
       layers?: ContextReportLayer[];
+      /** Harness switches this run used (absent on traces from before flags). */
+      flags?: HarnessFlags;
+      /** Provisional task shape from the request (see TaskShape); evidence may correct it. */
+      taskShape?: TaskShape;
+    }
+  | {
+      /** The final answer claimed success with no command after the last edit; sent back once. */
+      type: 'stop_check';
+      runId: string;
+      iteration: number;
+    }
+  | {
+      /** A tool error or steering note raised the rest of the run one reasoning rung. */
+      type: 'effort_escalated';
+      runId: string;
+      iteration: number;
+      from: string;
+      to: string;
+      reason: 'tool_error' | 'steering';
     }
   | {
       type: 'llm_request';
@@ -165,6 +187,14 @@ export type TraceEvent =
       afterTokens: number;
       /** Tool calls whose results became eviction cards in this pass. */
       toolCallIds?: string[];
+      /**
+       * Why these left the working set: `superseded` (a later read of the same
+       * lines or run of the same command), `cold` (not used for a few
+       * iterations), `cited` (a recorded finding cites the file, so the
+       * finding stands for it), `budget` (resident cap, removed down to the
+       * low mark in one pass). Absent on older traces (size-triggered eviction).
+       */
+      reason?: 'superseded' | 'cold' | 'cited' | 'budget';
     }
   | {
       /** In-run extractive compaction of older iterations of this turn. */
@@ -175,6 +205,24 @@ export type TraceEvent =
       afterTokens: number;
       /** Tool calls whose rows were folded into the recap. */
       toolCallIds?: string[];
+      /**
+       * `milestone`: folded at a verified checkpoint (a check passed after
+       * edits). `residue`: old steps whose results had all left were folded
+       * once their cards and call arguments passed the residue mark. Absent =
+       * size mark.
+       */
+      reason?: 'milestone' | 'residue';
+    }
+  | {
+      /**
+       * A read returned a range whose identical text had been removed from
+       * the prompt earlier: the model paid a step to get it back.
+       */
+      type: 'context_restored';
+      runId: string;
+      iteration: number;
+      toolCallId: string;
+      path: string;
     }
   | {
       type: 'skill_loaded';
@@ -230,7 +278,7 @@ export type TraceEvent =
       runId: string;
       iteration: number;
       toolName: string;
-      note: 'read_creep' | 'web_slices';
+      note: 'read_creep' | 'web_slices' | 'serial_reads';
       count: number;
     }
   | {
@@ -245,4 +293,103 @@ export type TraceEvent =
       type: 'system1_report';
       runId: string;
       report: System1RunReport;
+    }
+  | {
+      /** The task state moved to another phase (see TaskPhase). */
+      type: 'task_phase';
+      runId: string;
+      iteration: number;
+      from: TaskPhase;
+      to: TaskPhase;
+      /** The event that moved it, e.g. `edit_file`, `command after edit`, `limit`. */
+      cause: string;
+    }
+  | {
+      /** Task state at run end, written just before run_finish. */
+      type: 'task_state';
+      runId: string;
+      state: TaskStateSnapshot;
+    }
+  | {
+      /**
+       * What one model call is made of, measured on the messages it was sent
+       * (harness card included). Token counts are chars/4 estimates.
+       */
+      type: 'context_shape';
+      runId: string;
+      iteration: number;
+      messages: number;
+      /** Whole prompt (messages only, no tool schemas). */
+      promptTokens: number;
+      /** Tool results of this run still in full. */
+      residentToolTokens: number;
+      /**
+       * What can no longer leave the prompt: cards of removed results plus
+       * the argument text of this run's earlier tool calls.
+       */
+      residueTokens: number;
+      /** Leading messages identical to the previous call's (a cache-stable prefix). */
+      prefixStableMessages: number;
+      /** The harness card on this call (0 when none was sent). Absent in traces that predate it. */
+      cardTokens?: number;
+    }
+  | {
+      /**
+       * A harness decision with its reasons. `card`: the open items and
+       * advice the harness card showed on this call. `guard`: a guard acted
+       * instead of running a call (e.g. a repeat answered from earlier).
+       * `effort`: the effort floor changed (e.g. held at the baseline while
+       * no evidence arrives). `delegation`: a sub-agent brief was capped or
+       * refused. `finish`: a done gate sent the answer back. `boundary`:
+       * the prompt was reshaped (ids name what triggered it); between
+       * boundaries the prompt only grows (v2 phase 7).
+       */
+      type: 'policy_decision';
+      runId: string;
+      iteration: number;
+      kind: 'card' | 'guard' | 'effort' | 'delegation' | 'finish' | 'boundary';
+      ids: string[];
+      /** Why, in one line (absent in traces that predate phase 5). */
+      reason?: string;
+      /** The task-state values the decision read. */
+      inputs?: Record<string, string | number | boolean>;
+    }
+  | {
+      /**
+       * A sub-agent's findings and gaps, merged into this (parent) run's task
+       * state when the delegate call returns, so the parent's record holds
+       * them and it checks the gaps instead of re-verifying the findings.
+       */
+      type: 'child_findings';
+      runId: string;
+      iteration: number;
+      subRunId: string;
+      findings: TaskFinding[];
+      openQuestions: string[];
+    }
+  | {
+      /** A sub-agent's end, written to the child's trace: what it spent against its budget and delivered. */
+      type: 'child_finish';
+      runId: string;
+      parentRunId: string;
+      profile: string;
+      status: SubagentStatus;
+      reportStatus?: SubagentReportStatus;
+      toolCalls: number;
+      /** Own + its children, as charged to the parent. */
+      promptTokens: number;
+      findings: number;
+    }
+  | {
+      /** A sub-agent's budget, written to the child's trace before it starts. */
+      type: 'child_budget';
+      runId: string;
+      parentRunId: string;
+      profile: string;
+      thoroughness?: SubagentThoroughness;
+      maxToolCalls: number;
+      maxIterations: number;
+      maxPromptTokens: number;
+      /** Parent prompt tokens left (after other children's promises) when this one started. */
+      parentRemaining?: number;
     };

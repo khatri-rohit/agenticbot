@@ -7,12 +7,20 @@ import { Kbd } from '@/components/ui/kbd';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-const OPTIONS = [
-  { id: 'ask', label: 'Ask' },
-  { id: 'agent', label: 'Agent' },
-] as const;
+export const POSTURE_LABEL: Record<RunPosture, string> = {
+  ask: 'Ask',
+  plan: 'Plan',
+  agent: 'Agent',
+};
 
-/** Workspace Ask / Agent switch for the next send. */
+const ORDER: RunPosture[] = ['ask', 'plan', 'agent'];
+
+/** Ctrl+, cycles Ask → Plan → Agent → Ask. */
+export function nextPosture(current: RunPosture): RunPosture {
+  return ORDER[(ORDER.indexOf(current) + 1) % ORDER.length] ?? 'agent';
+}
+
+/** Workspace Ask / Plan / Agent switch for the next send. Ask and Plan are read-only. */
 export function PostureToggle({
   posture,
   onChange,
@@ -28,11 +36,11 @@ export function PostureToggle({
           role="group"
           aria-label="Workspace posture"
         >
-          {OPTIONS.map((option) => {
-            const selected = posture === option.id;
+          {ORDER.map((id) => {
+            const selected = posture === id;
             return (
               <Button
-                key={option.id}
+                key={id}
                 type="button"
                 variant="ghost"
                 size="sm"
@@ -43,9 +51,9 @@ export function PostureToggle({
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
-                onClick={() => onChange(option.id)}
+                onClick={() => onChange(id)}
               >
-                {option.label}
+                {POSTURE_LABEL[id]}
               </Button>
             );
           })}
@@ -53,7 +61,7 @@ export function PostureToggle({
       </TooltipTrigger>
       <TooltipContent>
         <span className="flex items-center gap-1.5">
-          Posture — Ask / Agent
+          Ask and Plan are read-only; Plan ends with a plan to approve
           <Kbd>Ctrl</Kbd>
           <Kbd>,</Kbd>
         </span>

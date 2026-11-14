@@ -5,6 +5,29 @@
     "iterations": 1,
     "toolCalls": 2,
     "status": "completed",
+    "task": {
+      "phase": "report",
+      "iteration": 1,
+      "taskClass": "small",
+      "shape": "unknown",
+      "workingSet": [],
+      "evidence": {
+        "edits": 0,
+        "failedEdits": 0,
+        "commands": [],
+        "toolErrors": 0,
+        "unverifiedSince": null,
+        "uncheckedFiles": [],
+        "lastCheck": null,
+        "reviewed": false,
+        "findings": [],
+        "lastEvidenceIteration": 0
+      },
+      "phaseIterations": {
+        "orient": 1
+      },
+      "childGaps": []
+    },
     "usage": {
       "own": {
         "promptTokens": 2000,
@@ -29,7 +52,31 @@
       "depth": 0,
       "mode": "workspace",
       "posture": "agent",
-      "windowTokens": 200000
+      "windowTokens": 260000,
+      "flags": {
+        "outcomeCards": true,
+        "promptTiers": true,
+        "harnessNotes": true,
+        "compactHomePrompt": false,
+        "situationCard": true,
+        "effortEscalation": true,
+        "stopCheck": true,
+        "sectionedSummary": true,
+        "learningLoop": true,
+        "stateCard": true
+      },
+      "taskShape": "unknown"
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 1,
+      "promptTokens": 3,
+      "residentToolTokens": 0,
+      "residueTokens": 0,
+      "prefixStableMessages": 0,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -71,10 +118,21 @@
       }
     },
     {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 5,
+      "promptTokens": 203,
+      "residentToolTokens": 34,
+      "residueTokens": 32,
+      "prefixStableMessages": 1,
+      "cardTokens": 0
+    },
+    {
       "type": "llm_request",
       "runId": "replay-run",
       "iteration": 1,
-      "estimatedPromptTokens": 257,
+      "estimatedPromptTokens": 265,
       "final": true
     },
     {
@@ -90,6 +148,41 @@
       },
       "durationMs": 0,
       "final": true
+    },
+    {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 1,
+      "from": "orient",
+      "to": "report",
+      "cause": "answer"
+    },
+    {
+      "type": "task_state",
+      "runId": "replay-run",
+      "state": {
+        "phase": "report",
+        "iteration": 1,
+        "taskClass": "small",
+        "shape": "unknown",
+        "workingSet": [],
+        "evidence": {
+          "edits": 0,
+          "failedEdits": 0,
+          "commands": [],
+          "toolErrors": 0,
+          "unverifiedSince": null,
+          "uncheckedFiles": [],
+          "lastCheck": null,
+          "reviewed": false,
+          "findings": [],
+          "lastEvidenceIteration": 0
+        },
+        "phaseIterations": {
+          "orient": 1
+        },
+        "childGaps": []
+      }
     },
     {
       "type": "run_finish",
@@ -265,5 +358,55 @@
       "role": "assistant",
       "content": "Open question: A or B. I recommend A."
     }
+  ],
+  "prompts": [
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {
+              "name": "offer_choice",
+              "arguments": "{\"question\":\"Which approach?\",\"options\":[{\"id\":\"a\",\"label\":\"Approach A\"},{\"id\":\"b\",\"label\":\"Approach B\"}]}"
+            }
+          },
+          {
+            "id": "s1",
+            "type": "function",
+            "function": {
+              "name": "later",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "User skipped this choice to decide later. Do not pick an option or continue work that depends on it."
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "s1",
+        "content": "Skipped: user deferred this choice."
+      },
+      {
+        "role": "user",
+        "content": "[Harness note, not from the user] The user skipped your question to decide later; tools are off. Do not pick an option or continue the work. Write the reply they will decide from: 1) one or two lines on what was done so far and where it stopped; 2) the open question; 3) each option by its label: what it would do, its trade-offs (effort, risk, what it changes) and when it is the right pick; 4) your recommendation and why; 5) how to answer next time (for example \"Go with <label>\", several options, or other direction). Keep it scannable."
+      }
+    ]
   ]
 }

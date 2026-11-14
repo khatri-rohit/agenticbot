@@ -8,6 +8,7 @@ import {
 } from '@agent/agent-models';
 
 import { resolveReasoningEffort } from '../model/ollama-model-config';
+import { effortFloor, isSteadyFloor, type EffortSignals } from '../policy';
 import type { System1Port } from './port';
 
 /** One thinking choice the model itself offers, lowest first. */
@@ -100,12 +101,14 @@ export function baselineWire(policy: EffortPolicy | undefined): string | undefin
   return policy.kind === 'auto' ? policy.ladder[policy.baselineIndex]!.wire : policy.wire;
 }
 
-export type ProfileThinking = 'off' | 'default' | 'max';
+export type ProfileThinking = 'off' | 'default' | 'high' | 'max';
 
 /**
  * Sub-agent thinking resolved against the child model's own values:
- * `off` only if that model offers off, `max` = its highest rung, otherwise
- * the model's default (undefined).
+ * `off` only if that model offers off, `max` = its highest rung, `high` =
+ * its highest rung at or below `high` (so never `xhigh` or `max`; a model
+ * that only thinks on/off gets on, and a model whose levels all sit above
+ * `high` gets its lowest), otherwise the model's default (undefined).
  */
 export function resolveProfileThinking(
   config: OllamaModelConfig | null,
@@ -114,18 +117,13 @@ export function resolveProfileThinking(
   if (!config?.thinking.supported || preference === 'default') return undefined;
   if (preference === 'off') return config.thinking.values.includes(false) ? false : undefined;
   const ladder = buildEffortLadder(config);
-  return ladder ? ladder[ladder.length - 1]!.value : undefined;
+  if (!ladder) return undefined;
+  if (preference === 'max') return ladder[ladder.length - 1]!.value;
+  const thinking = ladder.filter((rung) => rung.key !== 'off');
+  const cap = LEVEL_RANK.indexOf('high');
+  const atMostHigh = thinking.filter((rung) => rung.key === 'on' || LEVEL_RANK.indexOf(rung.key) <= cap);
+  return (atMostHigh[atMostHigh.length - 1] ?? thinking[0])?.value;
 }
-
-/** Loop facts the rules read; reset after every decision. */
-export type EffortSignals = {
-  iteration: number;
-  /** Newest message is role user: the user's prompt or a loop nudge. */
-  steering: boolean;
-  toolError: boolean;
-  /** edit_file, run_terminal or delegate ran since the last call. */
-  wrote: boolean;
-};
 
 export type EffortThresholds = {
   /** Raise to a rung when P(needs ≥ rung) is at least this. */
@@ -144,18 +142,6 @@ export const DEFAULT_EFFORT_THRESHOLDS: EffortThresholds = {
   keep: 0.5,
   monotoneTolerance: 0.1,
 };
-
-/** Lowest rung the rules allow this iteration, and why. */
-export function ruleFloor(
-  signals: EffortSignals,
-  baselineIndex: number,
-): { index: number; reason: string } {
-  if (signals.iteration <= 1) return { index: baselineIndex, reason: 'first_turn' };
-  if (signals.toolError) return { index: baselineIndex, reason: 'tool_error' };
-  if (signals.wrote) return { index: baselineIndex, reason: 'write_or_exec' };
-  if (signals.steering) return { index: baselineIndex, reason: 'steering' };
-  return { index: 0, reason: 'none' };
-}
 
 function questionKey(rung: EffortRung): string {
   return `needs_at_least_${rung.key}`;
@@ -230,6 +216,9 @@ export function chooseRung(
   return { index: baselineIndex, reason: 'keep', lowerEligible: false };
 }
 
+/** Quiet iterations between System 1 asks while nothing changes (enforce). */
+export const EFFORT_ASK_EVERY = 3;
+
 export type EffortDecision = {
   /** reasoning_effort to send; undefined = send none (today's behaviour for that model). */
   wire?: string;
@@ -238,6 +227,8 @@ export type EffortDecision = {
   /** Present for decisions made inline (enforce, fixed, fallback). */
   trace?: System1EffortTrace;
 };
+
+export type { EffortSignals };
 
 export type EffortRouterInput = {
   policy: EffortPolicy | undefined;
@@ -251,12 +242,18 @@ export type EffortRouterInput = {
 };
 
 /**
- * Per-run effort router. `decide` never throws; any failure returns the
- * baseline, which is exactly what the run sends without System 1.
+ * Per-run effort router. `decide` never throws. In enforce, a call with no
+ * answer (budget spent, breaker, timeout) holds System 1's last answer, floored
+ * by this iteration's rules; before any answer, or on an internal error, it
+ * returns the baseline, which is exactly what the run sends without System 1.
  */
 export function createEffortRouter() {
   let lowerEligible = false;
   let shadowLowerEligible = false;
+  /** Enforce only: the rung System 1's last real answer chose (before any floor). */
+  let lastScoredIndex: number | null = null;
+  /** Enforce only: when the last call was made, whether it was quiet, and its outcome. */
+  let lastAsk: { iteration: number; quiet: boolean; reason: string } | null = null;
 
   async function decide(input: EffortRouterInput): Promise<EffortDecision> {
     const { policy, system1, signals } = input;
@@ -275,7 +272,7 @@ export function createEffortRouter() {
       const enforce = policy.kind === 'auto' && system1.mode === 'enforce';
       if (!enforce && system1.mode !== 'shadow') return keepBaseline();
 
-      const floor = ruleFloor(signals, baselineIndex);
+      const floor = effortFloor(signals, baselineIndex);
       // Already at the top and the rules forbid lowering: nothing can change.
       if (baselineIndex === ladder.length - 1 && floor.index >= baselineIndex) return keepBaseline();
 
@@ -323,12 +320,60 @@ export function createEffortRouter() {
         return keepBaseline();
       }
 
+      // Cadence: ask at events, not every iteration. A quiet iteration (no
+      // first turn, error, write, or instruction; a steady no-progress floor
+      // is quiet too) right after a quiet, settled answer holds that answer,
+      // floored, without a call; the budget then lasts the whole run.
+      // lower_pending is never settled: its confirming ask must come next.
+      const quiet = isSteadyFloor(floor.reason);
+      if (
+        lastScoredIndex !== null &&
+        lastAsk !== null &&
+        quiet &&
+        lastAsk.quiet &&
+        lastAsk.reason !== 'lower_pending' &&
+        signals.iteration - lastAsk.iteration < EFFORT_ASK_EVERY
+      ) {
+        const heldIndex = Math.max(lastScoredIndex, floor.index);
+        const wire = ladder[heldIndex]!.wire;
+        const applied = wire !== baseline;
+        if (applied) system1.markApplied();
+        return {
+          wire,
+          applied,
+          trace: {
+            mode: system1.mode,
+            baseline: ladder[baselineIndex]!.wire,
+            chosen: wire,
+            applied,
+            reason: 'cadence_hold',
+            floor: ladder[floor.index]!.key,
+          },
+        };
+      }
+
       const result = await run(lowerEligible);
-      lowerEligible = result.lowerEligible;
-      const wire = ladder[result.index]!.wire;
+      lastAsk = { iteration: signals.iteration, quiet, reason: result.trace.reason };
+      let index = result.index;
+      let trace = result.trace;
+      if (result.trace.reason === 'fallback') {
+        // No opinion this time (budget spent, breaker open, timeout, busy):
+        // hold System 1's last answer instead of reverting to the baseline,
+        // so a long run does not spend its tail at the user's top rung. The
+        // rules' floor still wins for this iteration (errors, writes, new
+        // instructions), and hysteresis state is untouched (no new evidence).
+        if (lastScoredIndex !== null) {
+          index = Math.max(lastScoredIndex, floor.index);
+          trace = { ...trace, chosen: ladder[index]!.wire, reason: 'held' };
+        }
+      } else {
+        lowerEligible = result.lowerEligible;
+        if (result.trace.reason !== 'inconsistent') lastScoredIndex = result.index;
+      }
+      const wire = ladder[index]!.wire;
       const applied = wire !== baseline;
       if (applied) system1.markApplied();
-      return { wire, applied, trace: { ...result.trace, applied } };
+      return { wire, applied, trace: { ...trace, applied } };
     } catch (error) {
       system1?.note('effort', 'internal', signals.iteration, error instanceof Error ? error.message : String(error));
       return keepBaseline();

@@ -4,6 +4,7 @@ import { iterationShape, iterationsOf, PLAN_TOOLS } from '../read/iterations.js'
 import type { RunSummary } from '../read/runs.js';
 import { linesOf, type TraceLine } from '../read/trace.js';
 import type { UsageRecord } from '../read/usage.js';
+import { computeHealth, type HealthMetrics } from './health.js';
 
 /** A read walk needs at least this many narrow reads of one file in a row. */
 export const READ_WALK_MIN_CALLS = 5;
@@ -100,6 +101,8 @@ export type RunMetrics = {
   untracedPromptTokens: number;
   /** Balance change across the run, from usage.jsonl (legacy session/weekly plans). */
   capacity: { weeklyPercent: number | null; sessionPercent: number | null } | null;
+  /** Whether the harness mechanisms do what they exist for (v2 phase 0). */
+  health: HealthMetrics;
 };
 
 function percentile(sorted: number[], p: number): number {
@@ -389,5 +392,6 @@ export function computeRunMetrics(input: {
     verifiedAfterEdit: lastEditAt < 0 ? null : lastExecAt >= lastEditAt,
     untracedPromptTokens: Math.max(0, ownPrompt - perCall.reduce((sum, value) => sum + value, 0)),
     capacity: usageDelta(input.usage?.find((record) => record.runId === run.runId)),
+    health: computeHealth(lines, totalPrompt),
   };
 }

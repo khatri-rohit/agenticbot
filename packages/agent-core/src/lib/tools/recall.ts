@@ -12,7 +12,7 @@ export const recall: Tool = {
     function: {
       name: 'recall',
       description:
-        'Read a stored result by its sha256 (from an "(evicted)" card, a sub-agent report, or a blob note). Returns up to 8000 chars per call.',
+        'Read a stored result by its sha256 (from an "(evicted)" card, a sub-agent report, or a blob note): the exact text as it was then. For a file\'s current contents, read_file it again. Returns up to 8000 chars per call.',
       parameters: {
         type: 'object',
         properties: {

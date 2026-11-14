@@ -2,6 +2,12 @@ import { Router, type Request, type Response } from 'express';
 import type { OllamaEndpoint } from '@agent/agent-models';
 import { getOllamaModelConfig, listOllamaModels } from '@agent/agent-core';
 import { BalanceError, capacityEnabled, getOllamaBalance } from './capacity';
+import {
+  parseModelSettingsBody,
+  readModelSettings,
+  resolveModelSettings,
+  writeModelSettings,
+} from './model-settings-store';
 import { system1AutoFor } from '../runs/system1-runtime';
 import { asyncRoute } from '../platform/http-errors';
 
@@ -65,6 +71,34 @@ router.get('/models/config', asyncRoute(async (req: Request, res: Response) => {
     const msg = err instanceof Error ? err.message : String(err);
     return res.status(502).json({ error: msg });
   }
+}));
+
+/**
+ * GET /api/agent/models/settings
+ * Merged view for the Settings → Models tab: stored picks, the resolved
+ * model per role with its source, and thinking preferences.
+ */
+router.get('/models/settings', asyncRoute(async (_req: Request, res: Response) => {
+  const settings = await readModelSettings();
+  // Resolution preview against the home-mode default model; the dialog shows
+  // sources, and runs resolve against their own model.
+  const resolved = await resolveModelSettings('glm-5.2:cloud', 'cloud');
+  return res.json({ settings, resolved });
+}));
+
+/**
+ * PUT /api/agent/models/settings
+ * Validate and persist. Unknown fields and bad enums are a 400 with the
+ * problem list; a valid body replaces the whole settings object.
+ */
+router.put('/models/settings', asyncRoute(async (req: Request, res: Response) => {
+  const parsed = parseModelSettingsBody(req.body);
+  if (!parsed.ok) {
+    return res.status(400).json({ error: 'Invalid model settings', problems: parsed.problems });
+  }
+  await writeModelSettings(parsed.settings);
+  const resolved = await resolveModelSettings('glm-5.2:cloud', 'cloud');
+  return res.json({ settings: parsed.settings, resolved });
 }));
 
 /**

@@ -9,40 +9,66 @@ import {
   useState,
 } from 'react';
 import {
-  DEFAULT_THEME_ID,
-  type ThemeId,
-  THEME_PRESETS,
+  DEFAULT_THEME_PREFERENCE,
+  type ThemePreference,
+  type ThemeScheme,
   applyThemeToDocument,
-  persistThemeId,
-  readStoredThemeId,
+  persistThemePreference,
+  readStoredPreference,
+  schemeForPreference,
 } from '@/components/shell/theme-presets';
 
 type ThemeContextValue = {
-  themeId: ThemeId;
-  setThemeId: (id: ThemeId) => void;
-  presets: typeof THEME_PRESETS;
+  preference: ThemePreference;
+  setPreference: (preference: ThemePreference) => void;
+  /** Resolved mode — what actually renders. */
+  scheme: ThemeScheme;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+const SYSTEM_DARK_QUERY = '(prefers-color-scheme: dark)';
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [themeId, setThemeIdState] = useState<ThemeId>(DEFAULT_THEME_ID);
+  // null until storage is read on mount. The inline init script has already
+  // painted the right mode; applying a guessed default first would flicker.
+  const [preference, setPreferenceState] = useState<ThemePreference | null>(
+    null,
+  );
+  const [systemPrefersDark, setSystemPrefersDark] = useState(true);
 
   useEffect(() => {
-    const stored = readStoredThemeId();
-    setThemeIdState(stored);
-    applyThemeToDocument(stored);
+    const media = window.matchMedia(SYSTEM_DARK_QUERY);
+    setSystemPrefersDark(media.matches);
+    setPreferenceState(readStoredPreference());
+    const onChange = (event: MediaQueryListEvent) => {
+      setSystemPrefersDark(event.matches);
+    };
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
   }, []);
 
-  const setThemeId = useCallback((id: ThemeId) => {
-    setThemeIdState(id);
-    applyThemeToDocument(id);
-    persistThemeId(id);
+  // OS changes only move the scheme while the preference is System.
+  const scheme: ThemeScheme = preference
+    ? schemeForPreference(preference, systemPrefersDark)
+    : 'dark';
+
+  useEffect(() => {
+    if (preference) applyThemeToDocument(scheme);
+  }, [preference, scheme]);
+
+  const setPreference = useCallback((next: ThemePreference) => {
+    setPreferenceState(next);
+    persistThemePreference(next);
   }, []);
 
   const value = useMemo(
-    () => ({ themeId, setThemeId, presets: THEME_PRESETS }),
-    [themeId, setThemeId],
+    () => ({
+      preference: preference ?? DEFAULT_THEME_PREFERENCE,
+      setPreference,
+      scheme,
+    }),
+    [preference, setPreference, scheme],
   );
 
   return (

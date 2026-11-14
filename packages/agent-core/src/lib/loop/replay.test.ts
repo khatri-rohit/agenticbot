@@ -33,6 +33,14 @@ function tool(name: string, stage: Tool['stage'], execute: Tool['execute']): Too
 const read = tool('read_file', 'read', async (args) => `contents of ${String(args.path)}`);
 const bigRead = tool('read_file', 'read', async (args) => `${String(args.path)}:\n${'x'.repeat(4_000)}`);
 const edit = tool('edit_file', 'mutate', async (args) => `Patched ${String(args.path)}`);
+/** A check that passes, classified like the real run_terminal (exit code from line 2). */
+const passingCheck: Tool = {
+  ...tool('run_terminal', 'exec', async () => 'cwd: /w\nexit 0\nall tests passed'),
+  classify: (result) => {
+    const exit = /^exit (\d+)$/.exec(result.split('\n', 2)[1] ?? '');
+    return exit ? { outcome: 'ok', exitCode: Number(exit[1]) } : { outcome: 'error' };
+  },
+};
 
 function call(id: string, name: string, args: Record<string, unknown> = {}): PendingToolCall {
   return { id, type: 'function', function: { name, arguments: JSON.stringify(args) } };
@@ -68,8 +76,13 @@ async function replay(
   const trace: TraceEvent[] = [];
   const events: AgentEventWithoutSeq[] = [];
   const ledger: LedgerRecord[] = [];
+  // Exactly what each model call saw, so a change to prompt order or nudge text fails too.
+  const prompts: unknown[] = [];
   let calls = 0;
-  const modelCall: ModelCallFn = async () => script(++calls);
+  const modelCall: ModelCallFn = async (_model, messages) => {
+    prompts.push(structuredClone(messages));
+    return script(++calls);
+  };
   let result: unknown;
   try {
     result = await runLoop(modelCall, [{ role: 'user', content: 'do the task' }], createToolRegistry(tools), {
@@ -87,7 +100,7 @@ async function replay(
   } catch (error) {
     result = { threw: error instanceof Error ? error.message : String(error) };
   }
-  return normalise({ result, trace, events, ledger });
+  return normalise({ result, trace, events, ledger, prompts });
 }
 
 describe('loop replay', () => {
@@ -118,6 +131,29 @@ describe('loop replay', () => {
     await expect(JSON.stringify(out, null, 2)).toMatchFileSnapshot('./__replay__/token-limit.json');
   });
 
+  it('milestone checkpoint after edits pass a check', async () => {
+    const out = await replay(
+      (n) =>
+        n <= 3
+          ? turn([call(`r${n}`, 'read_file', { path: `f${n}.ts` })])
+          : n === 4
+            ? turn([call('e1', 'edit_file', { path: 'f1.ts' })])
+            : n === 5
+              ? turn([call('t1', 'run_terminal', { command: 'npm test' })])
+              : answer('Changed f1.ts; npm test passes.'),
+      [bigRead, edit, passingCheck],
+      {
+        contextBudget: {
+          ...DEFAULT_CONTEXT_BUDGET,
+          // Small marks so this short run's own context counts as large.
+          inRunClearAtLeastTokens: 300,
+          inRunKeepToolResults: 1,
+        },
+      },
+    );
+    await expect(JSON.stringify(out, null, 2)).toMatchFileSnapshot('./__replay__/milestone.json');
+  });
+
   it('eviction of old tool results', async () => {
     const out = await replay(
       (n) => (n <= 4 ? turn([call(`r${n}`, 'read_file', { path: `big${n}.ts` })]) : answer('Read them all.')),
@@ -125,7 +161,9 @@ describe('loop replay', () => {
       {
         contextBudget: {
           ...DEFAULT_CONTEXT_BUDGET,
-          inRunEvictTokens: 1_500,
+          // Four ~1k-token reads against a 1.5k-token resident cap: the
+          // least recently touched go to cards at once.
+          inRunResidentToolTokens: 1_500,
           inRunKeepToolResults: 1,
           inRunClearAtLeastTokens: 500,
         },

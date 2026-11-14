@@ -37,6 +37,7 @@ export {
   type MetricsSummary,
 } from './metrics/thread-metrics.js';
 export { findRun, flattenRuns, loadRunMetrics } from './metrics/load.js';
+export { ADVICE_WINDOW, computeHealth, type HealthMetrics } from './metrics/health.js';
 export { AREA_OWNERS, areaRows, RULES, signalsOf, type Area, type AreaRow, type Signal } from './metrics/areas.js';
 export {
   analyzeThread,
@@ -48,7 +49,7 @@ export {
   type ThreadReviewAnalysis,
 } from './analyze/review.js';
 
-export { loadTask, loadTasks, parseTask, type EvalTask, type LoadedTask, type TaskSuite } from './runner/task.js';
+export { loadTask, loadTasks, parseTask, TASK_SUITES, type EvalTask, type LoadedTask, type TaskSuite } from './runner/task.js';
 export { readSeed, seedEvalHome, type SeedInfo } from './runner/seed.js';
 export { gradeTrial, scopeMatcher, type Grade } from './runner/score.js';
 export {

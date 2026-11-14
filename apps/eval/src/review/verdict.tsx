@@ -99,6 +99,7 @@ export function ReviewVerdict({
           <p className="muted">
             Focused run {focus.runId.slice(0, 8)}: {focus.status} · {focus.iterations} iterations ·{' '}
             {focus.toolCalls} tools · {tokens(focus.promptTokens)} prompt
+            {typeof focus.promptGrowth === 'number' ? ` · growth ${focus.promptGrowth.toFixed(1)}×` : ''}
           </p>
         ) : null}
       </section>

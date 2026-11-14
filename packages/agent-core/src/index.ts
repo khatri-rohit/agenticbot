@@ -21,9 +21,11 @@ export { streamModelTurn } from './lib/model/stream';
 export type { OnTextDelta, ModelCallOptions } from './lib/model/types';
 export {
   getOllamaModelConfig,
+  getServedContextLength,
   listOllamaModels,
   peekOllamaModelConfig,
   resolveReasoningEffort,
+  sideCallReasoningEffort,
 } from './lib/model/ollama-model-config';
 
 // Loop
@@ -69,10 +71,20 @@ export { createMemoryTool } from './lib/tools/memory';
 export type { MemoryToolStore } from './lib/tools/memory';
 export { createInMemoryPlanStore, createPlanTools } from './lib/tools/plan';
 export type { PlanStore } from './lib/tools/plan';
-export { gateMemoryOps, applyMemoryText } from './lib/memory/gate';
+export { gateMemoryOps, applyMemoryText, looksLikeSecret } from './lib/memory/gate';
+export {
+  buildReviewMessages,
+  newUserTurns,
+  parseReviewProposals,
+} from './lib/memory/review';
+export {
+  createSessionSearchTool,
+  type SessionSearchHit,
+} from './lib/tools/session-search';
 
 // Context
 export { assembleContext } from './lib/context/assemble-context';
+export { prepareCarriedRecord, taskRecordFromRun } from './lib/context/carried-record';
 export type {
   AssembleContextInput,
   AssembleContextResult,
@@ -83,8 +95,13 @@ export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export {
   planCompaction,
   buildExtractiveSnapshot,
+  foldedTranscript,
   packMentionedThread,
 } from './lib/context/compact-snapshot';
+export {
+  acceptSectionedSummary,
+  buildSummaryMessages,
+} from './lib/context/sectioned-summary';
 
 // Sub-agents
 export {

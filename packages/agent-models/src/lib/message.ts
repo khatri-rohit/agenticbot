@@ -147,6 +147,10 @@ export function threadMentions(
 }
 
 export interface Message {
+  /**
+   * Stable row id. Assistant rows use the loop's messageId (the id the SSE
+   * stream used) when the ledger carries it, else `msg_<threadId>_<seq>`.
+   */
   id: string;
   threadId: string;
   runId: string | null;

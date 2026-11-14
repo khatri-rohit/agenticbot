@@ -2,7 +2,7 @@ import type { ModeName, RunPosture } from '@agent/agent-models';
 
 import type { ToolRegistry } from '../tools/types';
 import { ANTI_SLOP_CODE_LAW } from './coding-law';
-import { loadAgentIdentity } from './load-agent-identity';
+import { HOME_COMPACT_IDENTITY, loadAgentIdentity } from './load-agent-identity';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -94,11 +94,23 @@ function toolProtocol(registry: ToolRegistry, isWorkspace: boolean): string {
  * failure seen in traces (drift, false "verified", ritual tool calls, wide
  * reads in the parent). Stable text first; the date sits at the very end.
  */
-function workspacePrompt(registry: ToolRegistry, posture: RunPosture): string {
-  const isAsk = posture === 'ask';
+/**
+ * `stateCard`: the harness card is sent each call. Off (the A/B baseline),
+ * the prompt must not describe a card the model will never see.
+ */
+function workspacePrompt(registry: ToolRegistry, posture: RunPosture, stateCard: boolean): string {
+  // Plan shares Ask's read-only sections; its own text replaces how-you-work and the report.
+  const isAsk = posture !== 'agent';
+  const isPlan = posture === 'plan';
   const has = (name: string) => registry.byName.has(name);
 
-  const howYouWork = isAsk
+  const howYouWork = isPlan
+    ? `# How you work (Plan: read-only)
+- You can glob, grep, and read_file. You cannot edit files or run commands. The user approves the plan by switching the composer to Agent.
+- Explore first: read the code the change will touch, its callers, and its contracts. Do not invent paths, APIs, or flags.
+- Then write the plan${has('plan') ? ' with the plan tool (journal plus todos)' : ''}: the goal, the files and the change in each, the order, how each step is verified, and the risks. Name open questions instead of guessing.
+- Stop when the plan is written. Do not start the work.`
+    : isAsk
     ? `# How you work (Ask: read-only)
 - You can glob, grep, and read_file. You cannot edit files or run commands; if the user wants changes, tell them to switch the composer to Agent.
 - Understand before you answer: read the code in question, its callers, and its contracts. Do not invent paths, APIs, or flags.
@@ -119,8 +131,18 @@ function workspacePrompt(registry: ToolRegistry, posture: RunPosture): string {
       ? '- Hand wide reading (more than ~5 files, several searches, web research) to delegate(explore) with a real objective and scope. Do one or two reads yourself.'
       : '',
     '- Do not re-read what is already above.',
+    '- Issue independent glob, grep, and read_file calls together in one turn; they run in parallel, and each extra turn re-sends the whole context. Use grep context to see surrounding lines instead of a follow-up read.',
+    has('record_finding')
+      ? stateCard
+        ? '- When the task is to find or explain something, record each fact you confirm with record_finding (claim plus path:line) as you go. The record stays on the harness card, so the reads behind it can leave the context without being read again; write the answer from the record.'
+        : '- When the task is to find or explain something, record each fact you confirm with record_finding (claim plus path:line) as you go, so the reads behind it can leave the context; write the answer from your recorded findings.'
+      : '',
+    '- An "(evicted)" card stands for a result that left the context: read_file again for current contents, or recall its sha256 for that exact text.',
     isAsk ? '' : '- Batch edits, then verify once.',
     '- When the run says the budget is nearly spent: finish the current step, verify, and report what is left.',
+    stateCard
+      ? '- A "[Harness card]" message may close the conversation: the run\'s current phase, working set, recorded findings, open items and advice, rebuilt every step by the harness (not the user). Use it; do not answer it.'
+      : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -131,11 +153,14 @@ Check that you answered the question that was asked, with evidence, and named wh
     : `# Before you report done
 Ask what this could break: callers of anything you changed, edge cases and error paths, and whether you did what the user actually asked.${
         has('delegate')
-          ? ' Once edits pass verification, run delegate(review) once; fix findings inside the request and list the rest.'
+          ? ` For a change beyond a file or two, run delegate(review) once after edits pass the check${stateCard ? ' (the harness card says when)' : ''}; skip it for a small change. Fix findings inside the request and list the rest.`
           : ''
       }`;
 
-  const report = isAsk
+  const report = isPlan
+    ? `# Answer
+Summarise the plan in a few lines: the approach, the steps, and the open questions. Point to the plan for detail. No preamble.`
+    : isAsk
     ? `# Answer
 Lead with the answer, then the evidence (path:line). Short, no preamble.`
     : `# Report
@@ -204,6 +229,38 @@ If two reasonable paths would change what you do next, offer_choice with labeled
 If the user wants you to change a repo, tell them to open a folder (start a workspace chat).
 `.trim();
 
+/** Home's line for record_finding, only when the tool is in the run. */
+function homeRecordLine(registry: ToolRegistry): string {
+  return registry.byName.has('record_finding')
+    ? '\nWhen you research across several pages, record each fact you will use with record_finding (claim plus its URL). Recorded facts stay with the thread, so a later turn does not search again; write the answer from them.'
+    : '';
+}
+
+/**
+ * Home with a short identity: how to read the turn and how to answer, with
+ * compact tool guidance. The long house style lives in the
+ * ai-writing-guidelines skill, loaded when finished prose matters.
+ */
+function compactHomePrompt(registry: ToolRegistry): string {
+  const styleSkill = registry.byName.has('load_skill')
+    ? '\nFor finished prose the user will keep (docs, posts, emails), load the ai-writing-guidelines skill first.'
+    : '';
+  return `
+${HOME_COMPACT_IDENTITY}${styleSkill}
+
+# Tools
+${toolProtocol(registry, false)}
+
+${buildToolGuardrails(registry, true)}
+
+${HOME_BEHAVIOR}${homeRecordLine(registry)}
+
+Today's date is ${today()}.
+`
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /**
  * Assembles the frozen system prompt. Workspace gets the engineer prompt;
  * Home keeps its writing identity. USER.md / MEMORY.md belong in the memory
@@ -213,8 +270,10 @@ export function buildSystemPrompt(
   registry: ToolRegistry,
   mode?: ModeName,
   posture: RunPosture = 'agent',
+  options: { compactHome?: boolean; stateCard?: boolean } = {},
 ): string {
-  if (mode === 'workspace') return workspacePrompt(registry, posture);
+  if (mode === 'workspace') return workspacePrompt(registry, posture, options.stateCard ?? true);
+  if (options.compactHome) return compactHomePrompt(registry);
 
   return `
 ${loadAgentIdentity(mode)}
@@ -227,7 +286,7 @@ ${toolProtocol(registry, false)}
 
 ${buildToolGuardrails(registry, false)}
 
-${HOME_BEHAVIOR}
+${HOME_BEHAVIOR}${homeRecordLine(registry)}
 
 ${ANTI_SLOP_CODE_LAW}
 

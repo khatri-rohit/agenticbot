@@ -1,13 +1,11 @@
-import { limitMessage } from '@agent/agent-models';
+import { GUARD_LIMITS, limitMessage } from '@agent/agent-models';
 
-/** Invented tool names in one run before hard halt (I1 + I6). */
-const MAX_UNKNOWN_TOOL_STREAK = 2;
-/** Distinct read_file admits per path per run (stops offset paging storms). */
-const MAX_READ_FILE_PER_PATH = 30;
-/** run_terminal admits per run (stops shell flood; migrations run 40+ builds). */
-const MAX_TERMINAL_CALLS = 60;
-/** Identical mutate call+result before stuck halt. */
-const MAX_IDENTICAL_OUTCOMES = 3;
+const MAX_UNKNOWN_TOOL_STREAK = GUARD_LIMITS.unknownToolStreak;
+const MAX_READ_FILE_PER_PATH = GUARD_LIMITS.readsPerPath;
+const MAX_TERMINAL_CALLS = GUARD_LIMITS.terminalCalls;
+const MAX_IDENTICAL_OUTCOMES = GUARD_LIMITS.identicalOutcomes;
+/** Call keys of tools whose result depends on workspace contents (see toolCallKey). */
+const WORKSPACE_READ_PREFIXES = ['read_file:', 'grep:', 'glob:'];
 
 /**
  * Per-run memory of what the model already tried, so a run that is going in
@@ -91,9 +89,16 @@ export class RepetitionGuard {
     };
   }
 
-  /** A successful edit makes earlier build/test exits stale: start counting fresh. */
+  /**
+   * A successful edit makes earlier build/test exits stale, and earlier
+   * workspace reads and searches may now return something else: start
+   * counting both fresh, so a re-read after an edit is never a "repeat".
+   */
   editSucceeded(): void {
     for (const key of this.execOutcomeKeys) this.outcomeCounts.delete(key);
     this.execOutcomeKeys.clear();
+    for (const key of [...this.callCounts.keys()]) {
+      if (WORKSPACE_READ_PREFIXES.some((prefix) => key.startsWith(prefix))) this.callCounts.delete(key);
+    }
   }
 }

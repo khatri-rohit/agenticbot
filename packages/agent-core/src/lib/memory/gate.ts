@@ -72,7 +72,7 @@ function replaceOnce(haystack: string, needle: string, replacement: string): str
   return haystack.slice(0, index) + replacement + haystack.slice(index + needle.length);
 }
 
-function looksLikeSecret(text: string): boolean {
+export function looksLikeSecret(text: string): boolean {
   return SECRET_RE.test(text);
 }
 

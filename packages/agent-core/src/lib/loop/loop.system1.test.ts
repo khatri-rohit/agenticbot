@@ -129,22 +129,27 @@ describe('runLoop with System 1', () => {
     expect(shadow.traces.some((event) => event.type === 'system1_decision')).toBe(true);
   });
 
-  it('lowers effort in enforce only after two quiet steps, never on the first turn', async () => {
+  it('lowers effort in enforce only after two quiet steps, never on the first turn, and not while nothing progresses', async () => {
     const enforced = await run(port('enforce', confidentEasy), true);
     expect(enforced.result.status).toBe('completed');
-    // 1: first turn (floor). 2: first eligible lower (pending). 3+: lowered.
+    // 1: first turn (floor). 2: first eligible lower (pending). 3: lowered.
+    // 4: three steps with no evidence (this script records none): the floor
+    // holds the baseline again (F-4).
     expect(enforced.calls.map((call) => call.overrides?.reasoningEffort)).toEqual([
       undefined,
       undefined,
       'low',
-      'low',
+      undefined,
     ]);
     const requests = enforced.traces.filter((event) => event.type === 'llm_request');
     expect(requests.map((event) => (event as { reasoningEffort?: string }).reasoningEffort)).toEqual([
       'medium',
       'medium',
       'low',
-      'low',
+      'medium',
     ]);
+    expect(enforced.traces).toContainEqual(
+      expect.objectContaining({ type: 'policy_decision', kind: 'effort', ids: ['effort_floor:no_progress'], iteration: 4 }),
+    );
   });
 });

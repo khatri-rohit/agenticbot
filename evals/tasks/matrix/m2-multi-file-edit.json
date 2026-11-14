@@ -1,0 +1,25 @@
+{
+  "id": "m2-multi-file-edit",
+  "suite": "matrix",
+  "repo": { "source": ".", "commit": "022dc3a" },
+  "prompt": "Rename the exported constant `DIGEST_MAX_CHARS` in packages/agent-core/src/lib/subagent/types.ts to `SUBAGENT_DIGEST_MAX_CHARS` and update every use of it, keeping behaviour the same. Then make sure agent-core still compiles with `npx tsc -b packages/agent-core/tsconfig.lib.json`. Change nothing else.",
+  "posture": "agent",
+  "checks": [
+    { "run": "npx tsc -b packages/agent-core/tsconfig.lib.json", "expectExit": 0, "timeoutSec": 300 },
+    { "run": "git grep -n -w DIGEST_MAX_CHARS -- packages", "expectExit": 1, "timeoutSec": 60 }
+  ],
+  "files": [
+    { "path": "packages/agent-core/src/lib/subagent/types.ts", "mustMatch": "export const SUBAGENT_DIGEST_MAX_CHARS" },
+    { "path": "packages/agent-core/src/lib/subagent/prompt.ts", "mustMatch": "SUBAGENT_DIGEST_MAX_CHARS" }
+  ],
+  "scope": {
+    "allow": [
+      "packages/agent-core/src/lib/subagent/",
+      "packages/agent-core/dist/",
+      "packages/agent-models/dist/",
+      "packages/agent-core/tsconfig.lib.tsbuildinfo",
+      "packages/agent-models/tsconfig.lib.tsbuildinfo"
+    ]
+  },
+  "budget": { "maxPromptTokens": 800000, "maxMinutes": 12 }
+}

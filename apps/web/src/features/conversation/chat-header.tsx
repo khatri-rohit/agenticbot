@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { type Thread } from '@agent/agent-models';
 import { clampChatTitle } from '@/features/threads/thread-title';
 import { fetchThread } from '../../api/thread-client';
@@ -83,14 +83,13 @@ export function ChatHeader({ threadId }: { threadId: string }) {
         aria-label="Thread location"
         className="mb-1 flex items-center gap-1 text-xs text-muted-foreground"
       >
+        {/* Space only: the h1 below already names the thread. */}
         <Link
           href="/"
           className="transition-colors hover:text-foreground"
         >
           {spaceName}
         </Link>
-        <ChevronRight className="size-3 shrink-0 opacity-60" strokeWidth={1.75} />
-        <span className="truncate text-foreground/80">{display}</span>
       </nav>
       <h1 className="truncate text-lg font-semibold leading-snug tracking-tight text-pretty text-foreground">
         {isPending ? (

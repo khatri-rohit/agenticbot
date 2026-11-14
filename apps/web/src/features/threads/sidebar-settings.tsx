@@ -3,21 +3,40 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Bell,
+  Check,
+  Monitor,
+  Moon,
   Palette,
   RefreshCw,
   RotateCcw,
   Settings,
+  Sun,
   Trash2,
   UserRound,
   Volume2,
 } from 'lucide-react';
-import { DEFAULT_MEMORY_CAPS, type MemoryOp } from '@agent/agent-models';
+import {
+  MODEL_SETTING_ROLES,
+  SIDE_CALL_THINKING_LEVELS,
+  DEFAULT_MEMORY_CAPS,
+  type MemoryOp,
+  type ModelRoleSetting,
+  type ModelSettingRole,
+  type ModelSettings,
+  type ResolvedModelSettings,
+  type SideCallThinking,
+} from '@agent/agent-models';
 import { useTheme } from '@/components/shell/theme-provider';
 import {
   fetchMemory,
+  fetchPendingMemory,
+  getModelSettings,
+  putModelSettings,
+  resolvePendingMemory,
   revertMemoryOp,
   saveUserMemory,
 } from '@/api/agent-client';
+import { useOllamaModels } from '@/features/composer/use-ollama-models';
 import { toastError, toastSuccess } from '@/hooks/use-toast';
 import { formatRelativeTime } from '@/lib/format-relative-time';
 import { Button } from '@/components/ui/button';
@@ -52,7 +71,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { ThemeId } from '@/components/shell/theme-presets';
+import type { ThemePreference } from '@/components/shell/theme-presets';
 import { cn } from '@/lib/utils';
 import {
   enableBrowserNotifications,
@@ -73,7 +92,7 @@ export function SidebarSettings({
 }: {
   collapsed?: boolean;
 }) {
-  const { themeId, setThemeId, presets } = useTheme();
+  const { preference, setPreference } = useTheme();
   const [profileOpen, setProfileOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [notifyOn, setNotifyOn] = useState(false);
@@ -154,37 +173,45 @@ export function SidebarSettings({
                 Appearance
               </DropdownMenuLabel>
               <DropdownMenuRadioGroup
-                value={themeId}
-                onValueChange={(value) => setThemeId(value as ThemeId)}
+                value={preference}
+                onValueChange={(value) =>
+                  setPreference(value as ThemePreference)
+                }
               >
-                {presets.map((preset) => (
+                {(
+                  [
+                    {
+                      value: 'light',
+                      label: 'Light',
+                      icon: Sun,
+                      hint: 'Warm paper, ink text',
+                    },
+                    {
+                      value: 'dark',
+                      label: 'Dark',
+                      icon: Moon,
+                      hint: 'Warm charcoal, clay accent',
+                    },
+                    {
+                      value: 'system',
+                      label: 'System',
+                      icon: Monitor,
+                      hint: 'Follow your device setting',
+                    },
+                  ] as const
+                ).map((option) => (
                   <DropdownMenuRadioItem
-                    key={preset.id}
-                    value={preset.id}
+                    key={option.value}
+                    value={option.value}
                     className="items-start gap-2.5 py-2"
                   >
-                    <span
-                      className="mt-0.5 flex size-4 shrink-0 overflow-hidden rounded-[3px] ring-1 ring-border/70"
-                      aria-hidden
-                    >
-                      <span
-                        className="h-full w-1/2"
-                        style={{ background: preset.swatch.bg }}
-                      />
-                      <span
-                        className="h-full w-1/2"
-                        style={{ background: preset.swatch.accent }}
-                      />
-                    </span>
+                    <option.icon className="mt-0.5 size-4 shrink-0 opacity-80" />
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="flex items-center gap-1.5 leading-none">
-                        {preset.label}
-                        <span className="type-caption rounded px-1 py-px font-medium text-muted-foreground ring-1 ring-border/50">
-                          {preset.scheme}
-                        </span>
+                        {option.label}
                       </span>
                       <span className="type-caption leading-snug text-muted-foreground">
-                        {preset.description}
+                        {option.hint}
                       </span>
                     </span>
                   </DropdownMenuRadioItem>
@@ -241,7 +268,7 @@ export function SidebarSettings({
   );
 }
 
-type Tab = 'profile' | 'notes' | 'history';
+type Tab = 'profile' | 'notes' | 'history' | 'suggestions' | 'models';
 
 function ProfileDialog({
   open,
@@ -256,17 +283,48 @@ function ProfileDialog({
   const [loadedUser, setLoadedUser] = useState('');
   const [notes, setNotes] = useState('');
   const [ops, setOps] = useState<MemoryOp[]>([]);
+  const [pending, setPending] = useState<MemoryOp[]>([]);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmRevertId, setConfirmRevertId] = useState<string | null>(null);
   const [revertingId, setRevertingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [modelSettings, setModelSettings] = useState<ModelSettings | null>(null);
+  const [modelSettingsResolved, setModelSettingsResolved] =
+    useState<ResolvedModelSettings | null>(null);
+  const [modelSettingsSaving, setModelSettingsSaving] = useState(false);
+  const [modelSettingsError, setModelSettingsError] = useState<string | null>(null);
+
+  // Load model-role settings once on open; the Models tab edits them.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void getModelSettings()
+      .then((view) => {
+        if (cancelled) return;
+        setModelSettings(view.settings);
+        setModelSettingsResolved(view.resolved);
+        setModelSettingsError(null);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setModelSettingsError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const loadAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const memory = await fetchMemory();
+      const [memory, suggestions] = await Promise.all([
+        fetchMemory(),
+        fetchPendingMemory(),
+      ]);
+      setPending(suggestions);
       setDraft(memory.files.user);
       setLoadedUser(memory.files.user);
       setNotes(memory.files.notes);
@@ -323,6 +381,19 @@ function ProfileDialog({
     }
   };
 
+  const handleResolve = async (opId: string, decision: 'approve' | 'reject') => {
+    setResolvingId(opId);
+    try {
+      await resolvePendingMemory(opId, decision);
+      toastSuccess(decision === 'approve' ? 'Saved to memory. It applies on the next run.' : 'Suggestion dismissed.');
+      await loadAll(true);
+    } catch (error) {
+      toastError(describeError(error), 'Could not update the suggestion');
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
   const handleRevert = async (opId: string) => {
     setRevertingId(opId);
     try {
@@ -340,11 +411,16 @@ function ProfileDialog({
     { id: 'profile', label: 'Profile' },
     { id: 'notes', label: 'Agent notes' },
     { id: 'history', label: 'History' },
+    {
+      id: 'suggestions',
+      label: pending.length > 0 ? `Suggestions (${pending.length})` : 'Suggestions',
+    },
+    { id: 'models', label: 'Models' },
   ];
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>User profile</DialogTitle>
           <DialogDescription>
@@ -392,6 +468,47 @@ function ProfileDialog({
           />
         ) : tab === 'notes' ? (
           <NotesTab notes={notes} />
+        ) : tab === 'suggestions' ? (
+          <SuggestionsTab
+            pending={pending}
+            resolvingId={resolvingId}
+            onResolve={(opId, decision) => void handleResolve(opId, decision)}
+          />
+        ) : tab === 'models' ? (
+          <ModelsTab
+            settings={modelSettings}
+            resolved={modelSettingsResolved}
+            saving={modelSettingsSaving}
+            error={modelSettingsError}
+            onRoleChange={(role, setting) =>
+              setModelSettings((prev) =>
+                prev
+                  ? { ...prev, roles: { ...prev.roles, [role]: setting } }
+                  : prev,
+              )
+            }
+            onThinkingChange={(key, value) =>
+              setModelSettings((prev) =>
+                prev
+                  ? { ...prev, thinking: { ...prev.thinking, [key]: value } }
+                  : prev,
+              )
+            }
+            onSave={async () => {
+              if (!modelSettings) return;
+              setModelSettingsSaving(true);
+              try {
+                const view = await putModelSettings(modelSettings);
+                setModelSettings(view.settings);
+                setModelSettingsResolved(view.resolved);
+                setModelSettingsError(null);
+              } catch (err) {
+                setModelSettingsError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setModelSettingsSaving(false);
+              }
+            }}
+          />
         ) : (
           <HistoryTab
             ops={ops}
@@ -445,19 +562,29 @@ function ProfileDialog({
                 <Trash2 className="size-3.5" />
                 Clear
               </Button>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {/* A disabled primary "Saved" button read as broken; state
+                    is a quiet label, the action appears only when needed. */}
+                {!isDirty && !saving ? (
+                  <span className="type-caption flex items-center gap-1 text-subtle-foreground">
+                    <Check className="size-3.5" aria-hidden />
+                    Saved
+                  </span>
+                ) : null}
                 <DialogClose asChild>
-                  <Button type="button" variant="outline" disabled={saving}>
+                  <Button type="button" variant="ghost" disabled={saving}>
                     Close
                   </Button>
                 </DialogClose>
-                <Button
-                  type="button"
-                  disabled={!canSave}
-                  onClick={() => void handleSave()}
-                >
-                  {saving ? 'Saving…' : isDirty ? 'Save profile' : 'Saved'}
-                </Button>
+                {isDirty || saving ? (
+                  <Button
+                    type="button"
+                    disabled={!canSave}
+                    onClick={() => void handleSave()}
+                  >
+                    {saving ? 'Saving…' : 'Save profile'}
+                  </Button>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -497,7 +624,10 @@ function ProfileTab({
         </p>
       ) : null}
 
-      <Label htmlFor="about-user" className="type-caption text-muted-foreground">
+      <Label
+        htmlFor="about-user"
+        className="type-caption text-muted-foreground"
+      >
         About you
       </Label>
       <Textarea
@@ -508,39 +638,53 @@ function ProfileTab({
           'Name: Alex\nRole: staff engineer\nTimezone: IST (UTC+5:30)\nPrefs: concise BLUF answers, show trade-offs\nStack: TypeScript, Nx, Next.js'
         }
         onChange={(event) => onDraft(event.target.value)}
-        className="min-h-40 resize-y"
+        // It is a file (USER.md), so it reads like one: mono, calmer size,
+        // bounded height so the dialog never outgrows the screen.
+        className="max-h-[50vh] min-h-64 resize-y font-mono text-[0.8125rem] leading-[1.6]"
       />
 
-      <CharBudgetBar used={draft.length} cap={cap} />
-
-      {overCap ? (
-        <p className="type-caption text-destructive">
-          Over cap by {overBy} chars — consolidate first.
-        </p>
-      ) : isDirty ? (
-        <p className="type-caption text-muted-foreground">
-          Unsaved changes — Save to persist to{' '}
-          <code className="type-caption">USER.md</code>.
-        </p>
-      ) : null}
+      <div className="flex items-start justify-between gap-3">
+        {overCap ? (
+          <p className="type-caption text-destructive">
+            Over cap by {overBy} chars — consolidate first.
+          </p>
+        ) : isDirty ? (
+          <p className="type-caption text-muted-foreground">
+            Unsaved changes — Save to persist to{' '}
+            <code className="type-caption">USER.md</code>.
+          </p>
+        ) : (
+          <span />
+        )}
+        <CharBudgetBar used={draft.length} cap={cap} />
+      </div>
     </div>
   );
 }
 
 function CharBudgetBar({ used, cap }: { used: number; cap: number }) {
   const ratio = Math.min(used / Math.max(cap, 1), 1);
+  // Neutral until it matters: a full-width accent bar read as a loading or
+  // error state at 39%.
   const barColor =
-    used > cap ? 'bg-destructive' : ratio > 0.8 ? 'bg-[var(--warning)]' : 'bg-primary';
+    used > cap
+      ? 'bg-destructive'
+      : ratio > 0.8
+        ? 'bg-[var(--warning)]'
+        : 'bg-subtle-foreground/60';
   return (
-    <div className="flex flex-col gap-1">
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+    <div className="flex shrink-0 items-center gap-2">
+      <div className="h-1 w-20 overflow-hidden rounded-full bg-muted">
         <div
           className={cn('h-full transition-all', barColor)}
           style={{ width: `${ratio * 100}%` }}
           aria-hidden
         />
       </div>
-      <p className="type-caption text-muted-foreground" aria-live="polite">
+      <p
+        className="type-caption whitespace-nowrap text-subtle-foreground tabular-nums"
+        aria-live="polite"
+      >
         {used}/{cap} chars · ~{Math.ceil(used / 4)} tokens
       </p>
     </div>
@@ -703,6 +847,250 @@ function ProfileSkeleton() {
       <div className="h-40 w-full animate-pulse rounded-md bg-muted" />
       <div className="h-1.5 w-full animate-pulse rounded-full bg-muted" />
       <div className="h-3 w-48 animate-pulse rounded bg-muted" />
+    </div>
+  );
+}
+
+/** Memory the learning loop proposed; nothing is written until approved here. */
+function SuggestionsTab({
+  pending,
+  resolvingId,
+  onResolve,
+}: {
+  pending: MemoryOp[];
+  resolvingId: string | null;
+  onResolve: (opId: string, decision: 'approve' | 'reject') => void;
+}) {
+  if (pending.length === 0) {
+    return (
+      <p className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
+        No suggestions. After a chat goes quiet, the agent may suggest facts to remember; they wait here for you.
+      </p>
+    );
+  }
+  return (
+    <ScrollArea className="h-64 rounded-md border border-border">
+      <ul role="list" className="flex flex-col divide-y divide-border">
+        {pending.map((op) => {
+          const target = op.target === 'user' ? 'Profile' : op.target === 'notes' ? 'Agent notes' : 'Other';
+          const busy = resolvingId === op.id;
+          return (
+            <li key={op.id} className="flex flex-col gap-1.5 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <span className="type-caption font-medium text-muted-foreground">{target}</span>
+                <span className="type-caption text-muted-foreground">
+                  {op.evidence === 'user-said' ? 'you said this' : 'inferred'}
+                </span>
+                <span className="type-caption ml-auto text-muted-foreground">
+                  {formatRelativeTime(op.ts)}
+                </span>
+              </div>
+              {op.content ? (
+                <p className="text-xs whitespace-pre-wrap text-foreground">{op.content}</p>
+              ) : null}
+              <p className="type-caption text-muted-foreground">{op.reason}</p>
+              <div className="flex justify-end gap-1.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="type-caption h-6 px-2"
+                  disabled={busy}
+                  onClick={() => onResolve(op.id, 'reject')}
+                >
+                  Dismiss
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="type-caption h-6 px-2"
+                  disabled={busy}
+                  onClick={() => onResolve(op.id, 'approve')}
+                >
+                  Save to memory
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </ScrollArea>
+  );
+}
+
+const MODEL_ROLE_LABELS: Record<ModelSettingRole, string> = {
+  fast: 'Sub-agent fast',
+  strong: 'Sub-agent strong',
+  summary: 'Summarizer (compaction)',
+  title: 'Thread titles',
+};
+
+const MODEL_ROLE_HINTS: Record<ModelSettingRole, string> = {
+  fast: 'Explore sub-agents and other cheap side calls.',
+  strong: 'Review and advisor sub-agents.',
+  summary: 'Sectioned summaries when a thread compacts.',
+  title: 'Short titles for new threads.',
+};
+
+const ENV_VAR_FOR_ROLE: Record<ModelSettingRole, string> = {
+  fast: 'AGENT_MODEL_FAST',
+  strong: 'AGENT_MODEL_STRONG',
+  summary: 'AGENT_MODEL_SUMMARY',
+  title: 'TITLE_MODEL',
+};
+
+/**
+ * Settings → Models: one row per background role. Unset rows fall back to
+ * env, then to the run's own model; the caption shows which won.
+ */
+function ModelsTab({
+  settings,
+  resolved,
+  saving,
+  error,
+  onRoleChange,
+  onThinkingChange,
+  onSave,
+}: {
+  settings: ModelSettings | null;
+  resolved: ResolvedModelSettings | null;
+  saving: boolean;
+  error: string | null;
+  onRoleChange: (role: ModelSettingRole, setting: ModelRoleSetting) => void;
+  onThinkingChange: (key: 'summary' | 'learningReview', value: SideCallThinking) => void;
+  onSave: () => Promise<void>;
+}) {
+  const { cloudModels, localModels, localModelsLoading, localModelsError } =
+    useOllamaModels(true);
+
+  if (error) {
+    return (
+      <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-xs text-destructive">
+        {error}
+      </p>
+    );
+  }
+  if (!settings) {
+    return <ProfileSkeleton />;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">
+        Which model each background job uses. Unset roles fall back to the
+        environment variable, then to the run&apos;s own model. Applies to the
+        next run — no restart needed.
+      </p>
+      <ul role="list" className="flex flex-col gap-2.5">
+        {MODEL_SETTING_ROLES.map((role) => {
+          const setting = settings.roles[role];
+          const roleResolved = resolved?.roles[role];
+          const caption =
+            setting.model !== ''
+              ? 'from settings'
+              : roleResolved?.source === 'env'
+                ? `from ${ENV_VAR_FOR_ROLE[role]}`
+                : "default: the run's own model";
+          return (
+            <li key={role} className="flex flex-col gap-1">
+              <label
+                htmlFor={`model-role-${role}`}
+                className="type-caption font-medium text-foreground"
+              >
+                {MODEL_ROLE_LABELS[role]}
+              </label>
+              <select
+                id={`model-role-${role}`}
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                value={`${setting.endpoint}:${setting.model}`}
+                onChange={(event) => {
+                  const [endpoint, ...rest] = event.target.value.split(':');
+                  const model = rest.join(':');
+                  onRoleChange(role, {
+                    model,
+                    endpoint: endpoint === 'local' ? 'local' : 'cloud',
+                  });
+                }}
+              >
+                <option value="cloud:">Unset (env / run&apos;s model)</option>
+                <optgroup label="Cloud">
+                  {cloudModels.map((m) => (
+                    <option key={`cloud:${m.id}`} value={`cloud:${m.id}`}>
+                      {m.id}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Local">
+                  {localModelsLoading ? (
+                    <option disabled value="local:loading">
+                      Loading installed models…
+                    </option>
+                  ) : localModels.length === 0 ? (
+                    <option disabled value="local:none">
+                      {localModelsError ?? 'No local models found'}
+                    </option>
+                  ) : (
+                    localModels.map((m) => (
+                      <option key={`local:${m.id}`} value={`local:${m.id}`}>
+                        {m.id}
+                      </option>
+                    ))
+                  )}
+                </optgroup>
+              </select>
+              <span className="type-caption text-muted-foreground">
+                {MODEL_ROLE_HINTS[role]} · {caption}
+                {setting.model !== '' && roleResolved
+                  ? ` → ${roleResolved.model}`
+                  : roleResolved
+                    ? ` → ${roleResolved.model}`
+                    : ''}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex flex-col gap-2 border-t border-border pt-3">
+        <p className="type-caption font-medium text-foreground">Side-call thinking</p>
+        {(
+          [
+            ['summary', 'Summaries (compaction)'],
+            ['learningReview', 'Learning review (memory suggestions)'],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key} className="flex items-center justify-between gap-2">
+            <span className="text-xs text-foreground">{label}</span>
+            <select
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+              value={settings.thinking[key]}
+              onChange={(event) =>
+                onThinkingChange(key, event.target.value as SideCallThinking)
+              }
+            >
+              {SIDE_CALL_THINKING_LEVELS.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+        <p className="type-caption text-muted-foreground">
+          Higher thinking raises the output cap and timeout with it. Titles
+          always run thinking-off.
+        </p>
+      </div>
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          className="h-7 px-3 text-xs"
+          disabled={saving}
+          onClick={() => void onSave()}
+        >
+          {saving ? 'Saving…' : 'Save models'}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -25,8 +25,9 @@ export class ApiClient {
     return (text ? JSON.parse(text) : {}) as T;
   }
 
-  createThread(input: { workspaceRoot: string; model: string; title: string }): Promise<{ id: string }> {
-    return this.json('POST', '/threads', { kind: 'workspace', ...input });
+  /** A workspace thread when `workspaceRoot` is given, else a home (chat) thread. */
+  createThread(input: { workspaceRoot?: string; model: string; title: string }): Promise<{ id: string }> {
+    return this.json('POST', '/threads', { kind: input.workspaceRoot ? 'workspace' : 'home', ...input });
   }
 
   deleteThread(id: string): Promise<unknown> {
@@ -37,7 +38,7 @@ export class ApiClient {
     threadId: string;
     content: string;
     model: string;
-    posture: 'agent' | 'ask';
+    posture: 'agent' | 'ask' | 'plan';
     /** Omitted: the model default. `'auto'`: System 1 picks per iteration (enforce mode only). */
     thinking?: ThinkingValue;
   }): Promise<{ runId: string }> {

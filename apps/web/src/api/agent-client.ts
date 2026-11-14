@@ -6,10 +6,12 @@ import type {
   MemoryFiles,
   MemoryOp,
   MessageAttachment,
+  ModelSettings,
   OllamaBalance,
   OllamaEndpoint,
   OllamaListedModel,
   OllamaModelConfig,
+  ResolvedModelSettings,
   RunPosture,
   StartRunRequest,
   ThinkingValue,
@@ -37,7 +39,7 @@ export type ComposerOptions = {
   posture?: RunPosture;
   /** User-requested skills from `/` picks. */
   skills?: ComposerSkillHints;
-  /** 200k default window vs the model's full size. Persisted on the thread by /run. */
+  /** 260k default window vs the model's full size. Persisted on the thread by /run. */
   contextWindowMode?: ContextWindowMode;
 };
 
@@ -229,6 +231,42 @@ export async function fetchCloudOllamaModels(): Promise<LocalOllamaModelsRespons
   return res.json() as Promise<LocalOllamaModelsResponse>;
 }
 
+export type ModelSettingsView = {
+  settings: ModelSettings;
+  resolved: ResolvedModelSettings;
+};
+
+/** Stored model-role picks and their resolution, for Settings → Models. */
+export async function getModelSettings(): Promise<ModelSettingsView> {
+  const res = await fetch(`${API_BASE}/api/agent/models/settings`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load model settings: ${res.status}`);
+  }
+  return res.json() as Promise<ModelSettingsView>;
+}
+
+/** Persist model-role picks. Invalid bodies are a 400 with `problems`. */
+export async function putModelSettings(
+  settings: ModelSettings,
+): Promise<ModelSettingsView> {
+  const res = await fetch(`${API_BASE}/api/agent/models/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const problems = Array.isArray((body as { problems?: unknown }).problems)
+      ? ((body as { problems: string[] }).problems.join('; '))
+      : '';
+    throw new Error(
+      problems || (body as { error?: string }).error || `Failed to save model settings: ${res.status}`,
+    );
+  }
+  return res.json() as Promise<ModelSettingsView>;
+}
+
 /** Fetch Ollama Cloud balance (session/weekly limits or USD credits). */
 export async function fetchOllamaBalance(): Promise<OllamaBalance> {
   const res = await fetch(`${API_BASE}/api/agent/usage/balance`);
@@ -309,6 +347,34 @@ export async function saveUserMemory(
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Failed to save profile: ${res.status}`);
+  }
+  const { op } = (await res.json()) as { op: MemoryOp };
+  return op;
+}
+
+/** Memory suggestions waiting for approval (learning loop and staged writes). */
+export async function fetchPendingMemory(): Promise<MemoryOp[]> {
+  const res = await fetch(`${API_BASE}/api/agent/memory/pending`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load suggestions: ${res.status}`);
+  }
+  const { ops } = (await res.json()) as { ops: MemoryOp[] };
+  return ops;
+}
+
+export async function resolvePendingMemory(
+  opId: string,
+  decision: 'approve' | 'reject',
+): Promise<MemoryOp> {
+  const res = await fetch(`${API_BASE}/api/agent/memory/pending/${encodeURIComponent(opId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to ${decision} suggestion: ${res.status}`);
   }
   const { op } = (await res.json()) as { op: MemoryOp };
   return op;

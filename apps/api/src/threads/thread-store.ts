@@ -21,6 +21,7 @@ import {
   parseSnapshot,
   sameWorkspaceRoot,
   selectPlanForRewind,
+  parseRunTaskRecords,
   parseThreadLastRun,
   type ChatMessage,
   type ContextWindowMode,
@@ -32,11 +33,15 @@ import {
   type Snapshot,
   type Thread,
   type ThreadKind,
+  type RunTaskRecord,
   type ThreadLastRun,
   type ThreadPlan,
 } from '@agent/agent-models';
+import { looksLikeSecret, type SessionSearchHit } from '@agent/agent-core';
 
 const BLOB_INLINE_MAX = 8 * 1024;
+/** Run task records a thread file keeps (oldest leave first); the prompt bounds what it shows. */
+const TASK_RECORDS_MAX = 200;
 
 export type AppendInput = {
   threadId: string;
@@ -244,6 +249,7 @@ export class ThreadStore {
     await this.deleteChildThreads(id);
     await rm(this.threadDir(id), { recursive: true, force: true });
     this.db.prepare(`DELETE FROM threads WHERE id = ?`).run(id);
+    this.db.prepare(`DELETE FROM messages_fts WHERE thread_id = ?`).run(id);
     this.writers.delete(id);
     this.seqs.delete(id);
     return true;
@@ -334,6 +340,80 @@ export class ThreadStore {
       if (message) messages.push(message);
     }
     return messages;
+  }
+
+  /**
+   * Keyword search over user and assistant text of top-level threads
+   * (session_search). Tool output is never indexed. Each word is quoted, so
+   * FTS syntax in the query is matched literally; words are OR-ed and the
+   * best matches (bm25) come first.
+   */
+  searchMessages(
+    query: string,
+    options: { excludeThreadId?: string; limit: number },
+  ): SessionSearchHit[] {
+    const words = query
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter((word) => word.length > 0)
+      .slice(0, 12);
+    if (words.length === 0) return [];
+    const match = words.map((word) => `"${word.replace(/"/g, '""')}"`).join(' OR ');
+    const rows = this.db
+      .prepare(
+        `SELECT messages_fts.thread_id AS threadId, t.title AS title,
+                messages_fts.seq AS seq, messages_fts.role AS role,
+                snippet(messages_fts, 0, '[', ']', '…', 16) AS snippet
+           FROM messages_fts JOIN threads t ON t.id = messages_fts.thread_id
+          WHERE messages_fts MATCH ? AND messages_fts.thread_id != ?
+            AND t.parent_thread_id IS NULL
+          ORDER BY rank LIMIT ?`,
+      )
+      .all(match, options.excludeThreadId ?? '', options.limit) as Array<{
+      threadId: string;
+      title: string;
+      seq: number;
+      role: string;
+      snippet: string;
+    }>;
+    return rows.map((row) => ({
+      threadId: row.threadId,
+      title: row.title,
+      seq: Number(row.seq),
+      role: row.role === 'assistant' ? 'assistant' : 'user',
+      snippet: row.snippet,
+    }));
+  }
+
+  /**
+   * Index every existing ledger once (threads written before the search
+   * index existed). Runs in the background at startup; marks itself done.
+   */
+  async backfillSearchIndex(): Promise<void> {
+    const done = this.db
+      .prepare(`SELECT value FROM search_meta WHERE key = 'backfilled'`)
+      .get() as { value?: string } | undefined;
+    if (done?.value) return;
+    const ids = this.db.prepare(`SELECT id FROM threads`).all() as Array<{ id: string }>;
+    for (const { id } of ids) {
+      const envelopes = await this.readLedger(id, 0);
+      this.db.prepare(`DELETE FROM messages_fts WHERE thread_id = ?`).run(id);
+      for (const envelope of envelopes) this.indexForSearch(envelope);
+    }
+    this.db
+      .prepare(`INSERT OR REPLACE INTO search_meta (key, value) VALUES ('backfilled', ?)`)
+      .run(new Date().toISOString());
+  }
+
+  /** User and assistant text only; skipped when it looks like it holds a secret. */
+  private indexForSearch(envelope: LedgerEnvelope): void {
+    const { record } = envelope;
+    if (record.role !== 'user' && record.role !== 'assistant') return;
+    const text = typeof record.content === 'string' ? record.content.trim() : '';
+    if (!text || looksLikeSecret(text)) return;
+    this.db
+      .prepare(`INSERT INTO messages_fts (body, thread_id, seq, role) VALUES (?, ?, ?, ?)`)
+      .run(text, envelope.threadId, envelope.seq, record.role);
   }
 
   lastUserSeq(envelopes: LedgerEnvelope[]): number | undefined {
@@ -444,6 +524,7 @@ export class ThreadStore {
         : {}),
       ...(input.meta?.toolOutcome ? { toolOutcome: input.meta.toolOutcome } : {}),
       ...(input.meta?.webTrust ? { webTrust: input.meta.webTrust } : {}),
+      ...(input.meta?.messageId ? { messageId: input.meta.messageId } : {}),
       ...(input.skills ? { skills: input.skills } : {}),
     };
 
@@ -466,6 +547,7 @@ export class ThreadStore {
         `UPDATE threads SET last_seq = ?, updated_at = ? WHERE id = ?`,
       )
       .run(envelope.seq, envelope.ts, input.threadId);
+    this.indexForSearch(envelope);
 
     return envelope;
   }
@@ -491,6 +573,9 @@ export class ThreadStore {
         .map((envelope) => envelope.runId as string),
     );
     await this.rewriteLedger(threadId, kept);
+    this.db
+      .prepare(`DELETE FROM messages_fts WHERE thread_id = ? AND seq > ?`)
+      .run(threadId, keepThroughSeq);
     if (touchedRuns.size > 0) {
       await this.deleteChildThreads(threadId, (child) => {
         if (!child.parentRunId || !touchedRuns.has(child.parentRunId)) return false;
@@ -514,6 +599,8 @@ export class ThreadStore {
     if (lastRun && touchedRuns.has(lastRun.runId)) {
       await rm(this.lastRunPath(threadId), { force: true });
     }
+    // A cut run's findings describe work the thread no longer has.
+    await this.dropTaskRecords(threadId, touchedRuns);
   }
 
   private async readJsonFile<T>(
@@ -557,6 +644,34 @@ export class ThreadStore {
       `${JSON.stringify(lastRun, null, 2)}\n`,
       'utf8',
     );
+  }
+
+  /** Task records of this thread's runs, oldest first (see RunTaskRecord). */
+  async readTaskRecords(threadId: string): Promise<RunTaskRecord[]> {
+    return this.readJsonFile(this.taskRecordsPath(threadId), parseRunTaskRecords, []);
+  }
+
+  /**
+   * Store one run's task record (a re-run of the same id replaces it). The
+   * oldest records leave past TASK_RECORDS_MAX runs; the prompt bounds what
+   * it shows anyway, this only bounds the file.
+   */
+  async appendTaskRecord(threadId: string, record: RunTaskRecord): Promise<void> {
+    const records = (await this.readTaskRecords(threadId)).filter((entry) => entry.runId !== record.runId);
+    records.push(record);
+    await writeFile(
+      this.taskRecordsPath(threadId),
+      `${JSON.stringify(records.slice(-TASK_RECORDS_MAX), null, 2)}\n`,
+      'utf8',
+    );
+  }
+
+  private async dropTaskRecords(threadId: string, runIds: Set<string>): Promise<void> {
+    if (runIds.size === 0) return;
+    const records = await this.readTaskRecords(threadId);
+    const kept = records.filter((record) => !runIds.has(record.runId));
+    if (kept.length === records.length) return;
+    await writeFile(this.taskRecordsPath(threadId), `${JSON.stringify(kept, null, 2)}\n`, 'utf8');
   }
 
   async readPlan(threadId: string): Promise<ThreadPlan> {
@@ -699,6 +814,10 @@ export class ThreadStore {
   private lastRunPath(threadId: string): string {
     return path.join(this.threadDir(threadId), 'last-run.json');
   }
+
+  private taskRecordsPath(threadId: string): string {
+    return path.join(this.threadDir(threadId), 'task-records.json');
+  }
 }
 
 type CatalogThreadRow = {
@@ -778,6 +897,15 @@ export async function openThreadStore(home: string): Promise<ThreadStore> {
   ensureColumn(db, 'threads', 'parent_run_id', `parent_run_id TEXT`);
   ensureColumn(db, 'threads', 'context_window_mode', `context_window_mode TEXT`);
   ensureColumn(db, 'threads', 'subagent_profile', `subagent_profile TEXT`);
+  // Session search: user/assistant text only. A virtual FTS5 table, so it is
+  // rebuilt from the ledgers (backfillSearchIndex) rather than migrated.
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+      body, thread_id UNINDEXED, seq UNINDEXED, role UNINDEXED,
+      tokenize = 'unicode61'
+    );
+    CREATE TABLE IF NOT EXISTS search_meta (key TEXT PRIMARY KEY, value TEXT);
+  `);
   db.exec(`
     UPDATE threads SET kind = 'home' WHERE kind IN ('research', '');
     UPDATE threads SET kind = 'workspace' WHERE kind = 'coding';

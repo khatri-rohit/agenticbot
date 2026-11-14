@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CONTEXT_BUDGET, type LedgerEnvelope } from '@agent/agent-models';
+import { DEFAULT_CONTEXT_BUDGET, parseSnapshot, type LedgerEnvelope } from '@agent/agent-models';
 
 import {
   buildExtractiveSnapshot,
   chooseCompactThroughSeq,
+  foldedTranscript,
 } from './compact-snapshot';
 import {
   assembleContext,
@@ -123,7 +124,10 @@ describe('compact snapshot', () => {
     });
     const blob = JSON.stringify(messages);
     expect(blob).toContain('new question');
-    expect(blob).not.toContain('old answer');
+    // The compacted row is not sent as a message (the situation card may still quote its lead).
+    expect(
+      messages.some((m) => m.role === 'assistant' && m.content === 'old answer'),
+    ).toBe(false);
     expect(blob).toContain('Goal: old question');
   });
 
@@ -247,7 +251,8 @@ describe('compact snapshot', () => {
     const last = users[2];
     expect(last?.role).toBe('user');
     if (last?.role === 'user') {
-      expect(last.content).toBe('now?');
+      // Per-send harness context rides ahead of the user's own words.
+      expect(String(last.content).endsWith('now?')).toBe(true);
     }
   });
 
@@ -291,5 +296,68 @@ describe('compact snapshot', () => {
     if (first?.role === 'user') {
       expect(first.content).toBe('first\n(stub) 1 image attachment omitted');
     }
+  });
+});
+
+describe('folded turns stay restorable', () => {
+  const sha = 'b'.repeat(64);
+  const turns: LedgerEnvelope[] = [
+    envelope(1, 'user', 'find the port'),
+    {
+      v: 1,
+      seq: 2,
+      ts: '2026-01-01T00:00:00.000Z',
+      threadId: 't1',
+      runId: 'r1',
+      record: {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'grep', arguments: '{"pattern":"PORT"}' } }],
+      },
+    },
+    { v: 1, seq: 3, ts: '2026-01-01T00:00:00.000Z', threadId: 't1', runId: 'r1', record: { role: 'tool', tool_call_id: 'c1', content: 'src/main.ts:12: PORT = 3000' } },
+    {
+      v: 1,
+      seq: 4,
+      ts: '2026-01-01T00:00:00.000Z',
+      threadId: 't1',
+      runId: 'r1',
+      record: { role: 'tool', tool_call_id: 'c2', content: 'huge body' },
+      contentBlob: sha,
+    },
+    envelope(5, 'assistant', 'The port is 3000.'),
+    envelope(6, 'user', 'a newer question'),
+  ];
+
+  it('writes every folded message, call and result (or its blob sha), and nothing after the cut', () => {
+    const text = foldedTranscript(turns, 5);
+    expect(text).toContain('## User (seq 1)\nfind the port');
+    expect(text).toContain('[call c1] grep {"pattern":"PORT"}');
+    expect(text).toContain('src/main.ts:12: PORT = 3000');
+    expect(text).toContain(`(stored: recall sha256:${sha})`);
+    expect(text).not.toContain('huge body');
+    expect(text).toContain('The port is 3000.');
+    expect(text).not.toContain('a newer question');
+  });
+
+  it('points the summary at the transcript, and the snapshot keeps the sha through a reload', () => {
+    const snapshot = {
+      threadId: 't1',
+      throughSeq: 5,
+      model: 'test',
+      brief: 'Goal: find the port',
+      summary: 'User asked for the port; it is 3000.',
+      transcriptSha: 'c'.repeat(64),
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    expect(parseSnapshot(JSON.parse(JSON.stringify(snapshot)))?.transcriptSha).toBe('c'.repeat(64));
+    expect(parseSnapshot({ ...snapshot, transcriptSha: 'not-a-sha' })).not.toHaveProperty('transcriptSha');
+    const { messages } = assembleContext({
+      tools: createToolRegistry([]),
+      memory: { user: '', notes: '' },
+      snapshot,
+      envelopes: turns,
+    });
+    expect(String(messages[0]!.content)).toContain(`recall sha256:${'c'.repeat(64)}`);
   });
 });

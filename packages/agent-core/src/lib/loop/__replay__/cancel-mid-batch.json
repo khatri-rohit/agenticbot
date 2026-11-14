@@ -5,6 +5,29 @@
     "iterations": 1,
     "toolCalls": 2,
     "status": "error",
+    "task": {
+      "phase": "change",
+      "iteration": 1,
+      "taskClass": "small",
+      "shape": "unknown",
+      "workingSet": [],
+      "evidence": {
+        "edits": 0,
+        "failedEdits": 0,
+        "commands": [],
+        "toolErrors": 1,
+        "unverifiedSince": null,
+        "uncheckedFiles": [],
+        "lastCheck": null,
+        "reviewed": false,
+        "findings": [],
+        "lastEvidenceIteration": 0
+      },
+      "phaseIterations": {
+        "orient": 1
+      },
+      "childGaps": []
+    },
     "usage": {
       "own": {
         "promptTokens": 1000,
@@ -29,7 +52,31 @@
       "depth": 0,
       "mode": "workspace",
       "posture": "agent",
-      "windowTokens": 200000
+      "windowTokens": 260000,
+      "flags": {
+        "outcomeCards": true,
+        "promptTiers": true,
+        "harnessNotes": true,
+        "compactHomePrompt": false,
+        "situationCard": true,
+        "effortEscalation": true,
+        "stopCheck": true,
+        "sectionedSummary": true,
+        "learningLoop": true,
+        "stateCard": true
+      },
+      "taskShape": "unknown"
+    },
+    {
+      "type": "context_shape",
+      "runId": "replay-run",
+      "iteration": 1,
+      "messages": 1,
+      "promptTokens": 3,
+      "residentToolTokens": 0,
+      "residueTokens": 0,
+      "prefixStableMessages": 0,
+      "cardTokens": 0
     },
     {
       "type": "llm_request",
@@ -61,11 +108,46 @@
       }
     },
     {
+      "type": "task_phase",
+      "runId": "replay-run",
+      "iteration": 1,
+      "from": "orient",
+      "to": "change",
+      "cause": "edit_file"
+    },
+    {
       "type": "tool_error",
       "runId": "replay-run",
       "iteration": 1,
       "toolName": "agent",
       "error": "This operation was aborted"
+    },
+    {
+      "type": "task_state",
+      "runId": "replay-run",
+      "state": {
+        "phase": "change",
+        "iteration": 1,
+        "taskClass": "small",
+        "shape": "unknown",
+        "workingSet": [],
+        "evidence": {
+          "edits": 0,
+          "failedEdits": 0,
+          "commands": [],
+          "toolErrors": 1,
+          "unverifiedSince": null,
+          "uncheckedFiles": [],
+          "lastCheck": null,
+          "reviewed": false,
+          "findings": [],
+          "lastEvidenceIteration": 0
+        },
+        "phaseIterations": {
+          "orient": 1
+        },
+        "childGaps": []
+      }
     },
     {
       "type": "run_finish",
@@ -188,5 +270,13 @@
       "tool_call_id": "e2",
       "content": "Skipped: run cancelled."
     }
+  ],
+  "prompts": [
+    [
+      {
+        "role": "user",
+        "content": "do the task"
+      }
+    ]
   ]
 }

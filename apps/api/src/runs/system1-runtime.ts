@@ -31,7 +31,7 @@ type System1Settings = {
 const DEFAULT_MODEL = 'nimble-v3:9b';
 const DEFAULT_TIMEOUT_MS = 5000;
 /** Per-run ceiling on System 1 wall time, before the share of maxWallMs. */
-const RUN_BUDGET_CAP_MS = 20_000;
+const RUN_BUDGET_CAP_MS = 60_000;
 const RUN_BUDGET_SHARE = 0.05;
 
 // One daemon serves every run: breaker and in-flight limit are process-wide.

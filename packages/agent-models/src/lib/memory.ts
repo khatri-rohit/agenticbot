@@ -25,6 +25,8 @@ export type MemoryOp = {
   status: 'applied' | 'staged' | 'rejected' | 'reverted';
   /** Set only by the user's revert: the id of the op this one undoes. */
   reverts?: string;
+  /** Set when the user approves or rejects a staged op: that op's id. */
+  resolves?: string;
 };
 
 /**
@@ -94,6 +96,7 @@ export function parseMemoryOp(raw: unknown): MemoryOp | null {
     ...(typeof record.oldText === 'string' ? { oldText: record.oldText } : {}),
     ...(typeof record.content === 'string' ? { content: record.content } : {}),
     ...(typeof record.reverts === 'string' ? { reverts: record.reverts } : {}),
+    ...(typeof record.resolves === 'string' ? { resolves: record.resolves } : {}),
   };
 }
 
@@ -129,7 +132,7 @@ export const DEFAULT_MEMORY_CAPS: MemoryCaps = {
 
 /** Gate input — host assigns id/ts/status after the verdict. */
 /** What a writer proposes; only the store's revert sets `reverts`. */
-export type ProposedMemoryOp = Omit<MemoryOp, 'v' | 'id' | 'ts' | 'status' | 'reverts'>;
+export type ProposedMemoryOp = Omit<MemoryOp, 'v' | 'id' | 'ts' | 'status' | 'reverts' | 'resolves'>;
 
 export type MemoryGateVerdict = 'apply' | 'stage' | 'reject';
 

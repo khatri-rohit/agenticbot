@@ -6,6 +6,7 @@ import path from 'node:path';
 import { isPauseStop, isResumableStop, RUN_CANCELLED_REASON, type ThinkingValue, type ThreadLastRun } from '@agent/agent-models';
 
 import { readCatalog } from '../read/catalog.js';
+import { readLedger } from '../read/ledger.js';
 import { listRuns } from '../read/runs.js';
 import { linesOf, readRunTrace } from '../read/trace.js';
 import { flattenRuns, loadRunMetrics } from '../metrics/load.js';
@@ -69,6 +70,7 @@ export type TrialResult = {
   reason?: string;
   checksPassed?: boolean;
   filesPassed?: boolean;
+  answersPassed?: boolean;
   scopeViolations?: string[];
   budgetOk?: boolean;
   continues: number;
@@ -227,17 +229,23 @@ export async function runTrial(
     finishedAt: '',
   };
   try {
+    // A home task is a chat: no checkout, no workspace on the thread.
+    const home = task.mode === 'home';
     const workdirs = path.join(opts.evalHome, 'workdirs');
-    const tree = await checkout({
-      source: path.resolve(opts.harnessRoot, task.repo.source),
-      commit: task.repo.commit,
-      dir: path.join(workdirs, `${task.id}-${trial}`),
-    });
-    result.deps = tree.deps;
-    result.depsMs = tree.depsMs;
+    const tree = home
+      ? undefined
+      : await checkout({
+          source: path.resolve(opts.harnessRoot, task.repo.source),
+          commit: task.repo.commit,
+          dir: path.join(workdirs, `${task.id}-${trial}`),
+        });
+    if (tree) {
+      result.deps = tree.deps;
+      result.depsMs = tree.depsMs;
+    }
 
     const thread = await api.createThread({
-      workspaceRoot: tree.dir,
+      ...(tree ? { workspaceRoot: tree.dir } : {}),
       model: opts.model,
       title: `eval ${task.id} #${trial}`,
     });
@@ -245,47 +253,53 @@ export async function runTrial(
 
     // A hard stop well past the task's own budget, so a stuck run cannot hold the suite.
     const deadline = startedAt.getTime() + task.budget.maxMinutes * 2 * 60_000 + 10 * 60_000;
-    let message = task.prompt;
+    // One user turn after another (followUps), each with its own Continues.
+    const turns = [task.prompt, ...(task.followUps ?? [])];
     let limitReason: string | undefined;
-    for (;;) {
-      const { runId } = await api.startRun({
-        threadId: thread.id,
-        content: message,
-        model: opts.model,
-        posture: task.posture,
-        ...(thinking !== undefined ? { thinking } : {}),
-      });
-      result.runIds.push(runId);
-      const budgetStop = task.budget.maxPromptTokens * OVER_BUDGET_FACTOR;
-      let lastRun: ThreadLastRun | null = null;
-      let stopped: { ended: TrialEnd; reason: string } | undefined;
-      while (!lastRun && !stopped) {
-        lastRun = await api.settledLastRun(thread.id, runId, Math.max(0, Math.min(BUDGET_CHECK_MS, deadline - Date.now())));
-        if (lastRun) break;
-        if (Date.now() >= deadline) {
-          stopped = { ended: 'timeout', reason: 'eval.timeout: trial passed its hard deadline' };
-        } else if ((await trialPromptTokens(opts.evalHome, thread.id)) > budgetStop) {
-          stopped = { ended: 'over-budget', reason: `eval.budget: trial passed ${budgetStop} prompt tokens` };
+    for (const [turnIndex, turnPrompt] of turns.entries()) {
+      // The next turn goes only to a thread whose last turn settled with no stop.
+      if (turnIndex > 0 && (result.ended !== 'settled' || limitReason)) break;
+      let message = turnPrompt;
+      for (;;) {
+        const { runId } = await api.startRun({
+          threadId: thread.id,
+          content: message,
+          model: opts.model,
+          posture: task.posture,
+          ...(thinking !== undefined ? { thinking } : {}),
+        });
+        result.runIds.push(runId);
+        const budgetStop = task.budget.maxPromptTokens * OVER_BUDGET_FACTOR;
+        let lastRun: ThreadLastRun | null = null;
+        let stopped: { ended: TrialEnd; reason: string } | undefined;
+        while (!lastRun && !stopped) {
+          lastRun = await api.settledLastRun(thread.id, runId, Math.max(0, Math.min(BUDGET_CHECK_MS, deadline - Date.now())));
+          if (lastRun) break;
+          if (Date.now() >= deadline) {
+            stopped = { ended: 'timeout', reason: 'eval.timeout: trial passed its hard deadline' };
+          } else if ((await trialPromptTokens(opts.evalHome, thread.id)) > budgetStop) {
+            stopped = { ended: 'over-budget', reason: `eval.budget: trial passed ${budgetStop} prompt tokens` };
+          }
         }
-      }
-      if (!lastRun) {
-        await api.cancelRun(runId);
-        // Grade only a settled workspace: a cancelled run can still be finishing a write.
-        if (!(await api.settledLastRun(thread.id, runId, CANCEL_SETTLE_MS))) {
-          throw new Error(`run ${runId} did not settle within ${CANCEL_SETTLE_MS / 1000}s of its cancel; workspace not graded`);
+        if (!lastRun) {
+          await api.cancelRun(runId);
+          // Grade only a settled workspace: a cancelled run can still be finishing a write.
+          if (!(await api.settledLastRun(thread.id, runId, CANCEL_SETTLE_MS))) {
+            throw new Error(`run ${runId} did not settle within ${CANCEL_SETTLE_MS / 1000}s of its cancel; workspace not graded`);
+          }
+          result.ended = stopped!.ended;
+          limitReason = stopped!.reason;
+          break;
         }
-        result.ended = stopped!.ended;
-        limitReason = stopped!.reason;
-        break;
+        limitReason = lastRun.limitReason;
+        // lastRun.status 'error' also covers a server that stopped mid-run (the interrupted marker).
+        result.ended = limitReason === RUN_CANCELLED_REASON ? 'cancelled' : lastRun.status === 'error' ? 'error' : 'settled';
+        // A pause (account ran out) is resumable for a person, not for a trial.
+        if (!limitReason || !isResumableStop(limitReason) || isPauseStop(limitReason)) break;
+        if (result.continues >= opts.continues) break;
+        result.continues += 1;
+        message = CONTINUE_MESSAGE;
       }
-      limitReason = lastRun.limitReason;
-      // lastRun.status 'error' also covers a server that stopped mid-run (the interrupted marker).
-      result.ended = limitReason === RUN_CANCELLED_REASON ? 'cancelled' : lastRun.status === 'error' ? 'error' : 'settled';
-      // A pause (account ran out) is resumable for a person, not for a trial.
-      if (!limitReason || !isResumableStop(limitReason) || isPauseStop(limitReason)) break;
-      if (result.continues >= opts.continues) break;
-      result.continues += 1;
-      message = CONTINUE_MESSAGE;
     }
     if (limitReason) result.limitReason = limitReason;
 
@@ -309,9 +323,16 @@ export async function runTrial(
     result.promptTokens = promptTokens;
     result.minutes = Math.round(minutes * 10) / 10;
 
+    const lastRunId = result.runIds.at(-1);
+    const answer = (await readLedger(opts.evalHome, thread.id)).envelopes
+      .filter((envelope) => envelope.runId === lastRunId && envelope.record.role === 'assistant')
+      .map((envelope) => (typeof envelope.record.content === 'string' ? envelope.record.content : ''))
+      .filter(Boolean)
+      .at(-1);
     const grade = await gradeTrial({
       task,
-      dir: tree.dir,
+      ...(tree ? { dir: tree.dir } : {}),
+      ...(answer ? { answer } : {}),
       promptTokens,
       minutes,
       ...(limitReason ? { unresolvedLimit: limitReason } : {}),
@@ -319,6 +340,7 @@ export async function runTrial(
     result.grade = grade;
     result.checksPassed = grade.checksPassed;
     result.filesPassed = grade.filesPassed;
+    result.answersPassed = grade.answersPassed;
     result.scopeViolations = grade.scopeViolations;
     result.budgetOk = grade.budget.ok;
     result.status = grade.passed ? 'passed' : 'failed';

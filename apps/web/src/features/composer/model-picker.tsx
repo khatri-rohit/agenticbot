@@ -143,7 +143,7 @@ export function ModelPicker({
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-2.5 py-2">
           <Search
-            className="size-3.5 shrink-0 text-muted-foreground/70"
+            className="size-3.5 shrink-0 text-subtle-foreground"
             aria-hidden
           />
           <input
@@ -156,7 +156,7 @@ export function ModelPicker({
             }}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search models…"
-            className="h-5 w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/70"
+            className="h-5 w-full bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
             aria-label="Search models"
             aria-activedescendant={
               filteredModels.length > 0

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { readBaseline, recordBaseline } from '../gate/baseline.js';
 import { compareToBaseline, type GateCompare, type GateResult } from '../gate/gate.js';
 import { readResults, summarizeSuite, type SuiteStats } from '../gate/summary.js';
+import type { TaskSuite } from '../runner/task.js';
 import { flag, type Args } from './args.js';
 import { table, tokens } from './format.js';
 import { runCommandFor, suiteFlag } from './trials.js';
@@ -27,7 +28,7 @@ function compareFlag(args: Args): GateCompare {
 async function candidate(args: Args, suite: string): Promise<SuiteStats> {
   const results = flag(args, 'results');
   if (results) return summarizeSuite(await readResults(path.resolve(results)));
-  const run = await runCommandFor(args, { suite: suite as 'regression' | 'capability' });
+  const run = await runCommandFor(args, { suite: suite as TaskSuite });
   return summarizeSuite(run.results);
 }
 

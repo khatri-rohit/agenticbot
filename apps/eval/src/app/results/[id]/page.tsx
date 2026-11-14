@@ -14,11 +14,12 @@ import { tokens } from '../../../lib/format';
 
 export const dynamic = 'force-dynamic';
 
-/** The four grade parts as dots: checks, files, scope, budget. */
+/** The grade parts as dots: checks, files, answer, scope, budget. */
 function GradeDots({ trial }: { trial: TrialResult }) {
   const parts: [string, boolean | undefined][] = [
     ['checks', trial.checksPassed],
     ['files', trial.filesPassed],
+    ['answer', trial.answersPassed],
     ['scope', trial.scopeViolations ? trial.scopeViolations.length === 0 : undefined],
     ['budget', trial.budgetOk],
   ];

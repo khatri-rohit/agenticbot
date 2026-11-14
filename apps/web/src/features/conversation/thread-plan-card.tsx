@@ -161,7 +161,7 @@ export function PlanChip({ plan }: { plan: ThreadPlan | null }) {
       >
         {allDone ? (
           <Check
-            className="size-3.5 shrink-0 text-muted-foreground/70"
+            className="size-3.5 shrink-0 text-subtle-foreground"
             strokeWidth={2}
           />
         ) : (
@@ -262,7 +262,7 @@ function TodoMark({
 }) {
   if (status === 'completed') {
     return (
-      <Check className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+      <Check className="mt-0.5 size-3.5 shrink-0 text-subtle-foreground" />
     );
   }
   if (status === 'in_progress') {
@@ -271,6 +271,6 @@ function TodoMark({
     );
   }
   return (
-    <Circle className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+    <Circle className="mt-0.5 size-3.5 shrink-0 text-subtle-foreground" />
   );
 }

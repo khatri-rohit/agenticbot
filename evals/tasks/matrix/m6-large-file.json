@@ -1,0 +1,15 @@
+{
+  "id": "m6-large-file",
+  "suite": "matrix",
+  "repo": { "source": ".", "commit": "022dc3a" },
+  "prompt": "apps/web/src/features/composer/chat-input.tsx is a long file. Without changing it, list the aria-label of the last two elements in the file that have one, with their line numbers.",
+  "posture": "ask",
+  "checks": [],
+  "files": [],
+  "answer": [
+    { "mustMatch": "Remove image" },
+    { "mustMatch": "Skills" }
+  ],
+  "scope": { "allow": [] },
+  "budget": { "maxPromptTokens": 400000, "maxMinutes": 8 }
+}

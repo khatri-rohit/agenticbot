@@ -1,7 +1,7 @@
 import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
 
 import { getClient, getOllamaModelConfig, resolveReasoningEffort } from '@agent/agent-core';
-import { clampChatTitle, type OllamaEndpoint } from '@agent/agent-models';
+import { clampChatTitle, type OllamaEndpoint, type ResolvedModelSettings } from '@agent/agent-models';
 
 import type { ThreadStore } from '../threads/thread-store';
 
@@ -13,12 +13,15 @@ import type { ThreadStore } from '../threads/thread-store';
 const TITLE_TIMEOUT_MS = 4_000;
 
 /**
- * TITLE_MODEL (a cloud id) on cloud runs; the run's own model on local runs,
- * where a cloud id would not exist.
+ * The title model from the run's resolved settings (file > env > run's
+ * model). Falls back to the run's own model when no snapshot was passed.
  */
-function titleModelFor(runModel: string, endpoint: OllamaEndpoint): string {
-  const configured = process.env.TITLE_MODEL?.trim();
-  return endpoint === 'cloud' && configured ? configured : runModel;
+function titleModelFor(
+  runModel: string,
+  modelSettings: ResolvedModelSettings | undefined,
+): string {
+  const title = modelSettings?.roles.title;
+  return title && title.source !== 'default' ? title.model : runModel;
 }
 
 /**
@@ -51,13 +54,14 @@ async function generateThreadTitle(
   firstMessage: string,
   model: string,
   endpoint: OllamaEndpoint = 'cloud',
+  modelSettings?: ResolvedModelSettings,
 ): Promise<string> {
   const fallback = seedThreadTitle(firstMessage);
   const snippet = firstMessage.trim().slice(0, 1000);
   if (!snippet) return fallback;
 
   try {
-    const titleModel = titleModelFor(model, endpoint);
+    const titleModel = titleModelFor(model, modelSettings);
     const reasoningEffort = await titleReasoningEffort(titleModel, endpoint);
     const params = {
       model: titleModel,
@@ -101,10 +105,11 @@ export function titleNewThread(
   firstMessage: string,
   model: string,
   endpoint: OllamaEndpoint,
+  modelSettings?: ResolvedModelSettings,
 ): void {
   const seed = seedThreadTitle(firstMessage);
   store.updateThread(threadId, { title: seed, model });
-  void generateThreadTitle(firstMessage, model, endpoint).then((title) => {
+  void generateThreadTitle(firstMessage, model, endpoint, modelSettings).then((title) => {
     if (store.getThread(threadId)?.title === seed) {
       store.updateThread(threadId, { title });
     }

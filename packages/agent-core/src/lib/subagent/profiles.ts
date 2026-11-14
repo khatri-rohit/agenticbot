@@ -8,9 +8,10 @@ import { getSkill } from '../tools/skills';
 import type { SubagentContext, SubagentLimits, SubagentProfile } from './types';
 
 /**
- * Room for real research and review. A child's prompt tokens are also capped
- * at CHILD_BUDGET_SHARE of what the parent has left, so children cannot
- * outspend the parent however high this is.
+ * Ceiling for real research and review. The effort level of a brief
+ * (childAllocation) sets the child's actual limits below this, and its
+ * prompt tokens are also capped at CHILD_BUDGET_SHARE of what the parent
+ * has left, so children cannot outspend the parent.
  */
 const RESEARCH_LIMITS: SubagentLimits = {
   maxIterations: 200,
@@ -32,8 +33,10 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     modelRole: 'fast',
     // Search and report: routine steps, no design calls.
     thinking: 'off',
-    tools: ['glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
+    tools: ['glob', 'grep', 'read_file', 'recall', 'record_finding', 'web_search', 'web_fetch'],
     limits: RESEARCH_LIMITS,
+    // A brief that names no effort gets a bounded one, not 450 calls.
+    defaultThoroughness: 'medium',
     context: 'none',
     rules: false,
     report: true,
@@ -50,10 +53,15 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description:
       'Fresh-context review of uncommitted changes against the user request and project rules. Run once after edits pass verification. Returns issues with location, problem, fix, severity.',
     modelRole: 'strong',
-    // Finding real defects is the hard part; give it the model's full depth.
-    thinking: 'max',
-    tools: ['diff', 'glob', 'grep', 'read_file', 'recall', 'web_search', 'web_fetch'],
+    // Finding real defects is the hard part, so it thinks above the default;
+    // `high`, not `max` (project decision, 2026-11-14): the top level is
+    // more prone to invented findings.
+    thinking: 'high',
+    tools: ['diff', 'glob', 'grep', 'read_file', 'recall', 'record_finding', 'web_search', 'web_fetch'],
     limits: RESEARCH_LIMITS,
+    // A brief that names no effort gets a bounded one, not 450 calls (a
+    // live review ran 237 calls and 1.6M tokens on the ceiling).
+    defaultThoroughness: 'medium',
     context: 'diff',
     rules: true,
     report: true,
@@ -122,7 +130,7 @@ function frontmatter(raw: string): { fields: Map<string, string>; body: string }
 }
 
 const ROLES: ModelRole[] = ['main', 'fast', 'strong'];
-const THINKING: ProfileThinking[] = ['off', 'default', 'max'];
+const THINKING: ProfileThinking[] = ['off', 'default', 'high', 'max'];
 const USER_CONTEXTS: SubagentContext[] = ['none', 'diff'];
 
 function parseUserProfile(file: string, raw: string): SubagentProfile | string {

@@ -13,8 +13,10 @@ import {
   modeForKind,
   normalizeRunPosture,
   normalizeThreadKind,
+  parseHarnessFlags,
   threadMentions,
   type ContextWindowMode,
+  type HarnessFlags,
   type RunPosture,
 } from '@agent/agent-models';
 import {
@@ -22,8 +24,10 @@ import {
   createMemoryTool,
   createPlanTools,
   createRunToolset,
+  createSessionSearchTool,
   loadWorkspaceRules,
   packMentionedThread,
+  prepareCarriedRecord,
   getSkill,
   type MentionedThreadContext,
   type ToolRegistry,
@@ -150,7 +154,10 @@ export async function prepareRun(input: {
   report: ReturnType<typeof assembleContext>['report'];
   mode: ModeConfig;
   posture: RunPosture;
+  /** Resolved once here; the loop must run with the same switches the prompt was built with. */
+  flags: HarnessFlags;
 }> {
+  const flags = parseHarnessFlags(process.env.AGENT_FLAGS);
   const memory = getMemoryStore();
   const kind = normalizeThreadKind(input.thread?.kind);
   const mode = modeForKind(kind);
@@ -186,6 +193,9 @@ export async function prepareRun(input: {
     webSearch: input.webSearch,
     hostTools: [
       ...planTools,
+      createSessionSearchTool(async (query, limit) =>
+        store.searchMessages(query, { excludeThreadId: input.threadId, limit }),
+      ),
       createMemoryTool({
         read: () => memory.read(workspaceRoot),
         apply: async (op) => {
@@ -223,6 +233,18 @@ export async function prepareRun(input: {
     input.threadId,
   );
 
+  // Findings earlier runs recorded (v2 phase 6): carried in the stable
+  // prefix, bounded like the card's record, the rest behind a blob sha.
+  const carriedRecord =
+    input.threadId === 'draft'
+      ? null
+      : await prepareCarriedRecord({
+          records: await store.readTaskRecords(input.threadId),
+          envelopes: input.envelopes,
+          tokens: window.budget.recordCardTokens,
+          putBlob: (text) => store.putBlob(input.threadId, text),
+        });
+
   const skillNames = input.skillNames ?? [];
   const lastRun =
     input.threadId === 'draft' ? null : await readSettledLastRun(store, input.threadId);
@@ -238,6 +260,8 @@ export async function prepareRun(input: {
       skillNames,
       ...(plan ? { plan } : {}),
       ...(lastRun ? { lastRun } : {}),
+      ...(carriedRecord ? { carriedRecord } : {}),
+      flags,
     },
     window.budget,
   );
@@ -248,6 +272,7 @@ export async function prepareRun(input: {
     report: { ...report, windowSource: window.source },
     mode,
     posture,
+    flags,
   };
 }/**
  * The thread's last settled run. While a run is live, its lastRun is only the

@@ -1,20 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import {
-  Ban,
-  Check,
-  ChevronDown,
-  Copy,
-  FilePenLine,
-  FileSearch,
-  FileText,
-  Loader2,
-  Search,
-  SquareTerminal,
-  Wrench,
-  X,
-} from 'lucide-react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Ban, Check, ChevronDown, Copy, Loader2, X } from 'lucide-react';
 import { parseSubagentHeader, subagentDigestBody } from '@agent/agent-models';
 import type { ToolCallRow } from './turn-timeline';
 import { SubagentCard } from './subagent-card';
@@ -157,105 +144,111 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
         action: action === 'set_goal' ? 'Goal' : 'Plan',
       };
     }
-    case 'todo':
+    case 'todo': {
+      const todos = todoItems(args);
+      const done = todos.filter((t) => t.status === 'completed').length;
       return {
         kind: 'other',
-        title: 'checklist',
+        title: todos.length ? `${done} of ${todos.length} done` : 'checklist',
         action: 'Todos',
       };
+    }
     case 'offer_choice':
       return {
         kind: 'other',
         title: asString(args.question) || 'choice',
         action: 'Choice',
       };
+    case 'record_finding':
+      return {
+        kind: 'other',
+        title: asString(args.claim) || 'finding',
+        action: 'Finding',
+      };
     default:
       return { kind: 'other', title: row.toolName, action: row.toolName };
   }
 }
 
-/** File rows with settled edit_file results, for the summary strip. */
-function changedFilesSummary(rows: ToolCallRow[]): ChangesSummaryProps | null {
-  const files: ToolCallRow[] = [];
-  let plus = 0;
-  let minus = 0;
-  let pending = false;
-
-  for (const row of rows) {
-    if (row.toolName !== 'edit_file') continue;
-    if (row.status === 'running') {
-      pending = true;
-      continue;
-    }
-    if (row.status === 'failed' || row.status === 'skipped') continue;
-    const summary = summarizeToolRow(row);
-    files.push(row);
-    plus += summary.plus ?? 0;
-    minus += summary.minus ?? 0;
-  }
-
-  if (files.length === 0 && !pending) return null;
-  return {
-    files: files.length,
-    plus,
-    minus,
-    pending,
-  };
-}
-
-type ChangesSummaryProps = {
-  files: number;
+/**
+ * The collapsed group line ("Read 2 files, edited ledger.ts +41 −3"), with
+ * a failed count for the colored suffix. Verbs stay in narrative order —
+ * look, search, change, run, fetch — and a single edit (or read) prints its
+ * file name instead of a count.
+ */
+type GroupHeader = {
+  text: string;
   plus: number;
   minus: number;
-  pending: boolean;
+  failed: number;
 };
 
-function ChangesSummary({ files, plus, minus, pending }: ChangesSummaryProps) {
-  return (
-    <div
-      className="flex items-center gap-2 overflow-hidden rounded-lg border border-border/50 bg-muted/30 px-3 py-2"
-      aria-label={
-        pending ? 'Writing files…' : `Changed ${files} files +${plus} −${minus}`
-      }
-    >
-      <FilePenLine className="size-3.5 shrink-0 text-muted-foreground" />
-      {pending ? (
-        <span className="type-caption text-muted-foreground">
-          Writing files…
-        </span>
-      ) : (
-        <>
-          <span className="type-caption font-medium text-muted-foreground/80">
-            Changed {files} {files === 1 ? 'file' : 'files'}
-          </span>
-          <span className="type-caption flex-1 font-mono tabular-nums">
-            <span className="text-[var(--status-ok)]">+{plus}</span>{' '}
-            <span className="text-[var(--status-failed)]">−{minus}</span>
-          </span>
-        </>
-      )}
-    </div>
-  );
-}
+function groupHeader(rows: ToolCallRow[]): GroupHeader {
+  const readFiles: string[] = [];
+  const editFiles: string[] = [];
+  const otherActions: string[] = [];
+  let searches = 0;
+  let commands = 0;
+  let fetches = 0;
+  let plus = 0;
+  let minus = 0;
+  let failed = 0;
 
-function KindIcon({
-  kind,
-  action,
-  className,
-}: {
-  kind: ToolKind;
-  action: string;
-  className?: string;
-}) {
-  const shared = cn('size-3.5 shrink-0', className);
-  if (kind === 'terminal') return <SquareTerminal className={shared} />;
-  if (kind === 'search') return <Search className={shared} />;
-  if (kind === 'file' && action === 'Read')
-    return <FileText className={shared} />;
-  if (kind === 'file' && action === 'Edit')
-    return <FilePenLine className={shared} />;
-  if (kind === 'file') return <FileSearch className={shared} />;
-  return <Wrench className={shared} />;
+  for (const row of rows) {
+    if (row.status === 'failed') failed += 1;
+    const summary = summarizeToolRow(row);
+    switch (row.toolName) {
+      case 'read_file':
+        readFiles.push(summary.title);
+        break;
+      case 'edit_file':
+        if (row.status !== 'failed' && row.status !== 'skipped') {
+          editFiles.push(summary.title);
+          plus += summary.plus ?? 0;
+          minus += summary.minus ?? 0;
+        }
+        break;
+      case 'glob':
+      case 'grep':
+      case 'web_search':
+        searches += 1;
+        break;
+      case 'run_terminal':
+        commands += 1;
+        break;
+      case 'web_fetch':
+        fetches += 1;
+        break;
+      default:
+        otherActions.push(summary.action);
+        break;
+    }
+  }
+
+  const parts: string[] = [];
+  if (readFiles.length === 1) parts.push(`Read ${readFiles[0]}`);
+  else if (readFiles.length > 1) parts.push(`Read ${readFiles.length} files`);
+  if (searches === 1) parts.push('Searched');
+  else if (searches > 1) parts.push(`Searched ${searches} times`);
+  if (editFiles.length === 1) parts.push(`Edited ${editFiles[0]}`);
+  else if (editFiles.length > 1) parts.push(`Edited ${editFiles.length} files`);
+  if (commands === 1) parts.push('Ran a command');
+  else if (commands > 1) parts.push(`Ran ${commands} commands`);
+  if (fetches === 1) parts.push('Fetched a page');
+  else if (fetches > 1) parts.push(`Fetched ${fetches} pages`);
+  if (otherActions.length === 1) {
+    const verb = otherActions[0];
+    parts.push(verb.charAt(0).toUpperCase() + verb.slice(1));
+  } else if (otherActions.length > 1) {
+    parts.push(`${otherActions.length} tool calls`);
+  }
+
+  return {
+    text: parts.join(', ') || 'Tool calls',
+    plus,
+    minus,
+    failed,
+  };
 }
 
 function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
@@ -266,109 +259,132 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
     return <X className="size-3.5 shrink-0 text-destructive" />;
   }
   if (status === 'skipped') {
-    return <Ban className="size-3.5 shrink-0 text-muted-foreground/70" />;
+    return <Ban className="size-3.5 shrink-0 text-subtle-foreground" />;
   }
-  return <Check className="size-3.5 shrink-0 text-muted-foreground/70" />;
+  // Settled, successful rows stay bare — the lean line is the point.
+  return null;
 }
 
 /**
- * Each tool call renders as its own inline card in the stream. No group
- * accordion: every row is independently collapsible, so the user always
- * sees what the agent is doing without expanding a wrapper first.
- * A settled-run summary strip ("Changed N files +a −b") sits above the
- * cards when the step wrote files — the glanceable number before detail.
+ * One contiguous tool batch, lean: a single muted header line ("Read 2
+ * files, edited ledger.ts +41 −3 ›") collapses the whole batch; clicking it
+ * opens flat one-line rows, each of which expands to its per-type preview on
+ * a second click. Assistant prose between batches stays full-width — prose
+ * owns the reading path, tool detail is one deliberate click away.
+ *
+ * While any row is still running the group renders open with a pulse sweep
+ * on the running row; it collapses to the header once everything settles.
  */
-export function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
-  if (rows.length === 0) return null;
-  const changes = changedFilesSummary(rows);
-  return (
-    <div className="flex flex-col gap-2">
-      {changes ? <ChangesSummary {...changes} /> : null}
-      {rows.map((row) => {
-        // Ledger rebuild path (UC3/UC6): delegate tool results carry a
-        // machine-readable header. Parse it and render a SubagentCard
-        // instead of a plain tool result.
-        if (row.toolName === 'delegate' && row.result) {
-          const header = parseSubagentHeader(row.result);
-          if (header) {
-            const activity: SubagentActivity = {
-              subRunId: header.subRunId,
-              subThreadId: header.subThreadId,
-              profile: header.profile,
-              task: delegateObjective(row.args).slice(0, 160),
-              status: header.status,
-              iterations: header.iterations,
-              toolCalls: header.toolCalls,
-              summary: stripUntrustedMarkers(subagentDigestBody(row.result)) || undefined,
-              seq: 0,
-            };
-            return (
-              <SubagentCard
-                key={`subagent-${header.subRunId}`}
-                activity={activity}
-              />
-            );
-          }
-        }
-        return <ToolCard key={row.toolCallId} row={row} />;
-      })}
-    </div>
+export const ToolStepList = memo(function ToolStepList({
+  rows,
+}: {
+  rows: ToolCallRow[];
+}) {
+  const hasSubagentRows = rows.some(
+    (row) =>
+      row.toolName === 'delegate' && parseSubagentHeader(row.result ?? ''),
   );
+
+  if (rows.length === 0) return null;
+  if (
+    hasSubagentRows &&
+    rows.every(
+      (row) =>
+        row.toolName === 'delegate' && parseSubagentHeader(row.result ?? ''),
+    )
+  ) {
+    return (
+      <div className="flex flex-col gap-2">
+        {rows.map((row) => (
+          <SubagentRow key={row.toolCallId} row={row} />
+        ))}
+      </div>
+    );
+  }
+  return <ToolGroup rows={rows} />;
+});
+
+/** Ledger rebuild path (UC3/UC6): a delegate result carries a
+ * machine-readable header; the row renders as the full SubagentCard. */
+function SubagentRow({ row }: { row: ToolCallRow }) {
+  const header = parseSubagentHeader(row.result ?? '');
+  if (!header) return null;
+  const activity: SubagentActivity = {
+    subRunId: header.subRunId,
+    subThreadId: header.subThreadId,
+    profile: header.profile,
+    task: delegateObjective(row.args).slice(0, 160),
+    status: header.status,
+    iterations: header.iterations,
+    toolCalls: header.toolCalls,
+    summary:
+      stripUntrustedMarkers(subagentDigestBody(row.result ?? '')) || undefined,
+    seq: 0,
+  };
+  return <SubagentCard activity={activity} />;
 }
 
-/**
- * One tool call. Collapsed = fixed height (header + clipped content teaser +
- * bottom bar with a centered chevron) so the user gets a sense of what the
- * tool is doing without expanding. Expanded = full per-type preview between
- * header and bottom bar, capped at 60vh with an internal scrollbar. Cards
- * start collapsed whether running or settled — the user opens one on click
- * when they want detail, so a live stream of tool activity doesn't balloon
- * the transcript or fight the scroll.
- */
-function ToolCard({ row }: { row: ToolCallRow }) {
-  const [open, setOpen] = useState(false);
+function ToolGroup({ rows }: { rows: ToolCallRow[] }) {
+  const runningRow = rows.find((row) => row.status === 'running');
+  const isRunning = runningRow !== undefined;
+  const [open, setOpen] = useState(isRunning);
+  const wasRunning = useRef(isRunning);
+  const gh = useMemo(() => groupHeader(rows), [rows]);
 
-  const summary = summarizeToolRow(row);
+  // A live batch mounts open and auto-collapses on the running→settled edge,
+  // when the ledger results have landed and the header line is final. A
+  // settled batch from the ledger starts collapsed.
+  useEffect(() => {
+    if (isRunning) {
+      wasRunning.current = true;
+      return;
+    }
+    if (wasRunning.current) {
+      wasRunning.current = false;
+      setOpen(false);
+    }
+  }, [isRunning]);
+
   const toggle = () => setOpen((prev) => !prev);
 
   return (
-    <article
-      className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/50 bg-muted/30"
-      aria-label={`${summary.action}: ${summary.title}`}
-    >
+    <div className="w-full min-w-0">
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-accent/30"
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent/30"
       >
-        <KindIcon
-          kind={summary.kind}
-          action={summary.action}
-          className="text-muted-foreground"
-        />
-        <span className="type-caption shrink-0 font-medium text-muted-foreground/80">
-          {summary.action}
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
-          {summary.title}
-        </span>
-        {summary.minus !== undefined ? (
-          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
-            −{summary.minus}
+        {runningRow ? <StatusIcon status={runningRow.status} /> : null}
+        {open ? (
+          <span className="shrink-0 font-medium text-muted-foreground text-lg">
+            Details
+          </span>
+        ) : (
+          <span
+            className={cn(
+              'min-w-0 flex-1 truncate font-medium text-foreground py-1 text-lg cursor-pointer',
+              runningRow && 'tool-running',
+            )}
+          >
+            {gh.text}
+          </span>
+        )}
+        {!open && gh.plus > 0 ? (
+          <span className="type-ui shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
+            +{gh.plus}
           </span>
         ) : null}
-        {summary.plus !== undefined ? (
-          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
-            +{summary.plus}
+        {!open && gh.minus > 0 ? (
+          <span className="type-ui shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
+            −{gh.minus}
           </span>
         ) : null}
-        {row.durationMs !== undefined && row.status !== 'running' ? (
-          <span className="type-caption shrink-0 tabular-nums text-muted-foreground/70">
-            {row.durationMs}ms
+        {!open && gh.failed > 0 ? (
+          <span className="type-ui shrink-0 font-mono tabular-nums text-destructive">
+            {gh.failed} failed
           </span>
         ) : null}
-        <StatusIcon status={row.status} />
         <ChevronDown
           className={cn(
             'size-3 shrink-0 text-muted-foreground transition-transform',
@@ -378,28 +394,84 @@ function ToolCard({ row }: { row: ToolCallRow }) {
       </button>
 
       {open ? (
-        <div className="min-w-0 max-h-[60vh] overflow-y-auto overflow-x-auto border-t border-border/40 bg-background/40">
-          <ToolPreview row={row} summary={summary} />
+        <div className="mt-1 min-w-0 space-y-0.5 rounded-lg border border-border/40 bg-muted/20 px-2 py-1.5">
+          {rows.map((row) =>
+            row.toolName === 'delegate' &&
+            parseSubagentHeader(row.result ?? '') ? (
+              <SubagentRow key={row.toolCallId} row={row} />
+            ) : (
+              <ToolRow key={row.toolCallId} row={row} />
+            ),
+          )}
         </div>
-      ) : (
-        <div className="relative min-w-0 max-h-24 overflow-hidden border-t border-border/40 bg-background/40">
-          <ToolPreview row={teaserRow(row)} summary={summary} />
-          {/* Fade-to-edge so the clipped teaser reads as "more below — expand". */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-background/90 to-transparent" />
-        </div>
-      )}
+      ) : null}
+    </div>
+  );
+}
 
-      {/* No bottom bar: the header is the one expand affordance, matching the
-          competitive norm (Cursor/ChatGPT tool cards) of one control per card. */}
-    </article>
+/** One line inside an open group. Click toggles the inline per-type preview. */
+function ToolRow({ row }: { row: ToolCallRow }) {
+  const summary = useMemo(() => summarizeToolRow(row), [row]);
+  const [open, setOpen] = useState(false);
+
+  const toggle = () => setOpen((prev) => !prev);
+  const line = summary.action + ': ' + summary.title;
+
+  return (
+    <div className="w-full">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-accent/30"
+      >
+        <StatusIcon status={row.status} />
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate type-ui font-mono text-foreground',
+            row.status === 'running' && 'tool-running',
+          )}
+        >
+          {line}
+          {!open ? ' ›' : ''}
+        </span>
+        {summary.minus !== undefined ? (
+          <span className="type-ui shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
+            −{summary.minus}
+          </span>
+        ) : null}
+        {summary.plus !== undefined ? (
+          <span className="type-ui shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
+            +{summary.plus}
+          </span>
+        ) : null}
+        {row.durationMs !== undefined && row.status !== 'running' ? (
+          <span className="type-ui shrink-0 tabular-nums text-subtle-foreground">
+            {row.durationMs}ms
+          </span>
+        ) : null}
+        <ChevronDown
+          className={cn(
+            'size-3 shrink-0 text-muted-foreground transition-transform',
+            open && 'rotate-180',
+          )}
+        />
+      </button>
+
+      {open ? (
+        <div className="min-w-0 max-h-[60vh] overflow-y-auto overflow-x-auto rounded-lg border border-border/40 bg-card">
+          <ToolPreview row={teaserRow(row)} summary={summary} />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 /** Per-type preview body. Picks a renderer by tool name; falls back to a
  *  generic args + result view. All renderers share the 60vh scroll cap. */
 
-// Collapsed cards mount the preview too; cap result text so a large ledger
-// tool row does not build tens of thousands of hidden DOM nodes by default.
+// Previews mount only while their row is open; cap result text so one
+// expanded preview can't build a huge DOM when the ledger row is very large.
 const TEASER_MAX_CHARS = 2000;
 function teaserRow(row: ToolCallRow): ToolCallRow {
   if (!row.result || row.result.length <= TEASER_MAX_CHARS) return row;
@@ -426,6 +498,8 @@ function ToolPreview({
       return <SearchPreview row={row} />;
     case 'web_fetch':
       return <WebFetchPreview row={row} />;
+    case 'todo':
+      return <TodoPreview row={row} />;
     default:
       return <GenericPreview row={row} />;
   }
@@ -435,7 +509,13 @@ function ToolPreview({
 
 const PREVIEW_SCROLL = 'overflow-x-auto';
 
-function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+function CopyButton({
+  text,
+  label = 'Copy',
+}: {
+  text: string;
+  label?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     if (!text) return;
@@ -477,9 +557,7 @@ function PreviewHeader({
 }) {
   return (
     <div className="flex items-center justify-between gap-2 px-3 pt-2">
-      <p className="type-caption font-medium text-muted-foreground/70">
-        {label}
-      </p>
+      <p className="type-caption font-medium text-subtle-foreground">{label}</p>
       {onCopy}
     </div>
   );
@@ -490,7 +568,7 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
   const content = row.result ?? '';
   if (!content) {
     return (
-      <p className="type-caption px-3 py-2 italic text-muted-foreground/70">
+      <p className="type-caption px-3 py-2 italic text-subtle-foreground">
         {row.status === 'running' ? 'Reading…' : 'No output captured.'}
       </p>
     );
@@ -501,18 +579,37 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
   const firstLine = header ? Number(header[1]) : 1;
   let body = header ? content.slice(header[0].length) : content;
   // "(read_file truncated … continue with offset=…)" is a note, not a file line.
-  const note = body.match(/\n\n(\((?:read_file truncated|continue with)[^\n]*\))$/);
+  const note = body.match(
+    /\n\n(\((?:read_file truncated|continue with)[^\n]*\))$/,
+  );
   if (note) body = body.slice(0, note.index);
-  const lines = body.split('\n');
+  const rawLines = body.split('\n');
+  // Newer results number each line "N<TAB>text"; older ones are plain. The
+  // number feeds the gutter and is stripped from the text and from copy.
+  const numbered =
+    rawLines.length > 0 &&
+    /^\s*\d+\t/.test(rawLines[0] ?? '') &&
+    rawLines.every((line) => line === '' || /^\s*\d+\t/.test(line));
+  const lines = numbered
+    ? rawLines.map((line) => {
+        const match = /^\s*(\d+)\t/.exec(line);
+        return match
+          ? { n: Number(match[1]), text: line.slice(match[0].length) }
+          : { n: undefined, text: line };
+      })
+    : rawLines.map((line, i) => ({ n: firstLine + i, text: line }));
+  const lastLine =
+    [...lines].reverse().find((line) => line.n !== undefined)?.n ??
+    firstLine + lines.length - 1;
   const label = header
-    ? `File · lines ${firstLine}–${firstLine + lines.length - 1} of ${header[2]}`
+    ? `File · lines ${firstLine}–${lastLine} of ${header[2]}`
     : `File · ${lines.length} lines`;
+  const copyText = numbered
+    ? lines.map((line) => line.text).join('\n')
+    : content;
   return (
     <div className="min-w-0">
-      <PreviewHeader
-        label={label}
-        onCopy={<CopyButton text={content} />}
-      />
+      <PreviewHeader label={label} onCopy={<CopyButton text={copyText} />} />
       <pre
         className={cn(
           PREVIEW_SCROLL,
@@ -522,14 +619,14 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
         {lines.map((line, i) => (
           <span key={i} className="block">
             <span className="mr-3 inline-block w-8 shrink-0 select-none text-right text-muted-foreground/40 tabular-nums">
-              {firstLine + i}
+              {line.n ?? ''}
             </span>
-            <span>{line}</span>
+            <span>{line.text}</span>
           </span>
         ))}
       </pre>
       {note ? (
-        <p className="type-caption px-3 pb-2 italic text-muted-foreground/70">
+        <p className="type-caption px-3 pb-2 italic text-subtle-foreground">
           {note[1]}
         </p>
       ) : null}
@@ -554,7 +651,7 @@ function EditFilePreview({
 
   if (row.status === 'running' && !oldText && !newText) {
     return (
-      <p className="type-caption px-3 py-2 italic text-muted-foreground/70">
+      <p className="type-caption px-3 py-2 italic text-subtle-foreground">
         Editing {path}…
       </p>
     );
@@ -579,7 +676,9 @@ function EditFilePreview({
           >
             {oldLines.map((line, i) => (
               <span key={i} className="block">
-                <span className="mr-2 select-none text-[var(--diff-removed-fg)]/70">−</span>
+                <span className="mr-2 select-none text-[var(--diff-removed-fg)]/70">
+                  −
+                </span>
                 {line}
               </span>
             ))}
@@ -600,7 +699,9 @@ function EditFilePreview({
           >
             {newLines.map((line, i) => (
               <span key={i} className="block">
-                <span className="mr-2 select-none text-[var(--diff-added-fg)]/70">+</span>
+                <span className="mr-2 select-none text-[var(--diff-added-fg)]/70">
+                  +
+                </span>
                 {line}
               </span>
             ))}
@@ -608,7 +709,7 @@ function EditFilePreview({
         </div>
       ) : null}
       {oldLines.length === 0 && newLines.length === 0 ? (
-        <p className="type-caption italic text-muted-foreground/70">
+        <p className="type-caption italic text-subtle-foreground">
           {row.result || 'No diff available.'}
         </p>
       ) : null}
@@ -616,43 +717,34 @@ function EditFilePreview({
   );
 }
 
-/** run_terminal: dark block with `$ command` then output. While running,
- *  shows the command and a "Running…" line; output fills on completion. */
+/** run_terminal: the output as one flat terminal well. The command lives in
+ *  the card header (it wraps there when the card is open), so it is never
+ *  repeated here. */
 function TerminalPreview({ row }: { row: ToolCallRow }) {
-  const args = parseArgs(row.args);
-  const command = asString(args.command) || (row.result?.split('\n')[0] ?? '');
-  const output =
-    row.result && row.status !== 'running'
-      ? row.result
-      : row.status === 'running'
-        ? ''
-        : row.result ?? '';
+  const output = row.status === 'running' ? '' : (row.result ?? '');
 
   return (
-    <div className="min-w-0 px-3 py-2">
-      <PreviewHeader
-        label="Terminal"
-        onCopy={output ? <CopyButton text={output} /> : undefined}
-      />
+    <div className="relative min-w-0 bg-[var(--terminal-bg)]">
+      {output ? (
+        <div className="absolute top-1 right-1.5 z-10">
+          <CopyButton text={output} />
+        </div>
+      ) : null}
       <pre
         className={cn(
           PREVIEW_SCROLL,
-          'm-0 min-w-0 whitespace-pre-wrap break-words rounded-lg bg-[var(--terminal-bg)] px-2.5 py-2 font-mono type-caption leading-relaxed text-[var(--terminal-fg)] ring-1 ring-[var(--terminal-ring)]',
+          'm-0 min-w-0 whitespace-pre-wrap break-words px-3 py-2 pr-16 font-mono type-caption leading-relaxed text-[var(--terminal-fg)]',
         )}
       >
-        <span className="block text-[var(--terminal-prompt)]">
-          <span className="mr-1 select-none text-[var(--terminal-muted)]">$</span>
-          {command}
-        </span>
         {row.status === 'running' ? (
-          <span className="mt-1 flex items-center gap-1.5 text-[var(--terminal-muted)]">
+          <span className="flex items-center gap-1.5 text-[var(--terminal-muted)]">
             <Loader2 className="size-3 animate-spin" />
             Running…
           </span>
         ) : output ? (
-          <span className="mt-1 block text-[var(--terminal-fg)]/85">{output}</span>
+          output
         ) : (
-          <span className="mt-1 block text-[var(--terminal-muted)]">No output.</span>
+          <span className="text-[var(--terminal-muted)]">No output.</span>
         )}
       </pre>
     </div>
@@ -683,9 +775,9 @@ function SearchPreview({ row }: { row: ToolCallRow }) {
           {result}
         </pre>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/70">Searching…</p>
+        <p className="type-caption italic text-subtle-foreground">Searching…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/70">
+        <p className="type-caption italic text-subtle-foreground">
           No results.
         </p>
       )}
@@ -715,9 +807,9 @@ function WebFetchPreview({ row }: { row: ToolCallRow }) {
           {content}
         </pre>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/70">Fetching…</p>
+        <p className="type-caption italic text-subtle-foreground">Fetching…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/70">
+        <p className="type-caption italic text-subtle-foreground">
           No content.
         </p>
       )}
@@ -787,9 +879,7 @@ function shortenCell(text: string): string {
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-  );
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function JsonTable({ table }: { table: JsonTable }) {
@@ -801,7 +891,7 @@ function JsonTable({ table }: { table: JsonTable }) {
             {table.columns.map((column) => (
               <th
                 key={column}
-                className="whitespace-nowrap px-2 py-1 font-medium text-muted-foreground/80"
+                className="whitespace-nowrap px-2 py-1 font-medium text-muted-foreground"
               >
                 {column}
               </th>
@@ -825,7 +915,7 @@ function JsonTable({ table }: { table: JsonTable }) {
         </tbody>
       </table>
       {table.rows.length === JSON_TABLE_MAX_ROWS ? (
-        <p className="type-caption mt-1 text-muted-foreground/70">
+        <p className="type-caption mt-1 text-subtle-foreground">
           First {JSON_TABLE_MAX_ROWS} rows shown.
         </p>
       ) : null}
@@ -833,8 +923,78 @@ function JsonTable({ table }: { table: JsonTable }) {
   );
 }
 
+type TodoItem = { content: string; status: string };
+
+/** todo args → items; tolerant of partial/streaming args. */
+function todoItems(args: Record<string, unknown>): TodoItem[] {
+  if (!Array.isArray(args.todos)) return [];
+  return args.todos.flatMap((t) => {
+    if (!t || typeof t !== 'object') return [];
+    const item = t as Record<string, unknown>;
+    const content = asString(item.content);
+    return content
+      ? [{ content, status: asString(item.status) || 'pending' }]
+      : [];
+  });
+}
+
+const TODO_MARK: Record<string, string> = {
+  completed: '✓',
+  in_progress: '◐',
+  pending: '○',
+};
+
+/** todo: the checklist itself, not its JSON. */
+function TodoPreview({ row }: { row: ToolCallRow }) {
+  const todos = todoItems(parseArgs(row.args));
+  if (todos.length === 0) return <GenericPreview row={row} />;
+  return (
+    <ul className="min-w-0 space-y-1 px-3 py-2 type-ui">
+      {todos.map((todo, i) => (
+        <li key={i} className="flex min-w-0 items-start gap-2">
+          <span
+            aria-hidden
+            className={cn(
+              'w-3.5 shrink-0 text-center tabular-nums',
+              todo.status === 'completed'
+                ? 'text-[var(--status-ok)]'
+                : 'text-subtle-foreground',
+            )}
+          >
+            {TODO_MARK[todo.status] ?? '○'}
+          </span>
+          <span
+            className={cn(
+              'min-w-0',
+              todo.status === 'completed'
+                ? 'text-muted-foreground line-through decoration-subtle-foreground/60'
+                : 'text-foreground',
+            )}
+          >
+            <span className="sr-only">{todo.status.replace('_', ' ')}: </span>
+            {todo.content}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Top-level args as label/value pairs; nested values are summarised. */
+function readableArgs(raw: string): Array<[string, string]> | null {
+  const args = parseArgs(raw);
+  const entries = Object.entries(args);
+  if (entries.length === 0) return null;
+  return entries.map(([key, value]) => {
+    if (Array.isArray(value)) return [key, `${value.length} items`];
+    if (value && typeof value === 'object') return [key, '{…}'];
+    return [key, String(value)];
+  });
+}
+
 function GenericPreview({ row }: { row: ToolCallRow }) {
   const args = row.args ?? '';
+  const pairs = useMemo(() => readableArgs(args), [args]);
   const result = row.result ?? '';
   const table = useMemo(
     () => (result ? parseJsonTable(result) : null),
@@ -845,23 +1005,42 @@ function GenericPreview({ row }: { row: ToolCallRow }) {
     <div className="min-w-0 space-y-2 px-3 py-2">
       {args ? (
         <div className="min-w-0">
-          <PreviewHeader label="Args" onCopy={<CopyButton text={args} />} />
-          <pre
-            className={cn(
-              PREVIEW_SCROLL,
-              'm-0 min-w-0 whitespace-pre-wrap break-words px-1 py-1 font-mono type-caption leading-relaxed text-foreground/90',
-            )}
-          >
-            {args}
-          </pre>
+          <PreviewHeader label="Input" onCopy={<CopyButton text={args} />} />
+          {pairs ? (
+            <dl className="grid min-w-0 grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 px-1 py-1 type-caption">
+              {pairs.map(([key, value]) => (
+                <div key={key} className="contents">
+                  <dt className="text-subtle-foreground">{key}</dt>
+                  <dd
+                    className="m-0 min-w-0 truncate text-foreground"
+                    title={value}
+                  >
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {/* Raw JSON stays one click away for debugging, out of the
+              reading path. */}
+          <details className="px-1">
+            <summary className="type-caption cursor-pointer text-subtle-foreground hover:text-foreground">
+              Raw JSON
+            </summary>
+            <pre
+              className={cn(
+                PREVIEW_SCROLL,
+                'm-0 mt-1 min-w-0 whitespace-pre-wrap break-words font-mono type-caption leading-relaxed text-foreground/90',
+              )}
+            >
+              {args}
+            </pre>
+          </details>
         </div>
       ) : null}
       {result ? (
         <div className="min-w-0">
-          <PreviewHeader
-            label="Output"
-            onCopy={<CopyButton text={result} />}
-          />
+          <PreviewHeader label="Output" onCopy={<CopyButton text={result} />} />
           {table && table.rows.length > 0 ? (
             <JsonTable table={table} />
           ) : (
@@ -876,9 +1055,9 @@ function GenericPreview({ row }: { row: ToolCallRow }) {
           )}
         </div>
       ) : row.status === 'running' ? (
-        <p className="type-caption italic text-muted-foreground/70">Running…</p>
+        <p className="type-caption italic text-subtle-foreground">Running…</p>
       ) : (
-        <p className="type-caption italic text-muted-foreground/70">
+        <p className="type-caption italic text-subtle-foreground">
           No output captured.
         </p>
       )}
