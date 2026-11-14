@@ -1,18 +1,12 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Ban,
   Check,
   ChevronDown,
   Copy,
-  FilePenLine,
-  FileSearch,
-  FileText,
   Loader2,
-  Search,
-  SquareTerminal,
-  Wrench,
   X,
 } from 'lucide-react';
 import { parseSubagentHeader, subagentDigestBody } from '@agent/agent-models';
@@ -183,88 +177,85 @@ export function summarizeToolRow(row: ToolCallRow): ToolSummary {
   }
 }
 
-/** File rows with settled edit_file results, for the summary strip. */
-function changedFilesSummary(rows: ToolCallRow[]): ChangesSummaryProps | null {
-  const files: ToolCallRow[] = [];
-  let plus = 0;
-  let minus = 0;
-  let pending = false;
-
-  for (const row of rows) {
-    if (row.toolName !== 'edit_file') continue;
-    if (row.status === 'running') {
-      pending = true;
-      continue;
-    }
-    if (row.status === 'failed' || row.status === 'skipped') continue;
-    const summary = summarizeToolRow(row);
-    files.push(row);
-    plus += summary.plus ?? 0;
-    minus += summary.minus ?? 0;
-  }
-
-  if (files.length === 0 && !pending) return null;
-  return {
-    files: files.length,
-    plus,
-    minus,
-    pending,
-  };
-}
-
-type ChangesSummaryProps = {
-  files: number;
+/**
+ * The collapsed group line ("Read 2 files, edited ledger.ts +41 −3"), with
+ * a failed count for the colored suffix. Verbs stay in narrative order —
+ * look, search, change, run, fetch — and a single edit (or read) prints its
+ * file name instead of a count.
+ */
+type GroupHeader = {
+  text: string;
   plus: number;
   minus: number;
-  pending: boolean;
+  failed: number;
 };
 
-function ChangesSummary({ files, plus, minus, pending }: ChangesSummaryProps) {
-  return (
-    <div
-      className="flex items-center gap-2 overflow-hidden rounded-lg border border-border/50 bg-muted/30 px-3 py-2"
-      aria-label={
-        pending ? 'Writing files…' : `Changed ${files} files +${plus} −${minus}`
-      }
-    >
-      <FilePenLine className="size-3.5 shrink-0 text-muted-foreground" />
-      {pending ? (
-        <span className="type-caption text-muted-foreground">
-          Writing files…
-        </span>
-      ) : (
-        <>
-          <span className="type-caption font-medium text-muted-foreground">
-            Changed {files} {files === 1 ? 'file' : 'files'}
-          </span>
-          <span className="type-caption flex-1 font-mono tabular-nums">
-            <span className="text-[var(--status-ok)]">+{plus}</span>{' '}
-            <span className="text-[var(--status-failed)]">−{minus}</span>
-          </span>
-        </>
-      )}
-    </div>
-  );
-}
+function groupHeader(rows: ToolCallRow[]): GroupHeader {
+  const readFiles: string[] = [];
+  const editFiles: string[] = [];
+  const otherActions: string[] = [];
+  let searches = 0;
+  let commands = 0;
+  let fetches = 0;
+  let plus = 0;
+  let minus = 0;
+  let failed = 0;
 
-function KindIcon({
-  kind,
-  action,
-  className,
-}: {
-  kind: ToolKind;
-  action: string;
-  className?: string;
-}) {
-  const shared = cn('size-3.5 shrink-0', className);
-  if (kind === 'terminal') return <SquareTerminal className={shared} />;
-  if (kind === 'search') return <Search className={shared} />;
-  if (kind === 'file' && action === 'Read')
-    return <FileText className={shared} />;
-  if (kind === 'file' && action === 'Edit')
-    return <FilePenLine className={shared} />;
-  if (kind === 'file') return <FileSearch className={shared} />;
-  return <Wrench className={shared} />;
+  for (const row of rows) {
+    if (row.status === 'failed') failed += 1;
+    const summary = summarizeToolRow(row);
+    switch (row.toolName) {
+      case 'read_file':
+        readFiles.push(summary.title);
+        break;
+      case 'edit_file':
+        if (row.status !== 'failed' && row.status !== 'skipped') {
+          editFiles.push(summary.title);
+          plus += summary.plus ?? 0;
+          minus += summary.minus ?? 0;
+        }
+        break;
+      case 'glob':
+      case 'grep':
+      case 'web_search':
+        searches += 1;
+        break;
+      case 'run_terminal':
+        commands += 1;
+        break;
+      case 'web_fetch':
+        fetches += 1;
+        break;
+      default:
+        otherActions.push(summary.action);
+        break;
+    }
+  }
+
+  const parts: string[] = [];
+  if (readFiles.length === 1) parts.push(`Read ${readFiles[0]}`);
+  else if (readFiles.length > 1) parts.push(`Read ${readFiles.length} files`);
+  if (searches === 1) parts.push('Searched');
+  else if (searches > 1) parts.push(`Searched ${searches} times`);
+  if (editFiles.length === 1) parts.push(`Edited ${editFiles[0]}`);
+  else if (editFiles.length > 1) parts.push(`Edited ${editFiles.length} files`);
+  if (commands === 1) parts.push('Ran a command');
+  else if (commands > 1) parts.push(`Ran ${commands} commands`);
+  if (fetches === 1) parts.push('Fetched a page');
+  else if (fetches > 1) parts.push(`Fetched ${fetches} pages`);
+  if (otherActions.length === 1) {
+    const verb = otherActions[0];
+    parts.push(verb.charAt(0).toUpperCase() + verb.slice(1));
+  } else if (otherActions.length > 1) {
+    parts.push(`${otherActions.length} tool calls`);
+  }
+
+  return {
+    text: parts.join(', ') || 'Tool calls',
+    plus,
+    minus,
+    failed,
+  };
 }
 
 function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
@@ -277,102 +268,176 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
   if (status === 'skipped') {
     return <Ban className="size-3.5 shrink-0 text-subtle-foreground" />;
   }
-  return <Check className="size-3.5 shrink-0 text-subtle-foreground" />;
+  // Settled, successful rows stay bare — the lean line is the point.
+  return null;
 }
 
 /**
- * Each tool call renders as its own inline card in the stream. No group
- * accordion: every row is independently collapsible, so the user always
- * sees what the agent is doing without expanding a wrapper first.
- * A settled-run summary strip ("Changed N files +a −b") sits above the
- * cards when the step wrote files — the glanceable number before detail.
+ * One contiguous tool batch, lean: a single muted header line ("Read 2
+ * files, edited ledger.ts +41 −3 ›") collapses the whole batch; clicking it
+ * opens flat one-line rows, each of which expands to its per-type preview on
+ * a second click. Assistant prose between batches stays full-width — prose
+ * owns the reading path, tool detail is one deliberate click away.
+ *
+ * While any row is still running the group renders open with a pulse sweep
+ * on the running row; it collapses to the header once everything settles.
  */
 export const ToolStepList = memo(function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
-  if (rows.length === 0) return null;
-  const changes = changedFilesSummary(rows);
-  return (
-    <div className="flex flex-col gap-2">
-      {changes ? <ChangesSummary {...changes} /> : null}
-      {rows.map((row) => {
-        // Ledger rebuild path (UC3/UC6): delegate tool results carry a
-        // machine-readable header. Parse it and render a SubagentCard
-        // instead of a plain tool result.
-        if (row.toolName === 'delegate' && row.result) {
-          const header = parseSubagentHeader(row.result);
-          if (header) {
-            const activity: SubagentActivity = {
-              subRunId: header.subRunId,
-              subThreadId: header.subThreadId,
-              profile: header.profile,
-              task: delegateObjective(row.args).slice(0, 160),
-              status: header.status,
-              iterations: header.iterations,
-              toolCalls: header.toolCalls,
-              summary:
-                stripUntrustedMarkers(subagentDigestBody(row.result)) ||
-                undefined,
-              seq: 0,
-            };
-            return (
-              <SubagentCard
-                key={`subagent-${header.subRunId}`}
-                activity={activity}
-              />
-            );
-          }
-        }
-        return <ToolCard key={row.toolCallId} row={row} />;
-      })}
-    </div>
+  const hasSubagentRows = rows.some(
+    (row) => row.toolName === 'delegate' && parseSubagentHeader(row.result ?? ''),
   );
+
+  if (rows.length === 0) return null;
+  if (
+    hasSubagentRows &&
+    rows.every(
+      (row) => row.toolName === 'delegate' && parseSubagentHeader(row.result ?? ''),
+    )
+  ) {
+    return (
+      <div className="flex flex-col gap-2">
+        {rows.map((row) => (
+          <SubagentRow key={row.toolCallId} row={row} />
+        ))}
+      </div>
+    );
+  }
+  return <ToolGroup rows={rows} />;
 });
 
-/**
- * One tool call. Collapsed = fixed height (header + clipped content teaser +
- * bottom bar with a centered chevron) so the user gets a sense of what the
- * tool is doing without expanding. Expanded = full per-type preview between
- * header and bottom bar, capped at 60vh with an internal scrollbar. Cards
- * start collapsed whether running or settled — the user opens one on click
- * when they want detail, so a live stream of tool activity doesn't balloon
- * the transcript or fight the scroll.
- */
-function ToolCard({ row }: { row: ToolCallRow }) {
-  const [open, setOpen] = useState(false);
+/** Ledger rebuild path (UC3/UC6): a delegate result carries a
+ * machine-readable header; the row renders as the full SubagentCard. */
+function SubagentRow({ row }: { row: ToolCallRow }) {
+  const header = parseSubagentHeader(row.result ?? '');
+  if (!header) return null;
+  const activity: SubagentActivity = {
+    subRunId: header.subRunId,
+    subThreadId: header.subThreadId,
+    profile: header.profile,
+    task: delegateObjective(row.args).slice(0, 160),
+    status: header.status,
+    iterations: header.iterations,
+    toolCalls: header.toolCalls,
+    summary: stripUntrustedMarkers(subagentDigestBody(row.result ?? '')) || undefined,
+    seq: 0,
+  };
+  return <SubagentCard activity={activity} />;
+}
 
-  const summary = summarizeToolRow(row);
+function ToolGroup({ rows }: { rows: ToolCallRow[] }) {
+  const runningRow = rows.find((row) => row.status === 'running');
+  const isRunning = runningRow !== undefined;
+  const [open, setOpen] = useState(isRunning);
+  const wasRunning = useRef(isRunning);
+  const gh = useMemo(() => groupHeader(rows), [rows]);
+
+  // A live batch mounts open and auto-collapses on the running→settled edge,
+  // when the ledger results have landed and the header line is final. A
+  // settled batch from the ledger starts collapsed.
+  useEffect(() => {
+    if (isRunning) {
+      wasRunning.current = true;
+      return;
+    }
+    if (wasRunning.current) {
+      wasRunning.current = false;
+      setOpen(false);
+    }
+  }, [isRunning]);
+
   const toggle = () => setOpen((prev) => !prev);
 
   return (
-    <article
-      className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card"
-      aria-label={`${summary.action}: ${summary.title}`}
-    >
+    <div className="w-full min-w-0">
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-accent/30"
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent/30"
       >
-        <KindIcon
-          kind={summary.kind}
-          action={summary.action}
-          className="text-muted-foreground"
+        {runningRow ? <StatusIcon status={runningRow.status} /> : null}
+        {open ? (
+          <span className="type-caption shrink-0 font-medium text-muted-foreground">
+            Details
+          </span>
+        ) : (
+          <span
+            className={cn(
+              'min-w-0 flex-1 truncate type-caption font-medium text-muted-foreground',
+              runningRow && 'tool-running',
+            )}
+          >
+            {gh.text}
+          </span>
+        )}
+        {!open && gh.plus > 0 ? (
+          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
+            +{gh.plus}
+          </span>
+        ) : null}
+        {!open && gh.minus > 0 ? (
+          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
+            −{gh.minus}
+          </span>
+        ) : null}
+        {!open && gh.failed > 0 ? (
+          <span className="type-caption shrink-0 font-mono tabular-nums text-destructive">
+            {gh.failed} failed
+          </span>
+        ) : null}
+        <ChevronDown
+          className={cn(
+            'size-3 shrink-0 text-muted-foreground transition-transform',
+            open && 'rotate-180',
+          )}
         />
-        <span className="type-caption shrink-0 font-medium text-muted-foreground">
-          {summary.action}
-        </span>
+      </button>
+
+      {open ? (
+        <div className="mt-1 min-w-0 space-y-0.5 rounded-lg border border-border/40 bg-muted/20 px-2 py-1.5">
+          {rows.map((row) =>
+            row.toolName === 'delegate' &&
+            parseSubagentHeader(row.result ?? '') ? (
+              <SubagentRow key={row.toolCallId} row={row} />
+            ) : (
+              <ToolRow key={row.toolCallId} row={row} />
+            ),
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One line inside an open group. Click toggles the inline per-type preview. */
+function ToolRow({ row }: { row: ToolCallRow }) {
+  const summary = useMemo(() => summarizeToolRow(row), [row]);
+  const [open, setOpen] = useState(false);
+
+  const toggle = () => setOpen((prev) => !prev);
+  const line = summary.action + ': ' + summary.title;
+
+  return (
+    <div className="w-full">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-accent/30"
+      >
+        <StatusIcon status={row.status} />
         <span
           className={cn(
-            'min-w-0 flex-1 font-mono text-xs text-foreground',
-            open ? 'whitespace-pre-wrap break-all' : 'truncate',
+            'min-w-0 flex-1 truncate type-caption font-mono text-foreground',
+            row.status === 'running' && 'tool-running',
           )}
-          title={open ? undefined : summary.title}
-        >
-          {summary.title}
+       >
+          {line}
+          {!open ? ' ›' : ''}
         </span>
         {summary.minus !== undefined ? (
           <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
-            −{summary.minus}
+          −{summary.minus}
           </span>
         ) : null}
         {summary.plus !== undefined ? (
@@ -385,7 +450,6 @@ function ToolCard({ row }: { row: ToolCallRow }) {
             {row.durationMs}ms
           </span>
         ) : null}
-        <StatusIcon status={row.status} />
         <ChevronDown
           className={cn(
             'size-3 shrink-0 text-muted-foreground transition-transform',
@@ -395,40 +459,19 @@ function ToolCard({ row }: { row: ToolCallRow }) {
       </button>
 
       {open ? (
-        <div className="min-w-0 max-h-[60vh] overflow-y-auto overflow-x-auto border-t border-border/40 bg-card">
-          <ToolPreview row={row} summary={summary} />
-        </div>
-      ) : (
-        <div
-          className="relative min-w-0 max-h-24 cursor-pointer overflow-hidden border-t border-border/40 bg-card"
-          style={
-            {
-              '--teaser-surface':
-                summary.kind === 'terminal'
-                  ? 'var(--terminal-bg)'
-                  : 'var(--card)',
-            } as React.CSSProperties
-          }
-          onClick={toggle}
-        >
+        <div className="min-w-0 max-h-[60vh] overflow-y-auto overflow-x-auto rounded-lg border border-border/40 bg-card">
           <ToolPreview row={teaserRow(row)} summary={summary} />
-          {/* Fade in the card's own colour: a mismatched fade left a hard
-              cut through the last line instead of "more below". */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-[var(--teaser-surface)] to-transparent" />
         </div>
-      )}
-
-      {/* No bottom bar: the header is the one expand affordance, matching the
-          competitive norm (Cursor/ChatGPT tool cards) of one control per card. */}
-    </article>
+      ) : null}
+    </div>
   );
 }
 
 /** Per-type preview body. Picks a renderer by tool name; falls back to a
  *  generic args + result view. All renderers share the 60vh scroll cap. */
 
-// Collapsed cards mount the preview too; cap result text so a large ledger
-// tool row does not build tens of thousands of hidden DOM nodes by default.
+// Previews mount only while their row is open; cap result text so one
+// expanded preview can't build a huge DOM when the ledger row is very large.
 const TEASER_MAX_CHARS = 2000;
 function teaserRow(row: ToolCallRow): ToolCallRow {
   if (!row.result || row.result.length <= TEASER_MAX_CHARS) return row;
