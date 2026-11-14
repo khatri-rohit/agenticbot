@@ -6,6 +6,7 @@ import { ChatHeader } from '@/features/conversation/chat-header';
 import { MessageList } from '@/features/conversation/message-list';
 import { ChatInput } from '@/features/composer/chat-input';
 import { ThreadPlanCard } from '@/features/conversation/thread-plan-card';
+import { SubagentLiveStrip } from '@/features/conversation/subagent-card';
 import { ChoiceCard } from '@/features/conversation/choice-card';
 import { ChatShell } from '@/components/shell/chat-shell';
 import { useAgentRun } from '@/features/conversation/use-agent-run';
@@ -87,11 +88,20 @@ export default function ChatThreadPage({
               onResolve={resolvePendingChoice}
             />
           </div>
-          {/* Live plan overlay: absolute so the composer height never changes. */}
-          {isRunning && chatState.plan ? (
+          {/* Live plan + running sub-agents overlay: absolute so the
+              composer height never changes. */}
+          {isRunning &&
+          (chatState.plan ||
+            (chatState.activeRun?.subagentActivity?.some(
+              (activity) => activity.status === 'running',
+            ) ??
+              false)) ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-full z-10 px-4 pb-2 sm:px-6">
-              <div className="pointer-events-auto mx-auto w-full max-w-4xl">
-                <ThreadPlanCard plan={chatState.plan} />
+              <div className="pointer-events-auto mx-auto w-full max-w-4xl space-y-2">
+                {chatState.plan ? <ThreadPlanCard plan={chatState.plan} /> : null}
+                <SubagentLiveStrip
+                  activities={chatState.activeRun?.subagentActivity}
+                />
               </div>
             </div>
           ) : null}

@@ -132,3 +132,91 @@ export function SubagentCard({ activity }: { activity: SubagentActivity }) {
     </section>
   );
 }
+
+/**
+ * Lean in-flow line for a live delegate: one muted row in the same language
+ * as the tool group rows (profile + objective + live counter, pulse sweep on
+ * the task text). The full-width live link and progress live in the
+ * SubagentLiveStrip above the composer, not in the reading path.
+ */
+export function SubagentLiveLine({ activity }: { activity: SubagentActivity }) {
+  const label = PROFILE_LABELS[activity.profile] ?? activity.profile;
+  const calls = activity.toolCalls ?? 0;
+  return (
+    <div
+      className="flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2"
+      aria-label={`Sub-agent ${label}: ${activity.task}`}
+      aria-busy
+    >
+      <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+      <span className="type-ui shrink-0 font-medium text-foreground/90">
+        {label}
+      </span>
+      <span className="tool-running type-ui min-w-0 flex-1 truncate text-muted-foreground">
+        {activity.task}
+      </span>
+      <span className="type-caption shrink-0 tabular-nums text-muted-foreground">
+        {calls > 0
+          ? `${calls} tool${calls === 1 ? '' : 's'}${activity.lastTool ? ` · ${activity.lastTool}` : ''}`
+          : 'starting…'}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Running sub-agents above the composer — same container language as
+ * ThreadPlanCard (rounded card, slim rows, overlays via absolute so the
+ * composer height never changes). One row per live delegate: profile,
+ * objective, live tool counter, and the link to the child thread's live view.
+ * Settled delegates never render here; the transcript keeps their digest.
+ */
+export function SubagentLiveStrip({
+  activities,
+}: {
+  activities: SubagentActivity[] | undefined;
+}) {
+  const running = activities?.filter((item) => item.status === 'running') ?? [];
+  if (running.length === 0) return null;
+
+  return (
+    <section
+      className="min-w-0 overflow-hidden rounded-lg border border-border/60 bg-card shadow-sm"
+      aria-label="Running sub-agents"
+    >
+      {running.map((item) => {
+        const label = PROFILE_LABELS[item.profile] ?? item.profile;
+        const calls = item.toolCalls ?? 0;
+        return (
+          <div
+            key={item.subRunId}
+            className="flex min-w-0 items-center gap-2 px-3 py-2"
+            aria-busy
+          >
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+            <span className="type-ui shrink-0 font-medium text-foreground/90">
+              {label}
+            </span>
+            <span className="tool-running type-ui min-w-0 flex-1 truncate text-muted-foreground">
+              {item.task}
+            </span>
+            <span className="type-caption shrink-0 tabular-nums text-muted-foreground">
+              {calls > 0
+                ? `${calls} tool${calls === 1 ? '' : 's'}${item.lastTool ? ` · ${item.lastTool}` : ''}`
+                : 'starting…'}
+            </span>
+            {item.subThreadId ? (
+              <Link
+                href={`/chat/${item.subThreadId}`}
+                className="type-ui shrink-0 text-primary hover:underline"
+              >
+                View live conversation{' '}
+                <span aria-hidden="true">→</span>
+              </Link>
+            ) : null}
+          </div>
+        );
+      })}
+    </section>
+  );
+}

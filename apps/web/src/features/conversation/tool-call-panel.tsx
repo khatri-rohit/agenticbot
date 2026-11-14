@@ -1,14 +1,7 @@
 'use client';
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Ban,
-  Check,
-  ChevronDown,
-  Copy,
-  Loader2,
-  X,
-} from 'lucide-react';
+import { Ban, Check, ChevronDown, Copy, Loader2, X } from 'lucide-react';
 import { parseSubagentHeader, subagentDigestBody } from '@agent/agent-models';
 import type { ToolCallRow } from './turn-timeline';
 import { SubagentCard } from './subagent-card';
@@ -282,16 +275,22 @@ function StatusIcon({ status }: { status: ToolCallRow['status'] }) {
  * While any row is still running the group renders open with a pulse sweep
  * on the running row; it collapses to the header once everything settles.
  */
-export const ToolStepList = memo(function ToolStepList({ rows }: { rows: ToolCallRow[] }) {
+export const ToolStepList = memo(function ToolStepList({
+  rows,
+}: {
+  rows: ToolCallRow[];
+}) {
   const hasSubagentRows = rows.some(
-    (row) => row.toolName === 'delegate' && parseSubagentHeader(row.result ?? ''),
+    (row) =>
+      row.toolName === 'delegate' && parseSubagentHeader(row.result ?? ''),
   );
 
   if (rows.length === 0) return null;
   if (
     hasSubagentRows &&
     rows.every(
-      (row) => row.toolName === 'delegate' && parseSubagentHeader(row.result ?? ''),
+      (row) =>
+        row.toolName === 'delegate' && parseSubagentHeader(row.result ?? ''),
     )
   ) {
     return (
@@ -318,7 +317,8 @@ function SubagentRow({ row }: { row: ToolCallRow }) {
     status: header.status,
     iterations: header.iterations,
     toolCalls: header.toolCalls,
-    summary: stripUntrustedMarkers(subagentDigestBody(row.result ?? '')) || undefined,
+    summary:
+      stripUntrustedMarkers(subagentDigestBody(row.result ?? '')) || undefined,
     seq: 0,
   };
   return <SubagentCard activity={activity} />;
@@ -357,13 +357,13 @@ function ToolGroup({ rows }: { rows: ToolCallRow[] }) {
       >
         {runningRow ? <StatusIcon status={runningRow.status} /> : null}
         {open ? (
-          <span className="type-caption shrink-0 font-medium text-muted-foreground">
+          <span className="shrink-0 font-medium text-muted-foreground text-lg">
             Details
           </span>
         ) : (
           <span
             className={cn(
-              'min-w-0 flex-1 truncate type-caption font-medium text-muted-foreground',
+              'min-w-0 flex-1 truncate font-medium text-foreground py-1 text-lg cursor-pointer',
               runningRow && 'tool-running',
             )}
           >
@@ -371,17 +371,17 @@ function ToolGroup({ rows }: { rows: ToolCallRow[] }) {
           </span>
         )}
         {!open && gh.plus > 0 ? (
-          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
+          <span className="type-ui shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
             +{gh.plus}
           </span>
         ) : null}
         {!open && gh.minus > 0 ? (
-          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
+          <span className="type-ui shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
             −{gh.minus}
           </span>
         ) : null}
         {!open && gh.failed > 0 ? (
-          <span className="type-caption shrink-0 font-mono tabular-nums text-destructive">
+          <span className="type-ui shrink-0 font-mono tabular-nums text-destructive">
             {gh.failed} failed
           </span>
         ) : null}
@@ -428,25 +428,25 @@ function ToolRow({ row }: { row: ToolCallRow }) {
         <StatusIcon status={row.status} />
         <span
           className={cn(
-            'min-w-0 flex-1 truncate type-caption font-mono text-foreground',
+            'min-w-0 flex-1 truncate type-ui font-mono text-foreground',
             row.status === 'running' && 'tool-running',
           )}
-       >
+        >
           {line}
           {!open ? ' ›' : ''}
         </span>
         {summary.minus !== undefined ? (
-          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
-          −{summary.minus}
+          <span className="type-ui shrink-0 font-mono tabular-nums text-[var(--status-failed)]">
+            −{summary.minus}
           </span>
         ) : null}
         {summary.plus !== undefined ? (
-          <span className="type-caption shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
+          <span className="type-ui shrink-0 font-mono tabular-nums text-[var(--status-ok)]">
             +{summary.plus}
           </span>
         ) : null}
         {row.durationMs !== undefined && row.status !== 'running' ? (
-          <span className="type-caption shrink-0 tabular-nums text-subtle-foreground">
+          <span className="type-ui shrink-0 tabular-nums text-subtle-foreground">
             {row.durationMs}ms
           </span>
         ) : null}
@@ -604,7 +604,9 @@ function FileReadPreview({ row }: { row: ToolCallRow }) {
   const label = header
     ? `File · lines ${firstLine}–${lastLine} of ${header[2]}`
     : `File · ${lines.length} lines`;
-  const copyText = numbered ? lines.map((line) => line.text).join('\n') : content;
+  const copyText = numbered
+    ? lines.map((line) => line.text).join('\n')
+    : content;
   return (
     <div className="min-w-0">
       <PreviewHeader label={label} onCopy={<CopyButton text={copyText} />} />

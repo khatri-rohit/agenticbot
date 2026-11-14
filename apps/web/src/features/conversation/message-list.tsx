@@ -38,7 +38,7 @@ import {
 } from './conversation-rail';
 import { MessageActions } from './message-actions';
 import { CompactionCard } from './compaction-card';
-import { SubagentCard } from './subagent-card';
+import { SubagentCard, SubagentLiveLine } from './subagent-card';
 import { ToolStepList } from './tool-call-panel';
 import { PlanChip } from './thread-plan-card';
 import { UserMessage } from './user-message';
@@ -726,6 +726,17 @@ const TurnView = memo(function TurnView({
               );
             }
             if (step.type === 'subagent') {
+              // Live delegates read as one lean line (plan-row language);
+              // the full-width link + progress live in the strip above the
+              // composer. Settled delegates keep the digest card here.
+              if (step.activity.status === 'running') {
+                return (
+                  <SubagentLiveLine
+                    key={`subagent-${step.activity.subRunId}`}
+                    activity={step.activity}
+                  />
+                );
+              }
               return (
                 <SubagentCard
                   key={`subagent-${step.activity.subRunId}`}
