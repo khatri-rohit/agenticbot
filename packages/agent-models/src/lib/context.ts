@@ -204,6 +204,13 @@ export type Snapshot = {
   brief: string;
   /** Compacted older turns summary kept in the model window. */
   summary: string;
+  /**
+   * Blob of the full text of every turn this snapshot covers (messages,
+   * tool calls, tool results or their blob shas), so a compacted turn is
+   * restorable with `recall` instead of lost (v2 phase 6). Absent on
+   * snapshots written before it.
+   */
+  transcriptSha?: string;
   createdAt: string;
 };
 
@@ -227,5 +234,8 @@ export function parseSnapshot(raw: unknown): Snapshot | null {
     summary: r.summary,
     createdAt: r.createdAt,
     ...(typeof r.promptVersion === 'string' ? { promptVersion: r.promptVersion } : {}),
+    ...(typeof r.transcriptSha === 'string' && /^[a-f0-9]{64}$/.test(r.transcriptSha)
+      ? { transcriptSha: r.transcriptSha }
+      : {}),
   };
 }

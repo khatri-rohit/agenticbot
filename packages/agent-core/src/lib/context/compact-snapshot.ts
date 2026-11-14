@@ -266,3 +266,35 @@ export function packMentionedThread(input: {
   ].filter(Boolean);
   return clip(parts.join('\n\n'), MENTION_MAX_CHARS);
 }
+
+/**
+ * The full text of the turns a snapshot folds (seq <= throughSeq), for the
+ * host to store as a blob: every user and assistant message, each tool call
+ * with its arguments, and each tool result in full, or its own blob's sha
+ * when it was offloaded. The summary is lossy by design; this keeps the
+ * folded turns restorable (`recall`), so compaction removes text from the
+ * prompt without removing it from reach (P4).
+ */
+export function foldedTranscript(envelopes: LedgerEnvelope[], throughSeq: number): string {
+  const lines: string[] = [`Earlier turns of this thread, through ledger seq ${throughSeq}, oldest first.`];
+  for (const envelope of envelopes) {
+    if (envelope.seq > throughSeq) continue;
+    const { record } = envelope;
+    if (record.role === 'user') {
+      lines.push('', `## User (seq ${envelope.seq})`, record.content);
+    } else if (record.role === 'assistant') {
+      lines.push('', `## Assistant (seq ${envelope.seq})`);
+      if (record.content) lines.push(record.content);
+      for (const call of record.tool_calls ?? []) {
+        if (call.type === 'function') lines.push(`[call ${call.id}] ${call.function.name} ${call.function.arguments}`);
+      }
+    } else if (record.role === 'tool') {
+      lines.push(
+        '',
+        `## Tool result ${record.tool_call_id} (seq ${envelope.seq})`,
+        envelope.contentBlob ? `(stored: recall sha256:${envelope.contentBlob})` : record.content,
+      );
+    }
+  }
+  return lines.join('\n');
+}

@@ -620,7 +620,11 @@ export function assembleContext(
     briefParts.push(`# Thread brief\n${input.snapshot.brief}`);
   }
   if (input.snapshot?.summary) {
-    briefParts.push(`# Earlier turns (compacted)\n${input.snapshot.summary}`);
+    // The summary is lossy; the full folded turns are one recall away.
+    const restore = input.snapshot.transcriptSha
+      ? `\n(Full text of these turns, tool results included: recall sha256:${input.snapshot.transcriptSha})`
+      : '';
+    briefParts.push(`# Earlier turns (compacted)\n${input.snapshot.summary}${restore}`);
   }
   // Conversation summary, then the task record (v2 target prompt order).
   const recordText = input.carriedRecord?.trim() ?? '';

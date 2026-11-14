@@ -95,6 +95,7 @@ export type { WorkspaceRuleFiles } from './lib/context/load-workspace-rules';
 export {
   planCompaction,
   buildExtractiveSnapshot,
+  foldedTranscript,
   packMentionedThread,
 } from './lib/context/compact-snapshot';
 export {

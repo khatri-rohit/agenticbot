@@ -13,6 +13,7 @@ import {
   acceptSectionedSummary,
   buildExtractiveSnapshot,
   buildSummaryMessages,
+  foldedTranscript,
   getClient,
   getOllamaModelConfig,
   planCompaction,
@@ -136,9 +137,17 @@ export async function compactThread(input: {
         modelSettings: input.modelSettings,
       })
     : null;
-  const snapshot: Snapshot = sectioned
-    ? { ...extractive, summary: sectioned, promptVersion: 'sectioned-v1' }
-    : extractive;
+  // The summary is lossy; the folded turns stay restorable from their blob.
+  let transcriptSha: string | undefined;
+  try {
+    transcriptSha = await store.putBlob(input.threadId, foldedTranscript(envelopes, throughSeq));
+  } catch (error) {
+    console.warn('[compaction] transcript blob failed:', error instanceof Error ? error.message : error);
+  }
+  const snapshot: Snapshot = {
+    ...(sectioned ? { ...extractive, summary: sectioned, promptVersion: 'sectioned-v1' } : extractive),
+    ...(transcriptSha ? { transcriptSha } : {}),
+  };
   await store.writeSnapshot(input.threadId, snapshot);
   return snapshot;
 }
