@@ -273,6 +273,7 @@ function buildToolContext(s: RunState, toolCallId?: string): ToolContext {
               flags: s.flags,
               remainingPromptTokens: s.budget.remaining(),
               forkMessages: () => forkMessages(s),
+              ...(s.userRequest !== undefined ? { userRequest: s.userRequest } : {}),
               webTrust: () => webSources.snapshot(),
               ...(config.emit ? { emit: config.emit } : {}),
               ...(config.pinnedSkills ? { pinnedSkills: config.pinnedSkills } : {}),

@@ -36,8 +36,12 @@ export function changeGate(input: {
   );
 }
 
-/** Plan gate: open todos on the plan send the run back once, then end it on its plan limit. */
-export function planGate(input: { openPlanWork: boolean; nudges: number }): 'pass' | 'nudge' | 'stop' {
-  if (!input.openPlanWork) return 'pass';
+/**
+ * Plan gate: open todos on the plan send an Agent run back once, then end
+ * it on its plan limit. A read-only run (Plan, Ask) passes: it cannot work
+ * on the todos, so they never hold its answer back.
+ */
+export function planGate(input: { openPlanWork: boolean; nudges: number; posture: string }): 'pass' | 'nudge' | 'stop' {
+  if (input.posture !== 'agent' || !input.openPlanWork) return 'pass';
   return input.nudges < 1 ? 'nudge' : 'stop';
 }

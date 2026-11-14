@@ -277,7 +277,7 @@ export async function settleFinalAnswer(
       ? await s.config.hasOpenPlanWork()
       : false;
 
-    const plan = planGate({ openPlanWork, nudges: s.planWorkNudges });
+    const plan = planGate({ openPlanWork, nudges: s.planWorkNudges, posture: s.posture });
     if (plan === 'nudge') {
       s.planWorkNudges += 1;
       pushHarnessNote(s, OPEN_PLAN_WORK_NUDGE);

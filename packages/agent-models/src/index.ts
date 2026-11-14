@@ -292,6 +292,7 @@ export {
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   MIN_CONTEXT_WINDOW_TOKENS,
+  compactionMarks,
   contextBudgetForWindow,
   parseContextWindowMode,
   parseSnapshot,
@@ -299,6 +300,7 @@ export {
 } from './lib/context.js';
 
 export {
+  BRIEF_USER_REQUEST_MAX_CHARS,
   CARD_MARKS,
   CLASS_PACE_TOKENS,
   CHILD_BUDGET_SHARE,

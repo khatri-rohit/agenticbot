@@ -59,6 +59,9 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     thinking: 'high',
     tools: ['diff', 'glob', 'grep', 'read_file', 'recall', 'record_finding', 'web_search', 'web_fetch'],
     limits: RESEARCH_LIMITS,
+    // A brief that names no effort gets a bounded one, not 450 calls (a
+    // live review ran 237 calls and 1.6M tokens on the ceiling).
+    defaultThoroughness: 'medium',
     context: 'diff',
     rules: true,
     report: true,

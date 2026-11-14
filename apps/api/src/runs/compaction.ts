@@ -114,12 +114,15 @@ export async function compactThread(input: {
   envelopes: LedgerEnvelope[];
   report: ContextReport;
   modelSettings?: ResolvedModelSettings;
+  /** Called once there is something to compact, before the summary call. */
+  onStart?: () => void;
 }): Promise<Snapshot | null> {
   const { store, envelopes } = input;
   const throughSeq = planCompaction(envelopes, input.report);
   if (throughSeq == null) return null;
   const existing = await store.readSnapshot(input.threadId);
   if (existing && existing.throughSeq >= throughSeq) return null;
+  input.onStart?.();
 
   const extractive = buildExtractiveSnapshot({
     threadId: input.threadId,
@@ -191,7 +194,6 @@ export async function maybeCompactThread(input: {
 }): Promise<void> {
   if (!input.report.needsCompaction) return;
   const { store, threadId, runId } = input;
-  runManager.publish(runId, { type: 'context.compacting', runId, threadId });
   const snapshot = await compactThread({
     store,
     threadId,
@@ -201,6 +203,10 @@ export async function maybeCompactThread(input: {
     envelopes: await store.hydrateEnvelopes(threadId),
     report: input.report,
     modelSettings: input.modelSettings,
+    // Announced only when a snapshot will follow: over the mark with nothing
+    // left to fold (one long last turn, or a snapshot that already covers
+    // it) would leave the client's "compacting" notice on with no end.
+    onStart: () => runManager.publish(runId, { type: 'context.compacting', runId, threadId }),
   });
   if (snapshot) emitCompacted(store, runId, threadId, snapshot);
 }

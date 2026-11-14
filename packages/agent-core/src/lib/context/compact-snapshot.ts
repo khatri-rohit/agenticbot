@@ -1,5 +1,6 @@
 import {
   CHARS_PER_TOKEN,
+  compactionMarks,
   type ContextReport,
   type LedgerEnvelope,
   type Snapshot,
@@ -69,9 +70,11 @@ export function chooseCompactThroughSeqForTarget(
 }
 
 /**
- * The compaction decision (no LLM): when the report is over compactAtRatio,
- * the last seq to fold into the snapshot so the remaining history fits
- * compactToRatio next to the fixed layers. Null when nothing should be cut.
+ * The compaction decision (no LLM): when the report is over the compaction
+ * mark, the last seq to fold into the snapshot so the remaining history
+ * fits the target next to the fixed layers (both from `compactionMarks`:
+ * the lower of a window share and an absolute figure). Null when nothing
+ * should be cut.
  */
 export function planCompaction(
   envelopes: LedgerEnvelope[],
@@ -82,11 +85,7 @@ export function planCompaction(
   const historyTokens =
     layers.find((layer) => layer.id === 'conversation')?.tokens ?? 0;
   const fixedTokens = Math.max(0, occupiedTokens - historyTokens);
-  const targetTokens = Math.max(
-    1,
-    (budget.windowTokens - budget.outputReserveTokens) * budget.compactToRatio -
-      fixedTokens,
-  );
+  const targetTokens = Math.max(1, compactionMarks(budget).to - fixedTokens);
   return chooseCompactThroughSeqForTarget(
     envelopes,
     budget.keepToolResultsForTurns,

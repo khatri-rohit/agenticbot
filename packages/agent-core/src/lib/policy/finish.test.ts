@@ -27,9 +27,13 @@ describe('changeGate', () => {
 });
 
 describe('planGate', () => {
-  it('nudges once for open plan work, then stops', () => {
-    expect(planGate({ openPlanWork: false, nudges: 0 })).toBe('pass');
-    expect(planGate({ openPlanWork: true, nudges: 0 })).toBe('nudge');
-    expect(planGate({ openPlanWork: true, nudges: 1 })).toBe('stop');
+  it('nudges an Agent run once for open plan work, then stops', () => {
+    expect(planGate({ openPlanWork: false, nudges: 0, posture: 'agent' })).toBe('pass');
+    expect(planGate({ openPlanWork: true, nudges: 0, posture: 'agent' })).toBe('nudge');
+    expect(planGate({ openPlanWork: true, nudges: 1, posture: 'agent' })).toBe('stop');
+  });
+  it('passes a read-only run: it cannot work on the todos', () => {
+    expect(planGate({ openPlanWork: true, nudges: 0, posture: 'plan' })).toBe('pass');
+    expect(planGate({ openPlanWork: true, nudges: 0, posture: 'ask' })).toBe('pass');
   });
 });

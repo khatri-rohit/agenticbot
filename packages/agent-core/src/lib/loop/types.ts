@@ -168,6 +168,8 @@ export type SubagentParent = {
   remainingPromptTokens?: number;
   /** Parent conversation for an advisor fork. */
   forkMessages: () => ChatCompletionMessageParam[];
+  /** What the user asked the parent in this turn, in their own words (a review brief quotes it). */
+  userRequest?: string;
   /** What the parent may fetch; an advisor reading its conversation inherits it. */
   webTrust: () => WebTrust;
   /** Parent stream, for subrun.* markers. */

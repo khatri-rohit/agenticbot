@@ -113,6 +113,26 @@ describe('runLoop limits', () => {
     expect(result.limitReason).toMatch(/^limit\.plan:/);
   });
 
+  it.each(['plan', 'ask'] as const)('does not hold a read-only %s run to open plan todos it cannot work on', async (posture) => {
+    const tools = createToolRegistry([]);
+    let calls = 0;
+    const modelCall: ModelCallFn = async () => {
+      calls += 1;
+      return { content: 'Phase 1 is done; phases 2 to 4 are still open.', toolCalls: [], finishReason: 'stop' };
+    };
+    const result = await runLoop(modelCall, [{ role: 'user', content: 'is phase 1 done?' }], tools, {
+      model: 'test',
+      mode: 'workspace',
+      posture,
+      hasOpenPlanWork: () => true,
+      limits: { maxIterations: 8, toolTimeoutMs: 5_000 },
+    });
+    expect(result.status).toBe('completed');
+    expect(result.limitReason).toBeUndefined();
+    // No nudge call: the answer stands.
+    expect(calls).toBe(1);
+  });
+
   it('halts edit_file stuck on same path with identical results despite varied args', async () => {
     const editFile: Tool = {
       definition: {

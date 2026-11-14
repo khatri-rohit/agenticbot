@@ -122,7 +122,11 @@ async function harness(
     },
   };
   const charged: RunUsage[] = [];
-  const parent = (remainingPromptTokens?: number, parentEvents?: TraceEvent[]): SubagentParent => ({
+  const parent = (
+    remainingPromptTokens?: number,
+    parentEvents?: TraceEvent[],
+    extra: Partial<SubagentParent> = {},
+  ): SubagentParent => ({
     runId: 'parent-run',
     threadId: 'parent-thread',
     model: 'test-model',
@@ -138,10 +142,19 @@ async function harness(
     webTrust: () => ({ urls: [], sources: [] }),
     chargeUsage: (usage) => charged.push(usage),
     ...(parentEvents ? { trace: (event: TraceEvent) => parentEvents.push(event), iteration: () => 1 } : {}),
+    ...extra,
   });
   const spawn = createSubagentRunner({ runManager: new RunManager(), host });
-  const run = (spec: Partial<SubagentSpec>, remaining?: number, parentEvents?: TraceEvent[]) =>
-    spawn({ profile: 'explore', objective: 'find things', scope: 'the workspace', ...spec }, parent(remaining, parentEvents));
+  const run = (
+    spec: Partial<SubagentSpec>,
+    remaining?: number,
+    parentEvents?: TraceEvent[],
+    extra?: Partial<SubagentParent>,
+  ) =>
+    spawn(
+      { profile: 'explore', objective: 'find things', scope: 'the workspace', ...spec },
+      parent(remaining, parentEvents, extra),
+    );
   return { run, traces, briefs, charged, seen };
 }
 
@@ -154,6 +167,44 @@ const reportOnlyGuards = (events: TraceEvent[] | undefined) =>
     .filter((event) => event.kind === 'guard')
     .flatMap((event) => event.ids)
     .filter((id) => id.startsWith('report_only:'));
+
+describe('review sub-agent: budget and brief', () => {
+  it('a review brief that names no effort still runs under a bounded budget', async () => {
+    const { run, traces } = await harness(2_000);
+    const result = await run({ profile: 'review' });
+    const budget = budgetOf(traces.get(result.subThreadId))!;
+    // Not the profile ceiling (450 calls): the same default explore has.
+    expect(budget.maxToolCalls).toBe(THOROUGHNESS_TOOL_CALLS.medium + 1);
+  });
+
+  it('the brief carries the user’s own words, not the harness text around them', async () => {
+    const { run, briefs } = await harness(2_000);
+    await run({ profile: 'review' }, undefined, undefined, {
+      userRequest: 'continue with phase 3',
+      // What the parent's prompt holds: the plan in front of the user's
+      // message, then a harness note. Neither is the user's request.
+      forkMessages: () => [
+        {
+          role: 'user',
+          content:
+            "[Context from the harness for this message. The user did not write it.]\n\n# Plan\nPhase 1: bump dependencies.\n\n[End of harness context. The user's message follows.]\n\ncontinue with phase 3",
+        },
+        { role: 'user', content: '[Harness note, not from the user] Open todos remain on the Final plan.' },
+      ],
+    });
+    expect(briefs[0]).toContain("The user's request this work serves:\ncontinue with phase 3");
+    expect(briefs[0]).not.toContain('Harness note');
+    expect(briefs[0]).not.toContain('Phase 1: bump dependencies');
+  });
+
+  it('a long request is stored whole and the brief points at it', async () => {
+    const { run, briefs } = await harness(2_000);
+    await run({ profile: 'review' }, undefined, undefined, { userRequest: 'word '.repeat(2_400) });
+    expect(briefs[0]).not.toContain('…(truncated)');
+    // The fake host stores every blob under this sha.
+    expect(briefs[0]).toContain(`full text: recall sha256:${'b'.repeat(64)}`);
+  });
+});
 
 describe('sub-agent runner budgets', () => {
   it('a quick child that never reports stops at its call budget, and the brief and trace name the same limit', async () => {

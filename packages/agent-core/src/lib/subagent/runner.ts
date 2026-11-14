@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 import {
+  BRIEF_USER_REQUEST_MAX_CHARS,
   CHILD_RUN,
   childAllocation,
   emptyRunUsage,
@@ -116,21 +117,6 @@ export function reportStatusOf(
 function clampTitle(text: string): string {
   const words = text.trim().split(/\s+/).filter(Boolean).slice(0, 7);
   return words.length ? words.join(' ') : 'Sub-agent';
-}
-
-/** Last user-authored message before the parent's current tool turn. */
-function lastUserRequest(
-  messages: ChatCompletionMessageParam[],
-): string | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role !== 'user') continue;
-    if (typeof message.content === 'string') return message.content;
-    return message.content
-      .map((part) => (part.type === 'text' ? part.text : ''))
-      .join('\n');
-  }
-  return undefined;
 }
 
 /** Bounded wait queue: at most `max` children run at once per parent run. */
@@ -368,12 +354,17 @@ export function createSubagentRunner(deps: {
         agentsMd,
         skills: bound,
       });
-      const brief = buildBrief(
-        thoroughness ? { ...spec, thoroughness } : spec,
-        profile.context === 'diff'
-          ? lastUserRequest(parentMessages)
-          : undefined,
-      );
+      // The parent hands over the user's own words. Its prompt also holds
+      // user-role text the harness wrote (the context header, notes, the
+      // task record), so the request is never read back out of the messages.
+      const userRequest = profile.context === 'diff' ? parent.userRequest : undefined;
+      // A request past the brief's limit is stored whole on the child's
+      // thread, so the cut in the brief can name the full text.
+      const fullRequestSha =
+        userRequest && userRequest.length > BRIEF_USER_REQUEST_MAX_CHARS && tools.byName.has('recall')
+          ? await host.putBlob(threadId, userRequest)
+          : undefined;
+      const brief = buildBrief(thoroughness ? { ...spec, thoroughness } : spec, userRequest, fullRequestSha);
       messages = [
         { role: 'system', content: system },
         ...history,

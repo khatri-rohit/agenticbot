@@ -10,7 +10,10 @@ import type { RunBudget } from './run-budget';
  * ends. Which runs get which is policy/progress `progressScope`; the marks
  * are policy/progress `progressMarks`. What counts as evidence is the task
  * state's one definition (TaskStateTracker.noteEvidence), read through
- * `evidence()`; this class only prices the idle stretch in tokens.
+ * `evidence()`; this class prices the idle stretch in tokens. Stall advice
+ * also needs `PROGRESS_MARKS.stallMinIdleSteps` steps without evidence
+ * (`idleSteps()`, from task state): spend alone is not a stall, because
+ * with a large prompt two calls pass the token mark.
  */
 export class ProgressSteering {
   private spentAtProgress = 0;
@@ -28,6 +31,8 @@ export class ProgressSteering {
     private readonly evidence: () => number,
     /** The task's class (task state): sets the pace stall is measured against. */
     private readonly taskClass: () => TaskClass = () => 'long',
+    /** Model steps since the latest evidence (task state `stepsSinceEvidence`). */
+    private readonly idleSteps: () => number = () => Number.POSITIVE_INFINITY,
   ) {}
 
   private marks(): { stall: number; gate: number; pace: number; ceiling: number } {
@@ -84,6 +89,7 @@ export class ProgressSteering {
     if (!this.scope.stall) return undefined;
     const marks = this.marks();
     const idle = this.idleTokens();
+    if (this.idleSteps() < PROGRESS_MARKS.stallMinIdleSteps) return undefined;
     return idle >= marks.stall ? { idle, max: marks.ceiling, pace: marks.pace, taskClass: this.taskClass() } : undefined;
   }
 

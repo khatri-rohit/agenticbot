@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { REPORT_MAX_CHARS, type SubagentReport } from '@agent/agent-models';
+import { BRIEF_USER_REQUEST_MAX_CHARS, REPORT_MAX_CHARS, type SubagentReport, type SubagentSpec } from '@agent/agent-models';
 
-import { createReportTool, renderDigest, renderReport } from './prompt';
+import { buildBrief, createReportTool, renderDigest, renderReport } from './prompt';
 import { DIGEST_MAX_CHARS, UNTRUSTED_SUBAGENT_BEGIN, UNTRUSTED_SUBAGENT_END } from './types';
 
 const ctx = { runId: 'r', threadId: 't', origin: 'eval' as const, signal: new AbortController().signal };
@@ -85,5 +85,31 @@ describe('bounded digest', () => {
     const [last, marker] = body.split('\n').slice(-2);
     expect(marker).toBe(`…(cut; full report: recall sha256:${SHA})`);
     expect(lines).toContain(last);
+  });
+});
+
+describe('brief: the user request the work serves', () => {
+  const spec: SubagentSpec = { profile: 'review', objective: 'Review the diff', scope: 'src/' };
+  const STORED = 'c'.repeat(64);
+
+  it('carries a short request whole', () => {
+    const brief = buildBrief(spec, 'continue with phase 3');
+    expect(brief).toContain("The user's request this work serves:\ncontinue with phase 3");
+    expect(brief).not.toMatch(/cut:/);
+  });
+
+  it('cuts a long request at the limit, says how much is missing and where the full text is', () => {
+    const long = 'word '.repeat(2_400);
+    const brief = buildBrief(spec, long, STORED);
+    expect(brief).not.toContain('…(truncated)');
+    expect(brief).toContain(
+      `(cut: first ${BRIEF_USER_REQUEST_MAX_CHARS.toLocaleString('en-US')} of 12,000 characters; full text: recall sha256:${STORED})`,
+    );
+    expect(brief.length).toBeLessThan(BRIEF_USER_REQUEST_MAX_CHARS + 600);
+  });
+
+  it('without a stored copy still says how much is missing', () => {
+    const brief = buildBrief(spec, 'word '.repeat(2_400));
+    expect(brief).toMatch(/\(cut: first [\d,]+ of 12,000 characters\)$/);
   });
 });

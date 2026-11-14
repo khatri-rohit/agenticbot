@@ -10,6 +10,7 @@ import {
   CHARS_PER_TOKEN,
   CHILD_BUDGET_SHARE,
   childAllocation,
+  compactionMarks,
   contextBudgetForWindow,
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -141,6 +142,23 @@ describe('I8: one value per quantity', () => {
     // between them is real growth the run itself has to add.
     expect(DEFAULT_CONTEXT_BUDGET.compactAtRatio).toBeLessThan(DEFAULT_CONTEXT_BUDGET.inRunCompactRatio);
     expect(DEFAULT_CONTEXT_BUDGET.inRunCompactRatio).toBeLessThan(1);
+  });
+
+  it('between-run marks are ordered on every window: carry-over ≤ compaction target < compaction trigger ≤ the window share', () => {
+    for (const window of [MIN_CONTEXT_WINDOW_TOKENS, DEFAULT_CONTEXT_WINDOW_TOKENS, 1_000_000]) {
+      const budget = contextBudgetForWindow(window);
+      const input = window - budget.outputReserveTokens;
+      const marks = compactionMarks(budget);
+      // Results a run starts with fit inside what compaction cuts down to.
+      expect(budget.carryOverToolTokens).toBeGreaterThan(0);
+      expect(budget.carryOverToolTokens).toBeLessThanOrEqual(marks.to);
+      expect(marks.to).toBeLessThan(marks.at);
+      // The absolute figures only ever lower the window's share.
+      expect(marks.at).toBeLessThanOrEqual(input * budget.compactAtRatio);
+      expect(marks.to).toBeLessThanOrEqual(input * budget.compactToRatio);
+    }
+    // A large window does not raise what a run may start with.
+    expect(compactionMarks(contextBudgetForWindow(1_000_000))).toEqual(compactionMarks(contextBudgetForWindow(DEFAULT_CONTEXT_WINDOW_TOKENS)));
   });
 
   it('parallel children can never be promised more than the parent has left', () => {

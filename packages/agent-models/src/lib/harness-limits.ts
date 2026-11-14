@@ -94,6 +94,13 @@ export const FINDING_EVIDENCE_MAX_CHARS = 200;
  */
 export const REPORT_MAX_CHARS = 8_000;
 
+/**
+ * The user's request a review brief quotes ("the request this work serves").
+ * The brief is re-sent on every call of the child, so a long request is cut
+ * here; the cut says how much is missing and names the stored full text.
+ */
+export const BRIEF_USER_REQUEST_MAX_CHARS = 4_000;
+
 /** Parallel children per parent run. Extra spawns wait for a slot. */
 export const MAX_CONCURRENT_SUBAGENTS = 4;
 
@@ -142,12 +149,19 @@ export const CHILD_RUN = {
  * next evidence. Each mark is a share of the run's prompt budget, capped in
  * absolute tokens: idle spend is waste at any run size. The `conserve`
  * marks apply while the host says account capacity is behind pace.
+ *
+ * Stall also needs `stallMinIdleSteps` model steps without evidence: spend
+ * alone is not a stall. With a large prompt two calls pass the token mark
+ * while the run is still reading what it needs (live run: 160k per call,
+ * the 180k mark tripped on the second call). One step more than the effort
+ * floor (EFFORT_IDLE_FLOOR_STEPS): effort is held first, advice comes after.
  */
 export const PROGRESS_MARKS = {
   stallRatio: 0.3,
   gateRatio: 0.5,
   stallMaxTokens: 750_000,
   gateMaxTokens: 1_250_000,
+  stallMinIdleSteps: 4,
   conserve: {
     stallRatio: 0.2,
     gateRatio: 0.35,

@@ -21,7 +21,7 @@ import { argsPreview, toolCallIndex, type ToolCallInfo } from './outcome-card';
  */
 
 /** Tool results smaller than this are not worth a card. */
-const MIN_EVICT_CHARS = 800;
+export const MIN_EVICT_CHARS = 800;
 /**
  * Live state the generic pass never evicts. load_skill bodies leave through
  * retireSkillBodies instead, which keeps their core rules.

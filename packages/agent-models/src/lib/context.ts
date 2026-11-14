@@ -9,6 +9,13 @@ export type ContextBudget = {
   outputReserveTokens: number;
   /** Soft trigger for compaction (e.g. 0.65). M2 reports this; M4 acts on it. */
   compactAtRatio: number;
+  /**
+   * The same trigger in absolute tokens; the lower of the two applies (see
+   * `compactionMarks`). History is re-sent on every call of the next run, so
+   * what a run may start with is bounded by cost, not by the window: a
+   * larger window is headroom for one run, not room to carry more.
+   */
+  compactAtTokens: number;
   /** Per-call cap before a tool result is stubbed even in the recent tail. */
   toolResultMaxTokens: number;
   /** Tool results older than this many user turns become stubs. */
@@ -17,6 +24,16 @@ export type ContextBudget = {
   keepAttachmentsForTurns: number;
   /** Between-run compaction cuts older turns until history fits this share of the input budget. */
   compactToRatio: number;
+  /** The same target in absolute tokens; the lower of the two applies. */
+  compactToTokens: number;
+  /**
+   * Tool results from earlier turns kept in full when a run starts, newest
+   * first. Past it the older ones become cards (the same cards results older
+   * than `keepToolResultsForTurns` get). Absolute, like the in-run working
+   * set: a "continue" turn used to carry the whole previous run's results
+   * (live run: 154k tokens on every call).
+   */
+  carryOverToolTokens: number;
   /**
    * Cap on this run's resident tool results (the working set). Past it, the
    * least recently touched results become cards at once. Absolute on
@@ -91,11 +108,14 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   windowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
   outputReserveTokens: 20_000,
   compactAtRatio: 0.65,
+  compactAtTokens: 100_000,
   /** ~16k chars; cards are small, slices max 8k — keep recent research readable. */
   toolResultMaxTokens: 4_000,
   keepToolResultsForTurns: 2,
   keepAttachmentsForTurns: 2,
   compactToRatio: 0.25,
+  compactToTokens: 50_000,
+  carryOverToolTokens: 40_000,
   inRunResidentToolTokens: 24_000,
   inRunResidentLowRatio: 0.5,
   inRunResidueFoldTokens: 6_000,
@@ -156,6 +176,7 @@ export function contextBudgetForWindow(
   return {
     ...base,
     windowTokens,
+    carryOverToolTokens: Math.min(base.carryOverToolTokens, Math.floor(input * 0.2)),
     inRunResidentToolTokens: Math.min(base.inRunResidentToolTokens, Math.floor(input * 0.15)),
     inRunResidueFoldTokens: Math.min(base.inRunResidueFoldTokens, Math.floor(input * 0.05)),
     recordCardTokens: Math.min(base.recordCardTokens, Math.floor(input * 0.05)),
@@ -163,6 +184,20 @@ export function contextBudgetForWindow(
       base.inRunClearAtLeastTokens,
       Math.floor(input * 0.1),
     ),
+  };
+}
+
+/**
+ * Between-run compaction marks in tokens: compact when the prompt is over
+ * `at`, down to `to`. Each is the lower of its window share and its absolute
+ * figure, so a small window keeps its ratio and a large one stops at the
+ * absolute mark.
+ */
+export function compactionMarks(budget: ContextBudget): { at: number; to: number } {
+  const input = Math.max(1, budget.windowTokens - budget.outputReserveTokens);
+  return {
+    at: Math.min(input * budget.compactAtRatio, budget.compactAtTokens),
+    to: Math.min(input * budget.compactToRatio, budget.compactToTokens),
   };
 }
 

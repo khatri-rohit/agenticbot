@@ -19,7 +19,7 @@ import {
   type WebTrust,
 } from '@agent/agent-models';
 
-import { refreshContextReport } from '../context/assemble-context';
+import { currentUserRequest, refreshContextReport } from '../context/assemble-context';
 import { ReadDedupe } from '../context/residency';
 import type { TaskStateTracker } from '../state/task-state';
 import type { Tool, ToolRegistry } from '../tools/types';
@@ -63,6 +63,12 @@ export type RunState = {
   readonly runStartedAt: number;
   /** Index of the first message this run appends. */
   readonly runStart: number;
+  /**
+   * What the user asked in this turn, in their own words (no harness context
+   * header). Taken when the run starts: the user-role messages the loop
+   * appends later (harness notes, the task record) are not the user's.
+   */
+  readonly userRequest: string | undefined;
   readonly contextBudget: ContextBudget;
   readonly flags: HarnessFlags;
   /** Wraps config.trace and feeds turnSignals. */
@@ -139,7 +145,11 @@ export function createRunState(
       (event.toolName === 'edit_file' || event.toolName === 'run_terminal' || event.toolName === 'delegate')
     ) {
       turnSignals.wrote = true;
-    } else if (event.type === 'stall_nudge' || event.type === 'budget_warning') {
+    } else if (event.type === 'budget_warning') {
+      // A stall note is not trouble that raises effort: the effort floor
+      // already holds the baseline while no evidence comes in (policy/effort),
+      // and a rung above it is not wanted on a stall (project decision,
+      // 2026-11-14: the top level is more prone to invented findings).
       turnSignals.nudged = true;
     }
     config.trace(event);
@@ -172,6 +182,7 @@ export function createRunState(
     () => config.capacity?.conserve() === true,
     () => config.task.evidenceCount,
     () => config.task.taskClass,
+    () => config.task.stepsSinceEvidence,
   );
   const webSources = new WebSourceStore({
     ...(config.putBlob ? { putBlob: config.putBlob } : {}),
@@ -192,6 +203,7 @@ export function createRunState(
     limits,
     runStartedAt,
     runStart: messages.length,
+    userRequest: currentUserRequest(messages),
     contextBudget: config.contextBudget ?? DEFAULT_CONTEXT_BUDGET,
     flags: config.flags ?? DEFAULT_HARNESS_FLAGS,
     trace,

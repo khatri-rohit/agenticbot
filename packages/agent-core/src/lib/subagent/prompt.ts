@@ -1,4 +1,5 @@
 import {
+  BRIEF_USER_REQUEST_MAX_CHARS,
   REPORT_MAX_CHARS,
   THOROUGHNESS_TOOL_CALLS,
   type SubagentReport,
@@ -86,8 +87,24 @@ export function childSkills(names: string[]): { name: string; body: string }[] {
   return out;
 }
 
-/** The user message that opens the child run. */
-export function buildBrief(spec: SubagentSpec, userRequest?: string): string {
+/**
+ * The user's request as a brief quotes it. One past the limit is cut there,
+ * and the cut says how much is missing and, when the runner stored the full
+ * text (`fullTextSha`), where to recall it.
+ */
+function quoteUserRequest(text: string, fullTextSha?: string): string {
+  const max = BRIEF_USER_REQUEST_MAX_CHARS;
+  if (text.length <= max) return text;
+  const where = fullTextSha ? `; full text: recall sha256:${fullTextSha}` : '';
+  return `${text.slice(0, max)}\n(cut: first ${max.toLocaleString('en-US')} of ${text.length.toLocaleString('en-US')} characters${where})`;
+}
+
+/**
+ * The user message that opens the child run. `userRequest` is the user's
+ * own words for the parent's current turn; `fullRequestSha` is the blob of
+ * the whole request when it is longer than the brief quotes.
+ */
+export function buildBrief(spec: SubagentSpec, userRequest?: string, fullRequestSha?: string): string {
   const calls = spec.thoroughness ? THOROUGHNESS_TOOL_CALLS[spec.thoroughness] : undefined;
   // The harness keeps one call past the effort budget for `report` and
   // refuses every other tool once it is reached (see turn-tools.ts).
@@ -102,7 +119,7 @@ export function buildBrief(spec: SubagentSpec, userRequest?: string): string {
     `Scope: ${spec.scope}`,
     spec.outputFocus ? `Report focus: ${spec.outputFocus}` : '',
     effort,
-    userRequest ? `The user's request this work serves:\n${clip(userRequest, 2_000)}` : '',
+    userRequest ? `The user's request this work serves:\n${quoteUserRequest(userRequest, fullRequestSha)}` : '',
   ]
     .filter(Boolean)
     .join('\n');

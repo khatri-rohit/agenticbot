@@ -16,6 +16,7 @@ import type {
 } from '@agent/agent-models';
 import {
   CHARS_PER_TOKEN,
+  compactionMarks,
   DEFAULT_CONTEXT_BUDGET,
   DEFAULT_HARNESS_FLAGS,
   envelopeToChatMessage,
@@ -38,6 +39,7 @@ import { hostListedWebUrls } from '../tools/web/trust';
 import { liveResultCapChars } from '../tools/workspace/tools';
 import { estimatePromptTokens } from '../model/estimate-prompt-tokens';
 import { outcomeCard, toolCallIndex, type ToolCallInfo } from './outcome-card';
+import { MIN_EVICT_CHARS } from './residency';
 import { buildEvidenceLog, buildSituationCard } from './situation';
 
 export type MentionedThreadContext = {
@@ -292,13 +294,11 @@ export function refreshContextReport(
     { id: 'conversation', label: 'Conversation', tokens: conversation },
     { id: 'skills_loaded', label: 'Loaded skills', tokens: skillsLoaded },
   ];
-  const inputBudget =
-    report.budget.windowTokens - report.budget.outputReserveTokens;
   return {
     ...report,
     layers,
     occupiedTokens: occupied,
-    needsCompaction: occupied > inputBudget * report.budget.compactAtRatio,
+    needsCompaction: occupied > compactionMarks(report.budget).at,
   };
 }
 
@@ -526,6 +526,35 @@ const HARNESS_CONTEXT_OPEN =
 const HARNESS_CONTEXT_CLOSE =
   "[End of harness context. The user's message follows.]";
 
+/** The user's own words of a message `withHarnessContext` put a header on. */
+function withoutHarnessContext(text: string): string {
+  if (!text.startsWith(HARNESS_CONTEXT_OPEN)) return text;
+  const close = text.indexOf(HARNESS_CONTEXT_CLOSE);
+  return close < 0 ? text : text.slice(close + HARNESS_CONTEXT_CLOSE.length).trimStart();
+}
+
+/**
+ * What the user asked in the current turn: the last user message of an
+ * assembled prompt, without the harness context in front of it. Read it
+ * when the run starts, before the loop appends its own user-role messages
+ * (harness notes, the task record): those are not the user's words.
+ */
+export function currentUserRequest(messages: ChatCompletionMessageParam[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== 'user') continue;
+    const text =
+      typeof message.content === 'string'
+        ? message.content
+        : message.content
+            .map((part) => (part.type === 'text' ? part.text : ''))
+            .filter(Boolean)
+            .join('\n\n');
+    return withoutHarnessContext(text);
+  }
+  return undefined;
+}
+
 /**
  * Put per-send context at the top of the current user message. Assembly-time
  * only: the ledger keeps the user's words as sent, so an edit, retry or a
@@ -720,10 +749,35 @@ export function assembleContext(
     }
   }
 
+  // Carry-over: every tool result here was made before this run starts (an
+  // earlier turn inside the turn window, or an earlier run of the current
+  // turn that is being resumed). They stay in full newest-first up to
+  // `carryOverToolTokens`; once one does not fit, it and everything older
+  // get the card old results get. Without this a "continue" turn re-sends
+  // the whole previous run's results on every call.
+  const overCarryOver = new Set<number>();
+  let carryOverLeft = budget.carryOverToolTokens * CHARS_PER_TOKEN;
+  for (let i = live.length - 1; i >= 0; i--) {
+    const envelope = live[i]!;
+    if (envelope.record.role !== 'tool') continue;
+    if (envelope.seq < keepToolsFrom) break;
+    // Skill rows of earlier turns already go out as skill cards.
+    if (skillCallNames.has(envelope.record.tool_call_id)) continue;
+    const size = Math.min(envelope.record.content.length, maxToolChars);
+    // A card would not be smaller than a result this short.
+    if (size < MIN_EVICT_CHARS) continue;
+    if (size <= carryOverLeft) carryOverLeft -= size;
+    else {
+      carryOverLeft = 0;
+      overCarryOver.add(envelope.seq);
+    }
+  }
+
   for (const envelope of live) {
     const inTurn = lastUserSeq !== undefined && envelope.seq >= lastUserSeq;
     const oldTool =
-      envelope.record.role === 'tool' && envelope.seq < keepToolsFrom;
+      envelope.record.role === 'tool' &&
+      (envelope.seq < keepToolsFrom || overCarryOver.has(envelope.seq));
     const overCap =
       envelope.record.role === 'tool' &&
       envelope.record.content.length > maxToolChars;
@@ -911,8 +965,7 @@ export function assembleContext(
   ];
 
   const occupiedTokens = layers.reduce((sum, layer) => sum + layer.tokens, 0);
-  const inputBudget = budget.windowTokens - budget.outputReserveTokens;
-  const needsCompaction = occupiedTokens > inputBudget * budget.compactAtRatio;
+  const needsCompaction = occupiedTokens > compactionMarks(budget).at;
 
   const report: ContextReport = {
     budget,
