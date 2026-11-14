@@ -39,7 +39,7 @@ export type ComposerOptions = {
   posture?: RunPosture;
   /** User-requested skills from `/` picks. */
   skills?: ComposerSkillHints;
-  /** 200k default window vs the model's full size. Persisted on the thread by /run. */
+  /** 260k default window vs the model's full size. Persisted on the thread by /run. */
   contextWindowMode?: ContextWindowMode;
 };
 

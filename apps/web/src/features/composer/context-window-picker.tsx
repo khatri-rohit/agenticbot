@@ -23,8 +23,8 @@ function sizeLabel(tokens: number): string {
 }
 
 /**
- * 200K (default) vs the model's full window. Hidden when the model is not
- * larger than 200K, since both options would be the same number.
+ * 260K (default) vs the model's full window. Hidden when the model is not
+ * larger than 260K, since both options would be the same number.
  */
 export function ContextWindowPicker({
   modelMax,

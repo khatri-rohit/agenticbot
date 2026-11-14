@@ -60,7 +60,7 @@ Tools are registered in `@agent/agent-core` and filtered per run:
 
 ### Context, budgets, and sub-agents
 
-- **Window:** each thread budgets against **200K** (default) or the **model's full size** (composer toggle, stored as `threads.context_window_mode`). Resolved once in `resolveContextBudget` (`apps/api/src/models/model-runtime.ts`) from `resolveContextWindow` (`agent-models/context.ts`).
+- **Window:** each thread budgets against **260K** (default) or the **model's full size** (composer toggle, stored as `threads.context_window_mode`). Resolved once in `resolveContextBudget` (`apps/api/src/models/model-runtime.ts`) from `resolveContextWindow` (`agent-models/context.ts`).
 - **Compaction between runs** starts at `compactAtRatio` (65%) of the input budget and cuts older turns until history fits `compactToRatio` (25%).
 - **Inside a run** (`agent-core/context/residency.ts`): old tool results become `(evicted)` cards once the prompt passes `inRunEvictTokens` (40k, absolute), keeping the newest 4 and only when a pass frees ≥10k tokens; old iterations collapse into one extractive recap at `inRunCompactRatio` (45%); an unchanged `read_file` re-read returns a pointer.
 - **Token budget:** `maxPromptTokens` / `maxWallMs` per run (`WORKSPACE_MODE`: 10M / 2 h, `HOME_MODE`: 400k / 15 min). One wrap-up nudge at 80%, `limit.tokens` / `limit.wall` at 100%. Sub-agent spend is charged to the parent.

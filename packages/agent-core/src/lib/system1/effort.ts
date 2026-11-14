@@ -101,12 +101,14 @@ export function baselineWire(policy: EffortPolicy | undefined): string | undefin
   return policy.kind === 'auto' ? policy.ladder[policy.baselineIndex]!.wire : policy.wire;
 }
 
-export type ProfileThinking = 'off' | 'default' | 'max';
+export type ProfileThinking = 'off' | 'default' | 'high' | 'max';
 
 /**
  * Sub-agent thinking resolved against the child model's own values:
- * `off` only if that model offers off, `max` = its highest rung, otherwise
- * the model's default (undefined).
+ * `off` only if that model offers off, `max` = its highest rung, `high` =
+ * its highest rung at or below `high` (so never `xhigh` or `max`; a model
+ * that only thinks on/off gets on, and a model whose levels all sit above
+ * `high` gets its lowest), otherwise the model's default (undefined).
  */
 export function resolveProfileThinking(
   config: OllamaModelConfig | null,
@@ -115,7 +117,12 @@ export function resolveProfileThinking(
   if (!config?.thinking.supported || preference === 'default') return undefined;
   if (preference === 'off') return config.thinking.values.includes(false) ? false : undefined;
   const ladder = buildEffortLadder(config);
-  return ladder ? ladder[ladder.length - 1]!.value : undefined;
+  if (!ladder) return undefined;
+  if (preference === 'max') return ladder[ladder.length - 1]!.value;
+  const thinking = ladder.filter((rung) => rung.key !== 'off');
+  const cap = LEVEL_RANK.indexOf('high');
+  const atMostHigh = thinking.filter((rung) => rung.key === 'on' || LEVEL_RANK.indexOf(rung.key) <= cap);
+  return (atMostHigh[atMostHigh.length - 1] ?? thinking[0])?.value;
 }
 
 export type EffortThresholds = {

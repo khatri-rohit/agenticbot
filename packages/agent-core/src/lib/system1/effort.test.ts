@@ -86,6 +86,19 @@ describe('resolveProfileThinking', () => {
     expect(resolveProfileThinking(NONE, 'max')).toBeUndefined();
     expect(resolveProfileThinking(LEVELS, 'default')).toBeUndefined();
   });
+
+  it('resolves high to the highest level at or below high, never above it', () => {
+    const WITH_MAX = model(['low', 'high', 'max'], 'high', 'levels');
+    const NO_HIGH = model(['low', 'medium', 'xhigh', 'max'], 'medium', 'levels');
+    const ABOVE_HIGH = model(['xhigh', 'max'], 'xhigh', 'levels');
+    expect(resolveProfileThinking(WITH_MAX, 'high')).toBe('high');
+    expect(resolveProfileThinking(WITH_MAX, 'max')).toBe('max');
+    expect(resolveProfileThinking(NO_HIGH, 'high')).toBe('medium');
+    expect(resolveProfileThinking(ABOVE_HIGH, 'high')).toBe('xhigh');
+    expect(resolveProfileThinking(MIXED, 'high')).toBe('high');
+    expect(resolveProfileThinking(BOOLEAN, 'high')).toBe(true);
+    expect(resolveProfileThinking(NONE, 'high')).toBeUndefined();
+  });
 });
 
 

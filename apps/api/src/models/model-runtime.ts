@@ -47,8 +47,8 @@ export async function resolveCallOptions(
 }
 
 /**
- * Context budget for a model under a window mode: 200k by default (or the
- * model's size when smaller), the model's full size in `model` mode, 200k
+ * Context budget for a model under a window mode: 260k by default (or the
+ * model's size when smaller), the model's full size in `model` mode, 260k
  * when /api/show fails. On the local daemon the window is also capped by the
  * context the model is loaded with (/api/ps): chat goes through /v1, which
  * cannot request a size, so a longer prompt would be cut from the front.

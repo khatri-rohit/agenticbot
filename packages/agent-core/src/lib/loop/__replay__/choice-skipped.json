@@ -52,7 +52,7 @@
       "depth": 0,
       "mode": "workspace",
       "posture": "agent",
-      "windowTokens": 200000,
+      "windowTokens": 260000,
       "flags": {
         "outcomeCards": true,
         "promptTiers": true,

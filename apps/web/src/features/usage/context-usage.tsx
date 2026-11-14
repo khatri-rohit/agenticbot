@@ -255,7 +255,7 @@ export function ContextUsage({
         ) : null}
         {defaultWindow ? (
           <p className="type-caption mt-2 text-muted-foreground">
-            Using the 200K fallback window: the model's size is unavailable
+            Using the 260K fallback window: the model's size is unavailable
           </p>
         ) : null}
         {windowSource === 'served' ? (

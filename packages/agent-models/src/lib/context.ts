@@ -66,7 +66,7 @@ export type ContextBudget = {
 };
 
 /**
- * Which window a thread budgets against. `default` caps at 200k (or the
+ * Which window a thread budgets against. `default` caps at 260k (or the
  * model's size when smaller); `model` uses the model's full reported size.
  */
 export type ContextWindowMode = 'default' | 'model';
@@ -78,7 +78,7 @@ export type ContextWindowMode = 'default' | 'model';
  */
 export type ContextWindowSource = 'default' | 'model' | 'fallback' | 'served';
 
-export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 260_000;
 
 /**
  * Smallest window a run starts on. Below it the system prompt, tool schemas
@@ -114,7 +114,7 @@ export function parseContextWindowMode(value: unknown): ContextWindowMode | unde
 
 /**
  * The window a run budgets against. `modelMax` is the provider-reported
- * context length (null when /api/show failed → 200k fallback). `servedMax`
+ * context length (null when /api/show failed → 260k fallback). `servedMax`
  * is the context a local daemon actually loaded the model with: the
  * OpenAI-compatible endpoint cannot ask for a size, and a prompt past the
  * served size is cut from the front without an error, so it caps the window.

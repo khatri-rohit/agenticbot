@@ -53,8 +53,10 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description:
       'Fresh-context review of uncommitted changes against the user request and project rules. Run once after edits pass verification. Returns issues with location, problem, fix, severity.',
     modelRole: 'strong',
-    // Finding real defects is the hard part; give it the model's full depth.
-    thinking: 'max',
+    // Finding real defects is the hard part, so it thinks above the default;
+    // `high`, not `max` (project decision, 2026-11-14): the top level is
+    // more prone to invented findings.
+    thinking: 'high',
     tools: ['diff', 'glob', 'grep', 'read_file', 'recall', 'record_finding', 'web_search', 'web_fetch'],
     limits: RESEARCH_LIMITS,
     context: 'diff',
@@ -125,7 +127,7 @@ function frontmatter(raw: string): { fields: Map<string, string>; body: string }
 }
 
 const ROLES: ModelRole[] = ['main', 'fast', 'strong'];
-const THINKING: ProfileThinking[] = ['off', 'default', 'max'];
+const THINKING: ProfileThinking[] = ['off', 'default', 'high', 'max'];
 const USER_CONTEXTS: SubagentContext[] = ['none', 'diff'];
 
 function parseUserProfile(file: string, raw: string): SubagentProfile | string {
